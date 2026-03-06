@@ -1,0 +1,20 @@
+;; ── Record type ──────────────────────────────────
+type User
+  name :: Str
+  age :: Int
+  role :: Role
+
+;; ── Sum type ─────────────────────────────────────
+type Result a e
+  Ok a
+  Err e
+
+;; ── Newtype ──────────────────────────────────────
+newtype Email := Str
+
+;; ── Pattern matching ─────────────────────────────
+fn process :: Result Data Error -> Str
+  match result
+    Ok value => "got it"
+    Err :timeout => "retry"
+    Err other => "fail"
