@@ -21,8 +21,8 @@ public final class IrijRunner {
 
     public static void main(String[] args) throws IOException {
         if (args.length == 0) {
-            System.err.println("Usage: irij <file.irj> | irij -e '<code>'");
-            System.exit(1);
+            new IrijRepl().run();
+            return;
         }
 
         String source;
@@ -52,6 +52,13 @@ public final class IrijRunner {
         if (parser.getNumberOfSyntaxErrors() > 0) {
             System.err.printf("%d parse error(s)%n", parser.getNumberOfSyntaxErrors());
             System.exit(1);
+        }
+
+        // Type check (warnings only)
+        var checker = new TypeChecker();
+        var warnings = checker.check(cu);
+        for (var warning : warnings) {
+            System.err.println(warning);
         }
 
         // Interpret

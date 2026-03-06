@@ -672,6 +672,47 @@ class InterpreterTest {
     }
 
     // ═════════════════════════════════════════════════════════════════════
+    // Module system
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class ModuleSystem {
+        @Test void useStdMath() {
+            assertEquals("42", run("""
+                use std.math
+                fn main :: () -[IO]-> ()
+                  io.stdout.write (to-str (abs (-42)))
+                """));
+        }
+
+        @Test void useStdText() {
+            assertEquals("HELLO", run("""
+                use std.text
+                fn main :: () -[IO]-> ()
+                  io.stdout.write (to-upper "hello")
+                """));
+        }
+
+        @Test void useUserModule() throws IOException {
+            // Create a module file
+            var moduleFile = Path.of("examples/mylib.irj");
+            Files.writeString(moduleFile, """
+                fn greet-msg :: () -> ()
+                  "Hello from mylib!"
+                """);
+            try {
+                assertEquals("Hello from mylib!", run("""
+                    use examples.mylib
+                    fn main :: () -[IO]-> ()
+                      io.stdout.write (greet-msg ())
+                    """));
+            } finally {
+                Files.deleteIfExists(moduleFile);
+            }
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
     // Error handling
     // ═════════════════════════════════════════════════════════════════════
 

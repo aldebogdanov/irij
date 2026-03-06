@@ -20,6 +20,7 @@ val antlr by configurations.creating
 dependencies {
     antlr("org.antlr:antlr4:4.13.2")
     implementation("org.antlr:antlr4-runtime:4.13.2")
+    implementation("org.jline:jline:3.26.3")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -65,9 +66,10 @@ tasks.test {
 }
 
 // Run Irij programs: ./gradlew run --args="examples/hello.irj"
+// REPL: ./gradlew run (no args)
 tasks.register<JavaExec>("run") {
     dependsOn("compileJava")
     mainClass = "dev.irij.interpreter.IrijRunner"
     classpath = sourceSets["main"].runtimeClasspath
-    // Pass --args from CLI
+    standardInput = System.`in`
 }

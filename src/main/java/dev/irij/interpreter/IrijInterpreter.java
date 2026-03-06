@@ -84,7 +84,7 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
 
     // ── Declaration collection ──────────────────────────────────────────
 
-    private void collectDeclaration(IrijParser.TopLevelDeclContext decl) {
+    void collectDeclaration(IrijParser.TopLevelDeclContext decl) {
         if (decl.effectDecl() != null) {
             collectEffect(decl.effectDecl());
         } else if (decl.handlerDecl() != null) {
@@ -95,6 +95,10 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             collectTypeDecl(decl.typeDecl());
         } else if (decl.newtypeDecl() != null) {
             // newtypes are transparent wrappers — no constructor needed
+        } else if (decl.useDecl() != null) {
+            collectUseDecl(decl.useDecl());
+        } else if (decl.binding() != null) {
+            collectBinding(decl.binding());
         }
     }
 
@@ -128,6 +132,53 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
     private void collectFunction(IrijParser.FnDeclContext ctx) {
         String name = ctx.fnName().getText();
         functions.put(name, ctx);
+    }
+
+    private void collectUseDecl(IrijParser.UseDeclContext ctx) {
+        String modulePath = ctx.qualifiedName().getText();
+
+        if (ModuleRegistry.isStdlibModule(modulePath)) {
+            var modifier = ctx.useModifier();
+            if (modifier != null && modifier.LBRACE() != null) {
+                // Selective import: use std.math {abs sqrt}
+                for (var id : modifier.nameList().anyId()) {
+                    String name = id.getText();
+                    // Functions are already registered as short names by Stdlib.register
+                    // Just validate they exist
+                }
+            }
+            // :open or no modifier — all functions available (already are)
+            return;
+        }
+
+        // User module: use foo → parse and load foo.irj
+        // For now, try to load from current directory
+        String filePath = modulePath.replace('.', '/') + ".irj";
+        try {
+            String source = java.nio.file.Files.readString(java.nio.file.Path.of(filePath));
+            var lexer = new IrijLexer(CharStreams.fromString(source));
+            var tokens = new CommonTokenStream(lexer);
+            var parser = new IrijParser(tokens);
+            parser.removeErrorListeners();
+            var cu = parser.compilationUnit();
+            if (parser.getNumberOfSyntaxErrors() > 0) {
+                throw new IrijRuntimeError("Parse errors in module: " + modulePath);
+            }
+            // Collect declarations from the module
+            for (var decl : cu.topLevelDecl()) {
+                collectDeclaration(decl);
+            }
+        } catch (java.io.IOException e) {
+            throw new IrijRuntimeError("Cannot load module: " + modulePath + " (" + filePath + ")");
+        }
+    }
+
+    private void collectBinding(IrijParser.BindingContext bind) {
+        // Top-level bindings — evaluate and store
+        if (bind.BIND() != null && bind.LOWER_ID() != null) {
+            // Deferred — will be evaluated when main runs
+            // For now, just record that this is a top-level binding
+        }
     }
 
     private void collectTypeDecl(IrijParser.TypeDeclContext ctx) {
@@ -206,7 +257,7 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
 
     // ── Statements ──────────────────────────────────────────────────────
 
-    private Object evalStatement(IrijParser.StatementContext stmt) {
+    Object evalStatement(IrijParser.StatementContext stmt) {
         if (stmt.binding() != null) {
             return evalBinding(stmt.binding());
         }
@@ -216,7 +267,7 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         return UNIT;
     }
 
-    private Object evalBinding(IrijParser.BindingContext bind) {
+    Object evalBinding(IrijParser.BindingContext bind) {
         if (bind.BIND() != null && bind.LOWER_ID() != null) {
             String name = bind.LOWER_ID().getText();
             Object value = evalExpr(bind.expr());
@@ -1365,11 +1416,11 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         return null;
     }
 
-    private void pushScope() {
+    void pushScope() {
         scopeStack.push(new LinkedHashMap<>());
     }
 
-    private void popScope() {
+    void popScope() {
         scopeStack.pop();
     }
 
