@@ -1,7 +1,9 @@
 package dev.irij.interpreter;
 
+import dev.irij.parser.IrijLexer;
 import dev.irij.parser.IrijParser;
 import dev.irij.parser.IrijParserBaseVisitor;
+import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.ParseTree;
 
 import java.util.*;
@@ -89,8 +91,11 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             collectHandler(decl.handlerDecl());
         } else if (decl.fnDecl() != null) {
             collectFunction(decl.fnDecl());
+        } else if (decl.typeDecl() != null) {
+            collectTypeDecl(decl.typeDecl());
+        } else if (decl.newtypeDecl() != null) {
+            // newtypes are transparent wrappers — no constructor needed
         }
-        // Other declarations (type, proto, impl, etc.) are ignored for now
     }
 
     private void collectEffect(IrijParser.EffectDeclContext ctx) {
@@ -123,6 +128,46 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
     private void collectFunction(IrijParser.FnDeclContext ctx) {
         String name = ctx.fnName().getText();
         functions.put(name, ctx);
+    }
+
+    private void collectTypeDecl(IrijParser.TypeDeclContext ctx) {
+        if (ctx.typeBody() == null) return; // type alias — no constructors
+
+        var body = ctx.typeBody();
+
+        // Sum type: variants like Ok a | Err b
+        if (!body.typeVariant().isEmpty()) {
+            for (var variant : body.typeVariant()) {
+                String ctorName = variant.UPPER_ID().getText();
+                int arity = variant.typeExpr().size();
+                if (arity == 0) {
+                    // Nullary constructor: None, True, etc.
+                    builtins.put(ctorName, args -> new Tagged(ctorName));
+                } else {
+                    builtins.put(ctorName, args -> {
+                        if (args.size() == 1) return new Tagged(ctorName, args.get(0));
+                        return new Tagged(ctorName, new ArrayList<>(args));
+                    });
+                }
+            }
+        }
+
+        // Record type: fields like name :: Str, age :: Int
+        if (!body.typeField().isEmpty()) {
+            String typeName = ctx.typeName().getText();
+            var fieldNames = new ArrayList<String>();
+            for (var field : body.typeField()) {
+                fieldNames.add(field.anyId().getText());
+            }
+            // Register constructor that creates a map from positional args
+            builtins.put(typeName, args -> {
+                var map = new LinkedHashMap<String, Object>();
+                for (int i = 0; i < fieldNames.size() && i < args.size(); i++) {
+                    map.put(fieldNames.get(i), args.get(i));
+                }
+                return map;
+            });
+        }
     }
 
     // ── Function body evaluation ────────────────────────────────────────
@@ -309,6 +354,16 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             return evalAtomExpr(fnAtom);
         }
 
+        // If first atom is `recur` keyword (parsed as RECUR atomExpr* with 0 atomExprs),
+        // treat remaining atoms from appExpr as the recur arguments
+        if (fnAtom.RECUR() != null && fnAtom.lambdaExpr() == null) {
+            var args = new ArrayList<Object>();
+            for (int i = 1; i < atoms.size(); i++) {
+                args.add(evalAtomExpr(atoms.get(i)));
+            }
+            throw new RecurSignal(args);
+        }
+
         // f x y z — first atom is the function, rest are arguments
         var args = new ArrayList<Object>();
         for (int i = 1; i < atoms.size(); i++) {
@@ -329,6 +384,11 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             }
             throw new IrijRuntimeError("Cannot resolve function at: " +
                     (callSite != null ? callSite.getText() : "?"));
+        }
+
+        // 0. Check for recur — throws signal to unwind to loop head
+        if ("recur".equals(name)) {
+            throw new RecurSignal(args);
         }
 
         // 1. Check local scope for lambda/function value
@@ -408,7 +468,7 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         // Build the dotted path to detect IO builtins
         String fullPath = ctx.getText();
 
-        // IO builtins
+        // IO builtins — special-cased because "io" is not a real value
         if (fullPath.startsWith("io.stdout.write")) {
             var appArgs = ctx.appArgs();
             if (!appArgs.isEmpty()) {
@@ -434,35 +494,76 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             return scanner.hasNextLine() ? scanner.nextLine() : "";
         }
 
-        // General postfix: evaluate base and chain dot accesses
+        // General postfix: evaluate base, then chain dot accesses
+        // postfixExpr: appExpr (DOT (LOWER_ID | UPPER_ID) appArgs?)*
         Object base = evalExpr(ctx.appExpr());
 
-        // Walk the dot chain
-        // postfixExpr: appExpr (DOT (LOWER_ID | UPPER_ID) appArgs?)*
-        // Children after appExpr come in groups: DOT, identifier, optional appArgs
-        int childIdx = 1; // skip appExpr
-        int dotCount = ctx.DOT().size();
-        for (int d = 0; d < dotCount; d++) {
-            // Get the field name (LOWER_ID or UPPER_ID after the DOT)
-            var fieldNameNodes = new ArrayList<String>();
-            // The parser interleaves: DOT ID appArgs? DOT ID appArgs? ...
-            // We can use the children list; for now use text traversal
-        }
+        // Walk the dot chain using children list
+        // Pattern: appExpr DOT ID [appArgs] DOT ID [appArgs] ...
+        int dotIdx = 0;
+        for (var dotNode : ctx.DOT()) {
+            int childIndex = ctx.children.indexOf(dotNode);
+            if (childIndex + 1 >= ctx.children.size()) break;
 
-        // Map field access: record.field
-        if (base instanceof Map<?, ?> map) {
-            for (var dotNode : ctx.DOT()) {
-                int dotIndex = ctx.children.indexOf(dotNode);
-                if (dotIndex + 1 < ctx.children.size()) {
-                    String field = ctx.children.get(dotIndex + 1).getText();
-                    base = ((Map<String, Object>) map).getOrDefault(field, UNIT);
-                    if (base instanceof Map) map = (Map<?, ?>) base;
+            String field = ctx.children.get(childIndex + 1).getText();
+
+            // Collect method call args if present
+            List<Object> dotArgs = null;
+            if (dotIdx < ctx.appArgs().size()) {
+                // Check if this DOT has appArgs following the field name
+                var appArgsCtx = ctx.appArgs().get(dotIdx);
+                int appArgsIndex = ctx.children.indexOf(appArgsCtx);
+                if (appArgsIndex == childIndex + 2) {
+                    dotArgs = new ArrayList<>();
+                    for (var atom : appArgsCtx.atomExpr()) {
+                        dotArgs.add(evalAtomExpr(atom));
+                    }
+                    dotIdx++;
                 }
             }
-            return base;
+
+            // Resolve the field on the current base value
+            base = resolveDotAccess(base, field, dotArgs);
         }
 
         return base;
+    }
+
+    /**
+     * Resolve a dot access (field lookup or method call) on a value.
+     */
+    @SuppressWarnings("unchecked")
+    private Object resolveDotAccess(Object base, String field, List<Object> args) {
+        // Map field access: record.field
+        if (base instanceof Map<?, ?> map) {
+            Object val = ((Map<String, Object>) map).get(field);
+            if (val != null) {
+                // If args were provided and val is callable, apply it
+                if (args != null && !args.isEmpty()) {
+                    return applyValue(val, args);
+                }
+                return val;
+            }
+        }
+
+        // Tagged value with single map field: look through to the map
+        if (base instanceof Tagged t && t.fields().size() == 1 && t.field(0) instanceof Map<?, ?> innerMap) {
+            Object val = ((Map<String, Object>) innerMap).get(field);
+            if (val != null) {
+                if (args != null && !args.isEmpty()) {
+                    return applyValue(val, args);
+                }
+                return val;
+            }
+        }
+
+        // Tagged field access by index
+        if (base instanceof Tagged t) {
+            // Could add named field access for records in the future
+            return UNIT;
+        }
+
+        return UNIT;
     }
 
     // ── Atom evaluation ─────────────────────────────────────────────────
@@ -496,6 +597,24 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             // Otherwise a bare constructor tag or type reference
             return name;
         }
+        // RECUR and LOOP must be checked before grouped expr (ctx.expr() != null)
+        // because RECUR expr lambdaExpr also has an expr child
+        if (ctx.LOOP() != null && ctx.lambdaExpr() != null) {
+            return evalLoopExpr(ctx.lambdaExpr());
+        }
+        if (ctx.RECUR() != null) {
+            if (ctx.lambdaExpr() != null) {
+                // recur init (acc -> body) — loop setup form
+                return evalRecurExpr(ctx.expr(), ctx.lambdaExpr());
+            } else {
+                // recur val — signal restart inside loop body
+                var args = new ArrayList<Object>();
+                for (var atom : ctx.atomExpr()) {
+                    args.add(evalAtomExpr(atom));
+                }
+                throw new RecurSignal(args);
+            }
+        }
         if (ctx.LPAREN() != null && ctx.RPAREN() != null && ctx.expr() == null) {
             // Unit value: ()
             return UNIT;
@@ -509,6 +628,12 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         }
         if (ctx.mapLiteral() != null) {
             return evalMapLiteral(ctx.mapLiteral());
+        }
+        if (ctx.setLiteral() != null) {
+            return evalSetLiteral(ctx.setLiteral());
+        }
+        if (ctx.tupleLiteral() != null) {
+            return evalTupleLiteral(ctx.tupleLiteral());
         }
         return UNIT;
     }
@@ -558,12 +683,19 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
                 i += 2;
             } else if (c == '$' && i + 1 < s.length() && s.charAt(i + 1) == '{') {
                 // String interpolation: ${expr}
-                int close = s.indexOf('}', i + 2);
-                if (close >= 0) {
-                    String varName = s.substring(i + 2, close).trim();
-                    Object val = lookupVariable(varName);
-                    sb.append(val != null ? val.toString() : "${" + varName + "}");
-                    i = close + 1;
+                // Find matching close brace, handling nested braces
+                int depth = 1;
+                int j = i + 2;
+                while (j < s.length() && depth > 0) {
+                    if (s.charAt(j) == '{') depth++;
+                    else if (s.charAt(j) == '}') depth--;
+                    if (depth > 0) j++;
+                }
+                if (depth == 0) {
+                    String exprStr = s.substring(i + 2, j).trim();
+                    Object val = evalInterpolationExpr(exprStr);
+                    sb.append(Stdlib.show(val));
+                    i = j + 1;
                 } else {
                     sb.append(c);
                     i++;
@@ -574,6 +706,36 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             }
         }
         return sb.toString();
+    }
+
+    /**
+     * Parse and evaluate an expression string for string interpolation.
+     * Falls back to variable lookup for simple identifiers.
+     */
+    private Object evalInterpolationExpr(String exprStr) {
+        // Fast path: simple variable name
+        if (exprStr.matches("[a-z][a-z0-9-]*[!?]?")) {
+            Object val = lookupVariable(exprStr);
+            return val != null ? val : UNIT;
+        }
+        // Parse as an Irij expression
+        try {
+            var lexer = new IrijLexer(CharStreams.fromString(exprStr));
+            lexer.removeErrorListeners();
+            var tokens = new CommonTokenStream(lexer);
+            var parser = new IrijParser(tokens);
+            parser.removeErrorListeners();
+            var expr = parser.expr();
+            if (parser.getNumberOfSyntaxErrors() > 0) {
+                // If parsing fails, try as variable lookup
+                Object val = lookupVariable(exprStr);
+                return val != null ? val : exprStr;
+            }
+            return evalExpr(expr);
+        } catch (Exception e) {
+            Object val = lookupVariable(exprStr);
+            return val != null ? val : exprStr;
+        }
     }
 
     // ── Operator expressions (pass-through for single-child cases) ──────
@@ -595,7 +757,24 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         if (ctx.choreographyExpr().size() == 1) {
             return evalExpr(ctx.choreographyExpr(0));
         }
-        return evalExpr(ctx.choreographyExpr(0));
+        // f >> g >> h — compose left-to-right: (x -> x |> f |> g |> h)
+        // f << g << h — compose right-to-left: (x -> x |> h |> g |> f)
+        var fns = new ArrayList<Object>();
+        for (var choreo : ctx.choreographyExpr()) {
+            fns.add(evalExpr(choreo));
+        }
+        boolean isForward = ctx.COMPOSE().size() > 0; // >> vs <<
+        if (!isForward) {
+            Collections.reverse(fns);
+        }
+        // Return a Builtin that applies each function in sequence
+        return (Builtin) args -> {
+            Object val = Stdlib.arg(args, 0);
+            for (var fn : fns) {
+                val = applyValue(fn, List.of(val));
+            }
+            return val;
+        };
     }
 
     private Object evalOrExpr(IrijParser.OrExprContext ctx) {
@@ -853,6 +1032,15 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
     record LambdaValue(List<String> params, IrijParser.ExprContext body,
                        Map<String, Object> captured) {}
 
+    /** Sentinel exception thrown by `recur` to restart the loop body. */
+    static final class RecurSignal extends RuntimeException {
+        final List<Object> args;
+        RecurSignal(List<Object> args) {
+            super(null, null, true, false); // no stack trace for performance
+            this.args = args;
+        }
+    }
+
     private Object callLambda(LambdaValue lambda, List<Object> args) {
         pushScope();
         currentScope().putAll(lambda.captured());
@@ -1061,6 +1249,62 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             map.put(key, val);
         }
         return map;
+    }
+
+    // ── Loop/Recur ────────────────────────────────────────────────────────
+
+    /**
+     * loop (-> body) — execute thunk body repeatedly.
+     * Body should call `recur` to continue or return a value to stop.
+     */
+    private Object evalLoopExpr(IrijParser.LambdaExprContext lambdaCtx) {
+        // Loop thunk: (-> body) — no params, just repeatedly evaluate
+        while (true) {
+            try {
+                return evalExpr(lambdaCtx.expr());
+            } catch (RecurSignal signal) {
+                // Continue loop — recur was called with no meaningful binding for loop form
+            }
+        }
+    }
+
+    /**
+     * recur init (acc -> body) — tail-recursive loop.
+     * Evaluate body with acc bound to init, restart on RecurSignal with new value.
+     */
+    private Object evalRecurExpr(IrijParser.ExprContext initExpr, IrijParser.LambdaExprContext lambdaCtx) {
+        Object acc = evalExpr(initExpr);
+        var lambda = (LambdaValue) evalLambdaOrReturn(lambdaCtx);
+
+        while (true) {
+            try {
+                return callLambda(lambda, List.of(acc));
+            } catch (RecurSignal signal) {
+                acc = signal.args.isEmpty() ? UNIT : signal.args.get(0);
+            }
+        }
+    }
+
+    // ── Set/Tuple literals ──────────────────────────────────────────────
+
+    private Object evalSetLiteral(IrijParser.SetLiteralContext ctx) {
+        if (ctx.exprList() == null) return new LinkedHashSet<>();
+        var items = new LinkedHashSet<Object>();
+        for (var e : ctx.exprList().expr()) {
+            var elems = new ArrayList<Object>();
+            collectVectorElements(e, elems);
+            items.addAll(elems);
+        }
+        return items;
+    }
+
+    private Object evalTupleLiteral(IrijParser.TupleLiteralContext ctx) {
+        if (ctx.exprList() == null) return List.of();
+        var items = new ArrayList<Object>();
+        for (var e : ctx.exprList().expr()) {
+            collectVectorElements(e, items);
+        }
+        return List.copyOf(items);
     }
 
     // ── Applying a runtime value as a function ────────────────────────────

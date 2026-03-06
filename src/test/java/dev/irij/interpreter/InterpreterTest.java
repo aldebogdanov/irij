@@ -496,6 +496,28 @@ class InterpreterTest {
                   io.stdout.write "hello ${name}"
                 """));
         }
+
+        @Test void arithmeticInterpolation() {
+            assertEquals("2 + 3 = 5", run("""
+                fn main :: () -[IO]-> ()
+                  io.stdout.write "2 + 3 = ${2 + 3}"
+                """));
+        }
+
+        @Test void functionCallInterpolation() {
+            assertEquals("HELLO", run("""
+                fn main :: () -[IO]-> ()
+                  io.stdout.write "${to-upper "hello"}"
+                """));
+        }
+
+        @Test void expressionWithVariable() {
+            assertEquals("x squared is 25", run("""
+                fn main :: () -[IO]-> ()
+                  x := 5
+                  io.stdout.write "x squared is ${x * x}"
+                """));
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════
@@ -541,6 +563,115 @@ class InterpreterTest {
     }
 
     // ═════════════════════════════════════════════════════════════════════
+    // Function composition
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class FunctionComposition {
+        @Test void composeForward() {
+            assertEquals("HELLO WORLD", run("""
+                fn main :: () -[IO]-> ()
+                  shout := to-upper >> trim
+                  io.stdout.write (shout "  hello world  ")
+                """));
+        }
+
+        @Test void composeInPipeline() {
+            assertEquals("HELLO", run("""
+                fn main :: () -[IO]-> ()
+                  io.stdout.write ("hello" |> (trim >> to-upper))
+                """));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Dot access
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class DotAccess {
+        @Test void mapFieldAccess() {
+            assertEquals("Ada", run("""
+                fn main :: () -[IO]-> ()
+                  user := {name: "Ada" age: 30}
+                  io.stdout.write (user.name)
+                """));
+        }
+
+        @Test void nestedMapAccess() {
+            assertEquals("Irij", run("""
+                fn main :: () -[IO]-> ()
+                  config := {app: {name: "Irij"}}
+                  io.stdout.write (config.app.name)
+                """));
+        }
+
+        @Test void dotAccessWithPipe() {
+            assertEquals("ADA", run("""
+                fn main :: () -[IO]-> ()
+                  user := {name: "Ada"}
+                  io.stdout.write (user.name |> to-upper)
+                """));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Type declarations
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class TypeDeclarations {
+        @Test void sumTypeConstructors() {
+            assertEquals("Red\nGreen\nBlue", run("""
+                type Color
+                  Red
+                  Green
+                  Blue
+                fn main :: () -[IO]-> ()
+                  io.stdout.write (show Red)
+                  io.stdout.write (show Green)
+                  io.stdout.write (show Blue)
+                """));
+        }
+
+        @Test void sumTypeWithFields() {
+            assertEquals("Circle 5\nRect 3 4", run("""
+                type Shape
+                  Circle Float
+                  Rect Float Float
+                fn main :: () -[IO]-> ()
+                  io.stdout.write (show (Circle 5))
+                  io.stdout.write (show (Rect 3 4))
+                """));
+        }
+
+        @Test void sumTypePatternMatch() {
+            assertEquals("circle with radius 5", run("""
+                type Shape
+                  Circle Int
+                  Rect Int Int
+                fn main :: () -[IO]-> ()
+                  s := Circle 5
+                  match s
+                    Circle r => io.stdout.write ("circle with radius " ++ (to-str r))
+                    Rect w h => io.stdout.write ("rect " ++ (to-str w) ++ "x" ++ (to-str h))
+                """));
+        }
+
+        @Test void customResultType() {
+            // User-defined type should override stdlib constructors
+            assertEquals("Success 42\nFailure oops", run("""
+                type MyResult
+                  Success Int
+                  Failure Str
+                fn main :: () -[IO]-> ()
+                  io.stdout.write (show (Success 42))
+                  io.stdout.write (show (Failure "oops"))
+                """));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
     // Error handling
     // ═════════════════════════════════════════════════════════════════════
 
@@ -564,6 +695,39 @@ class InterpreterTest {
             assertThrows(IrijRuntimeError.class, () -> run("""
                 fn main :: () -[IO]-> ()
                   nonexistent-fn 42
+                """));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Loop/Recur
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class LoopRecur {
+        @Test void simpleRecur() {
+            assertEquals("1", run("""
+                fn main :: () -[IO]-> ()
+                  result := recur 5 (n -> if (n <= 1) n else recur (n - 1))
+                  io.stdout.write (to-str result)
+                """));
+        }
+
+        @Test void recurReturnsValue() {
+            // recur returns the non-recur value
+            assertEquals("done", run("""
+                fn main :: () -[IO]-> ()
+                  result := recur 3 (n -> if (n <= 0) "done" else recur (n - 1))
+                  io.stdout.write result
+                """));
+        }
+
+        @Test void recurWithZero() {
+            // recur terminates immediately when condition met
+            assertEquals("0", run("""
+                fn main :: () -[IO]-> ()
+                  result := recur 0 (n -> if (n <= 0) n else recur (n - 1))
+                  io.stdout.write (to-str result)
                 """));
         }
     }

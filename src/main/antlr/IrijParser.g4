@@ -401,7 +401,8 @@ atomExpr
     | mapLiteral                                     // {name: "jo" age: 5}
     | DETACH_BANG lambdaExpr                         // detach! (-> ...)
     | LOOP lambdaExpr                                // loop (-> body)
-    | RECUR expr lambdaExpr                          // recur init (acc -> ...)
+    | RECUR expr lambdaExpr                          // recur init (acc -> ...) — loop setup
+    | RECUR atomExpr*                                // recur val — signal restart inside loop
     | FLOW lambdaExpr                                // flow (-> body)
     | CHAN_KW INT_LIT typeAnnotationSuffix?           // chan 64 :: Chan Event
     | javaMethodCall                                 // JList/new ()
