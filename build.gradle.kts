@@ -63,3 +63,11 @@ tasks.compileJava {
 tasks.test {
     useJUnitPlatform()
 }
+
+// Run Irij programs: ./gradlew run --args="examples/hello.irj"
+tasks.register<JavaExec>("run") {
+    dependsOn("compileJava")
+    mainClass = "dev.irij.interpreter.IrijRunner"
+    classpath = sourceSets["main"].runtimeClasspath
+    // Pass --args from CLI
+}

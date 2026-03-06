@@ -1,0 +1,23 @@
+;; ── Hello World in Irij ───────────────────────────
+;; The simplest possible program.
+;;
+;; In Irij, ALL side effects (including printing) are
+;; algebraic effects. A function's type declares what
+;; it can do; a handler defines how.
+
+;; Step 1: Declare what "printing" means (an effect interface)
+effect Console
+  print :: Str -> ()
+
+;; Step 2: Provide a concrete implementation (a handler)
+handler console-to-stdout :: Console
+  print msg => io.stdout.write msg
+
+;; Step 3: Write the program (declares it needs Console)
+fn hello :: () -[Console]-> ()
+  print "Hello, World!"
+
+;; Step 4: Wire it together — handler + program
+fn main :: () -[IO]-> ()
+  with console-to-stdout
+    hello ()

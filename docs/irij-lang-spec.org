@@ -1,0 +1,1430 @@
+#+TITLE: ℑ (Irij) — AI-First Effect-Oriented Language
+#+SUBTITLE: Base Specification & Implementation Roadmap v0.2
+#+AUTHOR: Language Design Working Document
+#+DATE: 2026-03-04
+#+OPTIONS: toc:3 num:t ^:nil
+
+* Preamble: Design Axioms
+
+  Irij (ℑ, ASCII =IR=) is a language designed
+  around five non-negotiable axioms that inform every syntax and semantics
+  decision:
+
+  1. *AI-generates, human-audits.* The primary author is an LLM. Syntax
+     optimizes for token count and generation reliability, not typing comfort.
+  2. *Effects are the universal joint.* Concurrency, IO, choreography,
+     capabilities — all are algebraic effects. One mechanism, composable
+     everywhere.
+  3. *Verification is a dial, not a switch.* From dynamic through contracts,
+     property tests, refinement types, to proofs — per-binding, not per-project.
+  4. *Distribution is syntax, not infrastructure.* Participants, communication,
+     and projection are first-class constructs, not library patterns.
+  5. *Code is data is hash.* Every definition is content-addressed. No builds,
+     no stale state, perfect incrementalism.
+
+* Part I: Syntax Philosophy — "Dense ASCII"
+
+** 1.1 Design Rationale
+
+   Research shows a *2.6× token gap* between the most and least efficient
+   languages under BPE tokenization. The winners share traits: ASCII-only
+   symbols, minimal punctuation, implicit structure, and few reserved words.
+
+   Irij invents a notation we call *Dense ASCII*: a post-fix/infix hybrid using
+   two-character ASCII digraphs for all built-in operations — no Unicode, no
+   deep nesting, no ceremony.
+
+   Core principles:
+   - *Flat over nested:* max 2 levels of syntactic nesting in normal code.
+     Deep nesting is a code smell the formatter warns about. (KV-cache
+     friendly for transformer attention.)
+   - *Digraph operators:* all built-in operations are 1–2 ASCII characters.
+     User-defined operators are spelled out as words.
+   - *Significant whitespace for grouping:* indentation defines blocks
+     (like Python/Haskell), eliminating brace/bracket tokens.
+   - *Pipeline is king:* left-to-right data flow via pipe operator =|>=,
+     mirroring how both humans and LLMs read sequentially.
+   - *Keywords are short words, not digraphs.* A small set of reserved
+     words (=fn=, =do=, =if=, =match=, =type=, =mod=, =use=, =pub=,
+     =with=, =scope=, =effect=, =role=, =pre=, =post=, =law=) are
+     2–6 characters each — typically one BPE token. These are distinct
+     from operators: operators act on values, keywords introduce
+     structural forms. Keeping keywords as readable words costs
+     negligible tokens while dramatically improving auditability.
+
+** 1.2 Canonical Form: Indentation, Not S-Expressions
+
+   *Indentation is the canonical form* — the primary representation that
+   LLMs generate and humans read.
+
+   Rationale: LLMs generate tokens left-to-right. Maintaining a balanced
+   parenthesis stack is a known failure mode for transformers, especially
+   at depth > 3. Indentation requires only "repeat the whitespace prefix"
+   which is trivially reliable. Indentation is also more token-efficient:
+   whitespace tokens are cheap (1 token per indent level) vs. open-paren
+   + close-paren (2 extra tokens per nesting level).
+
+   S-expression form is supported as a *debug/interchange* format — useful
+   for AST serialization, tooling, and as a fallback when the indentation
+   parser encounters ambiguity. The compiler can convert between forms,
+   but indentation is the default and the generation target.
+
+   #+begin_example
+   ;; ── Canonical form (indentation) ─────────────────────────
+   fn factorial :: Int -> Int
+     match n
+       0 => 1
+       n => n * factorial (n - 1)
+
+   ;; ── Debug/interchange form (S-expression) ────────────────
+   ;; Used for: AST dumps, tooling interchange, edge cases.
+   ;; NOT the generation target for LLMs.
+   (fn factorial (:: Int (-> Int))
+     (match n (=> 0 1) (=> n (* n (factorial (- n 1))))))
+   #+end_example
+
+   The compiler accepts both forms and can convert between them.
+   Note that S-expressions are written *flat* (no internal indentation)
+   — if you need indentation to read them, use the canonical form instead.
+
+** 1.3 Lexical Grammar Sketch
+
+*** 1.3.1 Identifiers & Literals
+
+    #+begin_example
+    ;; identifiers: lowercase kebab-case (most token-efficient)
+    my-value
+    http-get
+    user->json
+
+    ;; type names: PascalCase
+    HttpResponse
+    UserRecord
+
+    ;; role/location names: UPPER-CASE (choreography)
+    ALICE
+    BOB
+    DB-PRIMARY
+
+    ;; numeric: standard with underscore separators
+    42  3.14  0xFF  1_000_000  2/3
+
+    ;; strings: double-quote, interpolation with ${}
+    "hello ${name}"
+
+    ;; keywords (like Clojure): colon-prefix atoms
+    :ok  :error  :pending
+
+    ;; comments: double-semicolon to end of line
+    ;; this is a comment
+    #+end_example
+
+*** 1.3.2 Core Digraph Operators
+
+    The operator table below is the heart of token efficiency. Each digraph
+    is chosen to be (a) mnemonic, (b) a single BPE token under GPT-4/Claude
+    tokenizers, and (c) visually distinct.
+
+    #+begin_example
+    ;; ── Binding & Definition ────────────────────────────────
+    :=    ;; immutable binding        x := 42
+    :!    ;; mutable binding          x :! 0
+    <-    ;; mutation / assignment     x <- x + 1
+    ->    ;; function arrow            (x y -> x + y)
+    =>    ;; fat arrow (pattern arm)   :ok v => v
+    ::    ;; type annotation           x :: Int
+
+    ;; ── Pipeline & Composition ──────────────────────────────
+    |>    ;; pipe forward              xs |> map f |> filter g
+    <|    ;; pipe backward             print <| compute x
+    >>    ;; compose forward           f >> g  ≡  (x -> x |> f |> g)
+    <<    ;; compose backward          g << f
+
+    ;; ── Arithmetic & Logic ──────────────────────────────────
+    + - * /          ;; standard
+    %                ;; modulo
+    **               ;; power
+    == /=            ;; equal, not-equal
+    < > <= >=        ;; comparison
+    && || !          ;; boolean
+    ++               ;; concatenation (strings, lists, etc.)
+
+    ;; ── Collection / Array ──────────────────────────────────
+    #[  ]            ;; vector literal         #[1 2 3]
+    #{ }             ;; set literal            #{:a :b}
+    #( )             ;; tuple literal          #(1 "a" :ok)
+    { }              ;; map literal            {name: "jo" age: 5}
+    ..               ;; range                  1..10
+    ..<              ;; exclusive range        0 ..< n
+
+    ;; ── Array / Sequence Operations (J-inspired digraphs) ──
+    /+    ;; reduce with +             #[1 2 3] |> /+       ;; => 6
+    /*    ;; reduce with *             #[1 2 3] |> /*       ;; => 6
+    /#    ;; count                     #[1 2 3] |> /#       ;; => 3
+    /&    ;; all? (reduce with &&)
+    /|    ;; any? (reduce with ||)
+    \.    ;; scan (prefix sums etc.)   #[1 2 3] |> \.+      ;; => #[1 3 6]
+    @     ;; map-over / each           xs |> @ f
+    @i    ;; map-indexed               xs |> @i (i v -> ...)
+    ?     ;; filter                    xs |> ? even?
+    !     ;; first match / find        xs |> ! (> 3)
+
+    ;; ── Effect & Control ────────────────────────────────────
+    do    ;; sequence effects          do (print "a") (print "b")
+    if    ;; conditional               if cond then-expr else-expr
+    match ;; pattern match             match x (:ok v => ...) (:err e => ...)
+    with  ;; effect handler            with handler expr
+
+    ;; ── Choreography ────────────────────────────────────────
+    ~>    ;; send                      val ~> ROLE
+    <~    ;; receive (sugar)           val <~ ROLE
+    ~*>   ;; broadcast                 val ~*> #[R1 R2]
+    ~/    ;; select (inform branch)    decision ~/ ROLE
+    @     ;; located-at (in types)     Str @BUYER
+    #+end_example
+
+*** 1.3.3 Token Budget Comparison
+
+    The following implements "map a function over a list, filter, reduce":
+
+    #+begin_example
+    ;; Irij: ~12 tokens
+    xs |> @ f |> ? g |> /+
+
+    ;; Clojure: ~18 tokens
+    (->> xs (map f) (filter g) (reduce +))
+
+    ;; Python: ~22 tokens
+    reduce(lambda a,b: a+b, filter(g, map(f, xs)))
+
+    ;; Java: ~35 tokens
+    xs.stream().map(f).filter(g).reduce(0, Integer::sum);
+    #+end_example
+
+** 1.4 Block Structure & Indentation
+
+   Blocks are defined by indentation (2-space canonical). The keyword that
+   opens a block is on the same line; the body is indented below.
+
+   #+begin_example
+   ;; function definition (canonical form)
+   fn factorial :: Int -> Int
+     match n
+       0 => 1
+       n => n * factorial (n - 1)
+   #+end_example
+
+* Part II: Core Language Constructs
+
+** 2.1 Bindings, Functions & Closures
+
+   #+begin_example
+   ;; immutable binding
+   x := 42
+
+   ;; with type annotation
+   x := 42 :: Int
+
+   ;; mutable binding (requires Mut effect)
+   x :! 0 :: Int
+
+   ;; anonymous function (lambda)
+   (x y -> x + y)
+
+   ;; named function
+   fn add :: Int -> Int -> Int
+     (x y -> x + y)
+
+   ;; multi-arity / clauses (pattern matching on arguments)
+   fn fib :: Int -> Int
+     0 => 0
+     1 => 1
+     n => fib (n - 1) + fib (n - 2)
+
+   ;; partial application is automatic (currying)
+   add-one := add 1      ;; Int -> Int
+
+   ;; point-free composition
+   process := parse >> validate >> transform >> serialize
+   #+end_example
+
+** 2.2 Data Types & Records
+
+   #+begin_example
+   ;; product type (record)
+   type User
+     name :: Str
+     age  :: Int
+     role :: Role
+
+   ;; sum type (tagged union)
+   type Result a e
+     Ok  a
+     Err e
+
+   ;; parameterized type
+   type Tree a
+     Leaf a
+     Node (Tree a) a (Tree a)
+
+   ;; newtype (zero-cost wrapper)
+   newtype Email := Str
+
+   ;; anonymous record (structural typing)
+   person := {name: "Jo" age: 30}
+   #+end_example
+
+** 2.3 Pattern Matching & Destructuring
+
+   #+begin_example
+   ;; match expression
+   match result
+     Ok value  => process value
+     Err :timeout => retry
+     Err other => log other |> then fail
+
+   ;; destructuring in bindings
+   {name: n age: a} := get-user id
+
+   ;; guards
+   match score
+     s | s >= 90 => :excellent
+     s | s >= 70 => :good
+     _           => :needs-work
+
+   ;; list patterns (... for rest, distinct from .. range operator)
+   match xs
+     #[]       => :empty
+     #[x]      => :singleton x
+     #[x ...r] => :cons x r      ;; head + rest (three dots = spread)
+   #+end_example
+
+   Note: =...= (three dots) is the spread/rest operator in patterns,
+   distinct from =..= (two dots) which is the range operator in
+   expressions. This avoids the ambiguity of using the same symbol
+   for both purposes.
+
+** 2.4 Module System
+
+   #+begin_example
+   ;; module declaration (one per file, mirrors path)
+   mod myapp.auth.jwt
+
+   ;; imports
+   use std.io          ;; qualified: io.read-file
+   use std.json :open  ;; unqualified: parse, encode
+   use std.http {get post}  ;; selective
+
+   ;; re-export
+   pub use internal.helpers
+
+   ;; visibility
+   pub fn public-api ...       ;; exported
+   fn internal-helper ...      ;; module-private
+   #+end_example
+
+* Part III: Algebraic Effects — The Universal Joint
+
+** 3.1 Effect Declaration
+
+   Effects are the *only* mechanism for side effects, concurrency, IO,
+   choreography, and capabilities. A function's type signature declares
+   exactly which effects it may perform.
+
+   *Lineage:* Algebraic effects originate from Plotkin & Power (2003) and
+   were made practical in Koka (Microsoft Research), Eff (Pretnar),
+   OCaml 5, and Unison. The key idea: a function declares *what*
+   operations it needs (e.g., "I need to print") without defining *how*
+   they work. The "how" is provided separately by a handler (§3.2).
+   This is like dependency injection, but tracked in the type system.
+
+   #+begin_example
+   ;; declaring an effect = declaring an interface of operations
+   ;; (think: "this is what I might do")
+   effect Console
+     print :: Str -> ()
+     read-line :: () -> Str
+
+   effect FileIO
+     read-file  :: Path -> Bytes
+     write-file :: Path -> Bytes -> ()
+
+   effect Http
+     fetch :: Request -> Response
+
+   ;; function with effects declared in its type
+   fn greet :: Str -[Console]-> ()
+     name := read-line ()
+     print "Hello, ${name}!"
+
+   ;; multiple effects
+   fn sync-data :: () -[Http FileIO Log]-> Result Data Error
+
+   ;; pure function (no effects — the default)
+   fn add :: Int -> Int -> Int
+     (x y -> x + y)
+   #+end_example
+
+   The effect annotation =-[E1 E2]->= between arrow tokens lists which
+   effects the function may perform. No annotation means *pure*. This is
+   the effect row, polymorphic by default (functions can be generic over
+   additional effects).
+
+** 3.2 Effect Handlers
+
+   Handlers intercept effect operations and define their concrete behavior.
+   They are first-class values, composable, and lexically scoped.
+
+   *How it works:* When a function performs an effect operation (e.g.,
+   =print "hello"=), execution pauses at that point and control transfers
+   to the enclosing handler. The handler executes its implementation for
+   that operation (e.g., writes to stdout), then *resumes* the original
+   function from where it paused. This is like =try/catch= but the catch
+   can return a value back to the throw site and continue execution.
+
+   *Why this matters:* The same function can be run with completely
+   different effect implementations without changing its code. Production
+   handler writes to real stdout; test handler collects strings into a
+   list. The function under test doesn't know the difference.
+
+   #+begin_example
+   ;; handler definition: provides concrete behavior for an effect
+   handler console-to-stdout :: Console
+     print msg => io.stdout.write msg       ;; "print" means write to stdout
+     read-line () => io.stdin.read-line ()  ;; "read-line" means read stdin
+
+   ;; using a handler: wraps a block, intercepts its effects
+   with console-to-stdout
+     greet "world"      ;; greet's print/read-line go to real stdout/stdin
+
+   ;; test handler: same effect, completely different behavior (pure!)
+   handler mock-console :: Console
+     state := :! #["Alice"]  ;; mutable state within handler
+     print msg => state <- state ++ #[msg]   ;; "print" appends to list
+     read-line () =>                          ;; "read-line" pops from list
+       result := head (deref state)
+       state <- tail (deref state)
+       result
+
+   ;; now test greet without any real IO:
+   with mock-console
+     greet "world"      ;; greet's print/read-line go to in-memory list
+
+   ;; composing handlers: stack multiple effect implementations
+   with (mock-console >> file-to-memory >> http-to-cache)
+     sync-data ()        ;; all three effects handled, fully pure
+   #+end_example
+
+** 3.3 Capabilities as Effects
+
+   A capability is an unforgeable permission token that grants the right to
+   perform certain effects. This combines effect tracking with a security
+   model.
+
+   *Lineage:* From Austral's linear capabilities and the Effekt language's
+   insight that "tracking capabilities is equivalent to tracking effects."
+
+   *How it works:* A capability is declared like an effect but with =cap=.
+   Functions that need it must declare it in their effect row. The
+   capability is created at a specific scope (e.g., when connecting to a
+   database) and ceases to exist when that scope exits. The runtime tracks
+   capabilities *linearly* — they cannot be duplicated, stored globally,
+   or leaked to unauthorized code.
+
+   *Why this matters:* A function's type signature reveals exactly what
+   resources it can access. If =migrate= requires =[DbWrite Log]=, you
+   know it can write to the database and log, and *nothing else* — it
+   cannot make HTTP calls, read files, or access other databases. This
+   provides supply-chain-attack resistance: a dependency that claims to
+   only need =Log= literally cannot exfiltrate data over the network.
+
+   #+begin_example
+   ;; capability declaration: like an effect, but permission-gated
+   cap DbWrite :: effect
+     insert :: Table -> Row -> ()
+     update :: Table -> Query -> Row -> ()
+     delete :: Table -> Query -> ()
+
+   ;; function requiring capability: must receive it from caller
+   fn migrate :: () -[DbWrite Log]-> ()
+     ...
+
+   ;; granting capability: scoped, cannot escape the with-block
+   fn main :: () -[IO]-> ()
+     with (db-connect "postgres://..." |> grant DbWrite)
+       migrate ()
+     ;; DbWrite capability does not exist here — cannot be leaked
+   #+end_example
+
+* Part IV: Structured Concurrency
+
+** 4.1 Design: Concurrency as Effects
+
+   All concurrency primitives are algebraic effects. The scheduler itself is
+   a handler. This means concurrency semantics are *user-definable* — you
+   can swap the scheduler by swapping the handler.
+
+   #+begin_example
+   ;; built-in concurrency effect
+   effect Async
+     fork   :: (() -[e]-> a) -> Fiber a
+     await  :: Fiber a -> a
+     sleep  :: Duration -> ()
+     cancel :: Fiber a -> ()
+   #+end_example
+
+** 4.2 Nursery / Scope Primitive
+
+   The =scope= construct is the structured concurrency primitive. All fibers
+   forked within a scope must complete (or be cancelled) before the scope
+   exits. This is enforced by the compiler — there is no =spawn-and-forget=.
+
+   For the rare case where "fire-and-forget" is genuinely needed (e.g.,
+   async replication after a client has already received a response), the
+   =detach!= escape hatch explicitly opts out of structured concurrency.
+   The =!= suffix signals danger — this is intentionally loud syntax for
+   an intentionally dangerous operation.
+
+   #+begin_example
+   ;; basic structured concurrency
+   fn fetch-dashboard :: () -[Http Async]-> Dashboard
+     scope s
+       user-f   := s.fork (-> fetch-user id)
+       orders-f := s.fork (-> fetch-orders id)
+       stats-f  := s.fork (-> fetch-stats id)
+       ;; all three run concurrently
+       ;; scope waits for all before continuing
+       make-dashboard (await user-f) (await orders-f) (await stats-f)
+
+   ;; racing — first result wins, others cancelled
+   fn fetch-fastest :: () -[Http Async]-> Data
+     scope.race
+       (-> fetch-from-primary)
+       (-> fetch-from-replica)
+       (-> fetch-from-cache)
+
+   ;; supervised — failures isolated per child
+   fn process-batch :: #[Job] -[Async Log]-> #[Result]
+     scope.supervised s
+       jobs |> @ (j -> s.fork (-> process j))
+            |> @ await
+
+   ;; escape hatch: fire-and-forget (use sparingly!)
+   ;; the ! suffix signals this breaks structured concurrency
+   fn notify-and-continue :: () -[Async]-> Response
+     detach! (-> send-analytics event)  ;; runs independently
+     :ok                                ;; returns immediately
+   #+end_example
+
+** 4.3 Streams & Flows
+
+   Inspired by Missionary's unification of discrete and continuous signals.
+
+   #+begin_example
+   ;; discrete stream (sequence of events)
+   effect Stream a
+     emit :: a -> ()
+     done :: ()
+
+   ;; continuous flow (always-current value, like a signal)
+   effect Flow a
+     sample :: () -> a
+
+   ;; stream operations (lazy, pull-based by default)
+   fn process-events :: Stream Event -[Async Log]-> ()
+     events
+       |> ? (e -> e.type == :purchase)
+       |> @ calculate-tax
+       |> chunk 100
+       |> @ batch-insert
+
+   ;; flow combination (reactive)
+   fn dashboard-state :: Flow User -> Flow #[Order] -> Flow Dashboard
+     (user orders ->
+       flow (-> make-dashboard (sample user) (sample orders)))
+   #+end_example
+
+** 4.4 Channels & Backpressure
+
+   #+begin_example
+   ;; bounded channel (backpressure built-in)
+   ch := chan 64 :: Chan Event
+
+   ;; send/receive are effects
+   effect Chan a
+     send :: a -> ()
+     recv :: () -> a
+
+   ;; select (multiplexing)
+   select
+     recv ch1 => (msg -> handle-primary msg)
+     recv ch2 => (msg -> handle-fallback msg)
+     timeout 5s => (-> log "timed out")
+   #+end_example
+
+* Part V: Choreographic Programming
+
+** 5.1 Located Types
+
+   Every value in a choreographic context carries a *location annotation*
+   specifying which participant owns it. The compiler performs Endpoint
+   Projection (EPP) to generate per-participant code automatically.
+
+   #+begin_example
+   ;; located type syntax: value @ ROLE
+   ;; declares which participant holds the data
+
+   fn buy-protocol :: Str@BUYER -[Choreo]-> Result@BUYER
+
+     ;; BUYER evaluates the title and sends to SELLER
+     title := BUYER.input "What book?"
+     title ~> SELLER                         ;; communicate BUYER->SELLER
+
+     ;; SELLER looks up price, sends to BUYER
+     price := SELLER.lookup title
+     price ~> BUYER
+
+     ;; BUYER decides
+     decision := BUYER.decide price
+     match decision
+       :buy =>
+         decision ~> SELLER                  ;; knowledge of choice
+         SELLER.ship title
+         :ok @BUYER
+       :pass =>
+         decision ~> SELLER
+         :cancelled @BUYER
+   #+end_example
+
+** 5.2 Communication Primitives
+
+   #+begin_example
+   ;; ── Core choreographic operators ─────────────────────────
+   ~>      ;; send: val@A ~> B              (A sends to B)
+   <~      ;; receive (sugar for ~> other direction)
+   ~*>     ;; broadcast: val@A ~*> #[B C D] (A sends to all)
+   ~/      ;; select: cond@A ~/ B           (A informs B of branch choice)
+
+   ;; ── Located computation ──────────────────────────────────
+   ROLE.expr       ;; expr evaluated at ROLE
+   val @ROLE       ;; type annotation: val is located at ROLE
+
+   ;; ── Enclave (subset of participants) ─────────────────────
+   enclave #[A B]
+     ;; only A and B participate in this block
+     shared := A.compute-share
+     shared ~> B
+     B.verify shared
+   #+end_example
+
+** 5.3 Endpoint Projection (EPP)
+
+   The compiler projects a single choreography into per-role programs.
+
+   #+begin_example
+   ;; The buy-protocol above compiles to:
+
+   ;; ── BUYER projection ─────────────────────────────────────
+   fn buy-protocol-BUYER :: () -[Net IO]-> Result
+     title := input "What book?"
+     send SELLER title
+     price := recv SELLER
+     decision := decide price
+     match decision
+       :buy =>
+         send SELLER :buy
+         :ok
+       :pass =>
+         send SELLER :pass
+         :cancelled
+
+   ;; ── SELLER projection ────────────────────────────────────
+   fn buy-protocol-SELLER :: () -[Net IO Db]-> ()
+     title := recv BUYER
+     price := lookup title
+     send BUYER price
+     branch := recv BUYER
+     match branch
+       :buy  => ship title
+       :pass => ()
+   #+end_example
+
+** 5.4 Census Polymorphism & Dynamic Participants
+
+   Based on Bates et al. (PLDI 2025): choreographies polymorphic over
+   the number and identity of participants.
+
+   *The problem:* Normal choreographies have a fixed, compile-time-known
+   set of roles (BUYER, SELLER). But real distributed systems often need
+   "do X for every worker" where the worker count is unknown at compile
+   time — think map-reduce, gossip protocols, voting.
+
+   *The solution:* Make the participant set a type parameter. =forall
+   WORKERS= means "this choreography works for any set of participants
+   playing the WORKER role." At runtime, =census WORKERS= returns the
+   current member set. The compiler projects this into: COORD gets a
+   loop of sends/receives; each WORKER gets a "receive, compute, send
+   back" program. The projection is *per-role-template*, instantiated
+   at deployment time for each actual participant.
+
+   #+begin_example
+   ;; census-polymorphic: works for any set of WORKERS
+   fn map-reduce
+     :: (a -> b) @COORD
+     -> #[a] @COORD
+     -> (b -> b -> b) @COORD
+     -> b @COORD
+     -[Choreo]-
+     forall WORKERS
+
+     ;; COORD splits data into as many chunks as there are WORKERS
+     chunks := COORD.partition data (census WORKERS)
+
+     ;; each WORKER receives their chunk, computes, sends back
+     par-each w <- WORKERS
+       chunk := chunks[w] ~> w       ;; COORD sends chunk to worker w
+       result := w.compute f chunk   ;; worker w computes locally
+       result ~> COORD               ;; worker w sends result to COORD
+
+     ;; COORD combines all results
+     COORD.reduce merge results
+   #+end_example
+
+** 5.5 Fault Tolerance
+
+   #+begin_example
+   ;; choreography with failure handling
+   fn safe-transfer :: () -[Choreo Async]-> ()
+     with choreo-retry {max: 3 backoff: :exponential}
+       amount := SENDER.input-amount
+       amount ~> RECEIVER
+       ack := RECEIVER.process amount
+       ack ~> SENDER
+
+     on-failure
+       SENDER.rollback
+       RECEIVER.rollback
+   #+end_example
+
+** 5.6 Scope Semantics in Choreographies
+
+   When =scope= appears inside a choreography, it obeys the same
+   structured concurrency rules as elsewhere: the scope *blocks* until
+   all forked fibers complete. This means code after the scope sees
+   the completed results.
+
+   #+begin_example
+   ;; scope blocks: replication finishes BEFORE Ok is returned
+   fn replicated-put :: Str -> Str -[Choreo Async]-> Reply@CLIENT
+     PRIMARY.store k v
+     scope s
+       s.fork (-> cmd ~> REPLICA; REPLICA.store k v)
+     ;; ↑ scope exits only after fork completes
+     Ok @CLIENT   ;; client gets Ok AFTER replication
+
+   ;; if you want "reply first, replicate later" you need detach!
+   fn fast-put :: Str -> Str -[Choreo Async]-> Reply@CLIENT
+     PRIMARY.store k v
+     detach! (-> cmd ~> REPLICA; REPLICA.store k v)
+     Ok @CLIENT   ;; client gets Ok IMMEDIATELY, replication continues
+   #+end_example
+
+* Part VI: Gradual Verification Spectrum
+
+** 6.1 Level 0 — Dynamic (No Annotations)
+
+   #+begin_example
+   ;; completely dynamic, no types, no constraints
+   fn process data
+     data |> transform |> validate |> save
+   #+end_example
+
+** 6.2 Level 1 — Gradual Types (Hints)
+
+   #+begin_example
+   ;; optional type hints (a la TypeScript)
+   ;; argument name still appears — the signature just adds types above
+   fn process :: Data -> Result
+     data -> data |> transform |> validate |> save
+
+   ;; partial annotation — mix typed and untyped
+   fn transform :: Data -> _    ;; return type inferred
+     data -> ...
+   #+end_example
+
+   Note: Level 0 and Level 1 have the same function *body*. The only
+   difference is the optional =:: Data -> Result= type annotation.
+   The argument name =data= appears in both — the annotation constrains
+   what the argument's type must be, but doesn't replace naming it.
+
+** 6.3 Level 2 — Contracts (Runtime Checks)
+
+   Contracts add runtime-checked preconditions and postconditions to
+   functions. Two forms exist, serving different scopes:
+
+   *=pre=/=post=: function-level contracts.* Checked on every call.
+   =pre= predicates receive the function's arguments; =post= receives
+   the return value. A violation is always the caller's fault (for =pre=)
+   or the implementation's fault (for =post=).
+
+   *=contract=/=in=/=out=: module-boundary contracts with blame tracking.*
+   Used on =pub= functions — the API surface. When a contract is violated,
+   *blame tracking* identifies which party broke the agreement:
+
+   - =in= violation → the *caller* (outside module) sent bad data.
+     Error message: "module X violated api-endpoint's input contract"
+   - =out= violation → the *implementation* (this module) returned bad data.
+     Error message: "api-endpoint violated its output contract to module X"
+
+   This distinction matters in large codebases (or multi-LLM systems)
+   where the caller and the implementer are different parties. It comes
+   from Racket's contract system (Findler & Felleisen, 2002).
+
+   #+begin_example
+   ;; ── Function-level contracts ─────────────────────────────
+   fn withdraw :: Account -> Amount -> Account
+     pre  (a -> a.balance >= 0)
+     pre  (a amt -> amt > 0 && amt <= a.balance)
+     post (result -> result.balance >= 0)
+     (account amount ->
+       {..account balance: account.balance - amount})
+
+   ;; ── Module-boundary contracts (with blame tracking) ──────
+   pub fn api-endpoint :: Request -> Response
+     contract
+       in  (r -> valid-json? r.body)      ;; caller's fault if violated
+       out (r -> r.status < 500)          ;; our fault if violated
+   #+end_example
+
+** 6.4 Level 3 — Property Testing (Algebraic Laws)
+
+   This is the *key innovation*: first-class law declarations that are
+   automatically tested via property-based testing and optionally
+   verified via SMT.
+
+   #+begin_example
+   ;; declaring a typeclass/protocol with laws
+   proto Monoid a
+     empty :: a
+     append :: a -> a -> a
+
+     law identity-left  = forall x. append empty x == x
+     law identity-right = forall x. append x empty == x
+     law associative    = forall x y z.
+       append (append x y) z == append x (append y z)
+
+   ;; implementing with automatic law checking
+   impl Monoid for Str
+     empty := ""
+     append := (++)
+     ;; compiler runs QuickCheck-style tests on all three laws
+     ;; at compile time or in CI
+
+   ;; custom laws on any function
+   fn sort :: Ord a => #[a] -> #[a]
+     law idempotent   = forall xs. sort (sort xs) == sort xs
+     law permutation  = forall xs. (sort xs |> /# ) == (xs |> /#)
+     law ordered      = forall xs. sorted? (sort xs)
+     ...
+   #+end_example
+
+** 6.5 Level 4 — Refinement Types
+
+   #+begin_example
+   ;; refinement type (SMT-verified at compile time)
+   type Nat := {x :: Int | x >= 0}
+   type NonEmpty a := {xs :: #[a] | /# xs > 0}
+   type Percentage := {x :: Float | x >= 0.0 && x <= 100.0}
+
+   ;; function with refinement
+   fn head :: NonEmpty a -> a
+     (#[x ..._ ] -> x)
+
+   ;; the compiler statically proves this is safe:
+   fn safe-example :: #[Int] -> Maybe Int
+     xs := get-data ()
+     if /# xs > 0
+       Just (head xs)    ;; OK: compiler sees /# xs > 0, refines to NonEmpty
+     else
+       Nothing
+   #+end_example
+
+** 6.6 Level 5 — Proofs (Dependent Types)
+
+   #+begin_example
+   ;; full dependent types for critical sections
+   fn matrix-mul
+     :: Matrix m n -> Matrix n p -> Matrix m p
+     proof dimensions-match
+     ...
+
+   ;; theorem as a type
+   type AppendAssoc a (xs ys zs :: #[a])
+     := append (append xs ys) zs == append xs (append ys zs)
+   #+end_example
+
+* Part VII: Content-Addressed Code
+
+** 7.1 Hash-Based Identity
+
+   #+begin_example
+   ;; every definition has a hash identity (SHA3-512)
+   ;; names are just metadata pointers to hashes
+
+   fn factorial :: Int -> Int  ;; hash: #a7f3b2c1...
+     match n
+       0 => 1
+       n => n * factorial (n - 1)
+
+   ;; renaming is free (just update name -> hash mapping)
+   ;; no builds needed (unchanged hashes use cached results)
+   ;; no dependency conflicts (deps are hashes, not versions)
+   #+end_example
+
+** 7.2 Effect-Aware Hashing (Novel)
+
+   Irij extends content-addressing to include effect signatures:
+
+   #+begin_example
+   ;; hash captures: AST structure + type signature + effect row
+   ;; two functions with same body but different effects get different hashes
+
+   fn read-config :: () -[FileIO]-> Config      ;; hash: #x1...
+   fn read-config-test :: () -> Config           ;; hash: #x2... (different!)
+
+   ;; enables: effect-polymorphic caching
+   ;; if a pure function was called with same args before, skip recomputation
+   ;; effect-annotated functions are only cached when handler permits it
+   #+end_example
+
+** 7.3 Codebase as Database
+
+   #+begin_example
+   ;; the codebase is a persistent store, not a filesystem
+   ;; interaction via the REPL
+
+   > find :: Str -> #[Result]      ;; search by name, type, effect
+   > find "Int -> Int"             ;; find all Int -> Int functions
+   > deps factorial                ;; show dependency graph
+   > history factorial             ;; show all versions
+   > diff #a7f3.. #b2e1..         ;; diff two versions
+   > test factorial                ;; run all tests touching this hash
+   #+end_example
+
+* Part VIII: REPL & Interactive Development
+
+** 8.1 REPL Architecture
+
+   #+begin_example
+   ;; REPL is the primary interface, not batch compilation
+   ;; network protocol (nREPL-compatible) for editor integration
+
+   ;; evaluate expression
+   > 2 + 3
+   5
+
+   ;; define and immediately use
+   > fn double (x -> x * 2)
+   > #[1 2 3] |> @ double
+   #[2 4 6]
+
+   ;; inspect effect requirements
+   > :effects sync-data
+   sync-data :: () -[Http FileIO Log]-> Result Data Error
+
+   ;; hot-reload a definition (dependents auto-recompute)
+   > fn transform ...  ;; updated
+   [reload] 3 dependents recomputed in 12ms
+
+   ;; stop-and-fix (Smalltalk-style resumable debugging)
+   > with debug-handler (process-batch jobs)
+   [BREAK at process:42] job #7 threw :parse-error
+   [debug]> inspect job
+   {id: 7 payload: "malformed..."}
+   [debug]> fix (-> process (repair job))
+   [RESUME] continuing from job #7...
+   #+end_example
+
+** 8.2 Scratch / Watch System
+
+   #+begin_example
+   ;; scratch files: expressions re-evaluated on save
+   ;; results shown inline (like Unison or Observable notebooks)
+
+   ;; scratch.irj ──────────────────────────────────
+   users := fetch-users ()         ;; => #[{name: "Jo"} {name: "Al"}]
+   users |> @ .name                ;; => #["Jo" "Al"]
+   users |> ? (u -> u.age > 30)    ;; => #[{name: "Al" age: 42}]
+   ;; ─────────────────────────────────────────────
+   ;; each line shows its result to the right
+   ;; changes propagate reactively
+   #+end_example
+
+** 8.3 AI Integration Points
+
+   #+begin_example
+   ;; REPL commands for AI collaboration
+
+   > :gen "function that fetches user by ID and caches result"
+   ;; LLM generates in canonical indented form
+   ;; compiler validates types and effects immediately
+   ;; human reviews, edits, accepts
+
+   > :explain sync-data
+   ;; LLM explains the function in natural language
+
+   > :refactor sync-data :extract-effect Http
+   ;; LLM refactors to make Http effect explicit
+
+   > :test-gen factorial
+   ;; LLM generates property tests from type signature and laws
+   #+end_example
+
+* Part IX: JVM Interop & Platform
+
+** 9.1 Java Interop
+
+   #+begin_example
+   ;; calling Java methods
+   use java.util.ArrayList as JList
+
+   fn java-example :: () -[JVM]-> Int
+     list := JList/new ()          ;; constructor
+     list |> JList/add "hello"     ;; instance method (void, side-effect)
+     list |> JList/size            ;; returns Int
+
+   ;; implementing Java interfaces
+   impl java.lang.Runnable for MyTask
+     run := (self -> process self.data)
+
+   ;; Java annotations (for framework compat)
+   @java.Override
+   fn to-string :: MyType -> Str
+     ...
+   #+end_example
+
+** 9.2 Platform Targets
+
+   #+begin_example
+   ;; Compilation targets (phased roadmap)
+
+   ;; Phase 1: JVM bytecode (primary)
+   irj build --target jvm
+
+   ;; Phase 2: GraalVM Native Image
+   irj build --target native
+
+   ;; Phase 3: JavaScript / browser (via GraalJS or dedicated backend)
+   irj build --target js
+
+   ;; Phase 4: WebAssembly (when Wasm GC matures)
+   irj build --target wasm
+   #+end_example
+
+* Part X: Standard Library Skeleton
+
+  The standard library is organized by effect capabilities:
+
+  #+begin_example
+  std.core        ;; fundamental types, operators, protocols
+                  ;; includes: loop, identity, const, flip, compose
+  std.collection  ;; vectors, maps, sets, trees (persistent + transient)
+  std.text        ;; string operations, regex, unicode
+  std.math        ;; numeric, random, linear algebra
+  std.io          ;; file, stdio, path
+  std.net         ;; http client/server, tcp, udp
+  std.json        ;; parse/encode/streaming
+  std.time        ;; instant, duration, clock effect
+  std.async       ;; scope, fiber, channel, flow, stream
+  std.choreo      ;; located types, EPP, transport backends
+  std.test        ;; property testing, generators, law checking
+  std.check       ;; contracts, refinement, SMT integration
+  std.ffi         ;; JVM interop utilities
+  std.log         ;; structured logging effect
+  std.db          ;; database effect + connection pooling
+  std.cli         ;; argument parsing, terminal effects
+  #+end_example
+
+  Notable std.core functions:
+
+  #+begin_example
+  ;; loop: call a thunk forever (returns Never)
+  fn loop :: (() -[e]-> ()) -[e]-> Never
+  ;; usage: loop (-> read-cmd |> process |> display)
+
+  ;; recur: loop with accumulator (tail-recursive)
+  fn recur :: a -> (a -[e]-> Either a b) -[e]-> b
+  ;; usage: recur 0 (n -> if n > 10 (Right n) (Left (n + 1)))
+
+  ;; identity, const, flip: standard combinators
+  fn identity :: a -> a
+  fn const :: a -> b -> a
+  fn flip :: (a -> b -> c) -> (b -> a -> c)
+  #+end_example
+
+* Part XI: Metaprogramming — Deferred by Design
+
+  *Decision: defer macros/metaprogramming to Phase 3+.*
+
+  Rationale: Macros are the #1 source of confusing error messages in
+  Lisp-family languages and would dramatically complicate LLM code
+  generation. For an AI-first language, the traditional uses of macros
+  are better served by other mechanisms:
+
+  - *Boilerplate elimination:* the LLM generates expanded code directly.
+  - *DSLs:* algebraic effects + handlers provide composable abstraction.
+  - *Code transformation:* the content-addressed codebase stores ASTs
+    that tooling can transform externally.
+
+  When metaprogramming is eventually added, the approach will be:
+
+  #+begin_example
+  ;; A "macro" is a function from AST-hash to AST-hash.
+  ;; Since all code is content-addressed, transformation is just
+  ;; a function that reads one hash and writes another.
+
+  ;; This will be explored in Phase 3, informed by real usage patterns.
+  ;; Until then, prefer effects + handlers + LLM generation.
+  #+end_example
+
+* Part XII: Implementation Roadmap
+
+** Phase 0 — Foundation (Months 1–2)
+
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Task                         | Details                         | Tool      | Priority  |
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Grammar spec (ANTLR 4)       | Indentation + S-expr forms      | ANTLR4    | MUST      |
+   | AST definition               | Algebraic data types in Java    | Java 21+  | MUST      |
+   | Lexer + Parser               | Dense ASCII + S-expression mode | ANTLR4    | MUST      |
+   | Basic type checker            | HM inference, effect rows       | Java      | MUST      |
+   | JVM bytecode emitter         | Core expressions only           | ASM 9.x   | MUST      |
+   | REPL (basic)                 | Read-eval-print, no network     | JLine3    | MUST      |
+   |------------------------------+---------------------------------+-----------+-----------|
+
+   Deliverable: evaluate arithmetic, bindings, functions, pattern matching.
+
+** Phase 1 — Core Language (Months 3–5)
+
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Task                         | Details                         | Tool      | Priority  |
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Algebraic effects            | Declare, perform, handle        | ASM/Loom  | MUST      |
+   | Structured concurrency       | scope, fork, await, race        | Loom VT   | MUST      |
+   | Data types                   | Records, variants, newtypes     | ASM       | MUST      |
+   | Pattern matching             | Exhaustiveness checking         | Custom    | MUST      |
+   | Module system                | use, pub, qualified names       | Custom    | MUST      |
+   | JVM interop                  | Call Java, implement interfaces | ASM       | MUST      |
+   | Network REPL                 | nREPL-compatible protocol       | Netty     | SHOULD    |
+   | Error messages               | Source-mapped, helpful           | Custom    | MUST      |
+   |------------------------------+---------------------------------+-----------+-----------|
+
+   Deliverable: write real programs, call Java libs, interactive REPL.
+
+** Phase 2 — Distinctive Features (Months 6–9)
+
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Task                         | Details                         | Tool      | Priority  |
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Gradual typing (L0-L2)       | Dynamic + hints + contracts     | Custom    | MUST      |
+   | Property testing (L3)        | Laws, QuickCheck-style          | Custom    | MUST      |
+   | Content-addressed store      | Hash-based codebase DB          | SQLite    | SHOULD    |
+   | Located types + EPP          | Choreographic core              | Custom    | MUST      |
+   | Communication backends       | TCP, HTTP, in-process           | Netty     | SHOULD    |
+   | Stream/Flow system           | Lazy streams + reactive flows   | Custom    | SHOULD    |
+   | LSP server                   | Diagnostics, completion, hover  | lsp4j     | MUST      |
+   | Formatter                    | Dense <-> S-expr conversion     | Custom    | MUST      |
+   |------------------------------+---------------------------------+-----------+-----------|
+
+   Deliverable: alpha release with unique value proposition.
+
+** Phase 3 — Production Readiness (Months 10–14)
+
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Task                         | Details                         | Tool      | Priority  |
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Refinement types (L4)        | SMT integration                 | Z3/CVC5  | SHOULD    |
+   | Capability system            | Linear tracking, grant/revoke   | Custom    | SHOULD    |
+   | Native Image                 | GraalVM AOT compilation         | GraalVM   | SHOULD    |
+   | Package manager              | Content-addressed distribution  | Custom    | MUST      |
+   | Conclave/enclave             | Choreographic subsets           | Custom    | SHOULD    |
+   | Census polymorphism          | Dynamic participant sets        | Custom    | COULD     |
+   | Metaprogramming              | AST-hash → AST-hash transforms | Custom    | COULD     |
+   | Debugger                     | Stop-and-fix, time-travel       | JDI/JDWP | SHOULD    |
+   | Documentation site           | Guides, API docs, playground    | Custom    | MUST      |
+   |------------------------------+---------------------------------+-----------+-----------|
+
+   Deliverable: beta release, usable for real distributed applications.
+
+** Phase 4 — Ecosystem (Months 15+)
+
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Task                         | Details                         | Tool      | Priority  |
+   |------------------------------+---------------------------------+-----------+-----------|
+   | Self-hosting (optional)      | Compiler in Irij                   | -         | COULD     |
+   | JS/Wasm backend              | Browser target                  | Truffle   | SHOULD    |
+   | AI training data             | Generate fine-tuning corpus     | -         | MUST      |
+   | Dependent types (L5)         | For critical sections           | Custom    | COULD     |
+   | Effect-aware caching         | Hash + effects = cache key      | Custom    | SHOULD    |
+   | IDE plugins                  | VS Code, Emacs, IntelliJ        | LSP       | MUST      |
+   | Community                    | Governance, contrib guide       | -         | MUST      |
+   |------------------------------+---------------------------------+-----------+-----------|
+
+* Part XIII: Open Questions & Risks
+
+** 13.1 Technical Risks
+
+   - *Effect compilation on JVM.* Algebraic effects need delimited
+     continuations. Project Loom provides virtual threads but not full
+     one-shot continuations. Options: (a) CPS transform at compile time,
+     (b) use Loom's =Continuation= internal API, (c) implement on Truffle
+     which has native continuation support. *Recommendation: start with
+     CPS transform, migrate to Loom continuations as they stabilize.*
+
+   - *Choreographic EPP complexity.* Projection of higher-order
+     choreographies with effects is an open research problem. Klor and
+     HasChor handle the simple cases; complex interactions may need
+     manual annotations. *Recommendation: start with first-order
+     choreographies, extend incrementally.*
+
+   - *Gradual verification overhead.* Typed Racket showed up to 235×
+     overhead at type boundaries. *Mitigation: JIT compilation
+     eliminates 90%+ overhead (Pycket result), use shallow types at
+     boundaries by default.*
+
+   - *Content-addressed code + mutation.* Mutable bindings complicate
+     hashing. *Mitigation: hash the pure computation; effects (including
+     mutation) are tracked separately in the effect row.*
+
+** 13.2 Adoption Risks
+
+   - *Zero training data for LLMs.* Novel syntax means LLMs have no
+     pre-training. See Part XIV for the multi-representation training
+     strategy that mitigates this.
+
+   - *Learning curve.* Effects + choreography + gradual types = many new
+     concepts. *Mitigation: Level 0 (fully dynamic, no annotations) is
+     the default entry point. Features are opt-in, incremental.*
+
+   - *JVM startup time.* Clojure's notorious slow startup.
+     *Mitigation: GraalVM Native Image (~50ms startup) or CRaC
+     (checkpoint/restore) from day one.*
+
+** 13.3 Design Decisions Still Open
+
+   - *Eager vs Lazy evaluation.* Lazy is more token-efficient (no
+     explicit delay/force) but harder to reason about effects.
+     *Leaning: strict by default, lazy via explicit =lazy= / streams.*
+
+   - *Row polymorphism implementation.* Koka-style evidence passing
+     vs. dictionary passing vs. Effekt-style capability passing.
+     *Needs prototyping.*
+
+   - *Syntax for type application.* Explicit =[Int]= vs. inferred
+     everywhere vs. turbofish =::<Int>=.
+     *Leaning: inferred, with explicit =@Int= when needed.*
+
+   - *Error model.* Checked effects (Err in effect row) vs. unchecked
+     panics vs. both. *Leaning: both, like Rust's Result + panic.*
+
+   - *Record system.* Nominal (declared types) vs. structural
+     (anonymous) vs. both. *Leaning: both, with structural subtyping
+     for anonymous records.*
+
+* Part XIV: LLM Training Strategy — Multi-Representation Learning
+
+  *Core question:* If indentation is the canonical form, how do LLMs
+  learn to generate Irij with zero pre-existing training data?
+
+  *Answer:* Train on multiple representations, generate in one.
+
+** 14.1 The Transfer Learning Insight
+
+   LLMs don't learn languages from scratch — they transfer structural
+   knowledge from languages they already know. The key findings:
+
+   - MIT experiment (2024): showed an LLM just a few examples of a novel
+     syntax and it could reliably generate code in that syntax. Few-shot
+     transfer works for syntactic patterns.
+
+   - BPE tokenization means the *tokens* of Irij are already in the LLM's
+     vocabulary: =fn=, =:==, =|>=, =#[=, =match=, etc. are all standard
+     ASCII sequences. The LLM doesn't see "a new language" — it sees
+     familiar token sequences in a new grammatical arrangement.
+
+   - Indented block structure transfers from Python, Haskell, YAML, and
+     every markdown code block the LLM has ever seen. Pipeline operators
+     transfer from Elixir, F#, OCaml. Pattern matching transfers from
+     Haskell, Rust, Scala. Effect syntax is novel, but structurally
+     resembles Java's =throws= clauses.
+
+** 14.2 Multi-Representation Training Corpus
+
+   The training strategy uses three representations of the same code:
+
+   #+begin_example
+   ;; ── Representation 1: Natural language specification ─────
+   ;; "A function that fetches a user by ID from the database,
+   ;;  returns Ok with the user or Err if not found.
+   ;;  Requires database read access and logging."
+
+   ;; ── Representation 2: Irij canonical (indented) form ────────
+   fn fetch-user :: Id -[DbRead Log]-> Result User NotFound
+     id -> 
+       log "fetching user ${id}"
+       result := db.query "SELECT * FROM users WHERE id = ?" id
+       match result
+         #[row ..._ ] => Ok (row->user row)
+         #[]          => Err NotFound
+
+   ;; ── Representation 3: Irij S-expression (interchange) form ──
+   (fn fetch-user (:: Id (-[DbRead Log]-> (Result User NotFound)))
+     (-> id (do (log "fetching user ${id}")
+       (:= result (db.query "SELECT * FROM users WHERE id = ?" id))
+       (match result (=> (#[row ..._]) (Ok (row->user row)))
+                     (=> (#[]) (Err NotFound))))))
+   #+end_example
+
+   Training on all three forms teaches the LLM:
+   - Spec → Code translation (from natural language)
+   - Indented ↔ S-expr equivalence (structural understanding)
+   - Indented form as the preferred generation target
+
+** 14.3 The Bootstrapping Pipeline
+
+   1. *Phase A (synthetic):* Use existing LLMs to translate a large
+      corpus of Clojure/Haskell/Koka code into Irij syntax, manually
+      correcting errors. Yields ~10K validated examples.
+
+   2. *Phase B (compiler-validated):* Feed examples to LLMs, have them
+      generate new Irij code, run the Irij compiler for type/effect checking,
+      keep only code that compiles. Yields ~100K validated examples.
+
+   3. *Phase C (fine-tune):* Fine-tune a model on the validated corpus.
+      The fine-tuned model generates directly in Irij indented form.
+
+   4. *Phase D (RLHF/DPO):* Use compiler feedback as reward signal.
+      Code that type-checks, effect-checks, and passes law verification
+      gets positive reward. This creates a model that inherently respects
+      the type system.
+
+   The S-expression form is valuable during Phase A (Lisp knowledge
+   transfers to S-expr generation), but by Phase C the model generates
+   indented form directly because that's what the validated corpus
+   predominantly contains.
+
+* Appendix A: Syntax Quick Reference Card
+
+  #+begin_example
+  ╔══════════════════════════════════════════════════════════════╗
+  ║                    ℑ QUICK REFERENCE                        ║
+  ╠══════════════════════════════════════════════════════════════╣
+  ║  BINDING        x := 42          x :! 0 (mut)              ║
+  ║  FUNCTION       fn f (x -> x+1)  fn f :: T -> T            ║
+  ║  LAMBDA         (x y -> x + y)                              ║
+  ║  PIPE           x |> f |> g      f >> g (compose)           ║
+  ║  MATCH          match x (P => E) ...                        ║
+  ║  SPREAD         #[x ...rest]     (in patterns, 3 dots)      ║
+  ║  EFFECT         effect E (op :: A -> B) ...                 ║
+  ║  HANDLER        with h expr                                 ║
+  ║  CAPABILITY     cap C :: effect (op :: ...)                 ║
+  ║  SCOPE          scope s (s.fork (-> ...))                   ║
+  ║  DETACH         detach! (-> ...)  (escape hatch!)           ║
+  ║  CHOREO SEND    val ~> ROLE      val ~*> #[R1 R2]          ║
+  ║  LOCATED        expr @ROLE       val :: T@ROLE              ║
+  ║  CONTRACT       pre P  post Q    contract (in P) (out Q)   ║
+  ║  LAW            law name = forall x. P x                    ║
+  ║  REFINEMENT     type T := {x :: U | pred x}                ║
+  ║  ARRAY OPS      @ map  ? filter  /+ reduce  /# count       ║
+  ║  COLLECTIONS    #[1 2]  #{:a}  #(1 2)  {k: v}              ║
+  ║  PURE FN        fn f :: A -> B                              ║
+  ║  EFFECTFUL FN   fn f :: A -[E1 E2]-> B                     ║
+  ║  LOOP           loop (-> body)   recur init (acc -> ...)    ║
+  ╚══════════════════════════════════════════════════════════════╝
+  #+end_example
+
+* Appendix B: Full Example — Distributed Key-Value Store
+
+  #+begin_example
+  mod demo.kv-store
+
+  use std.choreo
+  use std.async
+  use std.collection {HashMap}
+  use std.net
+  use std.core {loop}
+
+  ;; ── Roles ─────────────────────────────────────────────
+  role CLIENT
+  role PRIMARY
+  role REPLICA
+
+  ;; ── Data ──────────────────────────────────────────────
+  type Command
+    Get Str
+    Put Str Str
+    Del Str
+
+  type Reply
+    Found Str
+    NotFound
+    Ok
+
+  ;; ── Choreography ──────────────────────────────────────
+  fn kv-protocol :: Command@CLIENT -[Choreo Async]-> Reply@CLIENT
+
+    cmd := CLIENT.input
+    cmd ~> PRIMARY
+
+    match cmd @PRIMARY
+      Put k v =>
+        cmd ~/ REPLICA          ;; inform replica of branch
+        PRIMARY.store k v
+        ;; replicate: scope blocks until fork completes
+        scope s
+          s.fork (->
+            cmd ~> REPLICA
+            REPLICA.store k v)
+        Ok @CLIENT
+
+      Get k =>
+        cmd ~/ REPLICA
+        result := PRIMARY.lookup k
+        result ~> CLIENT
+        match result @CLIENT
+          Just v  => Found v
+          Nothing => NotFound
+
+      Del k =>
+        cmd ~/ REPLICA
+        PRIMARY.delete k
+        scope s
+          s.fork (-> cmd ~> REPLICA; REPLICA.delete k)
+        Ok @CLIENT
+
+  ;; ── Entry Point ───────────────────────────────────────
+  fn main :: () -[IO]-> ()
+    config := read-config ()
+    with (tcp-transport config)
+      with (console-to-stdout)
+        ;; loop is a std.core function: calls thunk forever
+        loop (->
+          cmd := CLIENT.prompt
+          reply := kv-protocol cmd
+          CLIENT.display reply)
+  #+end_example
+
+* Appendix C: Comparison with Existing Languages
+
+  | Feature              | ℑ       | Clojure | Scala/ZIO | Haskell | Kotlin  | Flix    |
+  |----------------------+---------+---------+-----------+---------+---------+--------|
+  | Token efficiency     | ★★★★★  | ★★★★   | ★★       | ★★★    | ★★     | ★★★   |
+  | Algebraic effects    | Native  | Library | Library   | Library | No      | Native |
+  | Struct. concurrency  | Native  | Library | Library   | Library | Native  | No     |
+  | Choreography         | Native  | Klor    | No        | HasChor | No      | No     |
+  | Gradual typing       | L0–L5   | Spec    | No        | No      | No      | No     |
+  | Content-addressed    | Native  | No      | No        | No      | No      | No     |
+  | REPL quality         | ★★★★★  | ★★★★★ | ★★       | ★★     | ★★★   | ★★★   |
+  | JVM interop          | Direct  | Direct  | Direct    | No      | Direct  | Direct |
+  | Law verification     | Native  | No      | No        | LH      | No      | No     |
+  | AI-first design      | Yes     | No      | No        | No      | No      | No     |
