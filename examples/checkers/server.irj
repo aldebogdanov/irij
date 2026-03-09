@@ -1,0 +1,13 @@
+;; Irij Online Playground Server
+;; Run: irij examples/checkers/server.irj --allow-impure
+;; Open: http://localhost:3001
+
+fn main :: () -[IO]-> ()
+  server := http-server 3001
+  html := http-serve-file "examples/checkers/index.html"
+  h-index := (req -> {status: 200 body: html content-type: "text/html"})
+  http-handle server "/" h-index
+  h-run := (req -> {status: 200 body: (irij-eval (req.body)) content-type: "application/json"})
+  http-handle server "/api/run" h-run
+  io.stdout.write "Playground running at http://localhost:3001\n"
+  http-start server

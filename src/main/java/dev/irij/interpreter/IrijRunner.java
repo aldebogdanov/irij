@@ -7,6 +7,8 @@ import org.antlr.v4.runtime.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * CLI entry point to run Irij programs.
@@ -14,22 +16,43 @@ import java.nio.file.Path;
  * <p>Usage:
  * <pre>
  *   java dev.irij.interpreter.IrijRunner path/to/file.irj
- *   java dev.irij.interpreter.IrijRunner -e 'fn main :: () -[IO]-> () ...'
+ *   java dev.irij.interpreter.IrijRunner --warn-impure path/to/file.irj
+ *   java dev.irij.interpreter.IrijRunner --allow-impure -e 'fn main :: ...'
+ *   java dev.irij.interpreter.IrijRunner         (no args → REPL)
  * </pre>
+ *
+ * <p>Purity flags:
+ * <ul>
+ *   <li>{@code --strict} — direct IO outside handlers is an error (default)
+ *   <li>{@code --warn-impure} — direct IO produces a warning but still runs
+ *   <li>{@code --allow-impure} — no purity checks
+ * </ul>
  */
 public final class IrijRunner {
 
     public static void main(String[] args) throws IOException {
-        if (args.length == 0) {
+        // Separate flags from positional args
+        PurityMode purityMode = PurityMode.STRICT;
+        List<String> positional = new ArrayList<>();
+
+        for (String arg : args) {
+            switch (arg) {
+                case "--strict", "--warn-impure", "--allow-impure" ->
+                        purityMode = PurityMode.fromFlag(arg);
+                default -> positional.add(arg);
+            }
+        }
+
+        if (positional.isEmpty()) {
             new IrijRepl().run();
             return;
         }
 
         String source;
-        if ("-e".equals(args[0]) && args.length > 1) {
-            source = args[1];
+        if ("-e".equals(positional.get(0)) && positional.size() > 1) {
+            source = positional.get(1);
         } else {
-            source = Files.readString(Path.of(args[0]));
+            source = Files.readString(Path.of(positional.get(0)));
         }
 
         // Parse
@@ -54,17 +77,33 @@ public final class IrijRunner {
             System.exit(1);
         }
 
-        // Type check (warnings only)
+        // Type check + purity check
         var checker = new TypeChecker();
+        checker.setPurityMode(purityMode);
         var warnings = checker.check(cu);
         for (var warning : warnings) {
             System.err.println(warning);
         }
 
+        // Purity errors are fatal in strict mode
+        var purityErrors = checker.getErrors();
+        if (!purityErrors.isEmpty()) {
+            for (var error : purityErrors) {
+                System.err.println(error);
+            }
+            System.err.printf("%d purity error(s) — use --warn-impure or --allow-impure to bypass%n",
+                    purityErrors.size());
+            System.exit(3);
+        }
+
         // Interpret
         try {
             var interpreter = new IrijInterpreter();
-            interpreter.execute(cu);
+            if ("-e".equals(positional.get(0))) {
+                interpreter.executeScript(cu);
+            } else {
+                interpreter.execute(cu);
+            }
         } catch (IrijRuntimeError e) {
             System.err.println("Runtime error: " + e.getMessage());
             System.exit(2);

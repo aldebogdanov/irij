@@ -101,6 +101,9 @@ public abstract class IrijLexerBase extends Lexer {
                         indentStack.pop();
                         tokenQueue.add(makeToken(IrijLexer.DEDENT, "", tok));
                     }
+                    // Emit a synthetic NEWLINE after DEDENT so subsequent
+                    // statements at the same indent level are properly separated.
+                    tokenQueue.add(makeToken(IrijLexer.NEWLINE, "\n", tok));
                 }
                 // indent == currentIndent: no action (same-level statement)
             } else {

@@ -1,0 +1,55 @@
+;; ═══════════════════════════════════════════════════════════════════════
+;; HTTP Showcase — demonstrates all HTTP builtins
+;; ═══════════════════════════════════════════════════════════════════════
+;; Run:   ./gradlew run --args="--allow-impure examples/http-showcase.irj"
+;;
+;; Endpoints:
+;;   GET /                              → welcome page
+;;   GET /weather?city=London           → weather lookup (string response)
+;;   GET /echo?msg=hello                → echo with request info
+;;   GET /calc?a=10&op=add&b=5          → calculator (map response with status)
+;;   GET /greet?name=Ada&lang=en        → multilingual greeting
+;;   GET /info                          → JSON response (content-type demo)
+;;   GET /error                         → 404 error (status code demo)
+
+;; ── Weather data ──────────────────────────────────────────────────────
+
+fn get-weather :: Str -> Str
+  "London"  => "London: 12C, cloudy"
+  "Paris"   => "Paris: 15C, sunny"
+  "Tokyo"   => "Tokyo: 22C, humid"
+  "Moscow"  => "Moscow: -5C, snowy"
+  "NYC"     => "NYC: 8C, windy"
+  city      => city ++ ": no data available"
+
+;; ── Greeting by language ──────────────────────────────────────────────
+
+fn greet-in :: Str -> Str -> Str
+  "en" => (name -> "Hello, " ++ name ++ "!")
+  "es" => (name -> "Hola, " ++ name ++ "!")
+  "fr" => (name -> "Bonjour, " ++ name ++ "!")
+  "ru" => (name -> "Привет, " ++ name ++ "!")
+  "jp" => (name -> "こんにちは, " ++ name ++ "!")
+  _    => (name -> "Hi, " ++ name ++ "!")
+
+;; ── Main ──────────────────────────────────────────────────────────────
+
+fn main :: () -[IO]-> ()
+  port := 8080
+  server := http-server port
+  h-root := (req -> "Irij HTTP Showcase\n\nEndpoints:\n  /weather?city=London\n  /echo?msg=hello\n  /calc?a=10&op=add&b=5\n  /greet?name=Ada&lang=en\n  /info\n  /error")
+  http-handle server "/" h-root
+  h-weather := (req -> if (str? (http-query-param (req.query) "city")) (get-weather (http-query-param (req.query) "city")) else "Provide ?city= param. Available: London, Paris, Tokyo, Moscow, NYC")
+  http-handle server "/weather" h-weather
+  h-echo := (req -> if (str? (http-query-param (req.query) "msg")) ("Echo: " ++ (http-query-param (req.query) "msg") ++ "\nMethod: " ++ (req.method) ++ "\nPath: " ++ (req.path)) else "Provide ?msg= param to echo")
+  http-handle server "/echo" h-echo
+  h-calc := (req -> if (str? (http-query-param (req.query) "a")) ({status: 200 body: ("Result: " ++ (to-str ((to-int (http-query-param (req.query) "a")) + (to-int (http-query-param (req.query) "b")))))}) else ({status: 400 body: "Provide ?a=NUM&b=NUM  (adds two numbers)"}))
+  http-handle server "/calc" h-calc
+  h-greet := (req -> if (str? (http-query-param (req.query) "name")) ((greet-in (if (str? (http-query-param (req.query) "lang")) (http-query-param (req.query) "lang") else "en")) (http-query-param (req.query) "name")) else "Provide ?name=Ada&lang=en|es|fr|ru|jp")
+  http-handle server "/greet" h-greet
+  h-info := (req -> {status: 200 body: "{\"server\": \"Irij HTTP\", \"version\": \"0.1.0\", \"lang\": \"Irij\"}" content-type: "application/json"})
+  http-handle server "/info" h-info
+  h-err := (req -> {status: 404 body: "Not found: this endpoint always returns 404"})
+  http-handle server "/error" h-err
+  io.stdout.write "Starting HTTP showcase on http://localhost:8080\n"
+  http-start server

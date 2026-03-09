@@ -6,6 +6,12 @@ import dev.irij.parser.IrijParserBaseVisitor;
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.ParseTree;
 
+import com.sun.net.httpserver.HttpServer;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 /**
@@ -38,6 +44,8 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
 
     {
         Stdlib.register(builtins);
+        registerHofBuiltins();
+        registerHttpBuiltins();
     }
 
     // ── Runtime state ──────────────────────────────────────────────────
@@ -48,13 +56,23 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
     /** Lexical scope chain for variable bindings */
     private final Deque<Map<String, Object>> scopeStack = new ArrayDeque<>();
 
+    /** Name of the currently executing user function (for TCO). */
+    private String currentFunctionName = null;
+
+    /** Whether we are in a tail-call-eligible position. */
+    private boolean inTailPosition = false;
+
     // ── Data classes ───────────────────────────────────────────────────
 
     record HandlerEntry(String handlerName, String effectName,
-                        Map<String, HandlerClause> operations) {}
+                        Map<String, HandlerClause> operations,
+                        List<HandlerStateInit> stateInits) {}
+
+    record HandlerStateInit(String name, IrijParser.ExprContext initExpr) {}
 
     record HandlerClause(List<String> params,
-                         IrijParser.ExprContext body) {}
+                         IrijParser.ExprContext body,
+                         IrijParser.FnBodyContext fnBody) {}
 
     record IrijFunction(String name, IrijParser.FnDeclContext decl) {}
 
@@ -77,6 +95,31 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         pushScope();
         try {
             evalFnBody(main);
+        } finally {
+            popScope();
+        }
+    }
+
+    /**
+     * Execute a compilation unit in script mode — no main() required.
+     * Declarations are collected, top-level bindings are evaluated,
+     * and if a main function exists it is called.
+     */
+    public void executeScript(IrijParser.CompilationUnitContext cu) {
+        pushScope();
+        try {
+            for (var decl : cu.topLevelDecl()) {
+                if (decl.binding() != null) {
+                    evalBinding(decl.binding());
+                } else {
+                    collectDeclaration(decl);
+                }
+            }
+            // If main exists, run it
+            var main = functions.get("main");
+            if (main != null) {
+                evalFnBody(main);
+            }
         } finally {
             popScope();
         }
@@ -115,18 +158,26 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         String handlerName = ctx.LOWER_ID().getText();
         String effectName = ctx.typeName().getText();
         var ops = new LinkedHashMap<String, HandlerClause>();
+        var stateInits = new ArrayList<HandlerStateInit>();
 
         for (var clause : ctx.handlerBody().handlerClause()) {
-            if (clause.LOWER_ID() != null) {
+            if (clause.binding() != null) {
+                // State initialization: state :! initialValue
+                var bind = clause.binding();
+                if (bind.MUT_BIND() != null && bind.LOWER_ID() != null) {
+                    stateInits.add(new HandlerStateInit(
+                            bind.LOWER_ID().getText(), bind.expr()));
+                }
+            } else if (clause.LOWER_ID() != null) {
                 String opName = clause.LOWER_ID().getText();
                 var params = new ArrayList<String>();
                 for (var pat : clause.pattern()) {
                     params.add(pat.getText());
                 }
-                ops.put(opName, new HandlerClause(params, clause.expr()));
+                ops.put(opName, new HandlerClause(params, clause.expr(), clause.fnBody()));
             }
         }
-        handlers.put(handlerName, new HandlerEntry(handlerName, effectName, ops));
+        handlers.put(handlerName, new HandlerEntry(handlerName, effectName, ops, stateInits));
     }
 
     private void collectFunction(IrijParser.FnDeclContext ctx) {
@@ -247,10 +298,15 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         if (body.lambdaExpr() != null) {
             return evalExpr(body.lambdaExpr());
         }
-        // Statements
+        // Statements — last statement is in tail position
         Object result = UNIT;
-        for (var stmt : body.statement()) {
-            result = evalStatement(stmt);
+        var stmts = body.statement();
+        for (int i = 0; i < stmts.size(); i++) {
+            if (i == stmts.size() - 1) {
+                result = evalStatementInTailPosition(stmts.get(i));
+            } else {
+                result = evalStatement(stmts.get(i));
+            }
         }
         return result;
     }
@@ -265,6 +321,27 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             return evalExpr(stmt.expr());
         }
         return UNIT;
+    }
+
+    private Object evalStatementInTailPosition(IrijParser.StatementContext stmt) {
+        if (stmt.binding() != null) {
+            // Bindings are never in tail position (value is bound, not returned)
+            return evalBinding(stmt.binding());
+        }
+        if (stmt.expr() != null) {
+            return evalExprInTailPosition(stmt.expr());
+        }
+        return UNIT;
+    }
+
+    private Object evalExprInTailPosition(ParseTree node) {
+        boolean prev = inTailPosition;
+        inTailPosition = true;
+        try {
+            return evalExpr(node);
+        } finally {
+            inTailPosition = prev;
+        }
     }
 
     Object evalBinding(IrijParser.BindingContext bind) {
@@ -315,7 +392,7 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             case IrijParser.RangeExprContext ctx -> evalRangeExpr(ctx);
             case IrijParser.AddExprContext ctx -> evalAddExpr(ctx);
             case IrijParser.MulExprContext ctx -> evalMulExpr(ctx);
-            case IrijParser.PowExprContext ctx -> evalExpr(ctx.unaryExpr(0));
+            case IrijParser.PowExprContext ctx -> evalPowExpr(ctx);
             case IrijParser.UnaryExprContext ctx -> evalUnaryExpr(ctx);
             case IrijParser.SeqOpExprContext ctx -> evalSeqOpExpr(ctx);
             case IrijParser.PostfixExprContext ctx -> evalPostfixExpr(ctx);
@@ -372,6 +449,12 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             throw new IrijRuntimeError("Unknown handler: " + handlerName);
         }
 
+        // Initialize handler state in a dedicated scope
+        pushScope();
+        for (var init : handler.stateInits()) {
+            currentScope().put(init.name(), evalExpr(init.initExpr()));
+        }
+
         // Push handler, execute body, pop handler
         handlerStack.push(handler);
         try {
@@ -384,6 +467,7 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             return UNIT;
         } finally {
             handlerStack.pop();
+            popScope(); // remove handler state scope
         }
     }
 
@@ -416,10 +500,13 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         }
 
         // f x y z — first atom is the function, rest are arguments
+        boolean wasTail = inTailPosition;
+        inTailPosition = false; // arguments are not in tail position
         var args = new ArrayList<Object>();
         for (int i = 1; i < atoms.size(); i++) {
             args.add(evalAtomExpr(atoms.get(i)));
         }
+        inTailPosition = wasTail; // the call itself inherits tail position
 
         return callFunction(fnName, args, fnAtom);
     }
@@ -454,6 +541,10 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         // 2. Check if it's a user-defined function
         var fn = functions.get(name);
         if (fn != null) {
+            // TCO: self-recursive tail call → trampoline instead of recursing
+            if (name.equals(currentFunctionName) && inTailPosition) {
+                throw new TailCallSignal(args);
+            }
             return callUserFunction(fn, args);
         }
 
@@ -473,15 +564,72 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
     }
 
     private Object callUserFunction(IrijParser.FnDeclContext fn, List<Object> args) {
-        pushScope();
+        String fnName = fn.fnName().getText();
+        String prevFn = currentFunctionName;
+        currentFunctionName = fnName;
+
         try {
-            // For now, functions don't have named params in the declaration body
-            // (param names come from pattern matching in the body)
-            // hello.irj: fn hello takes () — no actual params to bind
-            return evalFnBody(fn);
+            while (true) {
+                pushScope();
+                try {
+                    // Check for match arms as function body — match first arg against patterns
+                    var matchArms = getFnMatchArms(fn);
+                    if (matchArms != null && !args.isEmpty()) {
+                        return evalFnMatchArms(matchArms, args.get(0));
+                    }
+                    Object result = evalFnBody(fn);
+                    // If body evaluates to a lambda, apply it with the call args
+                    if (result instanceof LambdaValue lambda) {
+                        return callLambda(lambda, args);
+                    }
+                    return result;
+                } catch (TailCallSignal signal) {
+                    // Trampoline: rebind args for next iteration
+                    args = signal.args;
+                    continue;
+                } finally {
+                    popScope();
+                }
+            }
         } finally {
-            popScope();
+            currentFunctionName = prevFn;
         }
+    }
+
+    private IrijParser.MatchArmsContext getFnMatchArms(IrijParser.FnDeclContext fn) {
+        var body = fn.fnBody();
+        if (body != null && body.matchArms() != null) return body.matchArms();
+        var inline = fn.fnBodyInline();
+        if (inline != null && inline.matchArms() != null) return inline.matchArms();
+        return null;
+    }
+
+    private Object evalFnMatchArms(IrijParser.MatchArmsContext arms, Object scrutinee) {
+        boolean wasTail = inTailPosition;
+        inTailPosition = wasTail;
+        for (var arm : arms.matchArm()) {
+            var bindings = new LinkedHashMap<String, Object>();
+            if (matchPattern(arm.pattern(), scrutinee, bindings)) {
+                if (arm.guard() != null) {
+                    pushScope();
+                    currentScope().putAll(bindings);
+                    Object guardVal = evalExpr(arm.guard().expr());
+                    popScope();
+                    if (!isTruthy(guardVal)) continue;
+                }
+                pushScope();
+                currentScope().putAll(bindings);
+                try {
+                    if (arm.fnBody() != null) {
+                        return evalFnBodyCtx(arm.fnBody());
+                    }
+                    return evalExpr(arm.expr());
+                } finally {
+                    popScope();
+                }
+            }
+        }
+        throw new IrijRuntimeError("Non-exhaustive match in function on: " + scrutinee);
     }
 
     private HandlerClause resolveEffectOp(String opName) {
@@ -501,6 +649,14 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
             // Bind parameters
             for (int i = 0; i < clause.params().size() && i < args.size(); i++) {
                 currentScope().put(clause.params().get(i), args.get(i));
+            }
+            // Provide 'resume' — in the tree-walking interpreter, resume(v)
+            // simply returns v, which becomes the handler's return value,
+            // flowing back to the effect operation call site.
+            currentScope().put("resume", (Builtin) resumeArgs ->
+                    resumeArgs.isEmpty() ? UNIT : resumeArgs.get(0));
+            if (clause.fnBody() != null) {
+                return evalFnBodyCtx(clause.fnBody());
             }
             return evalExpr(clause.body());
         } finally {
@@ -927,19 +1083,36 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         Object result = evalExpr(ctx.powExpr(0));
         for (int i = 1; i < ctx.powExpr().size(); i++) {
             Object right = evalExpr(ctx.powExpr(i));
-            var op = ctx.getChild(2 * i - 1);
+            String opText = ctx.getChild(2 * i - 1).getText();
             if (result instanceof Long l && right instanceof Long r) {
-                String opText = op.getText();
-                if ("*".equals(opText)) {
-                    result = l * r;
-                } else if ("/".equals(opText)) {
-                    if (r == 0) throw new IrijRuntimeError("Division by zero");
-                    result = l / r;
-                } else if ("%".equals(opText)) {
-                    if (r == 0) throw new IrijRuntimeError("Division by zero");
-                    result = l % r;
-                }
+                result = switch (opText) {
+                    case "*" -> l * r;
+                    case "/" -> { if (r == 0) throw new IrijRuntimeError("Division by zero"); yield l / r; }
+                    case "%" -> { if (r == 0) throw new IrijRuntimeError("Division by zero"); yield l % r; }
+                    default -> result;
+                };
+            } else if (result instanceof Number && right instanceof Number) {
+                double l = ((Number) result).doubleValue(), r = ((Number) right).doubleValue();
+                result = switch (opText) {
+                    case "*" -> l * r;
+                    case "/" -> { if (r == 0) throw new IrijRuntimeError("Division by zero"); yield l / r; }
+                    case "%" -> { if (r == 0) throw new IrijRuntimeError("Division by zero"); yield l % r; }
+                    default -> result;
+                };
             }
+        }
+        return result;
+    }
+
+    private Object evalPowExpr(IrijParser.PowExprContext ctx) {
+        if (ctx.unaryExpr().size() == 1) return evalExpr(ctx.unaryExpr(0));
+        Object base = evalExpr(ctx.unaryExpr(0));
+        Object exp = evalExpr(ctx.unaryExpr(1));
+        double b = ((Number) base).doubleValue();
+        double e = ((Number) exp).doubleValue();
+        double result = Math.pow(b, e);
+        if (base instanceof Long && exp instanceof Long && result == (long) result) {
+            return (long) result;
         }
         return result;
     }
@@ -1001,7 +1174,10 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
     // ── Control flow ────────────────────────────────────────────────────
 
     private Object evalIfExpr(IrijParser.IfExprContext ctx) {
+        boolean wasTail = inTailPosition;
+        inTailPosition = false; // condition is not tail
         Object cond = evalExpr(ctx.expr(0));
+        inTailPosition = wasTail; // branches inherit tail position
         if (isTruthy(cond)) {
             if (ctx.fnBody().size() > 0) {
                 return evalFnBodyCtx(ctx.fnBody(0));
@@ -1016,7 +1192,10 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
     }
 
     private Object evalMatchExpr(IrijParser.MatchExprContext ctx) {
+        boolean wasTail = inTailPosition;
+        inTailPosition = false; // scrutinee is not tail
         Object scrutinee = evalExpr(ctx.expr());
+        inTailPosition = wasTail; // arm bodies inherit tail position
         for (var arm : ctx.matchArms().matchArm()) {
             var pattern = arm.pattern();
             var bindings = new LinkedHashMap<String, Object>();
@@ -1046,8 +1225,13 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
 
     private Object evalDoExpr(IrijParser.DoExprContext ctx) {
         Object result = UNIT;
-        for (var stmt : ctx.statement()) {
-            result = evalStatement(stmt);
+        var stmts = ctx.statement();
+        for (int i = 0; i < stmts.size(); i++) {
+            if (i == stmts.size() - 1) {
+                result = evalStatementInTailPosition(stmts.get(i));
+            } else {
+                result = evalStatement(stmts.get(i));
+            }
         }
         return result;
     }
@@ -1088,6 +1272,15 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
         final List<Object> args;
         RecurSignal(List<Object> args) {
             super(null, null, true, false); // no stack trace for performance
+            this.args = args;
+        }
+    }
+
+    /** Sentinel exception for self-recursive tail calls (TCO). */
+    static final class TailCallSignal extends RuntimeException {
+        final List<Object> args;
+        TailCallSignal(List<Object> args) {
+            super(null, null, true, false);
             this.args = args;
         }
     }
@@ -1166,6 +1359,18 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
                 Object val = map.get(key);
                 if (val == null) val = UNIT;
                 if (!matchPattern(field.pattern(), val, bindings)) return false;
+            }
+            return true;
+        }
+        // Tuple pattern: #(a b c) — exact arity match
+        if (pat.tuplePattern() != null) {
+            if (!(value instanceof List<?> list)) return false;
+            var tuplePat = pat.tuplePattern().patternList();
+            if (tuplePat == null) return list.isEmpty();
+            var subPats = tuplePat.pattern();
+            if (list.size() != subPats.size()) return false;
+            for (int i = 0; i < subPats.size(); i++) {
+                if (!matchPattern(subPats.get(i), list.get(i), bindings)) return false;
             }
             return true;
         }
@@ -1426,5 +1631,221 @@ public final class IrijInterpreter extends IrijParserBaseVisitor<Object> {
 
     private Map<String, Object> currentScope() {
         return scopeStack.peek();
+    }
+
+    // ── Callable dispatch ────────────────────────────────────────────────
+
+    private Object callIrijCallable(Object fn, List<Object> args) {
+        if (fn instanceof LambdaValue lambda) return callLambda(lambda, args);
+        if (fn instanceof Builtin b) return b.call(args);
+        if (fn instanceof IrijFunction f) return callUserFunction(f.decl(), args);
+        throw new IrijRuntimeError("Not a callable: " + fn);
+    }
+
+    // ── Higher-order builtins ────────────────────────────────────────────
+
+    private void registerHofBuiltins() {
+        builtins.put("map", args -> {
+            Object fn = args.get(0);
+            @SuppressWarnings("unchecked")
+            var list = (List<Object>) args.get(1);
+            var result = new ArrayList<Object>(list.size());
+            for (var item : list) {
+                result.add(callIrijCallable(fn, List.of(item)));
+            }
+            return result;
+        });
+
+        builtins.put("filter", args -> {
+            Object fn = args.get(0);
+            @SuppressWarnings("unchecked")
+            var list = (List<Object>) args.get(1);
+            var result = new ArrayList<Object>();
+            for (var item : list) {
+                Object val = callIrijCallable(fn, List.of(item));
+                if (isTruthy(val)) result.add(item);
+            }
+            return result;
+        });
+
+        builtins.put("each", args -> {
+            Object fn = args.get(0);
+            @SuppressWarnings("unchecked")
+            var list = (List<Object>) args.get(1);
+            for (var item : list) {
+                callIrijCallable(fn, List.of(item));
+            }
+            return UNIT;
+        });
+
+        builtins.put("reduce", args -> {
+            Object fn = args.get(0);
+            Object init = args.get(1);
+            @SuppressWarnings("unchecked")
+            var list = (List<Object>) args.get(2);
+            Object acc = init;
+            for (var item : list) {
+                acc = callIrijCallable(fn, List.of(acc, item));
+            }
+            return acc;
+        });
+
+        builtins.put("flat-map", args -> {
+            Object fn = args.get(0);
+            @SuppressWarnings("unchecked")
+            var list = (List<Object>) args.get(1);
+            var result = new ArrayList<Object>();
+            for (var item : list) {
+                Object val = callIrijCallable(fn, List.of(item));
+                if (val instanceof List<?> subList) {
+                    result.addAll(subList);
+                } else {
+                    result.add(val);
+                }
+            }
+            return result;
+        });
+    }
+
+    // ── HTTP builtins ────────────────────────────────────────────────────
+
+    private void registerHttpBuiltins() {
+        builtins.put("http-server", args -> {
+            int port = ((Number) args.get(0)).intValue();
+            try {
+                return HttpServer.create(new InetSocketAddress(port), 0);
+            } catch (IOException e) {
+                throw new IrijRuntimeError("Failed to create HTTP server: " + e.getMessage());
+            }
+        });
+
+        builtins.put("http-handle", args -> {
+            HttpServer server = (HttpServer) args.get(0);
+            String path = (String) args.get(1);
+            Object handlerFn = args.get(2);
+            server.createContext(path, exchange -> {
+                try {
+                    var reqMap = new LinkedHashMap<String, Object>();
+                    reqMap.put("method", exchange.getRequestMethod());
+                    reqMap.put("path", exchange.getRequestURI().getPath());
+                    reqMap.put("query", Objects.toString(exchange.getRequestURI().getQuery(), ""));
+                    reqMap.put("body", new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+
+                    Object result;
+                    synchronized (IrijInterpreter.this) {
+                        result = callIrijCallable(handlerFn, List.of(reqMap));
+                    }
+
+                    int status = 200;
+                    String body;
+                    String contentType = "text/plain";
+                    if (result instanceof Map<?,?> rm) {
+                        @SuppressWarnings("unchecked")
+                        var resMap = (Map<String, Object>) rm;
+                        status = resMap.containsKey("status") ? ((Number) resMap.get("status")).intValue() : 200;
+                        body = resMap.containsKey("body") ? String.valueOf(resMap.get("body")) : "";
+                        contentType = resMap.containsKey("content-type") ? String.valueOf(resMap.get("content-type")) : "text/plain";
+                    } else {
+                        body = String.valueOf(result);
+                    }
+                    byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+                    exchange.getResponseHeaders().set("Content-Type", contentType);
+                    exchange.sendResponseHeaders(status, bytes.length);
+                    try (var os = exchange.getResponseBody()) { os.write(bytes); }
+                } catch (Exception e) {
+                    try {
+                        byte[] err = ("Error: " + e.getMessage()).getBytes(StandardCharsets.UTF_8);
+                        exchange.sendResponseHeaders(500, err.length);
+                        try (var os = exchange.getResponseBody()) { os.write(err); }
+                    } catch (IOException ignored) {}
+                }
+            });
+            return UNIT;
+        });
+
+        builtins.put("http-start", args -> {
+            HttpServer server = (HttpServer) args.get(0);
+            server.setExecutor(null);
+            server.start();
+            System.out.println("Server started on port " + server.getAddress().getPort());
+            try {
+                Thread.currentThread().join();
+            } catch (InterruptedException e) {
+                server.stop(0);
+            }
+            return UNIT;
+        });
+
+        builtins.put("http-stop", args -> {
+            ((HttpServer) args.get(0)).stop(0);
+            return UNIT;
+        });
+
+        builtins.put("http-query-param", args -> {
+            String query = (String) args.get(0);
+            String key = (String) args.get(1);
+            if (query == null || query.isEmpty()) return UNIT;
+            for (String pair : query.split("&")) {
+                String[] kv = pair.split("=", 2);
+                if (kv[0].equals(key)) {
+                    return kv.length > 1
+                            ? URLDecoder.decode(kv[1], StandardCharsets.UTF_8)
+                            : "";
+                }
+            }
+            return UNIT;
+        });
+
+        builtins.put("irij-eval", args -> {
+            String source = (String) args.get(0);
+            var out = new java.io.ByteArrayOutputStream();
+            var oldOut = System.out;
+            var oldErr = System.err;
+            try {
+                System.setOut(new java.io.PrintStream(out, true, StandardCharsets.UTF_8));
+                System.setErr(new java.io.PrintStream(out, true, StandardCharsets.UTF_8));
+                int exitCode = dev.irij.cli.Pipeline.interpret(source, PurityMode.ALLOW);
+                String output = out.toString(StandardCharsets.UTF_8);
+                return jsonResponse(output, exitCode);
+            } catch (Exception e) {
+                String output = out.toString(StandardCharsets.UTF_8);
+                return jsonResponse(output + "\nError: " + e.getMessage(), 2);
+            } finally {
+                System.setOut(oldOut);
+                System.setErr(oldErr);
+            }
+        });
+
+        builtins.put("http-serve-file", args -> {
+            String filePath = (String) args.get(0);
+            try {
+                return java.nio.file.Files.readString(java.nio.file.Path.of(filePath), StandardCharsets.UTF_8);
+            } catch (IOException e) {
+                throw new IrijRuntimeError("Cannot read file: " + filePath);
+            }
+        });
+    }
+
+    private static String jsonResponse(String output, int exitCode) {
+        return "{\"output\": " + jsonEscape(output) + ", \"exit\": " + exitCode + "}";
+    }
+
+    private static String jsonEscape(String s) {
+        var sb = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        return sb.append("\"").toString();
     }
 }

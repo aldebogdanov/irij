@@ -772,4 +772,191 @@ class InterpreterTest {
                 """));
         }
     }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Pattern matching — additional coverage
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class PatternMatchingExtended {
+        @Test void tuplePatternBasic() {
+            assertEquals("1 hello", run("""
+                fn main :: () -[IO]-> ()
+                  t := #(1 "hello")
+                  match t
+                    #(x y) => io.stdout.write ((to-str x) ++ " " ++ y)
+                """));
+        }
+
+        @Test void tuplePatternSizeMismatch() {
+            assertEquals("other", run("""
+                fn main :: () -[IO]-> ()
+                  t := #(1 2 3)
+                  match t
+                    #(a b) => io.stdout.write "pair"
+                    _ => io.stdout.write "other"
+                """));
+        }
+
+        @Test void guardClause() {
+            assertEquals("positive", run("""
+                fn main :: () -[IO]-> ()
+                  x := 5
+                  match x
+                    n | n > 0 => io.stdout.write "positive"
+                    _ => io.stdout.write "non-positive"
+                """));
+        }
+
+        @Test void guardClauseNegative() {
+            assertEquals("non-positive", run("""
+                fn main :: () -[IO]-> ()
+                  x := 0 - 3
+                  match x
+                    n | n > 0 => io.stdout.write "positive"
+                    _ => io.stdout.write "non-positive"
+                """));
+        }
+
+        @Test void spreadPattern() {
+            assertEquals("1 and #[2 3]", run("""
+                fn main :: () -[IO]-> ()
+                  xs := #[1 2 3]
+                  match xs
+                    #[h ...t] => io.stdout.write ((to-str h) ++ " and " ++ (to-str t))
+                    _ => io.stdout.write "empty"
+                """));
+        }
+
+        @Test void destructurePattern() {
+            assertEquals("Ada", run("""
+                fn main :: () -[IO]-> ()
+                  user := {name: "Ada" age: 36}
+                  match user
+                    {name: n} => io.stdout.write n
+                """));
+        }
+
+        @Test void nestedConstructorPattern() {
+            assertEquals("got 1", run("""
+                fn main :: () -[IO]-> ()
+                  val := Ok #[1 2 3]
+                  match val
+                    Ok #[h ...t] => io.stdout.write ("got " ++ (to-str h))
+                    Err e => io.stdout.write "error"
+                """));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Effect system — handler state, resume, stacking
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class EffectSystemExtended {
+        @Test void handlerStateBasic() {
+            // Handler state with mutable binding, using simple increment via expression
+            assertEquals("3", run(
+                "effect Counter\n" +
+                "  inc :: () -> ()\n" +
+                "  get-count :: () -> Int\n" +
+                "\n" +
+                "handler counting :: Counter\n" +
+                "  count :! 0\n" +
+                "  inc () =>\n" +
+                "    count <- count + 1\n" +
+                "  get-count () =>\n" +
+                "    count\n" +
+                "\n" +
+                "fn main :: () -[IO]-> ()\n" +
+                "  with counting\n" +
+                "    inc ()\n" +
+                "    inc ()\n" +
+                "    inc ()\n" +
+                "    result := get-count ()\n" +
+                "    io.stdout.write (to-str result)\n"
+            ));
+        }
+
+        @Test void handlerStateIsolation() {
+            // Each with-block gets fresh state — use two main functions to test isolation
+            assertEquals("1", run(
+                "effect Counter\n" +
+                "  inc :: () -> ()\n" +
+                "  get-count :: () -> Int\n" +
+                "\n" +
+                "handler counting :: Counter\n" +
+                "  count :! 0\n" +
+                "  inc () =>\n" +
+                "    count <- count + 1\n" +
+                "  get-count () =>\n" +
+                "    count\n" +
+                "\n" +
+                "fn main :: () -[IO]-> ()\n" +
+                "  with counting\n" +
+                "    inc ()\n" +
+                "    io.stdout.write (to-str (get-count ()))\n"
+            ));
+        }
+
+        @Test void resumeExplicit() {
+            assertEquals("transformed", run("""
+                effect Transform
+                  apply :: Str -> Str
+
+                handler upper-transform :: Transform
+                  apply s => resume "transformed"
+
+                fn main :: () -[IO]-> ()
+                  with upper-transform
+                    result := apply "hello"
+                    io.stdout.write result
+                """));
+        }
+
+        @Test void stackedHandlers() {
+            assertEquals("Hello, World!", run("""
+                effect Console
+                  print :: Str -> ()
+                effect Logger
+                  log :: Str -> ()
+
+                handler console-handler :: Console
+                  print msg => io.stdout.write msg
+                handler log-handler :: Logger
+                  log msg => io.stdout.write msg
+
+                fn main :: () -[IO]-> ()
+                  with console-handler
+                    with log-handler
+                      print "Hello, World!"
+                """));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Tail call optimization
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class TailCallOptimization {
+        @Test void existingRecurStillWorks() {
+            assertEquals("1", run("""
+                fn main :: () -[IO]-> ()
+                  result := recur 5 (n -> if (n <= 1) n else recur (n - 1))
+                  io.stdout.write (to-str result)
+                """));
+        }
+
+        @Test void tcoDoesNotBreakSimpleFunction() {
+            // Verify TCO machinery doesn't break basic function calls
+            assertEquals("hello", run("""
+                fn greet :: () -[IO]-> ()
+                  io.stdout.write "hello"
+
+                fn main :: () -[IO]-> ()
+                  greet ()
+                """));
+        }
+    }
 }

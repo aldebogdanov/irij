@@ -192,11 +192,12 @@ handlerDecl
     ;
 
 handlerBody
-    : handlerClause (NEWLINE+ handlerClause)* NEWLINE*
+    : handlerClause (NEWLINE* handlerClause)* NEWLINE*
     ;
 
 handlerClause
     : LOWER_ID pattern* FAT_ARROW expr              // op args => implementation
+    | LOWER_ID pattern* FAT_ARROW NEWLINE INDENT fnBody DEDENT  // multi-line handler clause
     | binding                                        // state := :! initial
     ;
 
@@ -429,7 +430,7 @@ matchExpr
     ;
 
 matchArms
-    : matchArm (NEWLINE+ matchArm)* NEWLINE*
+    : matchArm (NEWLINE* matchArm)* NEWLINE*
     ;
 
 matchArm
