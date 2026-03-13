@@ -45,12 +45,15 @@
    - *Pipeline is king:* left-to-right data flow via pipe operator =|>=,
      mirroring how both humans and LLMs read sequentially.
    - *Keywords are short words, not digraphs.* A small set of reserved
-     words (=fn=, =do=, =if=, =match=, =type=, =mod=, =use=, =pub=,
-     =with=, =scope=, =effect=, =role=, =pre=, =post=, =law=) are
-     2–6 characters each — typically one BPE token. These are distinct
-     from operators: operators act on values, keywords introduce
-     structural forms. Keeping keywords as readable words costs
-     negligible tokens while dramatically improving auditability.
+     words (=fn=, =do=, =if=, =else=, =match=, =type=, =newtype=,
+     =mod=, =use=, =pub=, =with=, =scope=, =effect=, =role=, =cap=,
+     =handler=, =impl=, =proto=, =pre=, =post=, =law=, =contract=,
+     =select=, =enclave=, =forall=, =par-each=, =on-failure=) are
+     2–10 characters each —
+     typically one BPE token. These are distinct from operators:
+     operators act on values, keywords introduce structural forms.
+     Keeping keywords as readable words costs negligible tokens
+     while dramatically improving auditability.
 
 ** 1.2 Canonical Form: Indentation, Not S-Expressions
 
@@ -72,15 +75,14 @@
    #+begin_example
    ;; ── Canonical form (indentation) ─────────────────────────
    fn factorial :: Int -> Int
-     match n
-       0 => 1
-       n => n * factorial (n - 1)
+     0 => 1
+     n => n * factorial (n - 1)
 
    ;; ── Debug/interchange form (S-expression) ────────────────
    ;; Used for: AST dumps, tooling interchange, edge cases.
    ;; NOT the generation target for LLMs.
    (fn factorial (:: Int (-> Int))
-     (match n (=> 0 1) (=> n (* n (factorial (- n 1))))))
+     (=> 0 1) (=> n (* n (factorial (- n 1)))))
    #+end_example
 
    The compiler accepts both forms and can convert between them.
@@ -101,10 +103,10 @@
     HttpResponse
     UserRecord
 
-    ;; role/location names: UPPER-CASE (choreography)
-    ALICE
-    BOB
-    DB-PRIMARY
+    ;; role/location names: $-prefixed UPPER-CASE (choreography)
+    $ALICE
+    $BOB
+    $DB-PRIMARY
 
     ;; numeric: standard with underscore separators
     42  3.14  0xFF  1_000_000  2/3
@@ -131,8 +133,9 @@
     :!    ;; mutable binding          x :! 0
     <-    ;; mutation / assignment     x <- x + 1
     ->    ;; function arrow            (x y -> x + y)
-    =>    ;; fat arrow (pattern arm)   :ok v => v
+    =>    ;; fat arrow / block intro    :ok v => v  OR  => body
     ::    ;; type annotation           x :: Int
+    =     ;; map field separator       {name= "jo"}
 
     ;; ── Pipeline & Composition ──────────────────────────────
     |>    ;; pipe forward              xs |> map f |> filter g
@@ -153,7 +156,7 @@
     #[  ]            ;; vector literal         #[1 2 3]
     #{ }             ;; set literal            #{:a :b}
     #( )             ;; tuple literal          #(1 "a" :ok)
-    { }              ;; map literal            {name: "jo" age: 5}
+    { }              ;; map literal            {name= "jo" age= 5}
     ..               ;; range                  1..10
     ..<              ;; exclusive range        0 ..< n
 
@@ -166,21 +169,23 @@
     \.    ;; scan (prefix sums etc.)   #[1 2 3] |> \.+      ;; => #[1 3 6]
     @     ;; map-over / each           xs |> @ f
     @i    ;; map-indexed               xs |> @i (i v -> ...)
-    ?     ;; filter                    xs |> ? even?
-    !     ;; first match / find        xs |> ! (> 3)
+    /?    ;; filter                    xs |> /? even?
+    /!    ;; first match / find        xs |> /! (> 3)
 
     ;; ── Effect & Control ────────────────────────────────────
-    do    ;; sequence effects          do (print "a") (print "b")
-    if    ;; conditional               if cond then-expr else-expr
-    match ;; pattern match             match x (:ok v => ...) (:err e => ...)
-    with  ;; effect handler            with handler expr
+    -[    ;; effect arrow open          fn f :: A -[E1 E2]> B
+    ]>    ;; effect arrow close         (digraph pair with -[)
+    do    ;; sequence effects           do (print "a") (print "b")
+    if    ;; conditional                if cond then-expr else-expr
+    match ;; pattern match              match x (:ok v => ...) (:err e => ...)
+    with  ;; effect handler             with handler expr
 
     ;; ── Choreography ────────────────────────────────────────
-    ~>    ;; send                      val ~> ROLE
-    <~    ;; receive (sugar)           val <~ ROLE
-    ~*>   ;; broadcast                 val ~*> #[R1 R2]
-    ~/    ;; select (inform branch)    decision ~/ ROLE
-    @     ;; located-at (in types)     Str @BUYER
+    ~>    ;; send                      val ~> $ROLE
+    <~    ;; receive (sugar)           val <~ $ROLE
+    ~*>   ;; broadcast                 val ~*> #[$R1 $R2]
+    ~/    ;; select (inform branch)    decision ~/ $ROLE
+    @     ;; located-at (types & exprs) Str @$BUYER  match cmd @$PRIMARY
     #+end_example
 
 *** 1.3.3 Token Budget Comparison
@@ -189,7 +194,7 @@
 
     #+begin_example
     ;; Irij: ~12 tokens
-    xs |> @ f |> ? g |> /+
+    xs |> @ f |> /? g |> /+
 
     ;; Clojure: ~18 tokens
     (->> xs (map f) (filter g) (reduce +))
@@ -203,16 +208,64 @@
 
 ** 1.4 Block Structure & Indentation
 
-   Blocks are defined by indentation (2-space canonical). The keyword that
+   Blocks are defined by indentation (strict 2-space). The keyword that
    opens a block is on the same line; the body is indented below.
+
+   *Strict 2-space rule:* Indentation MUST be exactly 2 spaces per level.
+   The lexer treats =  = (two ASCII spaces) as a single INDENT token.
+   4 spaces = indent level 2. Odd or non-2-space indentation is a *hard
+   parse error*. This is not a style preference — it is a grammar rule,
+   analogous to a digraph. Benefits: zero style variance across codebases,
+   deterministic generation by LLMs, minimal token cost.
 
    #+begin_example
    ;; function definition (canonical form)
    fn factorial :: Int -> Int
-     match n
-       0 => 1
-       n => n * factorial (n - 1)
+     0 => 1
+     n => n * factorial (n - 1)
    #+end_example
+
+** 1.5 Expression Termination & Inline Sequencing
+
+   In function bodies, *newlines separate statements*. Each indented line
+   at the same level is a separate statement.
+
+   *Semicolons* (=;=) are the expression separator for *inline sequencing*,
+   but they are only permitted inside parenthesized expressions:
+
+   #+begin_example
+   ;; semicolons OK inside parentheses
+   s.fork (-> cmd ~> $REPLICA; $REPLICA.store k v)
+
+   ;; NOT allowed at top level — use newlines instead
+   ;; WRONG: name := read-line (); print name
+   ;; RIGHT:
+   name := read-line ()
+   print name
+   #+end_example
+
+   *Line continuation* uses =\= (backslash) at end of line. A trailing =\=
+   joins the following line into the current expression:
+
+   #+begin_example
+   ;; explicit continuation with \
+   long-result := compute-something a b \
+     + adjust c \
+     + finalize d
+
+   ;; implicit continuation: a more-indented line starting with a
+   ;; binary operator automatically continues the previous expression
+   result := data
+     |> parse
+     |> validate
+     |> transform
+   #+end_example
+
+   *Implicit continuation rule:* if a line is more indented than the
+   current statement and begins with a binary operator (=|>=, =+= ,
+   =&&=, =|=, etc.), it is a continuation of the previous line. The =\=
+   explicit marker is only needed when the continuation line does NOT
+   start with an operator.
 
 * Part II: Core Language Constructs
 
@@ -231,21 +284,49 @@
    ;; anonymous function (lambda)
    (x y -> x + y)
 
-   ;; named function
+   ;; ── Three function body forms ────────────────────────
+
+   ;; 1. Lambda — single expression, params bound with ->
    fn add :: Int -> Int -> Int
      (x y -> x + y)
 
-   ;; multi-arity / clauses (pattern matching on arguments)
+   ;; 2. Pattern-match arms — each arm matches the argument
    fn fib :: Int -> Int
      0 => 0
      1 => 1
      n => fib (n - 1) + fib (n - 2)
+
+   ;; 3. Imperative block — => binds params, body is multi-statement
+   ;;    => alone means the function takes ()
+   ;;    => params binds positional arguments from the type signature
+   fn greet :: Str -[Console]> ()
+     => name
+     print "Hello, ${name}!"
+
+   fn main :: () -[IO]> ()
+     =>
+     config := read-config ()
+     run-server config
 
    ;; partial application is automatic (currying)
    add-one := add 1      ;; Int -> Int
 
    ;; point-free composition
    process := parse >> validate >> transform >> serialize
+   #+end_example
+
+   *Function body disambiguation:* the parser determines the body form
+   by the first token after the indent:
+   - =(= → lambda (expression in parentheses with =->= arrow)
+   - =pattern => expr= → pattern-match arm (one or more arms)
+   - ==>= alone or ==> params= → imperative block (multi-statement body)
+
+   *Mutable bindings:* =:!= creates, =<-= writes, reading is by name:
+
+   #+begin_example
+   x :! 0          ;; create mutable binding
+   x <- x + 1      ;; mutate
+   print x          ;; read: just use the name
    #+end_example
 
 ** 2.2 Data Types & Records
@@ -271,7 +352,7 @@
    newtype Email := Str
 
    ;; anonymous record (structural typing)
-   person := {name: "Jo" age: 30}
+   person := {name= "Jo" age= 30}
    #+end_example
 
 ** 2.3 Pattern Matching & Destructuring
@@ -281,10 +362,10 @@
    match result
      Ok value  => process value
      Err :timeout => retry
-     Err other => log other |> then fail
+     Err other => do (log other) fail
 
    ;; destructuring in bindings
-   {name: n age: a} := get-user id
+   {name= n age= a} := get-user id
 
    ;; guards
    match score
@@ -353,19 +434,19 @@
      fetch :: Request -> Response
 
    ;; function with effects declared in its type
-   fn greet :: Str -[Console]-> ()
-     name := read-line ()
+   fn greet :: Str -[Console]> ()
+     => name
      print "Hello, ${name}!"
 
    ;; multiple effects
-   fn sync-data :: () -[Http FileIO Log]-> Result Data Error
+   fn sync-data :: () -[Http FileIO Log]> Result Data Error
 
    ;; pure function (no effects — the default)
    fn add :: Int -> Int -> Int
      (x y -> x + y)
    #+end_example
 
-   The effect annotation =-[E1 E2]->= between arrow tokens lists which
+   The effect annotation =-[E1 E2]>= between arrow tokens lists which
    effects the function may perform. No annotation means *pure*. This is
    the effect row, polymorphic by default (functions can be generic over
    additional effects).
@@ -399,11 +480,11 @@
 
    ;; test handler: same effect, completely different behavior (pure!)
    handler mock-console :: Console
-     state := :! #["Alice"]  ;; mutable state within handler
+     state :! #["Alice"]    ;; mutable binding within handler
      print msg => state <- state ++ #[msg]   ;; "print" appends to list
      read-line () =>                          ;; "read-line" pops from list
-       result := head (deref state)
-       state <- tail (deref state)
+       result := head state                  ;; read mutable by name
+       state <- tail state                   ;; write with <-
        result
 
    ;; now test greet without any real IO:
@@ -446,11 +527,12 @@
      delete :: Table -> Query -> ()
 
    ;; function requiring capability: must receive it from caller
-   fn migrate :: () -[DbWrite Log]-> ()
+   fn migrate :: () -[DbWrite Log]> ()
      ...
 
    ;; granting capability: scoped, cannot escape the with-block
-   fn main :: () -[IO]-> ()
+   fn main :: () -[IO]> ()
+     =>
      with (db-connect "postgres://..." |> grant DbWrite)
        migrate ()
      ;; DbWrite capability does not exist here — cannot be leaked
@@ -467,7 +549,7 @@
    #+begin_example
    ;; built-in concurrency effect
    effect Async
-     fork   :: (() -[e]-> a) -> Fiber a
+     fork   :: (() -[e]> a) -> Fiber a
      await  :: Fiber a -> a
      sleep  :: Duration -> ()
      cancel :: Fiber a -> ()
@@ -487,7 +569,8 @@
 
    #+begin_example
    ;; basic structured concurrency
-   fn fetch-dashboard :: () -[Http Async]-> Dashboard
+   fn fetch-dashboard :: Id -[Http Async]> Dashboard
+     => id
      scope s
        user-f   := s.fork (-> fetch-user id)
        orders-f := s.fork (-> fetch-orders id)
@@ -497,21 +580,24 @@
        make-dashboard (await user-f) (await orders-f) (await stats-f)
 
    ;; racing — first result wins, others cancelled
-   fn fetch-fastest :: () -[Http Async]-> Data
+   fn fetch-fastest :: () -[Http Async]> Data
+     =>
      scope.race
        (-> fetch-from-primary)
        (-> fetch-from-replica)
        (-> fetch-from-cache)
 
    ;; supervised — failures isolated per child
-   fn process-batch :: #[Job] -[Async Log]-> #[Result]
+   fn process-batch :: #[Job] -[Async Log]> #[Result]
+     => jobs
      scope.supervised s
        jobs |> @ (j -> s.fork (-> process j))
             |> @ await
 
    ;; escape hatch: fire-and-forget (use sparingly!)
    ;; the ! suffix signals this breaks structured concurrency
-   fn notify-and-continue :: () -[Async]-> Response
+   fn notify-and-continue :: Event -[Async]> Response
+     => event
      detach! (-> send-analytics event)  ;; runs independently
      :ok                                ;; returns immediately
    #+end_example
@@ -531,9 +617,10 @@
      sample :: () -> a
 
    ;; stream operations (lazy, pull-based by default)
-   fn process-events :: Stream Event -[Async Log]-> ()
+   fn process-events :: #[Event] -[Async Log]> ()
+     => events
      events
-       |> ? (e -> e.type == :purchase)
+       |> /? (e -> e.type == :purchase)
        |> @ calculate-tax
        |> chunk 100
        |> @ batch-insert
@@ -559,7 +646,7 @@
    select
      recv ch1 => (msg -> handle-primary msg)
      recv ch2 => (msg -> handle-fallback msg)
-     timeout 5s => (-> log "timed out")
+     timeout (Duration 5 :sec) => (-> log "timed out")
    #+end_example
 
 * Part V: Choreographic Programming
@@ -571,50 +658,50 @@
    Projection (EPP) to generate per-participant code automatically.
 
    #+begin_example
-   ;; located type syntax: value @ ROLE
+   ;; located type syntax: value @$ROLE
    ;; declares which participant holds the data
 
-   fn buy-protocol :: Str@BUYER -[Choreo]-> Result@BUYER
+   fn buy-protocol :: Str @$BUYER -[Choreo]> Result @$BUYER
+     => title
+     ;; $BUYER sends title to $SELLER
+     title ~> $SELLER                         ;; communicate $BUYER->$SELLER
 
-     ;; BUYER evaluates the title and sends to SELLER
-     title := BUYER.input "What book?"
-     title ~> SELLER                         ;; communicate BUYER->SELLER
+     ;; $SELLER looks up price, sends to $BUYER
+     price := $SELLER.lookup title
+     price ~> $BUYER
 
-     ;; SELLER looks up price, sends to BUYER
-     price := SELLER.lookup title
-     price ~> BUYER
-
-     ;; BUYER decides
-     decision := BUYER.decide price
+     ;; $BUYER decides
+     decision := $BUYER.decide price
      match decision
        :buy =>
-         decision ~> SELLER                  ;; knowledge of choice
-         SELLER.ship title
-         :ok @BUYER
+         decision ~> $SELLER                  ;; knowledge of choice
+         $SELLER.ship title
+         :ok @$BUYER
        :pass =>
-         decision ~> SELLER
-         :cancelled @BUYER
+         decision ~> $SELLER
+         :cancelled @$BUYER
    #+end_example
 
 ** 5.2 Communication Primitives
 
    #+begin_example
    ;; ── Core choreographic operators ─────────────────────────
-   ~>      ;; send: val@A ~> B              (A sends to B)
+   ~>      ;; send: val @$A ~> $B            ($A sends to $B)
    <~      ;; receive (sugar for ~> other direction)
-   ~*>     ;; broadcast: val@A ~*> #[B C D] (A sends to all)
-   ~/      ;; select: cond@A ~/ B           (A informs B of branch choice)
+   ~*>     ;; broadcast: val @$A ~*> #[$B $C $D] ($A sends to all)
+   ~/      ;; select: cond @$A ~/ $B         ($A informs $B of branch choice)
 
    ;; ── Located computation ──────────────────────────────────
-   ROLE.expr       ;; expr evaluated at ROLE
-   val @ROLE       ;; type annotation: val is located at ROLE
+   $ROLE.expr      ;; expr evaluated at $ROLE
+   val @$ROLE      ;; located-at: in types (Str @$BUYER) and in
+                   ;; expressions (match cmd @$PRIMARY dispatches on $PRIMARY)
 
    ;; ── Enclave (subset of participants) ─────────────────────
-   enclave #[A B]
-     ;; only A and B participate in this block
-     shared := A.compute-share
-     shared ~> B
-     B.verify shared
+   enclave #[$A $B]
+     ;; only $A and $B participate in this block
+     shared := $A.compute-share
+     shared ~> $B
+     $B.verify shared
    #+end_example
 
 ** 5.3 Endpoint Projection (EPP)
@@ -624,26 +711,28 @@
    #+begin_example
    ;; The buy-protocol above compiles to:
 
-   ;; ── BUYER projection ─────────────────────────────────────
-   fn buy-protocol-BUYER :: () -[Net IO]-> Result
+   ;; ── $BUYER projection ────────────────────────────────────
+   fn buy-protocol-BUYER :: () -[Net IO]> Result
+     =>
      title := input "What book?"
-     send SELLER title
-     price := recv SELLER
+     send $SELLER title
+     price := recv $SELLER
      decision := decide price
      match decision
        :buy =>
-         send SELLER :buy
+         send $SELLER :buy
          :ok
        :pass =>
-         send SELLER :pass
+         send $SELLER :pass
          :cancelled
 
-   ;; ── SELLER projection ────────────────────────────────────
-   fn buy-protocol-SELLER :: () -[Net IO Db]-> ()
-     title := recv BUYER
+   ;; ── $SELLER projection ───────────────────────────────────
+   fn buy-protocol-SELLER :: () -[Net IO Db]> ()
+     =>
+     title := recv $BUYER
      price := lookup title
-     send BUYER price
-     branch := recv BUYER
+     send $BUYER price
+     branch := recv $BUYER
      match branch
        :buy  => ship title
        :pass => ()
@@ -655,55 +744,71 @@
    the number and identity of participants.
 
    *The problem:* Normal choreographies have a fixed, compile-time-known
-   set of roles (BUYER, SELLER). But real distributed systems often need
+   set of roles ($BUYER, $SELLER). But real distributed systems often need
    "do X for every worker" where the worker count is unknown at compile
    time — think map-reduce, gossip protocols, voting.
 
    *The solution:* Make the participant set a type parameter. =forall
-   WORKERS= means "this choreography works for any set of participants
-   playing the WORKER role." At runtime, =census WORKERS= returns the
-   current member set. The compiler projects this into: COORD gets a
-   loop of sends/receives; each WORKER gets a "receive, compute, send
-   back" program. The projection is *per-role-template*, instantiated
-   at deployment time for each actual participant.
+   $WORKERS= means "this choreography works for any set of participants
+   playing the $WORKER role." At runtime, =census $WORKERS= returns the
+   current member set (a =std.choreo= function). The compiler projects
+   this into: $COORD gets a loop of sends/receives; each $WORKER gets
+   a "receive, compute, send back" program. The projection is
+   *per-role-template*, instantiated at deployment time for each actual
+   participant.
+
+   *=par-each=* is the choreographic parallel iteration keyword. It
+   iterates over a role set and runs the body once per participant,
+   in parallel. Syntax: =results := par-each w <- $ROLE_SET body=.
+   The last expression of each iteration is collected into a vector
+   bound on the coordinating role. Inside the body, =w= refers to the
+   current participant.
 
    #+begin_example
-   ;; census-polymorphic: works for any set of WORKERS
+   ;; census-polymorphic: works for any set of $WORKERS
    fn map-reduce
-     :: (a -> b) @COORD
-     -> #[a] @COORD
-     -> (b -> b -> b) @COORD
-     -> b @COORD
-     -[Choreo]-
-     forall WORKERS
+     :: (a -> b) @$COORD
+     -> #[a] @$COORD
+     -> (b -> b -> b) @$COORD
+     -> b @$COORD
+     -[Choreo]>
+     forall $WORKERS
+     => f data merge
+     ;; $COORD splits data into as many chunks as there are $WORKERS
+     chunks := $COORD.partition data (census $WORKERS)
 
-     ;; COORD splits data into as many chunks as there are WORKERS
-     chunks := COORD.partition data (census WORKERS)
-
-     ;; each WORKER receives their chunk, computes, sends back
-     par-each w <- WORKERS
-       chunk := chunks[w] ~> w       ;; COORD sends chunk to worker w
+     ;; each $WORKER receives their chunk, computes, sends back
+     ;; par-each collects the last expression from each iteration
+     results := par-each w <- $WORKERS
+       chunk := chunks[w] ~> w       ;; $COORD sends chunk to worker w
        result := w.compute f chunk   ;; worker w computes locally
-       result ~> COORD               ;; worker w sends result to COORD
+       result ~> $COORD              ;; worker w sends result to $COORD
 
-     ;; COORD combines all results
-     COORD.reduce merge results
+     ;; $COORD combines all collected results
+     $COORD.reduce merge results
    #+end_example
 
 ** 5.5 Fault Tolerance
 
+   A =with= block may have an =on-failure= clause that runs when the
+   primary body raises an unhandled exception or effect. The
+   =on-failure= block is indented at the same level as =with= and
+   executes in the same choreographic context (same roles, same
+   communication topology).
+
    #+begin_example
    ;; choreography with failure handling
-   fn safe-transfer :: () -[Choreo Async]-> ()
-     with choreo-retry {max: 3 backoff: :exponential}
-       amount := SENDER.input-amount
-       amount ~> RECEIVER
-       ack := RECEIVER.process amount
-       ack ~> SENDER
+   fn safe-transfer :: () -[Choreo Async]> ()
+     =>
+     with choreo-retry {max= 3 backoff= :exponential}
+       amount := $SENDER.input-amount
+       amount ~> $RECEIVER
+       ack := $RECEIVER.process amount
+       ack ~> $SENDER
 
      on-failure
-       SENDER.rollback
-       RECEIVER.rollback
+       $SENDER.rollback
+       $RECEIVER.rollback
    #+end_example
 
 ** 5.6 Scope Semantics in Choreographies
@@ -715,18 +820,20 @@
 
    #+begin_example
    ;; scope blocks: replication finishes BEFORE Ok is returned
-   fn replicated-put :: Str -> Str -[Choreo Async]-> Reply@CLIENT
-     PRIMARY.store k v
+   fn replicated-put :: Str -> Str -[Choreo Async]> Reply @$CLIENT
+     => k v
+     $PRIMARY.store k v
      scope s
-       s.fork (-> cmd ~> REPLICA; REPLICA.store k v)
+       s.fork (-> k ~> $REPLICA; v ~> $REPLICA; $REPLICA.store k v)
      ;; ↑ scope exits only after fork completes
-     Ok @CLIENT   ;; client gets Ok AFTER replication
+     Ok @$CLIENT   ;; client gets Ok AFTER replication
 
    ;; if you want "reply first, replicate later" you need detach!
-   fn fast-put :: Str -> Str -[Choreo Async]-> Reply@CLIENT
-     PRIMARY.store k v
-     detach! (-> cmd ~> REPLICA; REPLICA.store k v)
-     Ok @CLIENT   ;; client gets Ok IMMEDIATELY, replication continues
+   fn fast-put :: Str -> Str -[Choreo Async]> Reply @$CLIENT
+     => k v
+     $PRIMARY.store k v
+     detach! (-> k ~> $REPLICA; v ~> $REPLICA; $REPLICA.store k v)
+     Ok @$CLIENT   ;; client gets Ok IMMEDIATELY, replication continues
    #+end_example
 
 * Part VI: Gradual Verification Spectrum
@@ -735,8 +842,8 @@
 
    #+begin_example
    ;; completely dynamic, no types, no constraints
-   fn process data
-     data |> transform |> validate |> save
+   fn process
+     (data -> data |> transform |> validate |> save)
    #+end_example
 
 ** 6.2 Level 1 — Gradual Types (Hints)
@@ -745,17 +852,17 @@
    ;; optional type hints (a la TypeScript)
    ;; argument name still appears — the signature just adds types above
    fn process :: Data -> Result
-     data -> data |> transform |> validate |> save
+     (data -> data |> transform |> validate |> save)
 
    ;; partial annotation — mix typed and untyped
    fn transform :: Data -> _    ;; return type inferred
-     data -> ...
+     (data -> ...)
    #+end_example
 
-   Note: Level 0 and Level 1 have the same function *body*. The only
-   difference is the optional =:: Data -> Result= type annotation.
-   The argument name =data= appears in both — the annotation constrains
-   what the argument's type must be, but doesn't replace naming it.
+   Note: Level 0 and Level 1 have the same function *body* (a lambda).
+   The only difference is the optional =:: Data -> Result= type annotation.
+   The argument name =data= appears in the lambda in both — the
+   annotation constrains the type, but doesn't replace naming it.
 
 ** 6.3 Level 2 — Contracts (Runtime Checks)
 
@@ -787,7 +894,7 @@
      pre  (a amt -> amt > 0 && amt <= a.balance)
      post (result -> result.balance >= 0)
      (account amount ->
-       {..account balance: account.balance - amount})
+       {...account balance= account.balance - amount})
 
    ;; ── Module-boundary contracts (with blame tracking) ──────
    pub fn api-endpoint :: Request -> Response
@@ -842,7 +949,7 @@
 
    ;; the compiler statically proves this is safe:
    fn safe-example :: #[Int] -> Maybe Int
-     xs := get-data ()
+     => xs
      if /# xs > 0
        Just (head xs)    ;; OK: compiler sees /# xs > 0, refines to NonEmpty
      else
@@ -872,9 +979,8 @@
    ;; names are just metadata pointers to hashes
 
    fn factorial :: Int -> Int  ;; hash: #a7f3b2c1...
-     match n
-       0 => 1
-       n => n * factorial (n - 1)
+     0 => 1
+     n => n * factorial (n - 1)
 
    ;; renaming is free (just update name -> hash mapping)
    ;; no builds needed (unchanged hashes use cached results)
@@ -889,7 +995,7 @@
    ;; hash captures: AST structure + type signature + effect row
    ;; two functions with same body but different effects get different hashes
 
-   fn read-config :: () -[FileIO]-> Config      ;; hash: #x1...
+   fn read-config :: () -[FileIO]> Config      ;; hash: #x1...
    fn read-config-test :: () -> Config           ;; hash: #x2... (different!)
 
    ;; enables: effect-polymorphic caching
@@ -930,7 +1036,7 @@
 
    ;; inspect effect requirements
    > :effects sync-data
-   sync-data :: () -[Http FileIO Log]-> Result Data Error
+   sync-data :: () -[Http FileIO Log]> Result Data Error
 
    ;; hot-reload a definition (dependents auto-recompute)
    > fn transform ...  ;; updated
@@ -940,7 +1046,7 @@
    > with debug-handler (process-batch jobs)
    [BREAK at process:42] job #7 threw :parse-error
    [debug]> inspect job
-   {id: 7 payload: "malformed..."}
+   {id= 7 payload= "malformed..."}
    [debug]> fix (-> process (repair job))
    [RESUME] continuing from job #7...
    #+end_example
@@ -952,9 +1058,9 @@
    ;; results shown inline (like Unison or Observable notebooks)
 
    ;; scratch.irj ──────────────────────────────────
-   users := fetch-users ()         ;; => #[{name: "Jo"} {name: "Al"}]
+   users := fetch-users ()         ;; => #[{name= "Jo"} {name= "Al"}]
    users |> @ .name                ;; => #["Jo" "Al"]
-   users |> ? (u -> u.age > 30)    ;; => #[{name: "Al" age: 42}]
+   users |> /? (u -> u.age > 30)   ;; => #[{name= "Al" age= 42}]
    ;; ─────────────────────────────────────────────
    ;; each line shows its result to the right
    ;; changes propagate reactively
@@ -988,7 +1094,8 @@
    ;; calling Java methods
    use java.util.ArrayList as JList
 
-   fn java-example :: () -[JVM]-> Int
+   fn java-example :: () -[JVM]> Int
+     =>
      list := JList/new ()          ;; constructor
      list |> JList/add "hello"     ;; instance method (void, side-effect)
      list |> JList/size            ;; returns Int
@@ -997,10 +1104,11 @@
    impl java.lang.Runnable for MyTask
      run := (self -> process self.data)
 
-   ;; Java annotations (for framework compat)
-   @java.Override
-   fn to-string :: MyType -> Str
-     ...
+   ;; Java annotations: the compiler infers @Override for impl methods
+   ;; automatically. Framework annotations (e.g., Spring, JPA) are
+   ;; specified via metadata blocks in the module header — this avoids
+   ;; polluting Irij syntax with Java-specific concerns. Details TBD
+   ;; in Phase 1 FFI design.
    #+end_example
 
 ** 9.2 Platform Targets
@@ -1037,6 +1145,7 @@
   std.time        ;; instant, duration, clock effect
   std.async       ;; scope, fiber, channel, flow, stream
   std.choreo      ;; located types, EPP, transport backends
+                  ;; includes: census (role-set membership query)
   std.test        ;; property testing, generators, law checking
   std.check       ;; contracts, refinement, SMT integration
   std.ffi         ;; JVM interop utilities
@@ -1049,11 +1158,11 @@
 
   #+begin_example
   ;; loop: call a thunk forever (returns Never)
-  fn loop :: (() -[e]-> ()) -[e]-> Never
+  fn loop :: (() -[e]> ()) -[e]> Never
   ;; usage: loop (-> read-cmd |> process |> display)
 
   ;; recur: loop with accumulator (tail-recursive)
-  fn recur :: a -> (a -[e]-> Either a b) -[e]-> b
+  fn recur :: a -> (a -[e]> Either a b) -[e]> b
   ;; usage: recur 0 (n -> if n > 10 (Right n) (Left (n + 1)))
 
   ;; identity, const, flip: standard combinators
@@ -1269,17 +1378,17 @@
    ;;  Requires database read access and logging."
 
    ;; ── Representation 2: Irij canonical (indented) form ────────
-   fn fetch-user :: Id -[DbRead Log]-> Result User NotFound
-     id -> 
-       log "fetching user ${id}"
-       result := db.query "SELECT * FROM users WHERE id = ?" id
-       match result
-         #[row ..._ ] => Ok (row->user row)
-         #[]          => Err NotFound
+   fn fetch-user :: Id -[DbRead Log]> Result User NotFound
+     => id
+     log "fetching user ${id}"
+     result := db.query "SELECT * FROM users WHERE id = ?" id
+     match result
+       #[row ..._ ] => Ok (row->user row)
+       #[]          => Err NotFound
 
    ;; ── Representation 3: Irij S-expression (interchange) form ──
-   (fn fetch-user (:: Id (-[DbRead Log]-> (Result User NotFound)))
-     (-> id (do (log "fetching user ${id}")
+   (fn fetch-user (:: Id (-[DbRead Log]> (Result User NotFound)))
+     (=> id (do (log "fetching user ${id}")
        (:= result (db.query "SELECT * FROM users WHERE id = ?" id))
        (match result (=> (#[row ..._]) (Ok (row->user row)))
                      (=> (#[]) (Err NotFound))))))
@@ -1330,15 +1439,15 @@
   ║  CAPABILITY     cap C :: effect (op :: ...)                 ║
   ║  SCOPE          scope s (s.fork (-> ...))                   ║
   ║  DETACH         detach! (-> ...)  (escape hatch!)           ║
-  ║  CHOREO SEND    val ~> ROLE      val ~*> #[R1 R2]          ║
-  ║  LOCATED        expr @ROLE       val :: T@ROLE              ║
+  ║  CHOREO SEND    val ~> $ROLE     val ~*> #[$R1 $R2]         ║
+  ║  LOCATED        expr @$ROLE      val :: T @$ROLE            ║
   ║  CONTRACT       pre P  post Q    contract (in P) (out Q)   ║
   ║  LAW            law name = forall x. P x                    ║
   ║  REFINEMENT     type T := {x :: U | pred x}                ║
-  ║  ARRAY OPS      @ map  ? filter  /+ reduce  /# count       ║
-  ║  COLLECTIONS    #[1 2]  #{:a}  #(1 2)  {k: v}              ║
+  ║  ARRAY OPS      @ map  /? filter  /! find  /+ reduce  /#   ║
+  ║  COLLECTIONS    #[1 2]  #{:a}  #(1 2)  {k= v}              ║
   ║  PURE FN        fn f :: A -> B                              ║
-  ║  EFFECTFUL FN   fn f :: A -[E1 E2]-> B                     ║
+  ║  EFFECTFUL FN   fn f :: A -[E1 E2]> B                     ║
   ║  LOOP           loop (-> body)   recur init (acc -> ...)    ║
   ╚══════════════════════════════════════════════════════════════╝
   #+end_example
@@ -1355,9 +1464,9 @@
   use std.core {loop}
 
   ;; ── Roles ─────────────────────────────────────────────
-  role CLIENT
-  role PRIMARY
-  role REPLICA
+  role $CLIENT
+  role $PRIMARY
+  role $REPLICA
 
   ;; ── Data ──────────────────────────────────────────────
   type Command
@@ -1371,47 +1480,47 @@
     Ok
 
   ;; ── Choreography ──────────────────────────────────────
-  fn kv-protocol :: Command@CLIENT -[Choreo Async]-> Reply@CLIENT
+  fn kv-protocol :: Command @$CLIENT -[Choreo Async]> Reply @$CLIENT
+    => cmd
+    cmd ~> $PRIMARY
 
-    cmd := CLIENT.input
-    cmd ~> PRIMARY
-
-    match cmd @PRIMARY
+    match cmd @$PRIMARY
       Put k v =>
-        cmd ~/ REPLICA          ;; inform replica of branch
-        PRIMARY.store k v
+        cmd ~/ $REPLICA          ;; inform replica of branch
+        $PRIMARY.store k v
         ;; replicate: scope blocks until fork completes
         scope s
           s.fork (->
-            cmd ~> REPLICA
-            REPLICA.store k v)
-        Ok @CLIENT
+            cmd ~> $REPLICA
+            $REPLICA.store k v)
+        Ok @$CLIENT
 
       Get k =>
-        cmd ~/ REPLICA
-        result := PRIMARY.lookup k
-        result ~> CLIENT
-        match result @CLIENT
+        cmd ~/ $REPLICA
+        result := $PRIMARY.lookup k
+        result ~> $CLIENT
+        match result @$CLIENT
           Just v  => Found v
           Nothing => NotFound
 
       Del k =>
-        cmd ~/ REPLICA
-        PRIMARY.delete k
+        cmd ~/ $REPLICA
+        $PRIMARY.delete k
         scope s
-          s.fork (-> cmd ~> REPLICA; REPLICA.delete k)
-        Ok @CLIENT
+          s.fork (-> cmd ~> $REPLICA; $REPLICA.delete k)
+        Ok @$CLIENT
 
   ;; ── Entry Point ───────────────────────────────────────
-  fn main :: () -[IO]-> ()
+  fn main :: () -[IO]> ()
+    =>
     config := read-config ()
     with (tcp-transport config)
       with (console-to-stdout)
         ;; loop is a std.core function: calls thunk forever
         loop (->
-          cmd := CLIENT.prompt
+          cmd := $CLIENT.prompt
           reply := kv-protocol cmd
-          CLIENT.display reply)
+          $CLIENT.display reply)
   #+end_example
 
 * Appendix C: Comparison with Existing Languages
