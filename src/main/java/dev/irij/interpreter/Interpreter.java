@@ -20,6 +20,22 @@ public final class Interpreter {
         this.out = out;
         this.globalEnv = new Environment();
         Builtins.install(globalEnv, out);
+        installInterpreterBuiltins();
+    }
+
+    /** Builtins that need access to the interpreter's apply(). */
+    private void installInterpreterBuiltins() {
+        globalEnv.define("fold", new BuiltinFn("fold", 3, args -> {
+            var fn = args.get(0);
+            var init = args.get(1);
+            var coll = args.get(2);
+            var list = Builtins.toList(coll);
+            Object acc = init;
+            for (var elem : list) {
+                acc = apply(fn, List.of(acc, elem), SourceLoc.UNKNOWN);
+            }
+            return acc;
+        }));
     }
 
     public Interpreter() {
@@ -266,6 +282,9 @@ public final class Interpreter {
 
             // ── Seq Ops ─────────────────────────────────────────────────
             case Expr.SeqOp so -> evalSeqOp(so, env);
+
+            // ── Operator Section ─────────────────────────────────────────
+            case Expr.OpSection os -> evalOpSection(os);
 
             // ── Control Flow ────────────────────────────────────────────
             case Expr.IfExpr ie -> evalIf(ie, env);
@@ -629,6 +648,35 @@ public final class Interpreter {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Operator Sections
+    // ═══════════════════════════════════════════════════════════════════
+
+    private Object evalOpSection(Expr.OpSection os) {
+        return new BuiltinFn("(" + os.op() + ")", 2, args -> {
+            var left = args.get(0);
+            var right = args.get(1);
+            return switch (os.op()) {
+                case "+" -> numericOp(left, right, Long::sum, Double::sum, Builtins::addRational, os.loc());
+                case "-" -> numericOp(left, right, (a, b) -> a - b, (a, b) -> a - b, Builtins::subRational, os.loc());
+                case "*" -> numericOp(left, right, (a, b) -> a * b, (a, b) -> a * b, Builtins::mulRational, os.loc());
+                case "/" -> divOp(left, right, os.loc());
+                case "%" -> numericOp(left, right, (a, b) -> a % b, (a, b) -> a % b, null, os.loc());
+                case "**" -> powOp(left, right, os.loc());
+                case "++" -> Builtins.concatValues(left, right);
+                case "==" -> equalityOp(left, right);
+                case "/=" -> !((Boolean) equalityOp(left, right));
+                case "<" -> Builtins.compare(left, right) < 0;
+                case ">" -> Builtins.compare(left, right) > 0;
+                case "<=" -> Builtins.compare(left, right) <= 0;
+                case ">=" -> Builtins.compare(left, right) >= 0;
+                case "&&" -> Values.isTruthy(left) && Values.isTruthy(right);
+                case "||" -> Values.isTruthy(left) || Values.isTruthy(right);
+                default -> throw new IrijRuntimeError("Unknown operator section: " + os.op(), os.loc());
+            };
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Seq Ops
     // ═══════════════════════════════════════════════════════════════════
 
@@ -638,12 +686,14 @@ public final class Interpreter {
             return seqOpAsFunction(so.op(), so.loc());
         }
         var arg = eval(so.arg(), env);
-        // For @ /? /! @i — the arg is a function to use, return a partially applied seq op
+        // For @ /? /! @i /^ /$ — the arg is a function to use, return a partially applied seq op
         return switch (so.op()) {
             case "@" -> new BuiltinFn("@-partial", 1, args -> mapOver(arg, args.get(0), so.loc()));
             case "/?" -> new BuiltinFn("/?-partial", 1, args -> filterBy(arg, args.get(0), so.loc()));
             case "/!" -> new BuiltinFn("/!-partial", 1, args -> findFirst(arg, args.get(0), so.loc()));
             case "@i" -> new BuiltinFn("@i-partial", 1, args -> mapIndexed(arg, args.get(0), so.loc()));
+            case "/^" -> new BuiltinFn("/^-partial", 1, args -> reduceGeneric(arg, args.get(0), so.loc()));
+            case "/$" -> new BuiltinFn("/$-partial", 1, args -> scanGeneric(arg, args.get(0), so.loc()));
             // For reduce ops, the arg IS the collection
             default -> applySeqOp(so.op(), arg, env, so.loc());
         };
@@ -657,34 +707,29 @@ public final class Interpreter {
             case "/&" -> new BuiltinFn("/&", 1, args -> applySeqOp("/&", args.get(0), null, loc));
             case "/|" -> new BuiltinFn("/|", 1, args -> applySeqOp("/|", args.get(0), null, loc));
             case "@" -> new BuiltinFn("@", 1, args -> {
-                // @ f returns a function that maps f over a collection
                 var f = args.get(0);
-                return new BuiltinFn("@-partial", 1, args2 -> {
-                    var coll = args2.get(0);
-                    return mapOver(f, coll, loc);
-                });
+                return new BuiltinFn("@-partial", 1, args2 -> mapOver(f, args2.get(0), loc));
             });
             case "/?" -> new BuiltinFn("/?", 1, args -> {
                 var pred = args.get(0);
-                return new BuiltinFn("/?-partial", 1, args2 -> {
-                    var coll = args2.get(0);
-                    return filterBy(pred, coll, loc);
-                });
+                return new BuiltinFn("/?-partial", 1, args2 -> filterBy(pred, args2.get(0), loc));
             });
             case "/!" -> new BuiltinFn("/!", 1, args -> {
                 var pred = args.get(0);
-                return new BuiltinFn("/!-partial", 1, args2 -> {
-                    var coll = args2.get(0);
-                    return findFirst(pred, coll, loc);
-                });
+                return new BuiltinFn("/!-partial", 1, args2 -> findFirst(pred, args2.get(0), loc));
             });
             case "@i" -> new BuiltinFn("@i", 1, args -> {
                 var f = args.get(0);
-                return new BuiltinFn("@i-partial", 1, args2 -> {
-                    return mapIndexed(f, args2.get(0), loc);
-                });
+                return new BuiltinFn("@i-partial", 1, args2 -> mapIndexed(f, args2.get(0), loc));
             });
-            case "\\." -> new BuiltinFn("\\.", 1, args -> applySeqOp("\\.", args.get(0), null, loc));
+            case "/^" -> new BuiltinFn("/^", 1, args -> {
+                var f = args.get(0);
+                return new BuiltinFn("/^-partial", 1, args2 -> reduceGeneric(f, args2.get(0), loc));
+            });
+            case "/$" -> new BuiltinFn("/$", 1, args -> {
+                var f = args.get(0);
+                return new BuiltinFn("/$-partial", 1, args2 -> scanGeneric(f, args2.get(0), loc));
+            });
             default -> throw new IrijRuntimeError("Unknown seq op: " + op, loc);
         };
     }
@@ -725,6 +770,31 @@ public final class Interpreter {
             };
         }
         return acc;
+    }
+
+    /** Generic reduce (/^): apply fn to accumulate, init = first element. */
+    private Object reduceGeneric(Object fn, Object collection, SourceLoc loc) {
+        var list = Builtins.toList(collection);
+        if (list.isEmpty()) throw new IrijRuntimeError("Cannot reduce empty collection", loc);
+        Object acc = list.get(0);
+        for (int i = 1; i < list.size(); i++) {
+            acc = apply(fn, List.of(acc, list.get(i)), loc);
+        }
+        return acc;
+    }
+
+    /** Generic scan (/$): running accumulation, init = first element. */
+    private Object scanGeneric(Object fn, Object collection, SourceLoc loc) {
+        var list = Builtins.toList(collection);
+        if (list.isEmpty()) return new IrijVector(List.of());
+        var result = new ArrayList<Object>();
+        Object acc = list.get(0);
+        result.add(acc);
+        for (int i = 1; i < list.size(); i++) {
+            acc = apply(fn, List.of(acc, list.get(i)), loc);
+            result.add(acc);
+        }
+        return new IrijVector(result);
     }
 
     private Object mapOver(Object fn, Object coll, SourceLoc loc) {

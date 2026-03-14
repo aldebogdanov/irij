@@ -386,7 +386,7 @@ unaryExpr
     | seqOpExpr
     ;
 
-// Sequence operators: /+ /* /# /& /| /? /! \. @ @i
+// Sequence operators: /+ /* /# /& /| /? /! /^ /$ @ @i
 // Can appear with or without argument (standalone = used as function value)
 seqOpExpr
     : seqOp appExpr?
@@ -395,7 +395,7 @@ seqOpExpr
 
 seqOp
     : SEQ_PLUS | SEQ_STAR | SEQ_COUNT | SEQ_AND | SEQ_OR
-    | SEQ_FILTER | SEQ_FIND | SCAN | MAP_AT | MAP_INDEXED
+    | SEQ_FILTER | SEQ_FIND | REDUCE | SCAN_OP | MAP_AT | MAP_INDEXED
     ;
 
 // Application: f x y (juxtaposition of postfixed expressions)
@@ -421,6 +421,7 @@ atomExpr
     | UNDERSCORE
     | ifExpr
     | lambdaExpr
+    | operatorAsValue
     | unitExpr
     | parenExpr
     | vectorLiteral
@@ -434,6 +435,13 @@ atomExpr
 
 unitExpr
     : LPAREN RPAREN
+    ;
+
+// ── Operator as value: (+), (-), (*), etc. ──────────────────────────
+
+operatorAsValue
+    : LPAREN (PLUS | MINUS | STAR | SLASH | PERCENT | POW | CONCAT
+             | EQ | NEQ | LT | GT | LTE | GTE | AND | OR) RPAREN
     ;
 
 // ── Inline if expression ─────────────────────────────────────────────

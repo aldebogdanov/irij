@@ -1,0 +1,3 @@
+;; Hello, World! — the simplest Irij program
+
+println "Hello, World!"

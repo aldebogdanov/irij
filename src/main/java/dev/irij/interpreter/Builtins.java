@@ -72,8 +72,8 @@ public final class Builtins {
             return compare(args.get(0), args.get(1)) >= 0 ? args.get(0) : args.get(1);
         }));
 
-        env.define("pi", new BuiltinFn("pi", 0, args -> Math.PI));
-        env.define("e", new BuiltinFn("e", 0, args -> Math.E));
+        env.define("pi", Math.PI);
+        env.define("e", Math.E);
 
         // ── Collection ──────────────────────────────────────────────────
         env.define("head", new BuiltinFn("head", 1, args -> {
@@ -172,13 +172,50 @@ public final class Builtins {
         }));
 
         env.define("get", new BuiltinFn("get", 2, args -> {
-            var key = Values.toIrijString(args.get(0));
-            if (args.get(1) instanceof IrijMap map) {
-                var v = map.entries().get(key);
+            var key = args.get(0);
+            var coll = args.get(1);
+            if (coll instanceof IrijMap map) {
+                var v = map.entries().get(Values.toIrijString(key));
                 return v != null ? v : Values.UNIT;
             }
-            throw new IrijRuntimeError("get expects a Map as second argument");
+            if (coll instanceof IrijVector vec) {
+                long idx = asLong(key, "get");
+                if (idx < 0 || idx >= vec.elements().size()) return Values.UNIT;
+                return vec.elements().get((int) idx);
+            }
+            if (coll instanceof IrijTuple tup) {
+                long idx = asLong(key, "get");
+                if (idx < 0 || idx >= tup.elements().length) return Values.UNIT;
+                return tup.elements()[(int) idx];
+            }
+            throw new IrijRuntimeError("get expects a Map, Vector, or Tuple as second argument");
         }));
+
+        env.define("nth", new BuiltinFn("nth", 2, args -> {
+            long idx = asLong(args.get(0), "nth");
+            var coll = args.get(1);
+            if (coll instanceof IrijVector vec) {
+                if (idx < 0 || idx >= vec.elements().size())
+                    throw new IrijRuntimeError("nth: index " + idx + " out of bounds (size " + vec.elements().size() + ")");
+                return vec.elements().get((int) idx);
+            }
+            if (coll instanceof IrijTuple tup) {
+                if (idx < 0 || idx >= tup.elements().length)
+                    throw new IrijRuntimeError("nth: index " + idx + " out of bounds (size " + tup.elements().length + ")");
+                return tup.elements()[(int) idx];
+            }
+            throw new IrijRuntimeError("nth expects a Vector or Tuple, got " + Values.typeName(coll));
+        }));
+
+        env.define("last", new BuiltinFn("last", 1, args -> {
+            var v = args.get(0);
+            if (v instanceof IrijVector vec) {
+                if (vec.elements().isEmpty()) throw new IrijRuntimeError("last of empty vector");
+                return vec.elements().get(vec.elements().size() - 1);
+            }
+            throw new IrijRuntimeError("last expects a Vector, got " + Values.typeName(v));
+        }));
+
 
         // ── Functional ──────────────────────────────────────────────────
         env.define("identity", new BuiltinFn("identity", 1, args -> args.get(0)));

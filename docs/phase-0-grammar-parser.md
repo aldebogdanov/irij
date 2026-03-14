@@ -1,6 +1,6 @@
 # Phase 0 — Grammar & Parser
 
-Status: **Complete** (81/81 smoke tests passing)
+Status: **Complete** (64/64 parser smoke tests passing; 194 total including interpreter tests)
 
 ---
 
@@ -16,7 +16,7 @@ Phase 0 establishes the full Irij parser — lexer, grammar, indent/dedent engin
 | `src/main/antlr/IrijParser.g4` | ANTLR4 parser — full grammar rules for all Irij syntax |
 | `src/main/java/dev/irij/parser/IrijLexerBase.java` | Python-style INDENT/DEDENT injection, line continuation, paren-depth tracking |
 | `src/main/java/dev/irij/parser/IrijParseDriver.java` | Convenience API: `parse(String)`, `parseFile(Path)`, `tokenize(String)` |
-| `src/test/java/dev/irij/parser/ParserSmokeTest.java` | 81 smoke tests organized by spec section |
+| `src/test/java/dev/irij/parser/ParserSmokeTest.java` | 64 smoke tests organized by spec section |
 
 ---
 
@@ -33,7 +33,7 @@ Phase 0 establishes the full Irij parser — lexer, grammar, indent/dedent engin
 ./gradlew compileJava
 ```
 
-All 81 tests should pass with `BUILD SUCCESSFUL`.
+All 64 parser smoke tests (194 total with interpreter tests) should pass with `BUILD SUCCESSFUL`.
 
 ---
 
@@ -87,7 +87,7 @@ record ParseResult(
 
 **Keywords (30):** `fn`, `do`, `if`, `else`, `match`, `type`, `newtype`, `mod`, `use`, `pub`, `with`, `scope`, `effect`, `role`, `cap`, `handler`, `impl`, `proto`, `pre`, `post`, `law`, `contract`, `select`, `enclave`, `forall`, `par-each`, `on-failure`, `in`, `out`, `for`, `proof`
 
-**Digraph operators (35+):** `:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `==`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `**`, `++`, `..`, `..<`, `...`, `/+`, `/*`, `/#`, `/&`, `/|`, `/?`, `/!`, `\.`, `@`, `@i`
+**Digraph operators (35+):** `:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `==`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `**`, `++`, `..`, `..<`, `...`, `/+`, `/*`, `/#`, `/&`, `/|`, `/?`, `/!`, `/^`, `/$`, `@`, `@i`
 
 **Literals:** `INT_LIT`, `FLOAT_LIT`, `HEX_LIT`, `RATIONAL`, `STRING` (with `${}` interpolation), `KEYWORD` (`:ok`, `:error`), `ROLE_NAME` (`$BUYER`), `TYPE_NAME` (`Int`), `IDENT` (kebab-case)
 
@@ -131,7 +131,7 @@ choreography → pipeline → composition → or → and → equality → compar
 
 ## Test Coverage
 
-81 tests organized by spec section:
+64 tests organized by spec section (counts below reflect original coverage; suite was reorganized during Phase 1):
 
 | Section | Tests | Status |
 |---------|-------|--------|

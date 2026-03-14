@@ -1,0 +1,112 @@
+;; collections.irj — vectors, maps, sets, seq ops, pipelines
+
+;; ── Vectors ──────────────────────────────────────────────────────────────
+
+nums := #[1 2 3 4 5 6 7 8 9 10]
+println nums
+println (length nums)           ;; 10
+println (head nums)             ;; 1
+println (tail nums)             ;; #[2 3 4 5 6 7 8 9 10]
+
+;; ── Seq ops (collection via |> pipeline) ─────────────────────────────────
+
+doubled := nums |> @ (n -> n * 2)
+println doubled                 ;; #[2 4 6 8 10 12 14 16 18 20]
+
+evens := nums |> /? (n -> n % 2 == 0)
+println evens                   ;; #[2 4 6 8 10]
+
+total := /+ nums
+println total                   ;; 55
+
+println (/* #[1 2 3 4 5])       ;; 120
+println (/# evens)              ;; 5
+
+all-pos := (nums |> @ (n -> n > 0)) |> /&
+println all-pos                 ;; true
+
+first-big := nums |> /! (n -> n > 7)
+println first-big               ;; 8
+
+;; ── Reduce & Scan (/^ and /$) ────────────────────────────────────────────
+
+println (nums |> /^ (+))         ;; 55 — same as /+ but generic
+println (nums |> /^ (*))         ;; 3628800 — same as /*
+
+;; scan: running accumulation
+prefix-sums := #[1 2 3 4 5] |> /$ (+)
+println prefix-sums               ;; #[1 3 6 10 15]
+
+;; reduce with a custom comparator
+max-val := nums |> /^ (a b -> if (a > b) a else b)
+println max-val                    ;; 10
+
+;; ── Operator sections: (+), (*), etc. ───────────────────────────────────
+
+add := (+)
+println (add 3 4)                 ;; 7
+
+println (#[1 2 3 4] |> /^ (+))   ;; 10 — reduce with operator section
+println (#[1 2 3 4] |> /$ (*))   ;; #[1 2 6 24] — running products
+
+;; fold: reduce with explicit initial value
+println (fold (+) 0 #[1 2 3 4])  ;; 10
+println (fold (+) 100 #[])        ;; 100 — empty collection returns init
+
+;; ── Element access ──────────────────────────────────────────────────────
+
+println (nth 0 nums)              ;; 1
+println (nth 5 nums)              ;; 6
+println (last nums)               ;; 10
+println (get 2 nums)              ;; 3
+println (get 99 nums)             ;; () — out of bounds returns unit
+
+;; ── Pipelines ────────────────────────────────────────────────────────────
+
+;; sum of squares of even numbers 1..20 — broken into steps
+;; (multi-line pipelines require implicit continuation, not yet implemented)
+range-vec := to-vec (1 .. 20)
+evens-only := range-vec |> /? (n -> n % 2 == 0)
+squares    := evens-only |> @ (n -> n * n)
+result     := /+ squares
+println result                  ;; 1540
+
+;; ── Maps ─────────────────────────────────────────────────────────────────
+
+person := {name= "Jo" age= 30 city= "Oslo"}
+println person
+println person.name             ;; Jo
+println person.age              ;; 30
+
+older := {...person age= 31}
+println older.age               ;; 31
+println person.age              ;; 30 — original unchanged
+
+println (keys person)
+println (vals person)
+
+;; ── Sets ─────────────────────────────────────────────────────────────────
+
+s := #{1 2 3 2 1}
+println (length (to-vec s))     ;; 3
+
+;; ── Ranges ───────────────────────────────────────────────────────────────
+
+println (to-vec (1 .. 5))       ;; #[1 2 3 4 5]
+println (to-vec (1 ..< 5))      ;; #[1 2 3 4]
+
+first-ten := take 10 (1 .. 1000000)
+println (to-vec first-ten)      ;; #[1 2 3 4 5 6 7 8 9 10]
+
+;; ── Destructuring ────────────────────────────────────────────────────────
+
+;; map destructuring in bind (bindTarget supports {field= name} pattern)
+{name= n age= ag} := person
+println "${n} is ${ag}"         ;; Jo is 30
+
+;; vector destructuring requires match
+match #[10 20 30 40 50]
+  #[a b ...rest] =>
+    println a                   ;; 10
+    println b                   ;; 20
+    println rest                ;; #[30 40 50]

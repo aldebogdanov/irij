@@ -166,11 +166,18 @@
     /#    ;; count                     #[1 2 3] |> /#       ;; => 3
     /&    ;; all? (reduce with &&)
     /|    ;; any? (reduce with ||)
-    \.    ;; scan (prefix sums etc.)   #[1 2 3] |> \.+      ;; => #[1 3 6]
+    /^    ;; generic reduce (fold)     #[1 2 3] |> /^ (+)   ;; => 6
+    /$    ;; scan (prefix sums)        #[1 2 3] |> /$ (+)   ;; => #[1 3 6]
     @     ;; map-over / each           xs |> @ f
     @i    ;; map-indexed               xs |> @i (i v -> ...)
     /?    ;; filter                    xs |> /? even?
     /!    ;; first match / find        xs |> /! (> 3)
+
+    ;; ── Operator Sections (operators as first-class values) ──
+    (+)   ;; addition as function      (#[1 2 3] |> /^ (+))
+    (-)   ;; subtraction as function
+    (*)   ;; multiplication as function
+    (==)  ;; equality as function
 
     ;; ── Effect & Control ────────────────────────────────────
     -[    ;; effect arrow open          fn f :: A -[E1 E2]> B
@@ -1458,7 +1465,7 @@
   ║  CONTRACT       pre P  post Q    contract (in P) (out Q)   ║
   ║  LAW            law name = forall x. P x                    ║
   ║  REFINEMENT     type T := {x :: U | pred x}                ║
-  ║  ARRAY OPS      @ map  /? filter  /! find  /+ reduce  /#   ║
+  ║  ARRAY OPS      @ map  /? filter  /! find  /+ /* /^ /$ /#  ║
   ║  COLLECTIONS    #[1 2]  #{:a}  #(1 2)  {k= v}              ║
   ║  PURE FN        fn f :: A -> B                              ║
   ║  EFFECTFUL FN   fn f :: A -[E1 E2]> B                     ║
@@ -1537,7 +1544,33 @@
           $CLIENT.display reply)
   #+end_example
 
-* Appendix C: Comparison with Existing Languages
+* Appendix C: Interactive Development & REPL Roadmap
+
+  ℑ takes inspiration from Clojure's REPL-driven development model.
+  The vision is a connected REPL that allows redefining functions in a
+  running application, enabling truly interactive development.
+
+  *Current (Phase 2):* Basic REPL with evaluate-and-print, file loading,
+  history, multi-line input. Top-level bindings can be redefined in a
+  session.
+
+  *Planned capabilities:*
+  - *Hot function redefinition:* Redefine =fn= declarations in a running
+    program. Closures that captured the old definition continue with old
+    behavior; new calls use the new definition.
+  - *Connected REPL:* Attach to a running Irij process over a socket/pipe,
+    evaluate code in its environment (like nREPL).
+  - *Namespace-aware reload:* =:reload mod.name= re-evaluates a module,
+    replacing its bindings in the running environment.
+  - *State inspection:* =:env= to show current bindings, =:type expr= to
+    query inferred types.
+
+  *Design constraint:* The =Environment= uses =define()= which silently
+  overwrites existing bindings. This is intentional — the REPL must allow
+  redefinition. Phase 4 (modules) will add =pub= visibility but the REPL
+  will always bypass module boundaries for development access.
+
+* Appendix D: Comparison with Existing Languages
 
   | Feature              | ℑ       | Clojure | Scala/ZIO | Haskell | Kotlin  | Flix    |
   |----------------------+---------+---------+-----------+---------+---------+--------|

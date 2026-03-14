@@ -561,6 +561,7 @@ public class AstBuilder {
         if (ctx.UNDERSCORE() != null) return new Expr.Wildcard(loc(ctx));
         if (ctx.ifExpr() != null) return visitIfExpr(ctx.ifExpr());
         if (ctx.lambdaExpr() != null) return visitLambdaExpr(ctx.lambdaExpr());
+        if (ctx.operatorAsValue() != null) return visitOperatorAsValue(ctx.operatorAsValue());
         if (ctx.unitExpr() != null) return new Expr.UnitLit(loc(ctx));
         if (ctx.parenExpr() != null) return visitParenExpr(ctx.parenExpr());
         if (ctx.vectorLiteral() != null) return visitVectorLiteral(ctx.vectorLiteral());
@@ -680,6 +681,12 @@ public class AstBuilder {
             params.add(visitPattern(p));
         }
         return params;
+    }
+
+    private Expr visitOperatorAsValue(OperatorAsValueContext ctx) {
+        // The operator token is between LPAREN and RPAREN — get the second child
+        var opToken = (TerminalNode) ctx.getChild(1);
+        return new Expr.OpSection(opToken.getText(), loc(ctx));
     }
 
     private Expr visitExprSeq(ExprSeqContext ctx) {

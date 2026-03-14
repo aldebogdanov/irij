@@ -380,6 +380,26 @@ class ParserSmokeTest {
         @Test void seqOps() {
             assertParses("count := xs |> /#\n");
         }
+
+        @Test void reduceOp() {
+            assertParses("result := xs |> /^ (+)\n");
+        }
+
+        @Test void scanOp() {
+            assertParses("sums := xs |> /$ (+)\n");
+        }
+
+        @Test void operatorAsValue() {
+            assertParses("f := (+)\n");
+        }
+
+        @Test void operatorAsValueMinus() {
+            assertParses("f := (-)\n");
+        }
+
+        @Test void operatorSectionInPipeline() {
+            assertParses("result := #[1 2 3] |> /^ (+)\n");
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -420,7 +440,7 @@ class ParserSmokeTest {
         }
 
         @Test void tokenizesSeqOps() {
-            var tokens = IrijParseDriver.tokenize("/+ /* /# /& /| /? /!");
+            var tokens = IrijParseDriver.tokenize("/+ /* /# /& /| /? /! /^ /$");
             assertTrue(tokens.size() > 1);
         }
 

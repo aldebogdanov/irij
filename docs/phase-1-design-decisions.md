@@ -77,7 +77,9 @@ ranges). The operator determines which function to reduce with:
 - `/!` finds first matching
 - `@` maps a function over elements
 - `@i` maps with index
-- `\.` scan (prefix reductions)
+- `/^` generic reduce/foldl1 (takes a 2-arg fn, uses first element as init)
+- `/$` scan/prefix reductions (like `/^` but emits all intermediate values)
+- `fold fn init coll` — reduce with explicit initial value (handles empty collections)
 
 ```
 #[1 2 3] |> /+          ;; → 6

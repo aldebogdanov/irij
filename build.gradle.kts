@@ -119,6 +119,7 @@ tasks.register<JavaExec>("run") {
     mainClass = "dev.irij.interpreter.IrijRunner"
     classpath = sourceSets["main"].runtimeClasspath
     standardInput = System.`in`
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
 }
 
 // ── Install task ────────────────────────────────────────────────────
@@ -134,7 +135,7 @@ tasks.register("install") {
             into(libDir)
         }
         val script = file("$binDir/irij")
-        script.writeText("#!/bin/bash\nexec java -jar \"$home/.local/lib/irij.jar\" \"\$@\"\n")
+        script.writeText("#!/bin/bash\nexec java --enable-native-access=ALL-UNNAMED -jar \"$home/.local/lib/irij.jar\" \"\$@\"\n")
         script.setExecutable(true)
         println("Installed: $binDir/irij")
     }

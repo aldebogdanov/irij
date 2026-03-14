@@ -88,7 +88,8 @@ SEQ_AND     : '/&' ;       // all? (reduce with &&)
 SEQ_OR      : '/|' ;       // any? (reduce with ||)
 SEQ_FILTER  : '/?' ;       // filter
 SEQ_FIND    : '/!' ;       // find-first
-SCAN        : '\\.' ;      // scan (prefix sums)  written \. in source
+REDUCE      : '/^' ;       // generic reduce (fold) with function
+SCAN_OP     : '/$' ;       // scan (prefix sums) with function
 MAP_AT      : '@' ;        // map-over / located-at
 MAP_INDEXED : '@i' ;       // map-indexed
 

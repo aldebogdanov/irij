@@ -751,4 +751,164 @@ class InterpreterTest {
             assertTrue(e.getMessage().contains("Division by zero"));
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Step 24: Reduce (/^) and Scan (/$)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class ReduceAndScan {
+        @Test void reduceWithPlus() {
+            assertEquals("10", run("println (#[1 2 3 4] |> /^ (+))"));
+        }
+
+        @Test void reduceWithMultiply() {
+            assertEquals("24", run("println (#[1 2 3 4] |> /^ (*))"));
+        }
+
+        @Test void reduceWithLambda() {
+            assertEquals("10", run("println (#[1 2 3 4] |> /^ (a b -> a + b))"));
+        }
+
+        @Test void reduceWithMax() {
+            assertEquals("5", run("println (#[3 1 5 2] |> /^ (a b -> if (a > b) a else b))"));
+        }
+
+        @Test void scanWithPlus() {
+            assertEquals("#[1 3 6 10]", run("println (#[1 2 3 4] |> /$ (+))"));
+        }
+
+        @Test void scanWithMultiply() {
+            assertEquals("#[1 2 6 24]", run("println (#[1 2 3 4] |> /$ (*))"));
+        }
+
+        @Test void scanWithLambda() {
+            assertEquals("#[1 3 6 10]", run("println (#[1 2 3 4] |> /$ (a b -> a + b))"));
+        }
+
+        @Test void scanEmpty() {
+            assertEquals("#[]", run("println (#[] |> /$ (+))"));
+        }
+
+        @Test void scanSingleElement() {
+            assertEquals("#[42]", run("println (#[42] |> /$ (+))"));
+        }
+
+        @Test void reduceEmptyThrows() {
+            assertRuntimeError("#[] |> /^ (+)");
+        }
+
+        @Test void foldWithInit() {
+            assertEquals("10", run("println (fold (+) 0 #[1 2 3 4])"));
+        }
+
+        @Test void foldEmptyReturnsInit() {
+            assertEquals("0", run("println (fold (+) 0 #[])"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Step 25: Operator Sections
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class OperatorSections {
+        @Test void plusSection() {
+            assertEquals("5", run("println ((+) 2 3)"));
+        }
+
+        @Test void minusSection() {
+            assertEquals("2", run("println ((-) 5 3)"));
+        }
+
+        @Test void multiplySection() {
+            assertEquals("12", run("println ((*) 3 4)"));
+        }
+
+        @Test void concatSection() {
+            assertEquals("helloworld", run("println ((++) \"hello\" \"world\")"));
+        }
+
+        @Test void eqSection() {
+            assertEquals("true", run("println ((==) 1 1)"));
+        }
+
+        @Test void sectionAsArg() {
+            assertEquals("10", run("println (#[1 2 3 4] |> /^ (+))"));
+        }
+
+        @Test void sectionPartial() {
+            assertEquals("5", run("""
+                add := (+)
+                println (add 2 3)"""));
+        }
+
+        @Test void sectionInMap() {
+            assertEquals("#[2 4 6]", run("""
+                double := (x -> (*) 2 x)
+                println (#[1 2 3] |> @ double)"""));
+        }
+
+        @Test void comparisonSection() {
+            assertEquals("true", run("println ((<) 1 2)"));
+            assertEquals("false", run("println ((<) 2 1)"));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Step 26: nth, last, get on vectors
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class CollectionAccess {
+        @Test void nthVector() {
+            assertEquals("20", run("println (nth 1 #[10 20 30])"));
+        }
+
+        @Test void nthFirst() {
+            assertEquals("10", run("println (nth 0 #[10 20 30])"));
+        }
+
+        @Test void nthOutOfBoundsThrows() {
+            assertRuntimeError("nth 5 #[10 20 30]");
+        }
+
+        @Test void lastVector() {
+            assertEquals("30", run("println (last #[10 20 30])"));
+        }
+
+        @Test void lastEmptyThrows() {
+            assertRuntimeError("last #[]");
+        }
+
+        @Test void getOnVector() {
+            assertEquals("20", run("println (get 1 #[10 20 30])"));
+        }
+
+        @Test void getOnVectorOutOfBounds() {
+            assertEquals("()", run("println (get 5 #[10 20 30])"));
+        }
+
+        @Test void getOnMap() {
+            assertEquals("Jo", run("""
+                println (get "name" {name= "Jo" age= 30})"""));
+        }
+
+        @Test void nthInPipeline() {
+            assertEquals("30", run("""
+                println (#[10 20 30] |> nth 2)"""));
+        }
+
+        @Test void lastInPipeline() {
+            assertEquals("30", run("""
+                println (#[10 20 30] |> last)"""));
+        }
+
+        @Test void lengthVsCount() {
+            // length and /# both return count, but length works on more types
+            assertEquals("3", run("println (length #[1 2 3])"));
+            assertEquals("3", run("println (#[1 2 3] |> /#)"));
+            assertEquals("5", run("println (length \"hello\")"));
+        }
+    }
 }

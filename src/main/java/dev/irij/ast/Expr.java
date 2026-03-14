@@ -52,8 +52,13 @@ public sealed interface Expr extends Node {
 
     // ── Seq Ops ─────────────────────────────────────────────────────────
 
-    /** Sequence operator: /+, @, /?, etc. arg may be null for standalone use. */
+    /** Sequence operator: /+, @, /?, /^, /$, etc. arg may be null for standalone use. */
     record SeqOp(String op, Expr arg, SourceLoc loc) implements Expr {}
+
+    // ── Operator Section ──────────────────────────────────────────────
+
+    /** Operator used as first-class value: (+), (-), (*), etc. */
+    record OpSection(String op, SourceLoc loc) implements Expr {}
 
     // ── Control Flow ────────────────────────────────────────────────────
 

@@ -106,10 +106,9 @@ Per `docs/phase-1-design-decisions.md`:
 1. **`mod` keyword conflict**: `mod` is a keyword in the lexer (module declaration), so it can't be used as a builtin function name. Use `%` operator instead.
 2. **Collection literal ambiguity**: `#[f x]` is parsed as function application (`f(x)`) inside the vector, not two elements. Use `#[(f x)]` for clarity, or `#[a b]` only with non-callable atoms.
 3. **Lambda body limitations**: Lambda body is `exprSeq` (expressions only). Statements like `x <- expr` must use imperative fn body form instead.
-4. **`scan` (`\.`) and `map-indexed` (`@i`)**: Parsed but not fully implemented in the interpreter.
-5. **`flip`**: Declared but throws "requires partial application support".
-6. **Effects/handlers**: Parse into AST but `with handler` executes body without handler support.
-7. **Infinite ranges**: Not supported — both endpoints required.
+4. **`flip`**: Declared but throws "requires partial application support".
+5. **Effects/handlers**: Parse into AST but `with handler` executes body without handler support.
+6. **Infinite ranges**: Not supported — both endpoints required.
 
 ## Programmatic API
 

@@ -6,12 +6,12 @@ Source of truth: `docs/irij-lang-spec.org`
 
 ## Tooling — Emacs Package
 
-- [ ] **irij-mode** — `editors/emacs/irij-mode.el`
-  - [ ] Major mode for `.irj` files
-  - [ ] Syntax highlighting (keywords, digraphs, literals, comments)
-  - [ ] 2-space indentation enforcement
-  - [ ] Comment toggling (`;;`)
-  - [ ] REPL integration (send region, send buffer)
+- [x] **irij-mode** — `editors/emacs/irij-mode.el`
+  - [x] Major mode for `.irj` files
+  - [x] Syntax highlighting (keywords, digraphs, literals, comments)
+  - [x] 2-space indentation enforcement
+  - [x] Comment toggling (`;;`)
+  - [x] REPL integration (send region, send buffer)
 
 ---
 
@@ -22,7 +22,7 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
 - [x] **Lexer (ANTLR4)** — `src/main/antlr/IrijLexer.g4`
   - [x] Identifiers: kebab-case, PascalCase types, `$ROLE` names
   - [x] Literals: int, float, hex, underscore separators, rationals (`2/3`), strings with `${}` interpolation, keywords (`:ok`, `:error`)
-  - [x] All digraph operators (`:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `/+`, `/*`, `/#`, `/&`, `/|`, `\.`, `/?`, `/!`, `@`, `@i`, `..`, `..<`, `++`, `**`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `...`)
+  - [x] All digraph operators (`:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `/+`, `/*`, `/#`, `/&`, `/|`, `/^`, `/$`, `/?`, `/!`, `@`, `@i`, `..`, `..<`, `++`, `**`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `...`)
   - [x] `=` as map-field separator (context: inside `{}`)
   - [x] INDENT/DEDENT token generation (strict 2-space, hard error otherwise)
   - [x] Semicolons inside parenthesized expressions only
@@ -104,37 +104,41 @@ Minimal working language: bindings, functions, pattern matching, data types.
 - [x] **Builtins / stdlib core** — `src/main/java/dev/irij/interpreter/Builtins.java`
   - [x] Arithmetic (+, -, *, /, %, **), comparison (==, /=, <, >, <=, >=), boolean (&&, ||, !)
   - [x] Sequence ops: `@` (map), `/?` (filter), `/!` (find), `/+` `/*` `/#` `/&` `/|` (reductions)
+  - [x] Operator sections: `(+)`, `(-)`, `(*)`, etc. as first-class functions
   - [x] `head`, `tail`, `length`, `reverse`, `sort`, `take`, `drop`, `to-vec`
-  - [x] `identity`, `const`, `not`, `empty?`, `contains?`, `keys`, `vals`, `get`
+  - [x] `nth`, `last` — indexed and terminal access
+  - [x] `get` — works on maps, vectors, and tuples
+  - [x] `fold` — reduce with explicit initial value
+  - [x] `identity`, `const`, `not`, `empty?`, `contains?`, `keys`, `vals`
   - [x] `print`, `println`, `to-str`, `dbg`
   - [x] `div`, `mod`, `abs`, `min`, `max`, `pi`, `e`
 - [x] **Test suite** — `src/test/java/dev/irij/interpreter/InterpreterTest.java`
-  - [x] 70 tests covering all Phase 1 features (all passing)
+  - [x] 194 tests (64 parser + 130 interpreter, all passing)
 
 ---
 
-## Phase 2 — REPL & Interactive Runner
+## Phase 2 — REPL & Interactive Runner ✅
 
 The tool to evaluate code and run it interactively. This is the critical feedback loop.
 
-- [ ] **REPL** — `src/main/java/dev/irij/repl/IrijRepl.java`
-  - [ ] JLine3 terminal with history, completion
-  - [ ] Evaluate expressions, print results
-  - [ ] Multi-line input (detect incomplete INDENT blocks)
-  - [ ] `:type expr` — show inferred type
-  - [ ] `:reset` — clear environment
-  - [ ] `:load file.irj` — load and evaluate a file
-  - [ ] `:quit`
-- [ ] **File runner** — `src/main/java/dev/irij/cli/IrijCli.java`
-  - [ ] `irij file.irj` — parse, interpret, run
-  - [ ] `irij` (no args) — launch REPL
-  - [ ] `--parse-only` flag — just parse, report errors (useful for grammar testing)
-  - [ ] `--ast` flag — dump AST (debug)
-  - [ ] Error messages with source locations (file:line:col)
-- [ ] **Example programs** — `examples/`
-  - [ ] `hello.irj` — hello world
-  - [ ] `basics.irj` — bindings, functions, patterns
-  - [ ] `collections.irj` — vectors, maps, pipelines, seq ops
+- [x] **REPL** — `src/main/java/dev/irij/repl/IrijRepl.java`
+  - [x] JLine3 terminal with history, completion
+  - [x] Evaluate expressions, print results
+  - [x] Multi-line input (detect incomplete INDENT blocks)
+  - [x] `:type expr` — show inferred type (stub — awaits type inference)
+  - [x] `:reset` — clear environment
+  - [x] `:load file.irj` — load and evaluate a file
+  - [x] `:quit`
+- [x] **File runner** — `src/main/java/dev/irij/cli/IrijCli.java`
+  - [x] `irij file.irj` — parse, interpret, run
+  - [x] `irij` (no args) — launch REPL
+  - [x] `--parse-only` flag — just parse, report errors (useful for grammar testing)
+  - [x] `--ast` flag — dump AST (debug)
+  - [x] Error messages with source locations (file:line:col)
+- [x] **Example programs** — `examples/`
+  - [x] `hello.irj` — hello world
+  - [x] `basics.irj` — bindings, functions, patterns
+  - [x] `collections.irj` — vectors, maps, pipelines, seq ops
 
 ---
 
