@@ -4,49 +4,66 @@ Source of truth: `docs/irij-lang-spec.org`
 
 ---
 
-## Phase 0 — Grammar & Parser
+## Tooling — Emacs Package
+
+- [ ] **irij-mode** — `editors/emacs/irij-mode.el`
+  - [ ] Major mode for `.irj` files
+  - [ ] Syntax highlighting (keywords, digraphs, literals, comments)
+  - [ ] 2-space indentation enforcement
+  - [ ] Comment toggling (`;;`)
+  - [ ] REPL integration (send region, send buffer)
+
+---
+
+## Phase 0 — Grammar & Parser ✅
 
 Everything starts from the spec. No interpreter logic yet, just parsing.
 
-- [ ] **Lexer (ANTLR4)** — `src/main/antlr/IrijLexer.g4`
-  - [ ] Identifiers: kebab-case, PascalCase types, `$ROLE` names
-  - [ ] Literals: int, float, hex, underscore separators, rationals (`2/3`), strings with `${}` interpolation, keywords (`:ok`, `:error`)
-  - [ ] All digraph operators (`:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `/+`, `/*`, `/#`, `/&`, `/|`, `\.`, `/?`, `/!`, `@`, `@i`, `..`, `..<`, `++`, `**`, `/=`, `<=`, `>=`, `&&`, `||`, `...`)
-  - [ ] `=` as map-field separator (context: inside `{}`)
-  - [ ] INDENT/DEDENT token generation (strict 2-space, hard error otherwise)
-  - [ ] Semicolons inside parenthesized expressions only
-  - [ ] `\` line continuation
-  - [ ] Comments: `;;` to end of line
-  - [ ] Reserved words: `fn`, `do`, `if`, `else`, `match`, `type`, `newtype`, `mod`, `use`, `pub`, `with`, `scope`, `effect`, `role`, `cap`, `handler`, `impl`, `proto`, `pre`, `post`, `law`, `contract`, `select`, `enclave`, `forall`, `par-each`, `on-failure`
+- [x] **Lexer (ANTLR4)** — `src/main/antlr/IrijLexer.g4`
+  - [x] Identifiers: kebab-case, PascalCase types, `$ROLE` names
+  - [x] Literals: int, float, hex, underscore separators, rationals (`2/3`), strings with `${}` interpolation, keywords (`:ok`, `:error`)
+  - [x] All digraph operators (`:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `/+`, `/*`, `/#`, `/&`, `/|`, `\.`, `/?`, `/!`, `@`, `@i`, `..`, `..<`, `++`, `**`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `...`)
+  - [x] `=` as map-field separator (context: inside `{}`)
+  - [x] INDENT/DEDENT token generation (strict 2-space, hard error otherwise)
+  - [x] Semicolons inside parenthesized expressions only
+  - [x] `\` line continuation
+  - [x] Comments: `;;` to end of line
+  - [x] Reserved words: `fn`, `do`, `if`, `else`, `match`, `type`, `newtype`, `mod`, `use`, `pub`, `with`, `scope`, `effect`, `role`, `cap`, `handler`, `impl`, `proto`, `pre`, `post`, `law`, `contract`, `select`, `enclave`, `forall`, `par-each`, `on-failure`
 
-- [ ] **Parser (ANTLR4)** — `src/main/antlr/IrijParser.g4`
-  - [ ] Top-level declarations: `fn`, `type`, `newtype`, `effect`, `handler`, `cap`, `proto`, `impl`, `role`, `mod`, `use`, `pub`
-  - [ ] Three fn body forms (disambiguation by first token after INDENT):
+- [x] **Parser (ANTLR4)** — `src/main/antlr/IrijParser.g4`
+  - [x] Top-level declarations: `fn`, `type`, `newtype`, `effect`, `handler`, `cap`, `proto`, `impl`, `role`, `mod`, `use`, `pub`, `match`, `if`, `with`, `scope`
+  - [x] Three fn body forms (disambiguation by first token after INDENT):
     - `(` → lambda: `(x y -> expr)`
     - `pattern =>` → match arm(s)
     - `=>` / `=> params` → imperative block
-  - [ ] Contracts: `pre`, `post`, `contract`/`in`/`out`
-  - [ ] Laws: `law name = forall x. P x`
-  - [ ] Expressions: pipeline, composition, arithmetic, comparison, boolean, concat, range, application
-  - [ ] Collection literals: `#[...]`, `#{...}`, `#(...)`, `{k= v}`
-  - [ ] Pattern matching: `match expr` with arms, destructuring, guards (`|`), spread (`...`)
-  - [ ] Record update: `{...record field= val}`
-  - [ ] `if`/`else`, `with`, `scope`, `select`
-  - [ ] Mutable bindings: `:!`, `<-`, read by name
-  - [ ] Type annotations: `:: Type`, effect arrows `-[E1 E2]> T`
-  - [ ] Located types: `@$ROLE`
-  - [ ] Choreography: `~>`, `<~`, `~*>`, `~/`, `par-each`, `forall`, `on-failure`, `enclave`
+  - [x] Contracts: `pre`, `post`, `contract`/`in`/`out`
+  - [x] Laws: `law name = forall x. P x`
+  - [x] Expressions: pipeline, composition, arithmetic, comparison, boolean, concat, range, application
+  - [x] Collection literals: `#[...]`, `#{...}`, `#(...)`, `{k= v}`
+  - [x] Pattern matching: `match expr` with arms, destructuring, guards (`|`), spread (`...`)
+  - [x] Record update: `{...record field= val}`
+  - [x] `if`/`else` (block-level and inline expression), `with`, `scope`, `select`
+  - [x] Mutable bindings: `:!`, `<-`, read by name
+  - [x] Type annotations: `:: Type`, type application (`Result a e`), effect arrows `-[E1 E2]> T`
+  - [x] Located types: `@$ROLE`
+  - [x] Choreography: `~>`, `<~`, `~*>`, `~/`, `par-each`, `forall`, `on-failure`, `enclave`
+  - [x] Unit value `()` as expression and pattern
   - [ ] Implicit continuation (more-indented line starting with binary op)
 
-- [ ] **Lexer base class** — `src/main/java/dev/irij/parser/IrijLexerBase.java`
-  - [ ] INDENT/DEDENT post-processing (Python-style indent stack)
-  - [ ] Strict 2-space enforcement
+- [x] **Lexer base class** — `src/main/java/dev/irij/parser/IrijLexerBase.java`
+  - [x] INDENT/DEDENT post-processing (Python-style indent stack)
+  - [x] Strict 2-space enforcement
+  - [x] Paren/bracket depth tracking (suppress INDENT/DEDENT inside)
+  - [x] Comment-aware indent measurement
+  - [x] Line continuation (`\`) support
+  - [x] Trailing NEWLINE* before DEDENT handled in grammar
 
-- [ ] **Parse driver** — `src/main/java/dev/irij/parser/IrijParseDriver.java`
-  - [ ] Wire up lexer → parser, error reporting
+- [x] **Parse driver** — `src/main/java/dev/irij/parser/IrijParseDriver.java`
+  - [x] Wire up lexer → parser, error reporting
+  - [x] `parse(String)`, `parseFile(Path)`, `tokenize(String)` API
 
-- [ ] **Smoke tests** — `src/test/java/dev/irij/parser/ParserSmokeTest.java`
-  - [ ] Parse every code example from the spec (extract them, parse each, assert no errors)
+- [x] **Smoke tests** — `src/test/java/dev/irij/parser/ParserSmokeTest.java`
+  - [x] 81 tests covering all spec sections (all passing)
 
 ---
 
@@ -181,3 +198,5 @@ The universal joint. Everything interesting depends on this.
 2. **Slow and correct.** No rushing ahead. Each phase is fully tested before moving on.
 3. **Interactive from Phase 2.** The REPL is not an afterthought — it's the primary development tool.
 4. **Tests first.** Write the test (Irij source → expected output) before implementing the feature.
+5. **TODO.md updates.** Always update TODO.md if you confident in step correct implementation. Also possible to mark incomplete/problematic steps.
+6. **Docs after milestone.** When some phase or important steps are implemented — describe everything you created in corresponding files inside `./docs` folder. I need to know how to use or/and test everything implemented.

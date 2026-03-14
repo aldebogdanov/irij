@@ -25,6 +25,8 @@ examples/                  — example .irj programs
 5. **Effects are the universal joint.** All side effects, concurrency, IO, and choreography are algebraic effects with handlers.
 6. **Test-driven.** Write the test (Irij source string → expected output) before implementing a feature.
 7. **Slow but confident.** Everything must be covered by tests. Run suitable tests often and all tests for regression testing at milestones. Do not start next step if not everything in current one is proven correct.
+8. **TODO.md updates.** Always update TODO.md if you confident in step correct implementation. Also possible to mark incomplete/problematic steps.
+9. **Docs after milestone.** When some phase or important steps are implemented - describe everything you created in corresponding files inside ./docs folder. I need to know how to use or/and test everything implemented.
 
 ## Build & test
 
