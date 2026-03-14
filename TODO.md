@@ -71,34 +71,45 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
 
 Minimal working language: bindings, functions, pattern matching, data types.
 
-- [ ] **AST node types** — `src/main/java/dev/irij/ast/`
-  - [ ] Mirror parser rules as sealed interfaces / records
-- [ ] **Tree-walk interpreter** — `src/main/java/dev/irij/interpreter/`
-  - [ ] Immutable bindings (`:=`)
-  - [ ] Mutable bindings (`:!`, `<-`)
-  - [ ] Lambda functions, application
-  - [ ] Pattern-match arms (fn body form 2)
-  - [ ] Imperative blocks (`=>` / `=> params`)
-  - [ ] `if`/`else`, `match` expression
-  - [ ] Pipeline `|>`, composition `>>` `<<`
-  - [ ] Data types: `type` with variants, `newtype`
-  - [ ] Destructuring in bindings and patterns
-  - [ ] Spread `...` in patterns
-  - [ ] Guards in match arms
-  - [ ] Record literals `{k= v}`, record update `{...r k= v}`
-  - [ ] Collections: vectors `#[...]`, sets `#{...}`, tuples `#(...)`
-  - [ ] Range `..` and `..<`
-  - [ ] Concat `++`
-  - [ ] String interpolation `${}`
-  - [ ] Keywords `:ok`, `:error` etc as atoms
-- [ ] **Builtins / stdlib core** — `src/main/java/dev/irij/interpreter/Builtin.java`
-  - [ ] Arithmetic, comparison, boolean ops
-  - [ ] Sequence ops: `@` (map), `/?` (filter), `/!` (find), `/+` `/*` `/#` `/&` `/|` (reductions), `\.` (scan), `@i` (map-indexed)
-  - [ ] `head`, `tail`, `length`, `reverse`, `sort`, `concat`
-  - [ ] `identity`, `const`, `flip`, `compose`
-  - [ ] `print`, `println`, `to-str`, `dbg`
-- [ ] **Test suite** — `src/test/java/dev/irij/interpreter/InterpreterTest.java`
-  - [ ] One test per language feature, driven by Irij source strings
+- [x] **AST node types** — `src/main/java/dev/irij/ast/`
+  - [x] Sealed interfaces / records: `Node`, `Expr` (30+ variants), `Stmt`, `Decl`, `Pattern`
+  - [x] `AstBuilder` — ANTLR parse tree → AST visitor
+  - [x] Collection element flattening (grammar ambiguity: `appExpr : postfixExpr+`)
+  - [x] String interpolation parsing (`${}` in STRING tokens)
+- [x] **Tree-walk interpreter** — `src/main/java/dev/irij/interpreter/`
+  - [x] Immutable bindings (`:=`)
+  - [x] Mutable bindings (`:!`, `<-`), capture-by-reference in closures
+  - [x] Lambda functions, function application (juxtaposition)
+  - [x] Pattern-match arms (fn body form 2)
+  - [x] Imperative blocks (`=>` / `=> params`)
+  - [x] `if`/`else` (block and inline), `match` expression
+  - [x] Pipeline `|>` `<|`, composition `>>` `<<`
+  - [x] Data types: `type` with variants (Tagged), `newtype`
+  - [x] Destructuring in bindings and patterns
+  - [x] Spread `...` in vector patterns
+  - [x] Guards in match arms
+  - [x] Record literals `{k= v}`, record update `{...r k= v}`
+  - [x] Collections: vectors `#[...]`, sets `#{...}`, tuples `#(...)`
+  - [x] Range `..` and `..<` (lazy iterators)
+  - [x] Concat `++`
+  - [x] String interpolation `${}`
+  - [x] Keywords `:ok`, `:error` etc as atoms
+  - [x] Partial application (currying)
+  - [x] Rational arithmetic with GCD simplification
+  - [x] Implicit numeric widening (Int→Float)
+  - [x] Dot access on maps
+  - [x] do expression
+  - [x] Stub declarations (effect, handler, module, use, role, proto, impl, cap)
+  - [x] Runtime errors with source locations
+- [x] **Builtins / stdlib core** — `src/main/java/dev/irij/interpreter/Builtins.java`
+  - [x] Arithmetic (+, -, *, /, %, **), comparison (==, /=, <, >, <=, >=), boolean (&&, ||, !)
+  - [x] Sequence ops: `@` (map), `/?` (filter), `/!` (find), `/+` `/*` `/#` `/&` `/|` (reductions)
+  - [x] `head`, `tail`, `length`, `reverse`, `sort`, `take`, `drop`, `to-vec`
+  - [x] `identity`, `const`, `not`, `empty?`, `contains?`, `keys`, `vals`, `get`
+  - [x] `print`, `println`, `to-str`, `dbg`
+  - [x] `div`, `mod`, `abs`, `min`, `max`, `pi`, `e`
+- [x] **Test suite** — `src/test/java/dev/irij/interpreter/InterpreterTest.java`
+  - [x] 70 tests covering all Phase 1 features (all passing)
 
 ---
 

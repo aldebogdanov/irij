@@ -64,6 +64,40 @@ tasks.compileJava {
 
 tasks.test {
     useJUnitPlatform()
+
+    val verbose = project.hasProperty("verbose")
+
+    testLogging {
+        events("passed", "failed", "skipped")
+        showStandardStreams = verbose
+        showExceptions = true
+        showCauses = true
+        showStackTraces = verbose
+        displayGranularity = 2   // class + method (nested class names visible)
+        if (verbose) {
+            events("passed", "failed", "skipped", "started")
+        }
+    }
+
+    // Summary line after all tests
+    addTestListener(object : TestListener {
+        private var passed = 0; private var failed = 0; private var skipped = 0
+        override fun beforeSuite(s: TestDescriptor) {}
+        override fun afterSuite(s: TestDescriptor, r: TestResult) {
+            if (s.parent == null) {
+                println("\n┌─ Test Results ──────────────────────────────────────")
+                println("│  ✓ Passed:  ${r.successfulTestCount}")
+                if (r.failedTestCount > 0)
+                    println("│  ✗ Failed:  ${r.failedTestCount}")
+                if (r.skippedTestCount > 0)
+                    println("│  ○ Skipped: ${r.skippedTestCount}")
+                println("│  Total:     ${r.testCount}  (${r.endTime - r.startTime} ms)")
+                println("└─────────────────────────────────────────────────────")
+            }
+        }
+        override fun beforeTest(d: TestDescriptor) {}
+        override fun afterTest(d: TestDescriptor, r: TestResult) {}
+    })
 }
 
 // ── Shadow JAR (fat JAR with all dependencies) ──────────────────────

@@ -332,11 +332,18 @@
 ** 2.2 Data Types & Records
 
    #+begin_example
-   ;; product type (record)
+   ;; product type (record) — fields declared with ::
    type User
      name :: Str
      age  :: Int
      role :: Role
+
+   ;; construction: positional args in field-declaration order
+   u := User "Jo" 30 :admin     ;; → User {name= Jo age= 30 role= :admin}
+
+   ;; field access via dot
+   u.name   ;; → "Jo"
+   u.age    ;; → 30
 
    ;; sum type (tagged union)
    type Result a e
@@ -364,8 +371,15 @@
      Err :timeout => retry
      Err other => do (log other) fail
 
-   ;; destructuring in bindings
-   {name= n age= a} := get-user id
+   ;; destructuring in bindings — works on both anonymous records and product types
+   {name= n age= a} := get-user id          ;; anonymous record
+   {name= n age= a} := User "Jo" 30 :admin  ;; product type (same syntax)
+
+   ;; product type patterns — named (partial) or positional (all fields)
+   match user
+     {name= "Jo"}  => println "found Jo"  ;; named: match any subset of fields
+     {name= n}     => println n            ;; named: bind field to variable
+     User n a _    => println n            ;; positional: all fields, in order
 
    ;; guards
    match score
