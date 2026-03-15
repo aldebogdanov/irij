@@ -4,6 +4,7 @@ import dev.irij.ast.AstBuilder;
 import dev.irij.interpreter.Interpreter;
 import dev.irij.interpreter.IrijRuntimeError;
 import dev.irij.interpreter.Values;
+import dev.irij.nrepl.NReplServer;
 import dev.irij.parser.IrijParseDriver;
 import dev.irij.repl.IrijRepl;
 
@@ -18,11 +19,13 @@ import java.nio.file.Path;
  *   irij <file.irj>            — parse and run a source file
  *   irij --parse-only <file>   — parse and report errors, no evaluation
  *   irij --ast <file>          — dump parsed AST (debug)
+ *   irij --nrepl-server[=PORT] — start nREPL server (default port 7888)
  *   irij --version             — print version
  */
 public final class IrijCli {
 
     private static final String VERSION = "0.1.0-SNAPSHOT";
+    private static final int DEFAULT_NREPL_PORT = 7888;
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
@@ -31,14 +34,16 @@ public final class IrijCli {
         }
 
         // Walk flags
-        boolean parseOnly = false;
-        boolean dumpAst   = false;
-        String  filePath  = null;
+        boolean parseOnly   = false;
+        boolean dumpAst     = false;
+        int     nreplPort   = -1;
+        String  filePath    = null;
 
         for (String arg : args) {
             switch (arg) {
                 case "--parse-only" -> parseOnly = true;
                 case "--ast"        -> dumpAst   = true;
+                case "--nrepl-server" -> nreplPort = DEFAULT_NREPL_PORT;
                 case "--version", "-v" -> {
                     System.out.println("Irij ℑ  version " + VERSION);
                     return;
@@ -48,14 +53,28 @@ public final class IrijCli {
                     return;
                 }
                 default -> {
-                    if (arg.startsWith("-")) {
+                    if (arg.startsWith("--nrepl-server=")) {
+                        try {
+                            nreplPort = Integer.parseInt(arg.substring("--nrepl-server=".length()));
+                        } catch (NumberFormatException e) {
+                            System.err.println("Invalid port: " + arg);
+                            System.exit(1);
+                        }
+                    } else if (arg.startsWith("-")) {
                         System.err.println("Unknown flag: " + arg);
                         System.err.println("Run 'irij --help' for usage.");
                         System.exit(1);
+                    } else {
+                        filePath = arg;
                     }
-                    filePath = arg;
                 }
             }
+        }
+
+        // nREPL server mode
+        if (nreplPort >= 0) {
+            new NReplServer(nreplPort).start();
+            return;
         }
 
         if (filePath == null) {
@@ -132,6 +151,8 @@ public final class IrijCli {
               irij <file.irj>            run a source file
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
+              irij --nrepl-server        start nREPL server (port 7888)
+              irij --nrepl-server=PORT   start nREPL server on PORT
               irij --version             print version
               irij --help                this message""");
     }

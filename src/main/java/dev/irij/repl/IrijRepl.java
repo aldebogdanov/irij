@@ -1,9 +1,11 @@
 package dev.irij.repl;
 
 import dev.irij.ast.AstBuilder;
+import dev.irij.interpreter.Environment;
 import dev.irij.interpreter.Interpreter;
 import dev.irij.interpreter.IrijRuntimeError;
 import dev.irij.interpreter.Values;
+import dev.irij.interpreter.Values.BuiltinFn;
 import dev.irij.parser.IrijLexer;
 import dev.irij.parser.IrijParseDriver;
 import org.antlr.v4.runtime.Token;
@@ -17,6 +19,7 @@ import java.io.PrintWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Irij interactive REPL backed by JLine3.
@@ -28,6 +31,8 @@ import java.util.List;
  *   :quit / :q     — exit
  *   :reset         — clear the environment (fresh interpreter)
  *   :load <path>   — load and evaluate a source file
+ *   :env           — show user-defined bindings
+ *   :env all       — show all bindings (including builtins)
  *   :help          — show command list
  *   :type <expr>   — (stub) show inferred type
  */
@@ -122,6 +127,8 @@ public class IrijRepl {
                   :quit, :q        — exit
                   :reset           — clear environment (fresh interpreter)
                   :load <file>     — load and run a source file
+                  :env             — show user-defined bindings
+                  :env all         — show all bindings (including builtins)
                   :type <expr>     — show inferred type (not yet implemented)
                   :help            — this message""");
         } else if (cmd.equals(":reset")) {
@@ -129,6 +136,8 @@ public class IrijRepl {
             out.println("Environment cleared.");
         } else if (cmd.startsWith(":load ")) {
             loadFile(cmd.substring(6).trim());
+        } else if (cmd.equals(":env") || cmd.equals(":env all")) {
+            showEnv(cmd.equals(":env all"));
         } else if (cmd.startsWith(":type ")) {
             out.println(":type — type inference not yet implemented");
         } else {
@@ -149,18 +158,54 @@ public class IrijRepl {
         out.flush();
     }
 
+    // ── :env — show bindings ──────────────────────────────────────────────
+
+    private void showEnv(boolean showAll) {
+        var bindings = interpreter.getGlobalEnv().getBindings();
+        var entries = bindings.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .toList();
+
+        int count = 0;
+        for (var entry : entries) {
+            var cell = entry.getValue();
+            Object value = switch (cell) {
+                case Environment.ImmutableCell(var v) -> v;
+                case Environment.MutableCell mc -> mc.get();
+                case Environment.VarCell vc -> vc.get();
+            };
+
+            // Skip builtins unless :env all
+            if (!showAll && value instanceof BuiltinFn) continue;
+            // Skip boolean constants
+            if (!showAll && (entry.getKey().equals("true") || entry.getKey().equals("false"))) continue;
+            // Skip math constants
+            if (!showAll && (entry.getKey().equals("pi") || entry.getKey().equals("e"))) continue;
+
+            String typeName = Values.typeName(value);
+            String cellKind = switch (cell) {
+                case Environment.VarCell ignored -> "var";
+                case Environment.MutableCell ignored -> "mut";
+                case Environment.ImmutableCell ignored -> "";
+            };
+            String preview = Values.toIrijString(value);
+            if (preview.length() > 60) preview = preview.substring(0, 57) + "...";
+
+            String kindSuffix = cellKind.isEmpty() ? "" : " [" + cellKind + "]";
+            out.printf("  %-20s : %-12s = %s%s%n", entry.getKey(), typeName, preview, kindSuffix);
+            count++;
+        }
+
+        if (count == 0) {
+            out.println("  (no bindings)");
+        }
+    }
+
     // ── Incomplete-input detection ────────────────────────────────────────
 
     /**
      * Returns true when the accumulated input ends mid-block (INDENT > DEDENT),
      * meaning the user should keep typing.
-     *
-     * Works by tokenizing and counting INDENT vs DEDENT tokens.  The lexer
-     * adds synthetic DEDENT tokens at EOF to close any open blocks, so we
-     * compare what was emitted vs what *would* have been emitted without the
-     * EOF flush.  A simpler proxy: if there are any lines in the buffer that
-     * end with an INDENT token (i.e., the buffer ends with an open block),
-     * keep prompting.
      */
     private boolean isBlockOpen(String input) {
         try {
@@ -178,11 +223,8 @@ public class IrijRepl {
     }
 
     private static String tokenName(Token tok) {
-        // IrijLexer.tokenNames is the generated vocabulary
         int type = tok.getType();
         if (type == Token.EOF) return "<EOF>";
-        // IrijLexer constants: INDENT = 1, DEDENT = 2, NEWLINE = 3 in the generated code
-        // Use the vocabulary instead of hardcoded constants
         try {
             var vocab = IrijLexer.VOCABULARY;
             String name = vocab.getSymbolicName(type);

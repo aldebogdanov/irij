@@ -43,6 +43,22 @@ public final class Interpreter {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Scope-aware define
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Define a binding using VarCell at the global scope (supports hot
+     * redefinition) or ImmutableCell in local scopes.
+     */
+    private void defineInScope(Environment env, String name, Object value) {
+        if (env == globalEnv) {
+            env.defineVar(name, value);
+        } else {
+            env.define(name, value);
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Entry Point
     // ═══════════════════════════════════════════════════════════════════
 
@@ -68,21 +84,28 @@ public final class Interpreter {
         return switch (decl) {
             case Decl.FnDecl fn -> {
                 var value = makeFnValue(fn, env);
-                env.define(fn.name(), value);
+                defineInScope(env, fn.name(), value);
                 yield value;
             }
             case Decl.TypeDecl td -> {
                 registerTypeConstructors(td, env);
-                yield Values.UNIT;
+                yield "<type " + td.name() + ">";
             }
             case Decl.NewtypeDecl nt -> {
-                // Register a constructor function
-                env.define(nt.name(), new Constructor(nt.name(), 1));
-                yield Values.UNIT;
+                var ctor = new Constructor(nt.name(), 1);
+                defineInScope(env, nt.name(), ctor);
+                yield ctor;
             }
             case Decl.BindingDecl bd -> {
                 exec(bd.stmt(), env);
-                yield Values.UNIT;
+                // Return the bound value so nREPL/REPL can display it
+                yield switch (bd.stmt()) {
+                    case Stmt.Bind b when b.target() instanceof Stmt.BindTarget.Simple s ->
+                        env.lookup(s.name());
+                    case Stmt.MutBind mb when mb.target() instanceof Stmt.BindTarget.Simple s ->
+                        env.lookup(s.name());
+                    default -> Values.UNIT;
+                };
             }
             case Decl.ExprDecl ed -> eval(ed.expr(), env);
             case Decl.MatchDecl md -> {
@@ -146,9 +169,9 @@ public final class Interpreter {
                 for (var variant : st.variants()) {
                     if (variant.arity() == 0) {
                         // Zero-arg constructor: a value, not a function
-                        env.define(variant.name(), new Tagged(variant.name(), List.of()));
+                        defineInScope(env, variant.name(), new Tagged(variant.name(), List.of()));
                     } else {
-                        env.define(variant.name(), new Constructor(variant.name(), variant.arity()));
+                        defineInScope(env, variant.name(), new Constructor(variant.name(), variant.arity()));
                     }
                 }
             }
@@ -156,7 +179,7 @@ public final class Interpreter {
                 // Product type: constructor takes all fields as positional args,
                 // but also records field names for named access & destructuring
                 var fieldNames = pt.fields().stream().map(Decl.Field::name).toList();
-                env.define(td.name(), new Constructor(td.name(), fieldNames.size(), fieldNames));
+                defineInScope(env, td.name(), new Constructor(td.name(), fieldNames.size(), fieldNames));
             }
         }
     }
@@ -181,7 +204,7 @@ public final class Interpreter {
     private void execBind(Stmt.Bind bind, Environment env) {
         var value = eval(bind.value(), env);
         switch (bind.target()) {
-            case Stmt.BindTarget.Simple(var name) -> env.define(name, value);
+            case Stmt.BindTarget.Simple(var name) -> defineInScope(env, name, value);
             case Stmt.BindTarget.Destructure(var pat) -> {
                 if (!matchPattern(pat, value, env)) {
                     throw new IrijRuntimeError("Destructuring bind failed", bind.loc());

@@ -2,13 +2,21 @@ package dev.irij.interpreter;
 
 import dev.irij.ast.Node.SourceLoc;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
 /**
  * Lexical scope environment with parent chain.
- * Supports immutable and mutable bindings.
- * Closures capture mutables by reference through shared MutableCell instances.
+ * Supports immutable, mutable, and var (top-level rebindable) bindings.
+ *
+ * <p>Cell types:
+ * <ul>
+ *   <li>{@link ImmutableCell} — local let-bindings and builtins (not reassignable)
+ *   <li>{@link MutableCell} — {@code :!} mutable bindings (reassignable via {@code <-})
+ *   <li>{@link VarCell} — top-level definitions (Clojure-style Var indirection;
+ *       redefinition updates in-place so closures see the new value)
+ * </ul>
  */
 public final class Environment {
     private final Environment parent;
@@ -16,7 +24,7 @@ public final class Environment {
 
     // ── Cell types ──────────────────────────────────────────────────────
 
-    public sealed interface Cell permits ImmutableCell, MutableCell {}
+    public sealed interface Cell permits ImmutableCell, MutableCell, VarCell {}
 
     public record ImmutableCell(Object value) implements Cell {}
 
@@ -38,6 +46,44 @@ public final class Environment {
         @Override
         public String toString() {
             return "MutableCell(" + value + ")";
+        }
+    }
+
+    /**
+     * A rebindable top-level binding (analogous to Clojure's Var).
+     *
+     * <p>When a function is redefined at the REPL or via hot-reload,
+     * {@code defineVar} updates the existing VarCell in-place. Closures
+     * that captured a child of this environment resolve the name through
+     * the parent chain at call time and see the updated value.
+     *
+     * <p>The {@code volatile} qualifier on {@code value} prepares for
+     * future virtual-thread concurrency (nREPL sessions on separate threads).
+     */
+    public static final class VarCell implements Cell {
+        private final String name;
+        private volatile Object value;
+
+        public VarCell(String name, Object value) {
+            this.name = name;
+            this.value = value;
+        }
+
+        public Object get() {
+            return value;
+        }
+
+        public void set(Object value) {
+            this.value = value;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        @Override
+        public String toString() {
+            return "VarCell(" + name + " = " + value + ")";
         }
     }
 
@@ -69,6 +115,25 @@ public final class Environment {
         bindings.put(name, new MutableCell(value));
     }
 
+    /**
+     * Define a top-level rebindable binding (Var).
+     *
+     * <p>If a {@link VarCell} already exists for this name in <em>this</em>
+     * scope's bindings map, the value is updated in-place. This is the key
+     * semantic: closures holding a child of this environment will see the
+     * new value through parent-chain lookup.
+     *
+     * <p>If no VarCell exists yet, a new one is created.
+     */
+    public void defineVar(String name, Object value) {
+        Cell existing = bindings.get(name);
+        if (existing instanceof VarCell vc) {
+            vc.set(value);
+        } else {
+            bindings.put(name, new VarCell(name, value));
+        }
+    }
+
     /** Look up a variable by name, walking the parent chain. */
     public Object lookup(String name, SourceLoc loc) {
         Cell cell = lookupCell(name);
@@ -78,6 +143,7 @@ public final class Environment {
         return switch (cell) {
             case ImmutableCell(var v) -> v;
             case MutableCell mc -> mc.get();
+            case VarCell vc -> vc.get();
         };
     }
 
@@ -86,7 +152,14 @@ public final class Environment {
         return lookup(name, SourceLoc.UNKNOWN);
     }
 
-    /** Assign to a mutable variable, walking the parent chain. */
+    /**
+     * Assign to a mutable binding ({@code <-}), walking the parent chain.
+     *
+     * <p>Only {@link MutableCell} (created by {@code :!}) supports assignment.
+     * {@link VarCell} bindings are rebindable via {@code defineVar} (a new
+     * {@code :=} declaration), but not via the {@code <-} assignment operator
+     * — they are semantically immutable from the user's perspective.
+     */
     public void assign(String name, Object value, SourceLoc loc) {
         Cell cell = lookupCell(name);
         if (cell == null) {
@@ -102,6 +175,16 @@ public final class Environment {
     /** Check if a name is defined in this scope or any parent. */
     public boolean isDefined(String name) {
         return lookupCell(name) != null;
+    }
+
+    /** Whether this is the root (global) environment. */
+    public boolean isRoot() {
+        return parent == null;
+    }
+
+    /** Read-only view of this scope's bindings (does not include parents). */
+    public Map<String, Cell> getBindings() {
+        return Collections.unmodifiableMap(bindings);
     }
 
     // ── Internal ────────────────────────────────────────────────────────

@@ -1,0 +1,815 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Irij ℑ — Architecture Deep Dive</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700;800&display=swap');
+  body { font-family: 'Inter', sans-serif; }
+  code, pre, .mono { font-family: 'JetBrains Mono', monospace; }
+  .gradient-text { background: linear-gradient(135deg, #6366f1, #a855f7, #ec4899); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .card { backdrop-filter: blur(12px); }
+  .cell-immutable { border-color: #60a5fa; background: rgba(96, 165, 250, 0.08); }
+  .cell-mutable   { border-color: #f97316; background: rgba(249, 115, 22, 0.08); }
+  .cell-var       { border-color: #a855f7; background: rgba(168, 85, 247, 0.08); }
+  .flow-line { stroke-dasharray: 6 3; animation: dash 1s linear infinite; }
+  @keyframes dash { to { stroke-dashoffset: -9; } }
+  .phase-done { border-left-color: #22c55e; }
+  .phase-next { border-left-color: #eab308; }
+  pre { tab-size: 2; }
+  .tooltip { position: relative; }
+  .tooltip:hover::after { content: attr(data-tip); position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: #1e293b; color: #e2e8f0; padding: 4px 10px; border-radius: 6px; font-size: 12px; white-space: nowrap; z-index: 50; }
+  nav a.active { color: #a855f7; border-bottom: 2px solid #a855f7; }
+  details summary { cursor: pointer; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: '▸ '; color: #a855f7; font-weight: bold; }
+  details[open] summary::before { content: '▾ '; }
+  .svg-box { background: #0f172a; border-radius: 12px; padding: 24px; overflow-x: auto; }
+</style>
+</head>
+<body class="bg-slate-950 text-slate-200 leading-relaxed">
+
+<!-- ═══════════════════ NAV ═══════════════════ -->
+<nav class="sticky top-0 z-50 bg-slate-950/90 backdrop-blur border-b border-slate-800">
+  <div class="max-w-7xl mx-auto px-6 py-3 flex items-center gap-8 text-sm overflow-x-auto">
+    <span class="text-xl font-bold gradient-text whitespace-nowrap">ℑ Irij</span>
+    <a href="#overview"    class="text-slate-400 hover:text-white transition">Overview</a>
+    <a href="#pipeline"    class="text-slate-400 hover:text-white transition">Pipeline</a>
+    <a href="#environment" class="text-slate-400 hover:text-white transition">Environment</a>
+    <a href="#cells"       class="text-slate-400 hover:text-white transition">Cells</a>
+    <a href="#values"      class="text-slate-400 hover:text-white transition">Values</a>
+    <a href="#ast"         class="text-slate-400 hover:text-white transition">AST</a>
+    <a href="#interpreter" class="text-slate-400 hover:text-white transition">Interpreter</a>
+    <a href="#nrepl"       class="text-slate-400 hover:text-white transition">nREPL</a>
+    <a href="#phases"      class="text-slate-400 hover:text-white transition">Phases</a>
+  </div>
+</nav>
+
+<!-- ═══════════════════ HERO ═══════════════════ -->
+<header class="max-w-7xl mx-auto px-6 pt-20 pb-16 text-center">
+  <h1 class="text-6xl font-extrabold gradient-text mb-4">Architecture Deep Dive</h1>
+  <p class="text-slate-400 text-lg max-w-2xl mx-auto">How every byte of Irij source becomes a running program — from ANTLR tokens through AST nodes to VarCells and nREPL sessions.</p>
+  <div class="mt-8 flex justify-center gap-4 text-sm">
+    <span class="bg-green-500/10 text-green-400 px-3 py-1 rounded-full border border-green-500/30">235 tests passing</span>
+    <span class="bg-purple-500/10 text-purple-400 px-3 py-1 rounded-full border border-purple-500/30">Java 25 + ANTLR 4</span>
+    <span class="bg-blue-500/10 text-blue-400 px-3 py-1 rounded-full border border-blue-500/30">Phase 2.5 Complete</span>
+  </div>
+</header>
+
+<!-- ═══════════════════ 1. HIGH-LEVEL OVERVIEW ═══════════════════ -->
+<section id="overview" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">System Overview</h2>
+
+  <div class="svg-box mb-8">
+    <svg viewBox="0 0 900 200" class="w-full" style="max-height:220px">
+      <!-- Boxes -->
+      <rect x="20"  y="60" width="130" height="80" rx="12" fill="#1e293b" stroke="#6366f1" stroke-width="2"/>
+      <rect x="190" y="60" width="130" height="80" rx="12" fill="#1e293b" stroke="#818cf8" stroke-width="2"/>
+      <rect x="360" y="60" width="130" height="80" rx="12" fill="#1e293b" stroke="#a855f7" stroke-width="2"/>
+      <rect x="530" y="60" width="130" height="80" rx="12" fill="#1e293b" stroke="#c084fc" stroke-width="2"/>
+      <rect x="700" y="60" width="130" height="80" rx="12" fill="#1e293b" stroke="#22c55e" stroke-width="2"/>
+      <!-- Labels -->
+      <text x="85"  y="95"  text-anchor="middle" fill="#c7d2fe" font-size="13" font-weight="600">Source</text>
+      <text x="85"  y="115" text-anchor="middle" fill="#94a3b8" font-size="11">.irj file / REPL</text>
+      <text x="255" y="95"  text-anchor="middle" fill="#c7d2fe" font-size="13" font-weight="600">Lexer</text>
+      <text x="255" y="115" text-anchor="middle" fill="#94a3b8" font-size="11">INDENT / DEDENT</text>
+      <text x="425" y="95"  text-anchor="middle" fill="#c7d2fe" font-size="13" font-weight="600">Parser</text>
+      <text x="425" y="115" text-anchor="middle" fill="#94a3b8" font-size="11">ANTLR4 CST</text>
+      <text x="595" y="95"  text-anchor="middle" fill="#c7d2fe" font-size="13" font-weight="600">AstBuilder</text>
+      <text x="595" y="115" text-anchor="middle" fill="#94a3b8" font-size="11">Sealed Records</text>
+      <text x="765" y="95"  text-anchor="middle" fill="#c7d2fe" font-size="13" font-weight="600">Interpreter</text>
+      <text x="765" y="115" text-anchor="middle" fill="#94a3b8" font-size="11">Tree-walk eval</text>
+      <!-- Arrows -->
+      <line x1="150" y1="100" x2="190" y2="100" stroke="#475569" stroke-width="2" marker-end="url(#arrowGrey)"/>
+      <line x1="320" y1="100" x2="360" y2="100" stroke="#475569" stroke-width="2" marker-end="url(#arrowGrey)"/>
+      <line x1="490" y1="100" x2="530" y2="100" stroke="#475569" stroke-width="2" marker-end="url(#arrowGrey)"/>
+      <line x1="660" y1="100" x2="700" y2="100" stroke="#475569" stroke-width="2" marker-end="url(#arrowGrey)"/>
+      <!-- Arrow labels -->
+      <text x="170" y="90" text-anchor="middle" fill="#64748b" font-size="10">chars</text>
+      <text x="340" y="90" text-anchor="middle" fill="#64748b" font-size="10">tokens</text>
+      <text x="510" y="90" text-anchor="middle" fill="#64748b" font-size="10">CST</text>
+      <text x="680" y="90" text-anchor="middle" fill="#64748b" font-size="10">AST</text>
+      <text x="830" y="90" text-anchor="middle" fill="#64748b" font-size="10">Object</text>
+      <!-- Arrow markers -->
+      <defs>
+        <marker id="arrowGrey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#475569"/>
+        </marker>
+        <marker id="arrowPurple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#a855f7"/>
+        </marker>
+        <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#22c55e"/>
+        </marker>
+      </defs>
+    </svg>
+  </div>
+
+  <div class="grid md:grid-cols-3 gap-4">
+    <div class="bg-slate-900 rounded-xl p-5 border border-slate-800">
+      <div class="text-indigo-400 font-semibold mb-2">📝 Parse Driver</div>
+      <code class="text-sm text-slate-300">IrijParseDriver</code>
+      <p class="text-slate-500 text-sm mt-2">Wires Lexer → Parser. Three entry points: <code>parse(String)</code>, <code>parseFile(Path)</code>, <code>tokenize(String)</code>.</p>
+    </div>
+    <div class="bg-slate-900 rounded-xl p-5 border border-slate-800">
+      <div class="text-purple-400 font-semibold mb-2">🌳 AstBuilder</div>
+      <code class="text-sm text-slate-300">AstBuilder extends IrijParserBaseVisitor</code>
+      <p class="text-slate-500 text-sm mt-2">ANTLR CST → sealed Java records. Handles collection flattening, string interpolation re-parse.</p>
+    </div>
+    <div class="bg-slate-900 rounded-xl p-5 border border-slate-800">
+      <div class="text-green-400 font-semibold mb-2">⚡ Interpreter</div>
+      <code class="text-sm text-slate-300">Interpreter.run(List&lt;Decl&gt;)</code>
+      <p class="text-slate-500 text-sm mt-2">Tree-walk eval. <code>eval(Expr, Env)</code> → <code>Object</code>. VarCell for hot redefinition.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 2. EVALUATION PIPELINE ═══════════════════ -->
+<section id="pipeline" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">Evaluation Pipeline</h2>
+
+  <div class="svg-box mb-6">
+    <svg viewBox="0 0 900 340" class="w-full" style="max-height:360px">
+      <!-- Source code box -->
+      <rect x="20" y="20" width="200" height="90" rx="10" fill="#1e293b" stroke="#6366f1" stroke-width="1.5"/>
+      <text x="120" y="50" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="600">Irij Source</text>
+      <text x="120" y="72" text-anchor="middle" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">fn double</text>
+      <text x="120" y="86" text-anchor="middle" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">  (x -&gt; x * 2)</text>
+
+      <!-- IrijLexerBase -->
+      <rect x="260" y="20" width="200" height="90" rx="10" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+      <text x="360" y="45" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="600">IrijLexerBase</text>
+      <text x="360" y="65" text-anchor="middle" fill="#94a3b8" font-size="10">Indent stack: [0]</text>
+      <text x="360" y="80" text-anchor="middle" fill="#94a3b8" font-size="10">Post-process all tokens</text>
+      <text x="360" y="95" text-anchor="middle" fill="#fbbf24" font-size="10">+ INDENT / DEDENT</text>
+
+      <!-- Token stream -->
+      <rect x="500" y="20" width="200" height="90" rx="10" fill="#1e293b" stroke="#a78bfa" stroke-width="1.5"/>
+      <text x="600" y="45" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="600">Token Stream</text>
+      <text x="600" y="63" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">FN "double" NL INDENT</text>
+      <text x="600" y="77" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">LPAREN IDENT "x" ARROW</text>
+      <text x="600" y="91" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">IDENT "x" STAR INT 2</text>
+
+      <!-- Parser -->
+      <rect x="740" y="20" width="140" height="90" rx="10" fill="#1e293b" stroke="#c084fc" stroke-width="1.5"/>
+      <text x="810" y="50" text-anchor="middle" fill="#a5b4fc" font-size="12" font-weight="600">ANTLR4 Parser</text>
+      <text x="810" y="70" text-anchor="middle" fill="#94a3b8" font-size="10">LL(*) parse</text>
+      <text x="810" y="85" text-anchor="middle" fill="#94a3b8" font-size="10">→ Concrete ST</text>
+
+      <!-- Arrows top row -->
+      <line x1="220" y1="65" x2="260" y2="65" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="460" y1="65" x2="500" y2="65" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="700" y1="65" x2="740" y2="65" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+
+      <!-- AstBuilder -->
+      <rect x="500" y="140" width="200" height="90" rx="10" fill="#1e293b" stroke="#a855f7" stroke-width="1.5"/>
+      <text x="600" y="167" text-anchor="middle" fill="#d8b4fe" font-size="12" font-weight="600">AstBuilder</text>
+      <text x="600" y="185" text-anchor="middle" fill="#94a3b8" font-size="10">CST → Sealed Records</text>
+      <text x="600" y="200" text-anchor="middle" fill="#94a3b8" font-size="10">Expr, Stmt, Decl, Pattern</text>
+      <text x="600" y="215" text-anchor="middle" fill="#fbbf24" font-size="10">String interp re-parse</text>
+
+      <!-- Arrow from Parser to AstBuilder -->
+      <path d="M 810 110 L 810 160 L 700 185" fill="none" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+
+      <!-- AST nodes -->
+      <rect x="260" y="140" width="200" height="90" rx="10" fill="#1e293b" stroke="#8b5cf6" stroke-width="1.5"/>
+      <text x="360" y="165" text-anchor="middle" fill="#d8b4fe" font-size="12" font-weight="600">AST</text>
+      <text x="360" y="183" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">FnDecl("double", LambdaBody(</text>
+      <text x="360" y="197" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">  [VarPat("x")],</text>
+      <text x="360" y="211" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">  BinaryOp("*", Var("x"), 2)</text>
+
+      <!-- Arrow from AstBuilder to AST -->
+      <line x1="500" y1="185" x2="460" y2="185" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+
+      <!-- Interpreter -->
+      <rect x="20" y="140" width="200" height="90" rx="10" fill="#1e293b" stroke="#22c55e" stroke-width="1.5"/>
+      <text x="120" y="165" text-anchor="middle" fill="#86efac" font-size="12" font-weight="600">Interpreter</text>
+      <text x="120" y="183" text-anchor="middle" fill="#94a3b8" font-size="10">execDecl → makeFnValue</text>
+      <text x="120" y="198" text-anchor="middle" fill="#94a3b8" font-size="10">→ Lambda(params, body, env)</text>
+      <text x="120" y="213" text-anchor="middle" fill="#22c55e" font-size="10">defineVar("double", λ)</text>
+
+      <!-- Arrow from AST to Interpreter -->
+      <line x1="260" y1="185" x2="220" y2="185" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+
+      <!-- Environment -->
+      <rect x="20" y="260" width="360" height="60" rx="10" fill="#1e293b" stroke="#a855f7" stroke-width="1.5"/>
+      <text x="200" y="285" text-anchor="middle" fill="#d8b4fe" font-size="12" font-weight="600">Global Environment</text>
+      <text x="200" y="303" text-anchor="middle" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">{ "double" → VarCell(λ), "println" → ImmutableCell(BuiltinFn), ... }</text>
+
+      <!-- Arrow from Interpreter to Environment -->
+      <line x1="120" y1="230" x2="120" y2="260" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arrowPurple)"/>
+    </svg>
+  </div>
+
+  <div class="bg-slate-900 rounded-xl p-5 border border-slate-800 text-sm">
+    <p class="text-slate-400"><strong class="text-slate-200">Key insight:</strong> The lexer does the heavy lifting for Python-style indentation. <code>IrijLexerBase</code> post-processes <em>every token</em> from ANTLR's generated lexer, injecting synthetic <code>INDENT</code>/<code>DEDENT</code> tokens based on an indent stack. Parens suppress indentation tracking (newlines inside <code>()</code>, <code>[]</code>, <code>{}</code> are ignored).</p>
+  </div>
+</section>
+
+<!-- ═══════════════════ 3. ENVIRONMENT & SCOPE CHAIN ═══════════════════ -->
+<section id="environment" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">Environment &amp; Scope Chain</h2>
+
+  <div class="svg-box mb-6">
+    <svg viewBox="0 0 820 320" class="w-full" style="max-height:340px">
+      <!-- Global env -->
+      <rect x="20" y="20" width="300" height="130" rx="12" fill="#1e293b" stroke="#a855f7" stroke-width="2"/>
+      <text x="170" y="48" text-anchor="middle" fill="#d8b4fe" font-size="14" font-weight="700">Global Environment</text>
+      <text x="35" y="72" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">parent: null  (isRoot = true)</text>
+      <line x1="30" y1="80" x2="310" y2="80" stroke="#334155" stroke-width="1"/>
+      <text x="35" y="98"  fill="#c084fc" font-size="10" font-family="JetBrains Mono">"double"  → VarCell(λ)</text>
+      <text x="35" y="114" fill="#60a5fa" font-size="10" font-family="JetBrains Mono">"println" → ImmutableCell(BuiltinFn)</text>
+      <text x="35" y="130" fill="#60a5fa" font-size="10" font-family="JetBrains Mono">"true"    → ImmutableCell(Boolean)</text>
+      <text x="35" y="146" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">...50+ builtins...</text>
+
+      <!-- Child env (fn call) -->
+      <rect x="380" y="80" width="250" height="100" rx="12" fill="#1e293b" stroke="#6366f1" stroke-width="2"/>
+      <text x="505" y="108" text-anchor="middle" fill="#a5b4fc" font-size="14" font-weight="700">Call Environment</text>
+      <text x="395" y="130" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">parent: → globalEnv</text>
+      <line x1="390" y1="138" x2="620" y2="138" stroke="#334155" stroke-width="1"/>
+      <text x="395" y="155" fill="#60a5fa" font-size="10" font-family="JetBrains Mono">"x" → ImmutableCell(5)</text>
+      <text x="395" y="170" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">;; from pattern match</text>
+
+      <!-- Arrow: child → parent -->
+      <path d="M 380 130 L 340 130 L 340 100 L 320 100" fill="none" stroke="#a855f7" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrowPurple)"/>
+      <text x="348" y="115" fill="#a855f7" font-size="10">parent</text>
+
+      <!-- Closure capture -->
+      <rect x="380" y="220" width="250" height="80" rx="12" fill="#1e293b" stroke="#22c55e" stroke-width="2"/>
+      <text x="505" y="248" text-anchor="middle" fill="#86efac" font-size="14" font-weight="700">Lambda Closure</text>
+      <text x="395" y="268" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">params: [VarPat("x")]</text>
+      <text x="395" y="284" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">body: BinaryOp("*", ...)</text>
+      <text x="395" y="298" fill="#22c55e" font-size="10" font-family="JetBrains Mono">closure: → globalEnv (ref)</text>
+
+      <!-- Arrow: closure → global -->
+      <path d="M 380 282 L 170 282 L 170 150" fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrowGreen)"/>
+      <text x="250" y="275" fill="#22c55e" font-size="10">captured env</text>
+
+      <!-- Lookup path -->
+      <rect x="670" y="20" width="130" height="50" rx="8" fill="#fbbf24" fill-opacity="0.1" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="735" y="40" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="600">lookup("double")</text>
+      <text x="735" y="55" text-anchor="middle" fill="#fbbf24" font-size="9">walks parent chain</text>
+      <path d="M 670 45 L 630 130 L 590 130" fill="none" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="4 2" marker-end="url(#arrowGrey)"/>
+      <path d="M 505 80 L 505 45 L 670 45" fill="none" stroke="#fbbf24" stroke-width="1" stroke-dasharray="4 2"/>
+    </svg>
+  </div>
+
+  <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+    <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-700 flex items-center gap-2">
+      <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+      <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
+      <span class="w-3 h-3 rounded-full bg-green-500/80"></span>
+      <span class="ml-2 text-slate-500 text-xs mono">Environment.java — lookup</span>
+    </div>
+    <pre class="p-5 text-sm text-slate-300 overflow-x-auto"><code class="language-java"><span class="text-purple-400">public</span> Object <span class="text-yellow-300">lookup</span>(String name, SourceLoc loc) {
+    Cell cell = <span class="text-blue-400">lookupCell</span>(name);  <span class="text-slate-500">// walk parent chain</span>
+    <span class="text-purple-400">if</span> (cell == <span class="text-orange-400">null</span>)
+        <span class="text-purple-400">throw new</span> IrijRuntimeError(<span class="text-green-400">"Undefined variable: "</span> + name, loc);
+    <span class="text-purple-400">return switch</span> (cell) {
+        <span class="text-purple-400">case</span> <span class="text-blue-300">ImmutableCell</span>(<span class="text-purple-400">var</span> v) -> v;
+        <span class="text-purple-400">case</span> <span class="text-orange-300">MutableCell</span> mc    -> mc.<span class="text-yellow-300">get</span>();
+        <span class="text-purple-400">case</span> <span class="text-purple-300">VarCell</span> vc        -> vc.<span class="text-yellow-300">get</span>();
+    };
+}
+
+<span class="text-purple-400">private</span> Cell <span class="text-yellow-300">lookupCell</span>(String name) {
+    Cell cell = bindings.<span class="text-yellow-300">get</span>(name);
+    <span class="text-purple-400">if</span> (cell != <span class="text-orange-400">null</span>) <span class="text-purple-400">return</span> cell;
+    <span class="text-purple-400">if</span> (parent != <span class="text-orange-400">null</span>) <span class="text-purple-400">return</span> parent.<span class="text-yellow-300">lookupCell</span>(name);  <span class="text-slate-500">// ↑ recurse</span>
+    <span class="text-purple-400">return null</span>;
+}</code></pre>
+  </div>
+</section>
+
+<!-- ═══════════════════ 4. CELL HIERARCHY ═══════════════════ -->
+<section id="cells" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">Cell Hierarchy — The Heart of Bindings</h2>
+
+  <div class="grid md:grid-cols-3 gap-5 mb-8">
+    <!-- ImmutableCell -->
+    <div class="rounded-xl p-5 border-2 cell-immutable">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-4 h-4 rounded-full bg-blue-400"></span>
+        <span class="font-bold text-blue-300 text-lg">ImmutableCell</span>
+      </div>
+      <p class="text-slate-400 text-sm mb-3">Local bindings &amp; builtins. Cannot be reassigned or redefined.</p>
+      <pre class="text-xs bg-slate-950 rounded-lg p-3 text-blue-200"><code>record ImmutableCell(Object value)
+    implements Cell {}</code></pre>
+      <div class="mt-3 text-xs text-slate-500">
+        <div>✅ <code>x := 42</code> inside a function body</div>
+        <div>✅ <code>println</code>, <code>head</code>, <code>true</code></div>
+        <div>❌ <code>x &lt;- 0</code> → error</div>
+      </div>
+    </div>
+
+    <!-- MutableCell -->
+    <div class="rounded-xl p-5 border-2 cell-mutable">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-4 h-4 rounded-full bg-orange-400"></span>
+        <span class="font-bold text-orange-300 text-lg">MutableCell</span>
+      </div>
+      <p class="text-slate-400 text-sm mb-3">Explicit mutable bindings via <code>:!</code>. Reassignable via <code>&lt;-</code>.</p>
+      <pre class="text-xs bg-slate-950 rounded-lg p-3 text-orange-200"><code>class MutableCell implements Cell {
+    private Object value;
+    void set(Object v) { value = v; }
+    Object get() { return value; }
+}</code></pre>
+      <div class="mt-3 text-xs text-slate-500">
+        <div>✅ <code>counter :! 0</code></div>
+        <div>✅ <code>counter &lt;- counter + 1</code></div>
+        <div>🔗 Closures capture by reference</div>
+      </div>
+    </div>
+
+    <!-- VarCell -->
+    <div class="rounded-xl p-5 border-2 cell-var">
+      <div class="flex items-center gap-2 mb-3">
+        <span class="w-4 h-4 rounded-full bg-purple-400"></span>
+        <span class="font-bold text-purple-300 text-lg">VarCell</span>
+        <span class="text-xs bg-purple-500/20 text-purple-400 px-2 py-0.5 rounded-full">Phase 2.5</span>
+      </div>
+      <p class="text-slate-400 text-sm mb-3">Top-level rebindable. Clojure-style Var. Updated in-place on redef.</p>
+      <pre class="text-xs bg-slate-950 rounded-lg p-3 text-purple-200"><code>class VarCell implements Cell {
+    volatile Object value; // thread-safe
+    void set(Object v) { value = v; }
+    Object get() { return value; }
+}</code></pre>
+      <div class="mt-3 text-xs text-slate-500">
+        <div>✅ <code>fn f (x -&gt; x + 1)</code> at top level</div>
+        <div>✅ <code>fn f (x -&gt; x * 10)</code> redefinition</div>
+        <div>❌ <code>f &lt;- ...</code> → error (use <code>:=</code>)</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- VarCell Hot Redefinition Flow -->
+  <div class="svg-box">
+    <p class="text-slate-500 text-sm mb-3 font-semibold">Hot Redefinition — Why VarCell Matters</p>
+    <svg viewBox="0 0 800 230" class="w-full" style="max-height:240px">
+      <!-- Step 1 -->
+      <rect x="10" y="10" width="170" height="60" rx="8" fill="#1e293b" stroke="#a855f7" stroke-width="1.5"/>
+      <text x="95" y="33" text-anchor="middle" fill="#d8b4fe" font-size="11" font-weight="600">① Define fn helper</text>
+      <text x="95" y="50" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">(x → x + 1)</text>
+
+      <!-- Step 2 -->
+      <rect x="200" y="10" width="170" height="60" rx="8" fill="#1e293b" stroke="#6366f1" stroke-width="1.5"/>
+      <text x="285" y="33" text-anchor="middle" fill="#a5b4fc" font-size="11" font-weight="600">② Define fn caller</text>
+      <text x="285" y="50" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">(x → helper x)</text>
+
+      <!-- Step 3 -->
+      <rect x="390" y="10" width="170" height="60" rx="8" fill="#1e293b" stroke="#f97316" stroke-width="1.5"/>
+      <text x="475" y="33" text-anchor="middle" fill="#fdba74" font-size="11" font-weight="600">③ Redefine helper</text>
+      <text x="475" y="50" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">(x → x + 100)</text>
+
+      <!-- Step 4 -->
+      <rect x="580" y="10" width="200" height="60" rx="8" fill="#1e293b" stroke="#22c55e" stroke-width="2"/>
+      <text x="680" y="33" text-anchor="middle" fill="#86efac" font-size="11" font-weight="600">④ caller 5 → 105 ✓</text>
+      <text x="680" y="50" text-anchor="middle" fill="#22c55e" font-size="9">Name lookup sees new helper!</text>
+
+      <!-- Environment state -->
+      <rect x="10" y="90" width="370" height="55" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="195" y="112" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="600">Global Environment (after step ③)</text>
+      <text x="22" y="132" fill="#c084fc" font-size="9" font-family="JetBrains Mono">"helper" → VarCell ━━ .set(λ₂) ━━▸ λ₂ = (x → x + 100)</text>
+
+      <!-- call env -->
+      <rect x="10" y="160" width="370" height="55" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="195" y="182" text-anchor="middle" fill="#94a3b8" font-size="10" font-weight="600">caller's Closure → child of Global</text>
+      <text x="22" y="200" fill="#fbbf24" font-size="9" font-family="JetBrains Mono">lookup("helper") → walks parent → VarCell.get() → λ₂ ✓</text>
+
+      <!-- arrows -->
+      <line x1="180" y1="40" x2="200" y2="40" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="370" y1="40" x2="390" y2="40" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="560" y1="40" x2="580" y2="40" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+    </svg>
+  </div>
+
+  <div class="mt-6 bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+    <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-700 flex items-center gap-2">
+      <span class="w-3 h-3 rounded-full bg-red-500/80"></span>
+      <span class="w-3 h-3 rounded-full bg-yellow-500/80"></span>
+      <span class="w-3 h-3 rounded-full bg-green-500/80"></span>
+      <span class="ml-2 text-slate-500 text-xs mono">Interpreter.java — defineInScope</span>
+    </div>
+    <pre class="p-5 text-sm text-slate-300 overflow-x-auto"><code><span class="text-slate-500">/** VarCell at global scope, ImmutableCell locally. */</span>
+<span class="text-purple-400">private void</span> <span class="text-yellow-300">defineInScope</span>(Environment env, String name, Object value) {
+    <span class="text-purple-400">if</span> (env == globalEnv) {
+        env.<span class="text-purple-300">defineVar</span>(name, value);   <span class="text-slate-500">// updates in-place if exists</span>
+    } <span class="text-purple-400">else</span> {
+        env.<span class="text-blue-300">define</span>(name, value);      <span class="text-slate-500">// local: ImmutableCell</span>
+    }
+}</code></pre>
+  </div>
+</section>
+
+<!-- ═══════════════════ 5. RUNTIME VALUES ═══════════════════ -->
+<section id="values" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">Runtime Values</h2>
+
+  <div class="grid md:grid-cols-2 gap-5">
+    <!-- Left: type table -->
+    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+      <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-700">
+        <span class="text-slate-300 font-semibold">Irij Type → Java Representation</span>
+      </div>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-800">
+            <th class="text-left px-5 py-2 text-slate-500 font-normal">Irij</th>
+            <th class="text-left px-5 py-2 text-slate-500 font-normal">Java</th>
+            <th class="text-left px-5 py-2 text-slate-500 font-normal">Example</th>
+          </tr>
+        </thead>
+        <tbody class="text-slate-300">
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-blue-300">Int</td><td class="px-5 py-1.5 mono text-xs">Long</td><td class="px-5 py-1.5 mono text-xs text-slate-500">42</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-blue-300">Float</td><td class="px-5 py-1.5 mono text-xs">Double</td><td class="px-5 py-1.5 mono text-xs text-slate-500">3.14</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-blue-300">Rational</td><td class="px-5 py-1.5 mono text-xs">Values.Rational</td><td class="px-5 py-1.5 mono text-xs text-slate-500">2/3</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-blue-300">Bool</td><td class="px-5 py-1.5 mono text-xs">Boolean</td><td class="px-5 py-1.5 mono text-xs text-slate-500">true</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-blue-300">Str</td><td class="px-5 py-1.5 mono text-xs">String</td><td class="px-5 py-1.5 mono text-xs text-slate-500">"hello"</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-blue-300">Keyword</td><td class="px-5 py-1.5 mono text-xs">Values.Keyword</td><td class="px-5 py-1.5 mono text-xs text-slate-500">:ok</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-blue-300">Unit</td><td class="px-5 py-1.5 mono text-xs">Values.UNIT</td><td class="px-5 py-1.5 mono text-xs text-slate-500">()</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-green-300">Vector</td><td class="px-5 py-1.5 mono text-xs">IrijVector</td><td class="px-5 py-1.5 mono text-xs text-slate-500">#[1 2 3]</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-green-300">Set</td><td class="px-5 py-1.5 mono text-xs">IrijSet</td><td class="px-5 py-1.5 mono text-xs text-slate-500">#{1 2 3}</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-green-300">Map</td><td class="px-5 py-1.5 mono text-xs">IrijMap</td><td class="px-5 py-1.5 mono text-xs text-slate-500">{name= "Jo"}</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-green-300">Tuple</td><td class="px-5 py-1.5 mono text-xs">IrijTuple</td><td class="px-5 py-1.5 mono text-xs text-slate-500">#(1 :ok)</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-green-300">Range</td><td class="px-5 py-1.5 mono text-xs">IrijRange</td><td class="px-5 py-1.5 mono text-xs text-slate-500">1 .. 10</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-purple-300">Lambda</td><td class="px-5 py-1.5 mono text-xs">Values.Lambda</td><td class="px-5 py-1.5 mono text-xs text-slate-500">(x → x + 1)</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-purple-300">BuiltinFn</td><td class="px-5 py-1.5 mono text-xs">Values.BuiltinFn</td><td class="px-5 py-1.5 mono text-xs text-slate-500">println</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-purple-300">Partial</td><td class="px-5 py-1.5 mono text-xs">PartialApp</td><td class="px-5 py-1.5 mono text-xs text-slate-500">add 1</td></tr>
+          <tr class="border-b border-slate-800/50"><td class="px-5 py-1.5 text-orange-300">Tagged</td><td class="px-5 py-1.5 mono text-xs">Values.Tagged</td><td class="px-5 py-1.5 mono text-xs text-slate-500">Some 42</td></tr>
+          <tr><td class="px-5 py-1.5 text-orange-300">Constructor</td><td class="px-5 py-1.5 mono text-xs">Values.Constructor</td><td class="px-5 py-1.5 mono text-xs text-slate-500">Some (arity 1)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Right: Lambda anatomy -->
+    <div>
+      <div class="bg-slate-900 rounded-xl border border-slate-800 p-5 mb-5">
+        <p class="text-slate-300 font-semibold mb-3">Lambda Record (a closure)</p>
+        <pre class="text-sm text-slate-300 overflow-x-auto"><code><span class="text-purple-400">record</span> <span class="text-yellow-300">Lambda</span>(
+    List&lt;Pattern&gt; <span class="text-blue-300">params</span>,    <span class="text-slate-500">// formal parameters</span>
+    Expr           <span class="text-blue-300">body</span>,      <span class="text-slate-500">// expression to evaluate</span>
+    Environment    <span class="text-purple-300">closure</span>,   <span class="text-slate-500">// captured scope (by ref!)</span>
+    String         <span class="text-blue-300">name</span>       <span class="text-slate-500">// null for anonymous</span>
+)</code></pre>
+      </div>
+
+      <div class="bg-slate-900 rounded-xl border border-slate-800 p-5 mb-5">
+        <p class="text-slate-300 font-semibold mb-3">Function Application</p>
+        <pre class="text-sm text-slate-300 overflow-x-auto"><code><span class="text-slate-500">// Interpreter.apply()</span>
+<span class="text-purple-400">case</span> Lambda lam -> {
+    <span class="text-purple-400">if</span> (args.size() &lt; lam.arity())
+        <span class="text-purple-400">yield new</span> PartialApp(lam, args); <span class="text-slate-500">// curry!</span>
+    <span class="text-purple-400">var</span> callEnv = lam.closure().<span class="text-yellow-300">child</span>();
+    <span class="text-slate-500">// bind params via pattern matching</span>
+    <span class="text-purple-400">for</span> (<span class="text-purple-400">int</span> i = 0; i &lt; lam.params().size(); i++)
+        matchPattern(lam.params().get(i), args.get(i), callEnv);
+    <span class="text-purple-400">yield</span> eval(lam.body(), callEnv);
+}</code></pre>
+      </div>
+
+      <div class="bg-slate-900 rounded-xl border border-slate-800 p-5">
+        <p class="text-slate-300 font-semibold mb-3">Seq Ops — Partial Application Pattern</p>
+        <pre class="text-sm text-slate-300 overflow-x-auto"><code><span class="text-slate-500">// /^ (+) → partial waiting for collection</span>
+<span class="text-purple-400">case</span> <span class="text-green-400">"/^"</span> -> <span class="text-purple-400">new</span> BuiltinFn(<span class="text-green-400">"/^-partial"</span>, 1,
+    args -> reduceGeneric(fn, args.get(0), loc));
+
+<span class="text-slate-500">// #[1 2 3] |> /^ (+)  →  6</span></code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 6. AST NODE HIERARCHY ═══════════════════ -->
+<section id="ast" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">AST — Sealed Record Hierarchy</h2>
+  <p class="text-slate-400 mb-6">All AST nodes are Java sealed interfaces with record implementations. The compiler enforces exhaustive pattern matching.</p>
+
+  <div class="grid md:grid-cols-4 gap-4">
+    <!-- Expr -->
+    <div class="bg-slate-900 rounded-xl border border-indigo-500/30 p-4">
+      <div class="text-indigo-400 font-bold mb-3 text-lg">Expr <span class="text-xs text-indigo-500/60">(30+ variants)</span></div>
+      <div class="space-y-1 text-xs mono text-slate-400">
+        <div class="text-blue-300">── Literals ──</div>
+        <div>IntLit, FloatLit, RationalLit</div>
+        <div>HexLit, StrLit, BoolLit</div>
+        <div>KeywordLit, UnitLit</div>
+        <div class="text-blue-300 mt-2">── References ──</div>
+        <div>Var, TypeRef, RoleRef</div>
+        <div class="text-blue-300 mt-2">── Operators ──</div>
+        <div>BinaryOp, UnaryOp</div>
+        <div>OpSection <span class="text-slate-600">(+)</span></div>
+        <div class="text-blue-300 mt-2">── Application ──</div>
+        <div>App, Lambda, Pipe</div>
+        <div>Compose, SeqOp</div>
+        <div class="text-blue-300 mt-2">── Control ──</div>
+        <div>IfExpr, MatchExpr</div>
+        <div class="text-blue-300 mt-2">── Collections ──</div>
+        <div>VectorLit, SetLit</div>
+        <div>TupleLit, MapLit</div>
+        <div>RecordUpdate, Range</div>
+        <div class="text-blue-300 mt-2">── Other ──</div>
+        <div>StringInterp, DotAccess</div>
+        <div>DoExpr, Block</div>
+      </div>
+    </div>
+
+    <!-- Stmt -->
+    <div class="bg-slate-900 rounded-xl border border-orange-500/30 p-4">
+      <div class="text-orange-400 font-bold mb-3 text-lg">Stmt <span class="text-xs text-orange-500/60">(8 variants)</span></div>
+      <div class="space-y-1 text-xs mono text-slate-400">
+        <div>ExprStmt</div>
+        <div class="text-green-400">Bind <span class="text-slate-600">(:=)</span></div>
+        <div class="text-orange-400">MutBind <span class="text-slate-600">(:!)</span></div>
+        <div class="text-orange-400">Assign <span class="text-slate-600">(<-)</span></div>
+        <div>MatchStmt</div>
+        <div>IfStmt</div>
+        <div>With</div>
+        <div>Scope</div>
+        <div class="mt-3 text-blue-300">── BindTarget ──</div>
+        <div>Simple(name)</div>
+        <div>Destructure(pattern)</div>
+      </div>
+    </div>
+
+    <!-- Decl -->
+    <div class="bg-slate-900 rounded-xl border border-purple-500/30 p-4">
+      <div class="text-purple-400 font-bold mb-3 text-lg">Decl <span class="text-xs text-purple-500/60">(16 variants)</span></div>
+      <div class="space-y-1 text-xs mono text-slate-400">
+        <div class="text-purple-300">FnDecl</div>
+        <div class="text-purple-300">TypeDecl</div>
+        <div class="text-purple-300">NewtypeDecl</div>
+        <div>BindingDecl, ExprDecl</div>
+        <div>MatchDecl, IfDecl</div>
+        <div>WithDecl, ScopeDecl</div>
+        <div class="text-slate-600">ModDecl, UseDecl (stub)</div>
+        <div class="text-slate-600">EffectDecl (stub)</div>
+        <div class="text-slate-600">HandlerDecl (stub)</div>
+        <div class="text-slate-600">RoleDecl (stub)</div>
+        <div>PubDecl, StubDecl</div>
+        <div class="mt-3 text-blue-300">── FnBody ──</div>
+        <div>LambdaBody</div>
+        <div>MatchArmsBody</div>
+        <div>ImperativeBody</div>
+        <div>NoBody</div>
+      </div>
+    </div>
+
+    <!-- Pattern -->
+    <div class="bg-slate-900 rounded-xl border border-green-500/30 p-4">
+      <div class="text-green-400 font-bold mb-3 text-lg">Pattern <span class="text-xs text-green-500/60">(11 variants)</span></div>
+      <div class="space-y-1 text-xs mono text-slate-400">
+        <div>VarPat <span class="text-slate-600">x</span></div>
+        <div>WildcardPat <span class="text-slate-600">_</span></div>
+        <div>LitPat <span class="text-slate-600">42</span></div>
+        <div>ConstructorPat <span class="text-slate-600">Some x</span></div>
+        <div>KeywordPat <span class="text-slate-600">:ok x</span></div>
+        <div>UnitPat <span class="text-slate-600">()</span></div>
+        <div>GroupedPat <span class="text-slate-600">(pat)</span></div>
+        <div>VectorPat <span class="text-slate-600">#[a b]</span></div>
+        <div>TuplePat <span class="text-slate-600">#(a b)</span></div>
+        <div>DestructurePat <span class="text-slate-600">{k= v}</span></div>
+        <div>SpreadPat <span class="text-slate-600">...rest</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 7. INTERPRETER DISPATCH ═══════════════════ -->
+<section id="interpreter" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">Interpreter — eval / apply / exec</h2>
+
+  <div class="svg-box mb-6">
+    <svg viewBox="0 0 800 260" class="w-full" style="max-height:280px">
+      <!-- Central eval -->
+      <rect x="300" y="30" width="200" height="60" rx="12" fill="#6366f1" fill-opacity="0.15" stroke="#6366f1" stroke-width="2"/>
+      <text x="400" y="55" text-anchor="middle" fill="#a5b4fc" font-size="16" font-weight="800">eval(Expr, Env)</text>
+      <text x="400" y="75" text-anchor="middle" fill="#818cf8" font-size="10">→ Object</text>
+
+      <!-- Branches -->
+      <rect x="10"  y="130" width="110" height="45" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+      <text x="65"  y="150" text-anchor="middle" fill="#a5b4fc" font-size="10" font-weight="600">Literals</text>
+      <text x="65"  y="165" text-anchor="middle" fill="#94a3b8" font-size="8">IntLit, StrLit...</text>
+
+      <rect x="140" y="130" width="110" height="45" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+      <text x="195" y="150" text-anchor="middle" fill="#a5b4fc" font-size="10" font-weight="600">BinaryOp</text>
+      <text x="195" y="165" text-anchor="middle" fill="#94a3b8" font-size="8">+, -, *, ==, &&...</text>
+
+      <rect x="270" y="130" width="110" height="45" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+      <text x="325" y="150" text-anchor="middle" fill="#a5b4fc" font-size="10" font-weight="600">App</text>
+      <text x="325" y="165" text-anchor="middle" fill="#fbbf24" font-size="8">→ apply(fn, args)</text>
+
+      <rect x="400" y="130" width="110" height="45" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+      <text x="455" y="150" text-anchor="middle" fill="#a5b4fc" font-size="10" font-weight="600">Pipe |&gt;</text>
+      <text x="455" y="165" text-anchor="middle" fill="#94a3b8" font-size="8">eval both → apply</text>
+
+      <rect x="530" y="130" width="110" height="45" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+      <text x="585" y="150" text-anchor="middle" fill="#a5b4fc" font-size="10" font-weight="600">SeqOp</text>
+      <text x="585" y="165" text-anchor="middle" fill="#94a3b8" font-size="8">/+, @, /^, /$...</text>
+
+      <rect x="660" y="130" width="110" height="45" rx="8" fill="#1e293b" stroke="#818cf8" stroke-width="1.5"/>
+      <text x="715" y="150" text-anchor="middle" fill="#a5b4fc" font-size="10" font-weight="600">MatchExpr</text>
+      <text x="715" y="165" text-anchor="middle" fill="#94a3b8" font-size="8">pattern matching</text>
+
+      <!-- Lines from eval -->
+      <line x1="320" y1="90" x2="65"  y2="130" stroke="#4f46e5" stroke-width="1" stroke-opacity="0.5"/>
+      <line x1="340" y1="90" x2="195" y2="130" stroke="#4f46e5" stroke-width="1" stroke-opacity="0.5"/>
+      <line x1="370" y1="90" x2="325" y2="130" stroke="#4f46e5" stroke-width="1" stroke-opacity="0.5"/>
+      <line x1="430" y1="90" x2="455" y2="130" stroke="#4f46e5" stroke-width="1" stroke-opacity="0.5"/>
+      <line x1="460" y1="90" x2="585" y2="130" stroke="#4f46e5" stroke-width="1" stroke-opacity="0.5"/>
+      <line x1="480" y1="90" x2="715" y2="130" stroke="#4f46e5" stroke-width="1" stroke-opacity="0.5"/>
+
+      <!-- Apply box -->
+      <rect x="220" y="200" width="360" height="50" rx="10" fill="#22c55e" fill-opacity="0.1" stroke="#22c55e" stroke-width="2"/>
+      <text x="400" y="222" text-anchor="middle" fill="#86efac" font-size="14" font-weight="800">apply(fn, args, loc)</text>
+      <text x="400" y="240" text-anchor="middle" fill="#4ade80" font-size="9">Lambda | BuiltinFn | Constructor | PartialApp | ComposedFn | MatchFn | ImperativeFn</text>
+      <line x1="325" y1="175" x2="350" y2="200" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrowGreen)"/>
+    </svg>
+  </div>
+
+  <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+    <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-700">
+      <span class="text-slate-300 font-semibold mono text-sm">Three function forms in Irij</span>
+    </div>
+    <div class="grid md:grid-cols-3 divide-x divide-slate-800">
+      <div class="p-4">
+        <div class="text-purple-400 font-semibold mb-2">Lambda Body</div>
+        <pre class="text-xs text-slate-400"><code>fn double
+  (x -> x * 2)</code></pre>
+        <p class="text-xs text-slate-600 mt-2">→ <code>Lambda(params, body, env)</code></p>
+      </div>
+      <div class="p-4">
+        <div class="text-purple-400 font-semibold mb-2">Match Arms</div>
+        <pre class="text-xs text-slate-400"><code>fn fib
+  0 => 0
+  1 => 1
+  n => fib (n-1) + fib (n-2)</code></pre>
+        <p class="text-xs text-slate-600 mt-2">→ <code>MatchFn(name, arms, env)</code></p>
+      </div>
+      <div class="p-4">
+        <div class="text-purple-400 font-semibold mb-2">Imperative Block</div>
+        <pre class="text-xs text-slate-400"><code>fn greet
+  => name
+  println "Hello ${name}"</code></pre>
+        <p class="text-xs text-slate-600 mt-2">→ <code>ImperativeFn(name, params, stmts, env)</code></p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 8. nREPL SERVER ═══════════════════ -->
+<section id="nrepl" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">nREPL Server Architecture</h2>
+
+  <div class="svg-box mb-6">
+    <svg viewBox="0 0 800 300" class="w-full" style="max-height:320px">
+      <!-- Editor -->
+      <rect x="20" y="30" width="150" height="70" rx="10" fill="#1e293b" stroke="#6366f1" stroke-width="2"/>
+      <text x="95" y="60" text-anchor="middle" fill="#a5b4fc" font-size="13" font-weight="600">Editor</text>
+      <text x="95" y="78" text-anchor="middle" fill="#94a3b8" font-size="10">CIDER / vim-fireplace</text>
+
+      <!-- TCP -->
+      <rect x="220" y="30" width="120" height="70" rx="10" fill="#1e293b" stroke="#475569" stroke-width="1.5"/>
+      <text x="280" y="60" text-anchor="middle" fill="#94a3b8" font-size="12" font-weight="600">TCP Socket</text>
+      <text x="280" y="78" text-anchor="middle" fill="#64748b" font-size="10">bencode wire</text>
+
+      <!-- NReplServer -->
+      <rect x="390" y="10" width="200" height="100" rx="12" fill="#1e293b" stroke="#a855f7" stroke-width="2"/>
+      <text x="490" y="38" text-anchor="middle" fill="#d8b4fe" font-size="14" font-weight="700">NReplServer</text>
+      <text x="490" y="57" text-anchor="middle" fill="#94a3b8" font-size="10">ServerSocket + VirtualThreads</text>
+      <text x="490" y="72" text-anchor="middle" fill="#94a3b8" font-size="10">ConcurrentHashMap&lt;sessions&gt;</text>
+      <text x="490" y="90" text-anchor="middle" fill="#fbbf24" font-size="9">.nrepl-port file</text>
+
+      <!-- Sessions -->
+      <rect x="350" y="140" width="180" height="70" rx="10" fill="#1e293b" stroke="#22c55e" stroke-width="1.5"/>
+      <text x="440" y="165" text-anchor="middle" fill="#86efac" font-size="12" font-weight="600">NReplSession A</text>
+      <text x="440" y="182" text-anchor="middle" fill="#94a3b8" font-size="9">Interpreter + IndirectOut</text>
+      <text x="440" y="197" text-anchor="middle" fill="#94a3b8" font-size="9">UUID: 3f2a...</text>
+
+      <rect x="560" y="140" width="180" height="70" rx="10" fill="#1e293b" stroke="#22c55e" stroke-width="1.5"/>
+      <text x="650" y="165" text-anchor="middle" fill="#86efac" font-size="12" font-weight="600">NReplSession B</text>
+      <text x="650" y="182" text-anchor="middle" fill="#94a3b8" font-size="9">Interpreter + IndirectOut</text>
+      <text x="650" y="197" text-anchor="middle" fill="#94a3b8" font-size="9">UUID: a7b1...</text>
+
+      <!-- IndirectOutputStream detail -->
+      <rect x="350" y="240" width="390" height="50" rx="8" fill="#fbbf24" fill-opacity="0.06" stroke="#fbbf24" stroke-width="1.5"/>
+      <text x="545" y="262" text-anchor="middle" fill="#fbbf24" font-size="11" font-weight="600">IndirectOutputStream</text>
+      <text x="545" y="278" text-anchor="middle" fill="#fbbf24" font-size="9">Per-eval: swap target → ByteArrayOutputStream → capture stdout → swap back</text>
+
+      <!-- Arrows -->
+      <line x1="170" y1="65" x2="220" y2="65" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="340" y1="65" x2="390" y2="65" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="450" y1="110" x2="440" y2="140" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="530" y1="110" x2="650" y2="140" stroke="#475569" stroke-width="1.5" marker-end="url(#arrowGrey)"/>
+      <line x1="440" y1="210" x2="440" y2="240" stroke="#fbbf24" stroke-width="1" stroke-dasharray="4 2" marker-end="url(#arrowGrey)"/>
+      <line x1="650" y1="210" x2="650" y2="240" stroke="#fbbf24" stroke-width="1" stroke-dasharray="4 2" marker-end="url(#arrowGrey)"/>
+
+      <!-- Labels -->
+      <text x="195" y="55" text-anchor="middle" fill="#64748b" font-size="9">bencode</text>
+      <text x="365" y="55" text-anchor="middle" fill="#64748b" font-size="9">decode</text>
+    </svg>
+  </div>
+
+  <div class="grid md:grid-cols-2 gap-5">
+    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+      <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-700">
+        <span class="text-slate-300 font-semibold mono text-sm">Bencode Wire Format</span>
+      </div>
+      <pre class="p-5 text-sm text-slate-300 overflow-x-auto"><code><span class="text-slate-500">── Request (editor → server) ──</span>
+d
+  2:op   4:eval
+  4:code 5:1 + 2
+  7:session 36:3f2a-...
+  2:id   1:1
+e
+
+<span class="text-slate-500">── Response (server → editor) ──</span>
+d
+  5:value 1:3
+  6:status l4:donee
+  7:session 36:3f2a-...
+  2:id   1:1
+e</code></pre>
+    </div>
+
+    <div class="bg-slate-900 rounded-xl border border-slate-800 overflow-hidden">
+      <div class="px-5 py-3 bg-slate-800/50 border-b border-slate-700">
+        <span class="text-slate-300 font-semibold mono text-sm">Output Capture (the IndirectOutputStream trick)</span>
+      </div>
+      <pre class="p-5 text-sm text-slate-300 overflow-x-auto"><code><span class="text-slate-500">// Problem: Builtins capture PrintStream at construction</span>
+<span class="text-slate-500">// Solution: PrintStream wraps IndirectOutputStream</span>
+
+<span class="text-purple-400">var</span> capture = <span class="text-purple-400">new</span> ByteArrayOutputStream();
+<span class="text-purple-400">var</span> old = indirectOut.<span class="text-yellow-300">setTarget</span>(capture);
+<span class="text-purple-400">try</span> {
+    <span class="text-slate-500">// println calls go to capture now!</span>
+    interpreter.run(ast);
+    String stdout = capture.toString();
+} <span class="text-purple-400">finally</span> {
+    indirectOut.<span class="text-yellow-300">setTarget</span>(old); <span class="text-slate-500">// restore</span>
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ 9. PHASE ROADMAP ═══════════════════ -->
+<section id="phases" class="max-w-7xl mx-auto px-6 py-12">
+  <h2 class="text-3xl font-bold mb-8">Phase Roadmap</h2>
+
+  <div class="space-y-4">
+    <div class="bg-slate-900 rounded-xl border-l-4 phase-done p-5 flex items-start gap-4">
+      <span class="text-green-400 text-2xl">✅</span>
+      <div>
+        <div class="font-bold text-slate-200">Phase 0 — Grammar &amp; Parser</div>
+        <p class="text-slate-400 text-sm">ANTLR4 lexer/parser, INDENT/DEDENT, IrijLexerBase, parse driver. <span class="mono text-green-400">64 tests.</span></p>
+      </div>
+    </div>
+    <div class="bg-slate-900 rounded-xl border-l-4 phase-done p-5 flex items-start gap-4">
+      <span class="text-green-400 text-2xl">✅</span>
+      <div>
+        <div class="font-bold text-slate-200">Phase 1 — AST &amp; Tree-Walk Interpreter</div>
+        <p class="text-slate-400 text-sm">Sealed AST records, AstBuilder, eval/apply/exec, builtins, pattern matching, collections, pipelines, seq ops. <span class="mono text-green-400">130 tests.</span></p>
+      </div>
+    </div>
+    <div class="bg-slate-900 rounded-xl border-l-4 phase-done p-5 flex items-start gap-4">
+      <span class="text-green-400 text-2xl">✅</span>
+      <div>
+        <div class="font-bold text-slate-200">Phase 2 — REPL &amp; CLI</div>
+        <p class="text-slate-400 text-sm">JLine3 REPL, IrijCli, example programs, irij-mode.el for Emacs.</p>
+      </div>
+    </div>
+    <div class="bg-slate-900 rounded-xl border-l-4 phase-done p-5 flex items-start gap-4">
+      <span class="text-green-400 text-2xl">✅</span>
+      <div>
+        <div class="font-bold text-slate-200">Phase 2.5 — Interactive Development Foundation</div>
+        <p class="text-slate-400 text-sm">VarCell (Clojure-style Var), nREPL TCP server (bencode), <code>:env</code> command. <span class="mono text-green-400">+41 → 235 total tests.</span></p>
+      </div>
+    </div>
+    <div class="bg-slate-900 rounded-xl border-l-4 phase-next p-5 flex items-start gap-4">
+      <span class="text-yellow-400 text-2xl">⏳</span>
+      <div>
+        <div class="font-bold text-slate-200">Phase 3 — Effects &amp; Handlers</div>
+        <p class="text-slate-400 text-sm">Algebraic effects, <code>with handler expr</code>, effect rows, resume/continuation.</p>
+      </div>
+    </div>
+    <div class="bg-slate-900 rounded-xl border-l-4 border-l-slate-700 p-5 flex items-start gap-4 opacity-60">
+      <span class="text-slate-500 text-2xl">📋</span>
+      <div>
+        <div class="font-bold text-slate-400">Phase 4–8</div>
+        <p class="text-slate-500 text-sm">Modules, concurrency (virtual threads), contracts, choreography, capabilities, JVM interop, GraalVM native.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══════════════════ FOOTER ═══════════════════ -->
+<footer class="max-w-7xl mx-auto px-6 py-12 border-t border-slate-800 text-center">
+  <p class="text-slate-600 text-sm">
+    <span class="gradient-text font-bold">Irij ℑ</span> — AI-first effect-oriented programming language<br>
+    <span class="mono text-xs">Java 25 · ANTLR 4.13.2 · JLine 3.26.3 · 235 tests</span>
+  </p>
+</footer>
+
+</body>
+</html>

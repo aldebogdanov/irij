@@ -911,4 +911,81 @@ class InterpreterTest {
             assertEquals("5", run("println (length \"hello\")"));
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // VarCell / Hot Redefinition
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class VarRedefinition {
+
+        @Test void nameBasedCallSeesRedefinedFn() {
+            assertEquals("105", run("""
+                fn helper
+                  (x -> x + 1)
+                fn caller
+                  (x -> helper x)
+                fn helper
+                  (x -> x + 100)
+                println (caller 5)"""));
+        }
+
+        @Test void topLevelBindRedefVisibleThroughClosure() {
+            assertEquals("2", run("""
+                x := 1
+                fn get-x
+                  (-> x)
+                x := 2
+                println (get-x ())"""));
+        }
+
+        @Test void closureCapturedByValueUnaffected() {
+            // add-n 10 creates a closure with n=10 baked in.
+            // Redefining add-n does NOT affect the existing closure.
+            assertEquals("15", run("""
+                fn add-n
+                  (n -> (x -> n + x))
+                adder := add-n 10
+                fn add-n
+                  (n -> (x -> n * x))
+                println (adder 5)"""));
+        }
+
+        @Test void localBindingsStillImmutable() {
+            // Local bindings inside fn bodies use ImmutableCell, not VarCell.
+            // Assignment to them should fail.
+            assertRuntimeError("""
+                fn f
+                  =>
+                  x := 42
+                  x <- 0
+                f ()""");
+        }
+
+        @Test void assignToTopLevelVarStillFails() {
+            // VarCell supports re-declaration (:=) but NOT assignment (<-)
+            assertRuntimeError("x := 42\nx <- 0");
+        }
+
+        @Test void typeConstructorRedef() {
+            assertEquals("New \"hello\"", run("""
+                type Old
+                  Old a
+                type New
+                  New a
+                println (New "hello")"""));
+        }
+
+        @Test void multipleRedefsChain() {
+            // g calls f twice: f(f(1)) = f(10) = 100
+            assertEquals("100", run("""
+                fn f
+                  (x -> x + 1)
+                fn g
+                  (x -> f (f x))
+                fn f
+                  (x -> x * 10)
+                println (g 1)"""));
+        }
+    }
 }

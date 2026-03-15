@@ -271,11 +271,20 @@ and decrease after a line that is less indented than its predecessor."
 
 (defvar irij-mode-map
   (let ((map (make-sparse-keymap)))
+    ;; Comint subprocess REPL (always available)
     (define-key map (kbd "C-c C-z") #'irij-repl)
     (define-key map (kbd "C-c C-r") #'irij-send-region)
     (define-key map (kbd "C-c C-b") #'irij-send-buffer)
     (define-key map (kbd "C-c C-l") #'irij-send-line)
     (define-key map (kbd "C-c C-c") #'irij-toggle-comment-region)
+    ;; nREPL client (available when irij-nrepl.el is loaded)
+    (define-key map (kbd "C-c C-n") #'irij-nrepl-connect)
+    (define-key map (kbd "C-x C-e") #'irij-nrepl-eval-last-sexp)
+    (define-key map (kbd "C-c C-e") #'irij-nrepl-eval-last-sexp)
+    (define-key map (kbd "C-c C-d") #'irij-nrepl-eval-defun)
+    (define-key map (kbd "C-c C-k") #'irij-nrepl-eval-buffer)
+    (define-key map (kbd "C-c M-r") #'irij-nrepl-eval-region)
+    (define-key map (kbd "C-c C-o") #'irij-nrepl-show-result-buffer)
     map)
   "Keymap for `irij-mode'.")
 
@@ -286,12 +295,20 @@ and decrease after a line that is less indented than its predecessor."
 (define-derived-mode irij-mode prog-mode "Irij"
   "Major mode for editing Irij (ℑ) source files.
 
-Key bindings:
+Comint subprocess REPL:
   \\[irij-repl]              Start / switch to REPL
   \\[irij-send-region]       Send region to REPL
   \\[irij-send-buffer]       Send buffer to REPL
   \\[irij-send-line]         Send current line to REPL
-  \\[irij-toggle-comment-region]  Toggle `;;` comments"
+  \\[irij-toggle-comment-region]  Toggle `;;` comments
+
+nREPL client (requires `irij --nrepl-server` running):
+  \\[irij-nrepl-connect]            Connect to nREPL server
+  \\[irij-nrepl-eval-last-sexp]     Eval expression at point
+  \\[irij-nrepl-eval-defun]         Eval top-level declaration
+  \\[irij-nrepl-eval-buffer]        Eval entire buffer
+  \\[irij-nrepl-eval-region]        Eval selected region
+  \\[irij-nrepl-show-result-buffer] Show nREPL output buffer"
   :syntax-table irij-mode-syntax-table
   (setq-local font-lock-defaults         '(irij-font-lock-keywords))
   (setq-local indent-line-function       #'irij-indent-line)
@@ -305,6 +322,9 @@ Key bindings:
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.irj\\'" . irij-mode))
+
+;; Load the nREPL client if it is on the load-path (no error if absent).
+(require 'irij-nrepl nil t)
 
 (provide 'irij-mode)
 

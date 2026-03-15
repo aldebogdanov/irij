@@ -12,6 +12,17 @@ Source of truth: `docs/irij-lang-spec.org`
   - [x] 2-space indentation enforcement
   - [x] Comment toggling (`;;`)
   - [x] REPL integration (send region, send buffer)
+- [x] **irij-nrepl** — `editors/emacs/irij-nrepl.el`
+  - [x] Bencode encoder/decoder (pure Elisp, zero external deps)
+  - [x] Async TCP transport (`make-network-process`, partial-frame buffering)
+  - [x] Session management (`clone` op, auto-connect from `.nrepl-port`)
+  - [x] `irij-nrepl-connect` — auto-reads `.nrepl-port` or prompts for port
+  - [x] `irij-nrepl-eval-last-sexp` (`C-x C-e`, `C-c C-e`)
+  - [x] `irij-nrepl-eval-defun` — top-level `fn`/`type`/binding (`C-c C-d`)
+  - [x] `irij-nrepl-eval-buffer` (`C-c C-k`)
+  - [x] `irij-nrepl-eval-region` (`C-c M-r`)
+  - [x] Result display: value in minibuffer + `*irij-nrepl*` output buffer
+  - [x] Hot redefinition — re-eval `fn` declaration, callers see new version
 
 ---
 
@@ -139,6 +150,30 @@ The tool to evaluate code and run it interactively. This is the critical feedbac
   - [x] `hello.irj` — hello world
   - [x] `basics.irj` — bindings, functions, patterns
   - [x] `collections.irj` — vectors, maps, pipelines, seq ops
+
+---
+
+## Phase 2.5 — Interactive Development Foundation ✅
+
+Hot redefinition, nREPL server, environment inspection.
+
+- [x] **VarCell** — `src/main/java/dev/irij/interpreter/Environment.java`
+  - [x] `VarCell` cell type for top-level rebindable bindings (Clojure-style Var)
+  - [x] `defineVar(name, value)` — in-place update if VarCell exists
+  - [x] `Interpreter.defineInScope()` — routes to `defineVar` at global scope
+  - [x] Top-level `fn`, `type`, `:=` use VarCell; builtins remain ImmutableCell
+  - [x] `<-` assignment still rejects VarCell (immutable semantics preserved)
+- [x] **nREPL server** — `src/main/java/dev/irij/nrepl/`
+  - [x] `Bencode.java` — bencode encoder/decoder (nREPL wire format)
+  - [x] `IndirectOutputStream.java` — swappable output stream for per-eval capture
+  - [x] `NReplSession.java` — session with independent interpreter + output capture
+  - [x] `NReplServer.java` — TCP server, virtual threads, `.nrepl-port` file
+  - [x] Supported ops: `clone`, `eval`, `describe`, `close`
+  - [x] `--nrepl-server[=PORT]` CLI flag (default port 7888)
+- [x] **`:env` REPL command**
+  - [x] `:env` — show user-defined bindings (name, type, preview)
+  - [x] `:env all` — include builtins
+- [x] **Tests** — 235 total (64 parser + 137 interpreter + 14 bencode + 12 session + 1 server + 7 varCell)
 
 ---
 
