@@ -26,6 +26,8 @@ class NReplSessionTest {
         var session = new NReplSession();
         var resp = eval(session, "println 42");
         assertTrue(resp.get("out").toString().contains("42"));
+        // println returns Unit, which is now always included as "()"
+        assertEquals("()", resp.get("value"));
         assertEquals(List.of("done"), resp.get("status"));
     }
 
@@ -102,5 +104,57 @@ class NReplSessionTest {
         var session = new NReplSession();
         var resp = session.handleOp(Map.of("op", "eval"));
         assertNotNull(resp.get("err"));
+    }
+
+    @Test void evalAlwaysIncludesValue() {
+        var session = new NReplSession();
+        // Even Unit is returned as "()"
+        var resp = eval(session, "println \"hi\"");
+        assertEquals("()", resp.get("value"));
+    }
+
+    @Test void bindingReturnsValue() {
+        var session = new NReplSession();
+        var resp = eval(session, "x := 42");
+        assertEquals("42", resp.get("value"));
+    }
+
+    @Test void backgroundOutOpEmpty() {
+        var session = new NReplSession();
+        var resp = session.handleOp(Map.of("op", "background-out"));
+        assertNull(resp.get("out"));
+        assertEquals(List.of("done"), resp.get("status"));
+    }
+
+    @Test void backgroundOutCapturesSpawnedOutput() throws Exception {
+        var session = new NReplSession();
+        // Spawn a thread that prints after a short delay
+        eval(session, "spawn (-> sleep 50 ; println \"from-thread\")");
+        // Wait for the spawned thread to run
+        Thread.sleep(200);
+        // Poll background output
+        var resp = session.handleOp(Map.of("op", "background-out"));
+        assertNotNull(resp.get("out"), "Expected background output from spawned thread");
+        assertTrue(resp.get("out").toString().contains("from-thread"));
+    }
+
+    @Test void backgroundOutDrainsBuffer() throws Exception {
+        var session = new NReplSession();
+        eval(session, "spawn (-> sleep 50 ; println \"once\")");
+        Thread.sleep(200);
+        // First drain gets the output
+        var resp1 = session.handleOp(Map.of("op", "background-out"));
+        assertTrue(resp1.get("out").toString().contains("once"));
+        // Second drain is empty
+        var resp2 = session.handleOp(Map.of("op", "background-out"));
+        assertNull(resp2.get("out"));
+    }
+
+    @Test void describeIncludesBackgroundOutOp() {
+        var session = new NReplSession();
+        var resp = session.handleOp(Map.of("op", "describe"));
+        @SuppressWarnings("unchecked")
+        var ops = (Map<String, ?>) resp.get("ops");
+        assertTrue(ops.containsKey("background-out"));
     }
 }

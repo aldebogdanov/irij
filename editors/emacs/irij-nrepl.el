@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024  Irij Contributors
 ;; Author: Irij Contributors
-;; Version: 0.1.0
+;; Version: 0.2.0
 ;; Keywords: languages irij nrepl
 ;; URL: https://github.com/irij-lang/irij
 ;; Package-Requires: ((emacs "27.1") (cl-lib "0.5"))
@@ -17,12 +17,16 @@
 ;;   1. Start server:  irij --nrepl-server     (terminal)
 ;;   2. Connect:       C-c C-n                 (in any .irj buffer)
 ;;   3. Eval:
-;;        C-x C-e   eval expression at point   → inline  ;;  => 42
+;;        C-x C-e   eval expression at point   -> inline  ;;  => 42
 ;;        C-c C-e   same
 ;;        C-c C-d   eval top-level declaration (fn/type/binding)
 ;;        C-c C-k   eval entire buffer
 ;;        C-c M-r   eval selected region
 ;;        C-c C-o   show *irij-nrepl* output buffer
+;;
+;; The *irij-nrepl* buffer is interactive — type Irij code at the ℑ>
+;; prompt and press RET to evaluate.  Background output from spawned
+;; threads appears there automatically.
 ;;
 ;; Auto-connect: if `.nrepl-port` exists in the project root, the first
 ;; eval command will connect automatically without prompting.
@@ -53,13 +57,18 @@
   :group 'irij-nrepl)
 
 (defcustom irij-nrepl-result-buffer "*irij-nrepl*"
-  "Buffer name for nREPL output history."
+  "Buffer name for nREPL output history and interactive REPL."
   :type 'string
   :group 'irij-nrepl)
 
 (defcustom irij-nrepl-inline-max-length 120
   "Truncate inline result overlays at this many characters."
   :type 'integer
+  :group 'irij-nrepl)
+
+(defcustom irij-nrepl-poll-interval 0.5
+  "Seconds between background output polls (0 to disable)."
+  :type 'number
   :group 'irij-nrepl)
 
 
@@ -81,6 +90,17 @@
     (t :underline t :slant italic))
   "Face for inline eval errors.")
 
+(defface irij-nrepl-prompt-face
+  '((t :foreground "#61afef" :weight bold))
+  "Face for the ℑ> prompt in the interactive REPL buffer.")
+
+(defface irij-nrepl-bg-output-face
+  '((((class color) (background dark))
+     :foreground "#98c379")
+    (((class color) (background light))
+     :foreground "#50a14f"))
+  "Face for background thread output in the REPL buffer.")
+
 
 ;; ── Connection state ──────────────────────────────────────────────────
 
@@ -94,13 +114,16 @@
   "Partial receive buffer for TCP framing (bencode may arrive in chunks).")
 
 (defvar irij-nrepl--pending (make-hash-table :test 'equal)
-  "Map of request-id → (callback . accumulated-hash-table).")
+  "Map of request-id -> (callback . accumulated-hash-table).")
 
 (defvar irij-nrepl--id-seq 0
   "Monotonically increasing request ID counter.")
 
 (defvar irij-nrepl--overlays nil
   "List of active inline result overlays.")
+
+(defvar irij-nrepl--poll-timer nil
+  "Timer for polling background output from spawned threads.")
 
 
 ;; ────────────────────────────────────────────────────────────────────
@@ -188,7 +211,7 @@ Returns (VALUE . NEW-POS) on success, or nil if more bytes are needed."
                   (unless r (throw 'result nil))
                   (push (car r) items)
                   (setq cur (cdr r)))))
-            nil)))   ; ran off end without finding 'e' → incomplete
+            nil)))   ; ran off end without finding 'e' -> incomplete
 
        ;; Dict: d<key-val-pairs>e
        ((= ch ?d)
@@ -322,7 +345,7 @@ If no .nrepl-port file is found, prompt interactively."
           irij-nrepl--id-seq    0)
     (clrhash irij-nrepl--pending)
     ;; Open TCP connection (binary, synchronous)
-    (message "ℑ Connecting to nREPL on %s:%d…" h p)
+    (message "ℑ Connecting to nREPL on %s:%d..." h p)
     (setq irij-nrepl--conn
           (make-network-process
            :name     "irij-nrepl"
@@ -339,13 +362,16 @@ If no .nrepl-port file is found, prompt interactively."
      (lambda (resp)
        (let ((sid (gethash "new-session" resp)))
          (setq irij-nrepl--session sid)
-         (message "ℑ Connected to nREPL on %s:%d  (session %s…)"
+         ;; Start background output polling
+         (irij-nrepl--start-poll)
+         (message "ℑ Connected to nREPL on %s:%d  (session %s...)"
                   h p (substring sid 0 8)))))))
 
 (defun irij-nrepl--sentinel (proc event)
   "Handle nREPL connection state changes."
   (when (string-match-p "\\(?:closed\\|failed\\|exited\\|deleted\\)" event)
     (when (eq proc irij-nrepl--conn)
+      (irij-nrepl--stop-poll)
       (setq irij-nrepl--conn    nil
             irij-nrepl--session nil)
       (message "ℑ nREPL disconnected"))))
@@ -353,6 +379,7 @@ If no .nrepl-port file is found, prompt interactively."
 (defun irij-nrepl-disconnect ()
   "Close the active nREPL session and connection."
   (interactive)
+  (irij-nrepl--stop-poll)
   (when (and irij-nrepl--conn (process-live-p irij-nrepl--conn))
     (when irij-nrepl--session
       (ignore-errors
@@ -377,7 +404,66 @@ If no .nrepl-port file is found, prompt interactively."
 
 
 ;; ────────────────────────────────────────────────────────────────────
-;; Section 4 — Inline result overlays
+;; Section 4 — Background output polling
+;; ────────────────────────────────────────────────────────────────────
+;;
+;; Spawned virtual threads write to a BackgroundOutputStream on the
+;; server.  We poll via the "background-out" op and append any output
+;; to the *irij-nrepl* buffer.
+
+(defun irij-nrepl--start-poll ()
+  "Start polling for background thread output."
+  (irij-nrepl--stop-poll)
+  (when (> irij-nrepl-poll-interval 0)
+    (setq irij-nrepl--poll-timer
+          (run-with-timer irij-nrepl-poll-interval
+                          irij-nrepl-poll-interval
+                          #'irij-nrepl--poll-background))))
+
+(defun irij-nrepl--stop-poll ()
+  "Stop the background output polling timer."
+  (when irij-nrepl--poll-timer
+    (cancel-timer irij-nrepl--poll-timer)
+    (setq irij-nrepl--poll-timer nil)))
+
+(defun irij-nrepl--poll-background ()
+  "Send a background-out request; append any output to the REPL buffer."
+  (when (irij-nrepl--connected-p)
+    (condition-case nil
+        (irij-nrepl--send
+         (list (cons "op"      "background-out")
+               (cons "session" irij-nrepl--session))
+         (lambda (resp)
+           (let ((out (gethash "out" resp)))
+             (when (and out (not (string-empty-p out)))
+               (irij-nrepl--append-bg-output out)))))
+      (error nil))))  ; silently ignore if connection dropped
+
+(defun irij-nrepl--append-bg-output (text)
+  "Append background thread output TEXT to the REPL buffer."
+  (with-current-buffer (get-buffer-create irij-nrepl-result-buffer)
+    (unless (derived-mode-p 'irij-nrepl-repl-mode)
+      (irij-nrepl-repl-mode))
+    (let ((inhibit-read-only t)
+          (at-end (eobp))
+          (win (get-buffer-window (current-buffer))))
+      (save-excursion
+        ;; Insert before the prompt (if any)
+        (goto-char (point-max))
+        (let ((prompt-start (irij-nrepl--find-prompt-start)))
+          (when prompt-start
+            (goto-char prompt-start)))
+        (insert (propertize text 'face 'irij-nrepl-bg-output-face
+                            'read-only t 'rear-nonsticky t)))
+      ;; Auto-scroll if the window was at the end
+      (when (and win at-end)
+        (with-selected-window win
+          (goto-char (point-max))
+          (recenter -1))))))
+
+
+;; ────────────────────────────────────────────────────────────────────
+;; Section 5 — Inline result overlays
 ;; ────────────────────────────────────────────────────────────────────
 
 (defun irij-nrepl--clear-overlays ()
@@ -394,7 +480,7 @@ Use error face when ERRP is non-nil."
       (let* ((face    (if errp 'irij-nrepl-error-face 'irij-nrepl-result-face))
              (display (if (> (length text) irij-nrepl-inline-max-length)
                           (concat (substring text 0 (- irij-nrepl-inline-max-length 1))
-                                  "…")
+                                  "...")
                         text))
              (str     (propertize (concat "  ;; => " display)
                                   'face   face
@@ -413,7 +499,7 @@ Use error face when ERRP is non-nil."
 
 
 ;; ────────────────────────────────────────────────────────────────────
-;; Section 5 — Eval & result display
+;; Section 6 — Eval & result display
 ;; ────────────────────────────────────────────────────────────────────
 
 (defun irij-nrepl--eval (code &optional buf pos)
@@ -434,80 +520,259 @@ Show inline overlay at BUF/POS when provided."
         (out    (gethash "out"    resp))
         (err    (gethash "err"    resp))
         (status (gethash "status" resp)))
-    ;; Always log to the output buffer
-    (irij-nrepl--append-to-result-buf out err value)
+    ;; Always log to the REPL buffer
+    (irij-nrepl--append-to-repl-buf out err value)
     ;; Inline overlay + minibuffer
     (cond
-     ((and (listp status) (member "eval-error" status))
+     ;; Error
+     ((and (listp status) (member "error" status))
       (let ((msg (string-trim (or err "evaluation failed"))))
         (when (and buf pos)
           (irij-nrepl--show-inline buf pos msg t))
         (message "ℑ Error: %s" msg)))
+     ;; Has a value
      (value
       (when (and buf pos)
         (irij-nrepl--show-inline buf pos value nil))
-      ;; Also show any stdout that came along — useful for C-c C-k / C-c M-r
+      ;; Also show any stdout that came along
       (let ((printed (and out (not (string-empty-p (string-trim out)))
                           (string-trim out))))
         (if printed
             (message "ℑ => %s   [out: %s]" value printed)
-          (message "ℑ => %s" value)))))))
+          (message "ℑ => %s" value))))
+     ;; Only stdout, no value (unlikely but handle it)
+     (out
+      (message "ℑ %s" (string-trim out))))))
 
-(defun irij-nrepl--append-to-result-buf (out err value)
-  "Append OUT, ERR, and VALUE to the nREPL result buffer."
+(defun irij-nrepl--append-to-repl-buf (out err value)
+  "Append OUT, ERR, and VALUE to the REPL buffer."
   (with-current-buffer (get-buffer-create irij-nrepl-result-buffer)
-    (unless (derived-mode-p 'irij-nrepl-result-mode)
-      (irij-nrepl-result-mode))
+    (unless (derived-mode-p 'irij-nrepl-repl-mode)
+      (irij-nrepl-repl-mode))
     (let ((inhibit-read-only t))
+      (save-excursion
+        (goto-char (point-max))
+        ;; Insert before the prompt
+        (let ((prompt-start (irij-nrepl--find-prompt-start)))
+          (when prompt-start
+            (goto-char prompt-start)))
+        (when (and out (not (string-empty-p out)))
+          (insert out))
+        (when (and err (not (string-empty-p err)))
+          (insert (propertize (concat ";; error: " (string-trim err) "\n")
+                              'face 'irij-nrepl-error-face)))
+        (when (and value (not (string-empty-p value)))
+          (insert (propertize (concat ";; => " value "\n")
+                              'face 'irij-nrepl-result-face)))))))
+
+
+;; ────────────────────────────────────────────────────────────────────
+;; Section 7 — Interactive REPL buffer
+;; ────────────────────────────────────────────────────────────────────
+;;
+;; The *irij-nrepl* buffer has an input prompt at the bottom.
+;; Users type code and press RET to evaluate.
+
+(defvar irij-nrepl--prompt "ℑ> "
+  "Prompt string for the interactive REPL buffer.")
+
+;; ── REPL input history ───────────────────────────────────────────────
+
+(defvar irij-nrepl--history nil
+  "List of previous REPL inputs (most recent first).")
+
+(defvar-local irij-nrepl--history-index -1
+  "Current position in the history ring.  -1 means 'not browsing'.")
+
+(defvar-local irij-nrepl--history-saved-input nil
+  "The unsent input text saved when the user starts browsing history.")
+
+(defun irij-nrepl--history-add (input)
+  "Add INPUT to the front of the history ring (skip duplicates & blanks)."
+  (let ((trimmed (string-trim input)))
+    (unless (string-empty-p trimmed)
+      (setq irij-nrepl--history
+            (cons trimmed (delete trimmed irij-nrepl--history))))))
+
+(defun irij-nrepl--replace-input (text)
+  "Replace the current prompt input with TEXT."
+  (let ((inhibit-read-only t)
+        (prompt-pos (irij-nrepl--find-prompt-start)))
+    (when prompt-pos
+      (delete-region (+ prompt-pos (length irij-nrepl--prompt))
+                     (point-max))
       (goto-char (point-max))
-      (when (or out err value)
-        (insert "\n;; ─────────────────────────────\n"))
-      (when (and out (not (string-empty-p out)))
-        (insert (replace-regexp-in-string
-                 "^\\(.\\)" ";;   \\1"
-                 (format ";; stdout:\n%s" out))))
-      (when (and err (not (string-empty-p err)))
-        (insert (format ";; error: %s\n" (string-trim err))))
-      (when (and value (not (string-empty-p value)))
-        (insert (format ";; => %s\n" value))))))
+      (insert text))))
 
+(defun irij-nrepl-history-previous ()
+  "Replace input with the previous history entry (M-p)."
+  (interactive)
+  (when irij-nrepl--history
+    ;; Save current input the first time we navigate
+    (when (= irij-nrepl--history-index -1)
+      (setq irij-nrepl--history-saved-input
+            (or (irij-nrepl--get-input) "")))
+    (let ((next-idx (1+ irij-nrepl--history-index)))
+      (when (< next-idx (length irij-nrepl--history))
+        (setq irij-nrepl--history-index next-idx)
+        (irij-nrepl--replace-input
+         (nth next-idx irij-nrepl--history))))))
 
-;; ────────────────────────────────────────────────────────────────────
-;; Section 6 — Result buffer
-;; ────────────────────────────────────────────────────────────────────
+(defun irij-nrepl-history-next ()
+  "Replace input with the next (more recent) history entry (M-n)."
+  (interactive)
+  (cond
+   ((> irij-nrepl--history-index 0)
+    (setq irij-nrepl--history-index (1- irij-nrepl--history-index))
+    (irij-nrepl--replace-input
+     (nth irij-nrepl--history-index irij-nrepl--history)))
+   ((= irij-nrepl--history-index 0)
+    ;; Back to the unsent input
+    (setq irij-nrepl--history-index -1)
+    (irij-nrepl--replace-input
+     (or irij-nrepl--history-saved-input "")))))
 
-(defvar irij-nrepl-result-mode-map
+(defvar irij-nrepl-repl-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "g")       #'irij-nrepl-clear-result-buffer)
+    (define-key map (kbd "RET")     #'irij-nrepl-repl-return)
+    (define-key map (kbd "M-p")     #'irij-nrepl-history-previous)
+    (define-key map (kbd "M-n")     #'irij-nrepl-history-next)
     (define-key map (kbd "C-c C-c") #'irij-nrepl-clear-result-buffer)
-    (define-key map (kbd "q")       #'quit-window)
+    (define-key map (kbd "g")       nil)  ; allow typing 'g'
+    (define-key map (kbd "q")       nil)  ; allow typing 'q'
+    (define-key map (kbd "C-c C-q") #'quit-window)
     map)
-  "Keymap for the Irij nREPL result buffer.")
+  "Keymap for the Irij nREPL interactive REPL buffer.")
 
-(define-derived-mode irij-nrepl-result-mode special-mode "ℑ-nREPL"
-  "Read-only mode for the Irij nREPL output history buffer.
+;; Ensure keys are installed into a live keymap even on reload
+;; (defvar won't re-evaluate if the symbol is already bound).
+(define-key irij-nrepl-repl-mode-map (kbd "M-p") #'irij-nrepl-history-previous)
+(define-key irij-nrepl-repl-mode-map (kbd "M-n") #'irij-nrepl-history-next)
+
+(define-derived-mode irij-nrepl-repl-mode fundamental-mode "ℑ-REPL"
+  "Interactive REPL mode for Irij nREPL.
+
+Type code at the ℑ> prompt and press RET to evaluate.
+Background thread output appears automatically.
 
 Key bindings:
-  g / C-c C-c   clear buffer
-  q             quit window"
-  (setq buffer-read-only t)
-  (setq-local truncate-lines nil))
+  RET           evaluate input at prompt
+  C-c C-c       clear buffer
+  C-c C-q       quit window"
+  (setq-local truncate-lines nil)
+  ;; No irij font-lock here — the buffer is mostly output text, not code.
+  ;; Applying syntax highlighting would incorrectly color words in output
+  ;; (e.g. "Have" as a type name, numbers in messages, etc.).
+  ;; Results/errors/background output use overlay faces instead.
+  (font-lock-mode -1)
+  ;; Insert prompt at the end
+  (irij-nrepl--insert-prompt))
+
+(defun irij-nrepl--insert-prompt ()
+  "Insert the ℑ> prompt at the end of the REPL buffer."
+  (let ((inhibit-read-only t))
+    (goto-char (point-max))
+    ;; Only insert if there isn't already a prompt at point
+    (unless (irij-nrepl--at-prompt-p)
+      (insert (propertize irij-nrepl--prompt
+                          'face 'irij-nrepl-prompt-face
+                          'read-only t
+                          'rear-nonsticky t
+                          'irij-prompt t)))))
+
+(defun irij-nrepl--at-prompt-p ()
+  "Return non-nil if point is at or just after a prompt."
+  (save-excursion
+    (beginning-of-line)
+    (looking-at (regexp-quote irij-nrepl--prompt))))
+
+(defun irij-nrepl--find-prompt-start ()
+  "Find the start position of the last prompt, or nil if none."
+  (save-excursion
+    (goto-char (point-max))
+    (when (re-search-backward (regexp-quote irij-nrepl--prompt) nil t)
+      (point))))
+
+(defun irij-nrepl--get-input ()
+  "Get the text after the last prompt."
+  (save-excursion
+    (goto-char (point-max))
+    (let ((prompt-pos (irij-nrepl--find-prompt-start)))
+      (when prompt-pos
+        (buffer-substring-no-properties
+         (+ prompt-pos (length irij-nrepl--prompt))
+         (point-max))))))
+
+(defun irij-nrepl-repl-return ()
+  "Evaluate the input at the REPL prompt."
+  (interactive)
+  (let ((input (string-trim (or (irij-nrepl--get-input) ""))))
+    ;; Record in history and reset browse position
+    (irij-nrepl--history-add input)
+    (setq irij-nrepl--history-index -1)
+    (setq irij-nrepl--history-saved-input nil)
+    (if (string-empty-p input)
+        ;; Empty input — just insert a newline
+        (let ((inhibit-read-only t))
+          (goto-char (point-max))
+          (insert "\n")
+          (irij-nrepl--insert-prompt))
+      ;; Non-empty — make input read-only and evaluate
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert "\n")
+        ;; Make the input line read-only
+        (let ((prompt-start (irij-nrepl--find-prompt-start)))
+          (when prompt-start
+            (add-text-properties prompt-start (point-max)
+                                 '(read-only t)))))
+      ;; Evaluate via nREPL — use the internal send so we can add a
+      ;; prompt after the response arrives.
+      (condition-case err
+          (progn
+            (irij-nrepl--ensure-connected)
+            (irij-nrepl--send
+             (list (cons "op"      "eval")
+                   (cons "code"    input)
+                   (cons "session" irij-nrepl--session))
+             (lambda (resp)
+               (irij-nrepl--handle-response resp nil nil)
+               ;; Ensure there's a prompt at the end
+               (with-current-buffer (get-buffer-create irij-nrepl-result-buffer)
+                 (let ((inhibit-read-only t))
+                   (irij-nrepl--insert-prompt)
+                   (goto-char (point-max)))))))
+        (error
+         (let ((inhibit-read-only t))
+           (goto-char (point-max))
+           (insert (propertize (format ";; error: %s\n" (error-message-string err))
+                               'face 'irij-nrepl-error-face
+                               'read-only t))
+           (irij-nrepl--insert-prompt)
+           (goto-char (point-max))))))))
 
 (defun irij-nrepl-clear-result-buffer ()
-  "Clear the nREPL output history buffer."
+  "Clear the REPL buffer and re-insert the prompt."
   (interactive)
   (with-current-buffer (get-buffer-create irij-nrepl-result-buffer)
     (let ((inhibit-read-only t))
-      (erase-buffer))))
+      (erase-buffer)
+      (irij-nrepl--insert-prompt)
+      (goto-char (point-max)))))
 
 (defun irij-nrepl-show-result-buffer ()
-  "Pop to the nREPL output history buffer."
+  "Pop to the nREPL interactive REPL buffer."
   (interactive)
-  (pop-to-buffer (get-buffer-create irij-nrepl-result-buffer)))
+  (let ((buf (get-buffer-create irij-nrepl-result-buffer)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'irij-nrepl-repl-mode)
+        (irij-nrepl-repl-mode)))
+    (pop-to-buffer buf)
+    (goto-char (point-max))))
 
 
 ;; ────────────────────────────────────────────────────────────────────
-;; Section 7 — User commands
+;; Section 8 — User commands
 ;; ────────────────────────────────────────────────────────────────────
 
 ;;;###autoload
@@ -589,12 +854,12 @@ if no col-0 line exists above."
 
 
 ;; ────────────────────────────────────────────────────────────────────
-;; Section 8 — Keymap installation
+;; Section 9 — Keymap installation
 ;; ────────────────────────────────────────────────────────────────────
 ;;
 ;; Keybindings are defined in two places:
-;;   1. irij-mode.el defvar — picked up on fresh Emacs start
-;;   2. with-eval-after-load below — installs into the LIVE map in a
+;;   1. irij-mode.el defvar -- picked up on fresh Emacs start
+;;   2. with-eval-after-load below -- installs into the LIVE map in a
 ;;      running Emacs even when irij-mode-map already existed before
 ;;      irij-nrepl.el was first loaded.
 ;;

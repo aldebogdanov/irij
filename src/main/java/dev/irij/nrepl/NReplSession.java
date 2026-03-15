@@ -22,11 +22,15 @@ public final class NReplSession {
     private final String id;
     private final Interpreter interpreter;
     private final IndirectOutputStream indirectOut;
+    private final BackgroundOutputStream backgroundOut;
     private volatile boolean closed;
 
     public NReplSession() {
         this.id = UUID.randomUUID().toString();
-        this.indirectOut = new IndirectOutputStream(System.out);
+        // Background output stream captures println from spawned threads
+        // between evaluations (when the per-eval capture is not active).
+        this.backgroundOut = new BackgroundOutputStream();
+        this.indirectOut = new IndirectOutputStream(backgroundOut);
         var printStream = new PrintStream(indirectOut, true);
         this.interpreter = new Interpreter(printStream);
         this.closed = false;
@@ -55,6 +59,7 @@ public final class NReplSession {
         }
         return switch (op) {
             case "eval" -> evalOp(msg);
+            case "background-out" -> backgroundOutOp();
             case "describe" -> describeOp();
             case "close" -> closeOp();
             default -> unknownOp(op);
@@ -69,9 +74,13 @@ public final class NReplSession {
             return errorResponse("Missing 'code' in eval message");
         }
 
-        // Capture stdout
+        // Drain any background output that accumulated since the last eval
+        // (e.g. from spawned threads) and prepend it to this eval's output.
+        String bgPrefix = backgroundOut.drain();
+
+        // Capture stdout for this eval
         var capture = new ByteArrayOutputStream();
-        var oldTarget = indirectOut.setTarget(capture);
+        indirectOut.setTarget(capture);
         try {
             // Parse
             var parseResult = IrijParseDriver.parse(code);
@@ -80,7 +89,8 @@ public final class NReplSession {
                 for (var err : parseResult.errors()) {
                     sb.append(err).append("\n");
                 }
-                return errorResponseWithOut(capture, "Parse error: " + sb.toString().strip());
+                return errorResponseWithOut(bgPrefix, capture,
+                        "Parse error: " + sb.toString().strip());
             }
 
             // Build AST and interpret
@@ -89,23 +99,39 @@ public final class NReplSession {
 
             // Build response
             var resp = new LinkedHashMap<String, Object>();
-            String stdout = capture.toString();
+            String stdout = bgPrefix + capture.toString();
             if (!stdout.isEmpty()) {
                 resp.put("out", stdout);
             }
-            if (value != Values.UNIT) {
-                resp.put("value", Values.toIrijString(value));
-            }
+            resp.put("value", Values.toIrijString(value));
             resp.put("status", List.of("done"));
             return resp;
 
         } catch (IrijRuntimeError e) {
-            return errorResponseWithOut(capture, "Runtime error: " + e.getMessage());
+            return errorResponseWithOut(bgPrefix, capture, "Runtime error: " + e.getMessage());
         } catch (Exception e) {
-            return errorResponseWithOut(capture, "Error: " + e.getMessage());
+            return errorResponseWithOut(bgPrefix, capture, "Error: " + e.getMessage());
         } finally {
-            indirectOut.setTarget(oldTarget);
+            // Restore target to the background buffer so spawned threads
+            // continue writing there (not to System.out).
+            indirectOut.setTarget(backgroundOut);
         }
+    }
+
+    // ── background-out ────────────────────────────────────────────────
+
+    /**
+     * Drain buffered output from spawned background threads.
+     * The Emacs client polls this op on a timer.
+     */
+    private Map<String, Object> backgroundOutOp() {
+        var resp = new LinkedHashMap<String, Object>();
+        String output = backgroundOut.drain();
+        if (!output.isEmpty()) {
+            resp.put("out", output);
+        }
+        resp.put("status", List.of("done"));
+        return resp;
     }
 
     // ── describe ────────────────────────────────────────────────────────
@@ -114,6 +140,7 @@ public final class NReplSession {
         var resp = new LinkedHashMap<String, Object>();
         resp.put("ops", Map.of(
                 "eval", Map.of(),
+                "background-out", Map.of(),
                 "describe", Map.of(),
                 "clone", Map.of(),
                 "close", Map.of()
@@ -145,9 +172,10 @@ public final class NReplSession {
         return resp;
     }
 
-    private Map<String, Object> errorResponseWithOut(ByteArrayOutputStream capture, String message) {
+    private Map<String, Object> errorResponseWithOut(
+            String bgPrefix, ByteArrayOutputStream capture, String message) {
         var resp = new LinkedHashMap<String, Object>();
-        String stdout = capture.toString();
+        String stdout = bgPrefix + capture.toString();
         if (!stdout.isEmpty()) {
             resp.put("out", stdout);
         }

@@ -25,6 +25,20 @@ public final class Interpreter {
 
     /** Builtins that need access to the interpreter's apply(). */
     private void installInterpreterBuiltins() {
+        // ── spawn — run a thunk in a virtual thread ──────────────────
+        globalEnv.define("spawn", new BuiltinFn("spawn", 1, args -> {
+            var thunk = args.get(0);
+            var thread = Thread.startVirtualThread(() -> {
+                try {
+                    apply(thunk, List.of(), SourceLoc.UNKNOWN);
+                } catch (Exception e) {
+                    out.println("[spawn] error: " + e.getMessage());
+                }
+            });
+            return thread;
+        }));
+
+        // ── fold — left fold over a collection ────────────────────────
         globalEnv.define("fold", new BuiltinFn("fold", 3, args -> {
             var fn = args.get(0);
             var init = args.get(1);

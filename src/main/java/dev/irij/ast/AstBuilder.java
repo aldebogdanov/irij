@@ -353,6 +353,16 @@ public class AstBuilder {
     // ═══════════════════════════════════════════════════════════════════
 
     private Expr visitExpr(ExprContext ctx) {
+        return visitApplyToExpr(ctx.applyToExpr());
+    }
+
+    private Expr visitApplyToExpr(ApplyToExprContext ctx) {
+        if (ctx.applyToExpr() != null) {
+            // f ~ rest  →  App(f, [rest])
+            Expr fn   = visitChoreographyExpr(ctx.choreographyExpr());
+            Expr rest = visitApplyToExpr(ctx.applyToExpr());
+            return new Expr.App(fn, List.of(rest), loc(ctx));
+        }
         return visitChoreographyExpr(ctx.choreographyExpr());
     }
 
@@ -788,7 +798,9 @@ public class AstBuilder {
      * but only if each level has exactly one child (no operators at any level).
      */
     private AppExprContext findAppExpr(ExprContext ctx) {
-        var choreo = ctx.choreographyExpr();
+        var applyTo = ctx.applyToExpr();
+        if (applyTo.applyToExpr() != null) return null; // has ~ operator
+        var choreo = applyTo.choreographyExpr();
         if (choreo.pipeExpr().size() != 1) return null;
         var pipe = choreo.pipeExpr().get(0);
         if (pipe.composeExpr().size() != 1) return null;

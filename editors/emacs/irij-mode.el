@@ -98,8 +98,18 @@
     "concat" "take" "drop" "to-vec"
     "contains?" "keys" "vals" "get"
     "nth" "last" "fold"
-    "identity" "const" "not" "empty?")
+    "identity" "const" "not" "empty?"
+    "spawn" "sleep")
   "Built-in functions in Irij.")
+
+;; Emacs 29+ introduced `font-lock-number-face'.  On older versions
+;; the symbol doesn't exist (neither as face nor variable), which
+;; causes "Symbol's value as variable is void" when font-lock tries
+;; to use it.  We define it as a variable pointing to the real face
+;; so that font-lock can resolve it in all Emacs versions.
+(unless (boundp 'font-lock-number-face)
+  (defvar font-lock-number-face 'font-lock-constant-face
+    "Compatibility shim: points to `font-lock-constant-face' on Emacs < 29."))
 
 (defconst irij-font-lock-keywords
   (let ((kw-re    (regexp-opt irij-keywords      'words))
@@ -130,6 +140,8 @@
       ("<|" . font-lock-keyword-face)
       (">>" . font-lock-keyword-face)
       ("<<"  . font-lock-keyword-face)
+      ;; Apply-to-rest (lowest precedence apply): f ~ rest ≡ f(rest)
+      ("\\(?:^\\|[^~<]\\)\\(~\\)\\(?:[^>*/]\\|$\\)" 1 font-lock-keyword-face)
       ;; Seq operators: /+ /* /# /& /| /? /! /^ /$ @ @i
       ("\\(?:/[+*#&|!?^$]\\|@i?\\)" . font-lock-builtin-face)
       ;; Numeric literals (int, float, hex, rational)
@@ -317,7 +329,7 @@ nREPL client (requires `irij --nrepl-server` running):
   (setq-local comment-start-skip        ";;+\\s-*")
   (setq-local tab-width                 irij-indent-offset)
   (setq-local indent-tabs-mode          nil)
-  (setq-local electric-indent-inhibit   nil)
+  (setq-local electric-indent-inhibit   t)
   (font-lock-ensure))
 
 ;;;###autoload

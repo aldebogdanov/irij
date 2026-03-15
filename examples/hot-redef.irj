@@ -1,0 +1,41 @@
+;; ─────────────────────────────────────────────────
+;; Hot Redefinition Demo
+;; ─────────────────────────────────────────────────
+;;
+;; Run this file in the REPL or via nREPL, then
+;; redefine `greet` while the loop is running.
+;; VarCell ensures the change is picked up instantly.
+;;
+;;   $ irij
+;;   ℑ> :load examples/hot-redef.irj
+;;
+;;   Hello, World!      ← every 2 seconds
+;;   Hello, World!
+;;   Hello, World!
+;;
+;;   ℑ> fn greet
+;;        => name
+;;        println ~ "Hey, " ++ name ++ "!!!"
+;;
+;;   Hey, World!!!      ← immediate switch
+;;   Hey, World!!!
+;;
+;; Or from Emacs: C-c C-d on the new fn greet definition.
+
+fn greet
+  => name
+  println ~ "Hola, " ++ name ++ "!"
+
+fn run-loop
+  => n
+  greet "World"
+  sleep 1000
+  if (n > 1)
+    run-loop ~ n - 1
+  else
+    println "Loop finished. Have a good day!"
+
+;; Start the loop in a background virtual thread
+spawn (-> run-loop 10)
+
+println "Start loop with `spawn (-> run-loop n)` and then redefine `greet` to see hot-swap!"

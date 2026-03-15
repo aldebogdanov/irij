@@ -177,6 +177,29 @@ Hot redefinition, nREPL server, environment inspection.
 
 ---
 
+## Phase 2.75 — Concurrency Primitives ✅
+
+Minimal spawn/sleep for hot-redefinition demos, not the full structured concurrency system.
+
+- [x] **`sleep` builtin** — `Builtins.java`
+  - [x] `sleep 1000` → Int arg = milliseconds
+  - [x] `sleep 1.5` → Float arg = seconds (× 1000)
+- [x] **`spawn` builtin** — `Interpreter.installInterpreterBuiltins()`
+  - [x] `spawn (-> body)` — run thunk in Java virtual thread
+  - [x] Shares interpreter's global env (VarCell lookups see hot-redef)
+  - [x] Errors logged to `out`, don't crash main thread
+  - [x] Returns `Thread` handle (opaque, future: await/cancel)
+- [x] **Values.java** — Thread display (`<thread N>`) and typeName
+- [x] **`examples/hot-redef.irj`** — demo: spawn loop + redefine fn live
+- [x] **`~` operator** (apply-to-rest) — lowest precedence, right-associative
+  - [x] `TILDE` token in `IrijLexer.g4`
+  - [x] `applyToExpr` rule in `IrijParser.g4` (right-recursive)
+  - [x] Desugars to `Expr.App(fn, [rest])` in `AstBuilder`
+  - [x] Emacs font-lock highlighting
+- [x] **Tests** — 255 total (+6 concurrency + 3 parser tilde + 5 interpreter tilde)
+
+---
+
 ## Phase 3 — Effects & Handlers
 
 The universal joint. Everything interesting depends on this.

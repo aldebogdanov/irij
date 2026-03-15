@@ -316,7 +316,13 @@ typeAnnotation
 // ═══════════════════════════════════════════════════════════════════════
 
 expr
-    : choreographyExpr
+    : applyToExpr
+    ;
+
+// Apply-to-rest: f ~ rest  ≡  f(rest)   (lowest precedence, right-associative)
+applyToExpr
+    : choreographyExpr TILDE applyToExpr       // f ~ rest
+    | choreographyExpr                          // no ~
     ;
 
 // Choreography: ~> <~ ~*> ~/

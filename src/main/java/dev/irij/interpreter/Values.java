@@ -315,6 +315,7 @@ public final class Values {
         }
         if (value instanceof Boolean b) return b.toString();
         if (value instanceof String s) return s;
+        if (value instanceof Thread t) return "<thread " + t.threadId() + ">";
         return value.toString();
     }
 
@@ -346,6 +347,7 @@ public final class Values {
         if (value instanceof PartialApp) return "PartialApp";
         if (value instanceof ComposedFn) return "ComposedFn";
         if (value instanceof Constructor) return "Constructor";
+        if (value instanceof Thread) return "Thread";
         return value.getClass().getSimpleName();
     }
 

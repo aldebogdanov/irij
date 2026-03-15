@@ -42,6 +42,19 @@ public final class Builtins {
             return Values.toIrijString(args.get(0));
         }));
 
+        // ── Concurrency primitives ─────────────────────────────────────
+        env.define("sleep", new BuiltinFn("sleep", 1, args -> {
+            var ms = args.get(0);
+            long millis;
+            if (ms instanceof Long l)  millis = l;                      // sleep 1000  → 1 second
+            else if (ms instanceof Double d) millis = (long)(d * 1000); // sleep 1.5   → 1500 ms
+            else throw new IrijRuntimeError(
+                    "sleep expects Int (milliseconds) or Float (seconds), got " + Values.typeName(ms));
+            try { Thread.sleep(millis); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            return Values.UNIT;
+        }));
+
         // ── Arithmetic ──────────────────────────────────────────────────
         env.define("div", new BuiltinFn("div", 2, args -> {
             long a = asLong(args.get(0), "div");

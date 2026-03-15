@@ -100,6 +100,7 @@ Per `docs/phase-1-design-decisions.md`:
 - **Closures**: Capture mutables by reference (shared `MutableCell`)
 - **Evaluation**: Strict everywhere except lazy ranges
 - **Errors**: Runtime exceptions with source locations
+- **`~` operator**: Lowest precedence, right-associative. `f ~ rest` ≡ `f (rest)` — eliminates parens around arguments. Only works when the left side is a function value, not a keyword (`if`, `match` etc.)
 
 ## Known Limitations
 

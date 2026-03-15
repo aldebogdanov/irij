@@ -103,7 +103,7 @@ record ParseResult(
 3. Imperative block: `=> params` followed by statements
 
 **Expression precedence (lowest → highest):**
-choreography → pipeline → composition → or → and → equality → comparison → concat → range → add → mul → power → unary → seq-ops → application → postfix → atom
+apply-to (`~`) → choreography → pipeline → composition → or → and → equality → comparison → concat → range → add → mul → power → unary → seq-ops → application → postfix → atom
 
 **Patterns:** constructors, keywords, variables, wildcards, literals, unit `()`, grouped `(pat)`, vectors `#[x ...rest]`, tuples `#(a b)`, destructure `{name= n}`, spread `...rest`
 

@@ -400,6 +400,19 @@ class ParserSmokeTest {
         @Test void operatorSectionInPipeline() {
             assertParses("result := #[1 2 3] |> /^ (+)\n");
         }
+
+        @Test void tildeApplyToRest() {
+            assertParses("println ~ \"Hi, \" ++ name\n");
+        }
+
+        @Test void tildeChained() {
+            assertParses("f ~ g ~ x + 1\n");
+        }
+
+        @Test void tildeWithLambda() {
+            assertParses("result := identity ~ 2 + 3\n");
+        }
+
     }
 
     // ═══════════════════════════════════════════════════════════════

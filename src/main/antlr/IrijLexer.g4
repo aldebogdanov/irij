@@ -113,6 +113,7 @@ PERCENT     : '%' ;
 LT          : '<' ;
 GT          : '>' ;
 NOT         : '!' ;
+TILDE       : '~' ;        // apply-to-rest: f ~ x + 1  ≡  f (x + 1)
 DOT         : '.' ;
 EQUALS      : '=' ;        // map field separator {name= "jo"}
 SEMICOLON   : ';' ;        // inline separator (only inside parens)

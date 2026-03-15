@@ -63,6 +63,18 @@ println p.x        ;; 3.0
 {x= px y= py} := p
 println ("x=" ++ (to-str px) ++ " y=" ++ (to-str py))
 
+;; ── Apply-to-rest (~) ────────────────────────────────────────────────────
+;;
+;; The ~ operator has the lowest precedence and is right-associative.
+;; f ~ rest  ≡  f (rest)   — eliminates parens around the argument.
+
+println ~ "The answer is " ++ to-str x   ;; "The answer is 42"
+println ~ square 7                       ;; 49
+println ~ area (Circle 3.0)              ;; ~28.27...
+
+;; Right-associative chaining:  f ~ g ~ expr  ≡  f (g (expr))
+println ~ to-str ~ 2 + 3                 ;; "5"
+
 ;; ── Pipeline ─────────────────────────────────────────────────────────────
 
 result := 5 |> square |> (n -> n + 1)

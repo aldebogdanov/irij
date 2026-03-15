@@ -1,12 +1,14 @@
 package dev.irij.interpreter;
 
 import dev.irij.ast.AstBuilder;
+import dev.irij.ast.Decl;
 import dev.irij.parser.IrijParseDriver;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -987,5 +989,137 @@ class InterpreterTest {
                   (x -> x * 10)
                 println (g 1)"""));
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Concurrency: spawn and sleep
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class Concurrency {
+
+        /** Helper: parse source into AST declarations. */
+        private List<Decl> parse(String source) {
+            var pr = IrijParseDriver.parse(source + "\n");
+            assertFalse(pr.hasErrors(), () -> "Parse errors: " + pr.errors());
+            return new AstBuilder().build(pr.tree());
+        }
+
+        @Test void sleepDelaysExecution() {
+            long start = System.currentTimeMillis();
+            run("sleep 100");
+            long elapsed = System.currentTimeMillis() - start;
+            assertTrue(elapsed >= 90, "sleep 100 should delay ~100ms, took " + elapsed + "ms");
+        }
+
+        @Test void sleepAcceptsFloat() {
+            long start = System.currentTimeMillis();
+            run("sleep 0.1");
+            long elapsed = System.currentTimeMillis() - start;
+            assertTrue(elapsed >= 90, "sleep 0.1 (100ms) should delay ~100ms, took " + elapsed + "ms");
+        }
+
+        @Test void spawnReturnsThread() {
+            var result = eval("spawn (-> 42)");
+            assertInstanceOf(Thread.class, result);
+        }
+
+        @Test void spawnRunsInBackground() throws Exception {
+            var baos = new ByteArrayOutputStream();
+            var out = new PrintStream(baos);
+            var interp = new Interpreter(out);
+            interp.run(parse("spawn (-> sleep 30 ; println \"from-spawn\")"));
+            // spawn returns immediately — no output yet
+            var immediate = baos.toString();
+            assertFalse(immediate.contains("from-spawn"),
+                "spawn should not block; output should be empty immediately");
+            // Wait for spawned thread to finish
+            Thread.sleep(100);
+            var after = baos.toString();
+            assertTrue(after.contains("from-spawn"),
+                "Spawned thread should have printed after sleep");
+        }
+
+        @Test void spawnSeesVarCellUpdate() throws Exception {
+            var baos = new ByteArrayOutputStream();
+            var out = new PrintStream(baos);
+            var interp = new Interpreter(out);
+
+            // Define greet, spawn a loop that calls it 3 times with sleeps
+            interp.run(parse("""
+                fn greet
+                  => name
+                  println name
+                """));
+            interp.run(parse("""
+                spawn (-> greet "v1" ; sleep 150 ; greet "v1" ; sleep 150 ; greet "v1")
+                """));
+
+            // Let first call execute
+            Thread.sleep(80);
+
+            // Redefine greet — VarCell updates in-place
+            interp.run(parse("""
+                fn greet
+                  => name
+                  println ("UPDATED-" ++ name)
+                """));
+
+            // Wait for remaining calls
+            Thread.sleep(500);
+            out.flush();
+            var output = baos.toString();
+
+            assertTrue(output.contains("v1"),
+                "First call should have used original definition");
+            assertTrue(output.contains("UPDATED-v1"),
+                "Later calls should see the redefined function via VarCell");
+        }
+
+        @Test void spawnErrorDoesNotCrash() throws Exception {
+            var baos = new ByteArrayOutputStream();
+            var out = new PrintStream(baos);
+            var interp = new Interpreter(out);
+
+            interp.run(parse("spawn (-> 1 + \"bad\")"));
+            Thread.sleep(100);
+
+            var output = baos.toString();
+            assertTrue(output.contains("[spawn] error:"),
+                "Error in spawned thread should be logged, not crash");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Tilde (apply-to-rest) operator
+    // ═══════════════════════════════════════════════════════════════
+
+    @Nested
+    class TildeOperator {
+
+        @Test void tildeAppliesFnToRest() {
+            assertEquals("hello", run("println ~ \"hello\""));
+        }
+
+        @Test void tildeHasLowestPrecedence() {
+            // println ~ "a" ++ "b"  →  println ("a" ++ "b")  →  println "ab"
+            assertEquals("ab", run("println ~ \"a\" ++ \"b\""));
+        }
+
+        @Test void tildeRightAssociative() {
+            // identity ~ println ~ "chain"  →  identity (println ("chain"))
+            assertEquals("chain", run("identity ~ println ~ \"chain\""));
+        }
+
+        @Test void tildeWithArithmetic() {
+            // println ~ 2 + 3  →  println (2 + 3)  →  println 5
+            assertEquals("5", run("println ~ 2 + 3"));
+        }
+
+        @Test void tildeWithComparison() {
+            // println ~ 3 > 2  →  println (3 > 2)  →  println true
+            assertEquals("true", run("println ~ 3 > 2"));
+        }
+
     }
 }
