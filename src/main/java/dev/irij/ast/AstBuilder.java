@@ -278,6 +278,12 @@ public class AstBuilder {
         if (ctx.destructurePattern() != null) {
             return new Stmt.BindTarget.Destructure(visitDestructurePattern(ctx.destructurePattern()));
         }
+        if (ctx.vectorPattern() != null) {
+            return new Stmt.BindTarget.Destructure(visitVectorPattern(ctx.vectorPattern()));
+        }
+        if (ctx.tuplePattern() != null) {
+            return new Stmt.BindTarget.Destructure(visitTuplePattern(ctx.tuplePattern()));
+        }
         throw new IllegalStateException("Unknown bind target at " + loc(ctx));
     }
 

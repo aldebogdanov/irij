@@ -136,6 +136,12 @@ public abstract class IrijLexerBase extends Lexer {
         int currentIndent = indentStack.peek();
 
         if (indent > currentIndent) {
+            // Implicit continuation: if the more-indented line starts with
+            // a binary operator, suppress NEWLINE+INDENT (join to previous line).
+            if (nextLineStartsWithBinaryOp()) {
+                ((CommonToken) nlToken).setChannel(Token.HIDDEN_CHANNEL);
+                return nextToken();
+            }
             // Deeper indent — emit NEWLINE + INDENT.
             validateIndent(indent, nlToken);
             indentStack.push(indent);
@@ -176,6 +182,34 @@ public abstract class IrijLexerBase extends Lexer {
         // Finally, the EOF itself.
         pendingTokens.add(eofToken);
         return pendingTokens.poll();
+    }
+
+    /**
+     * Check whether the next non-whitespace characters on the upcoming line
+     * form the start of a binary operator. Called after measureNextIndent()
+     * has consumed leading whitespace, so _input.LA(1) is the first real char.
+     *
+     * <p>Operators that trigger implicit continuation:
+     * {@code |> || <| << <= < >> >= > == ++ + * ** % && .. ..<}
+     *
+     * <p>NOT included (ambiguous as unary/prefix):
+     * {@code -} (unary negation), {@code /} (seq ops like /? /+ /!)
+     */
+    private boolean nextLineStartsWithBinaryOp() {
+        int ch1 = _input.LA(1);
+        int ch2 = _input.LA(2);
+        return switch (ch1) {
+            case '|' -> true;           // |>  ||
+            case '&' -> ch2 == '&';     // &&
+            case '+' -> true;           // +  ++
+            case '*' -> true;           // *  **
+            case '%' -> true;           // %
+            case '<' -> true;           // <  <=  <<  <|
+            case '>' -> true;           // >  >=  >>
+            case '=' -> ch2 == '=';     // ==
+            case '.' -> ch2 == '.';     // ..  ..<
+            default  -> false;
+        };
     }
 
     /**

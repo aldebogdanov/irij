@@ -480,4 +480,77 @@ class ParserSmokeTest {
             assertTrue(tokens.size() > 1);
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 4.5a — Destructuring Bindings & Implicit Continuation
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested class DestructuringBindings {
+        @Test void vectorDestructure() {
+            assertParses("#[a b c] := #[1 2 3]\n");
+        }
+
+        @Test void vectorSpreadDestructure() {
+            assertParses("#[first ...rest] := #[1 2 3 4]\n");
+        }
+
+        @Test void tupleDestructure() {
+            assertParses("#(x y) := #(42 \"hello\")\n");
+        }
+
+        @Test void nestedDestructure() {
+            assertParses("#[#(a b) #(c d)] := vec\n");
+        }
+    }
+
+    @Nested class ImplicitContinuation {
+        @Test void pipelineContinuation() {
+            assertParses("""
+                x := data
+                  |> filter
+                  |> map
+                """);
+        }
+
+        @Test void concatContinuation() {
+            assertParses("""
+                s := "a"
+                  ++ "b"
+                  ++ "c"
+                """);
+        }
+
+        @Test void arithmeticContinuation() {
+            assertParses("""
+                x := 1
+                  + 2
+                  + 3
+                """);
+        }
+
+        @Test void booleanContinuation() {
+            assertParses("""
+                b := x
+                  && y
+                  || z
+                """);
+        }
+
+        @Test void continuationInsideBlock() {
+            assertParses("""
+                fn f
+                  => x
+                  x
+                    |> double
+                    |> square
+                """);
+        }
+
+        @Test void normalIndentNotAffected() {
+            assertParses("""
+                if true
+                  println "hello"
+                """);
+        }
+    }
 }

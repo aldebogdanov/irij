@@ -1912,4 +1912,128 @@ class InterpreterTest {
                 """));
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Destructuring Bindings (Phase 4.5a)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class DestructuringBindings {
+
+        @Test void vectorDestructure() {
+            assertEquals("1 2 3", run("""
+                #[a b c] := #[1 2 3]
+                println ~ (to-str a) ++ " " ++ (to-str b) ++ " " ++ (to-str c)
+                """));
+        }
+
+        @Test void vectorDestructureWithSpread() {
+            assertEquals("10 #[20 30 40]", run("""
+                #[first ...rest] := #[10 20 30 40]
+                println ~ (to-str first) ++ " " ++ (to-str rest)
+                """));
+        }
+
+        @Test void tupleDestructure() {
+            assertEquals("42 hello", run("""
+                #(x y) := #(42 "hello")
+                println ~ (to-str x) ++ " " ++ y
+                """));
+        }
+
+        @Test void nestedDestructure() {
+            assertEquals(":name Jo", run("""
+                #[#(k v) _] := #[#(:name "Jo") #(:age 30)]
+                println ~ (to-str k) ++ " " ++ v
+                """));
+        }
+
+        @Test void destructureBindFails() {
+            assertThrows(IrijRuntimeError.class, () -> run("""
+                #[a b c] := #[1 2]
+                """));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Implicit Continuation (Phase 4.5a)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class ImplicitContinuation {
+
+        @Test void pipelineContinuation() {
+            assertEquals("220", run("""
+                result := #[1 2 3 4 5 6 7 8 9 10]
+                  |> /? (n -> n % 2 == 0)
+                  |> @ (n -> n * n)
+                  |> /+
+                println (to-str result)
+                """));
+        }
+
+        @Test void concatContinuation() {
+            assertEquals("hello world", run("""
+                msg := "hello"
+                  ++ " "
+                  ++ "world"
+                println msg
+                """));
+        }
+
+        @Test void arithmeticContinuation() {
+            assertEquals("10", run("""
+                total := 1
+                  + 2
+                  + 3
+                  + 4
+                println (to-str total)
+                """));
+        }
+
+        @Test void booleanContinuation() {
+            assertEquals("true", run("""
+                check := true
+                  && true
+                  && (1 < 2)
+                println (to-str check)
+                """));
+        }
+
+        @Test void comparisonContinuation() {
+            assertEquals("true", run("""
+                result := 42
+                  == 42
+                println (to-str result)
+                """));
+        }
+
+        @Test void rangeContinuation() {
+            assertEquals("#[1 2 3 4 5]", run("""
+                r := 1
+                  .. 5
+                println (to-str (to-vec r))
+                """));
+        }
+
+        @Test void continuationInsideFnBody() {
+            assertEquals("90", run("""
+                fn process
+                  => xs
+                  xs
+                    |> /? (x -> x > 3)
+                    |> @ (x -> x * 10)
+                    |> /+
+                println (to-str (process #[1 2 3 4 5]))
+                """));
+        }
+
+        @Test void normalIndentStillWorks() {
+            assertEquals("positive", run("""
+                x := 5
+                if (x > 0)
+                  println "positive"
+                """));
+        }
+    }
 }

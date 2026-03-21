@@ -301,6 +301,8 @@ binding
 bindTarget
     : IDENT
     | destructurePattern
+    | vectorPattern
+    | tuplePattern
     ;
 
 typeAnnotationSuffix
