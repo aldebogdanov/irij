@@ -1,0 +1,23 @@
+;; Run all Irij stdlib test suites.
+;; Usage: irij tests/run-all.irj
+
+println "=== std.math ==="
+use std.math :open
+use std.test :open
+
+;; ── Math tests ──────────────────────────────────────
+
+m1 := test "sqrt" (-> assert-eq 4.0 (sqrt 16))
+m2 := test "floor" (-> assert-eq 3.0 (floor 3.7))
+m3 := test "ceil" (-> assert-eq 4.0 (ceil 3.2))
+m4 := test "pow" (-> assert-eq 8.0 (pow 2 3))
+m5 := test "abs" (-> assert-eq 5 (abs (0 - 5)))
+m6 := test "clamp" (-> assert-eq 5 (clamp 0 10 5))
+m7 := test "even?" (-> assert-true (even? 4))
+m8 := test "odd?" (-> assert-true (odd? 3))
+m9 := test "gcd" (-> assert-eq 6 (gcd 12 18))
+m10 := test "square" (-> assert-eq 25 (square 5))
+
+println ""
+println "=== Summary ==="
+summarize #[m1 m2 m3 m4 m5 m6 m7 m8 m9 m10]

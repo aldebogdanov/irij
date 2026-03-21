@@ -1,0 +1,13 @@
+mod std.convert
+
+;; Conversion utilities built on top of builtins.
+;; Builtins used: parse-int, parse-float, to-str, split
+
+pub fn to-int
+  (val -> parse-int (to-str val))
+
+pub fn to-float
+  (val -> parse-float (to-str val))
+
+pub fn digits
+  (s -> (split s "") |> @ parse-int)

@@ -4,7 +4,12 @@ import dev.irij.ast.*;
 import dev.irij.ast.Node.SourceLoc;
 import dev.irij.interpreter.Values.*;
 
+import dev.irij.module.ModuleRegistry;
+import dev.irij.module.StdModules;
+import dev.irij.parser.IrijParseDriver;
+
 import java.io.PrintStream;
+import java.nio.file.Path;
 import java.util.*;
 
 /**
@@ -15,12 +20,19 @@ public final class Interpreter {
 
     private final Environment globalEnv;
     private final PrintStream out;
+    private final ModuleRegistry moduleRegistry;
+
+    // Module loading state
+    private String currentModuleName;
+    private Set<String> pubNames; // non-null only during module file loading
 
     public Interpreter(PrintStream out) {
         this.out = out;
         this.globalEnv = new Environment();
         Builtins.install(globalEnv, out);
         installInterpreterBuiltins();
+        this.moduleRegistry = new ModuleRegistry(this::loadModuleSource);
+        StdModules.registerAll(moduleRegistry, out);
     }
 
     /** Builtins that need access to the interpreter's apply(). */
@@ -36,6 +48,17 @@ public final class Interpreter {
                 }
             });
             return thread;
+        }));
+
+        // ── try — run a thunk, catch errors ────────────────────────────
+        globalEnv.define("try", new BuiltinFn("try", 1, args -> {
+            var thunk = args.get(0);
+            try {
+                var result = apply(thunk, List.of(), SourceLoc.UNKNOWN);
+                return new Tagged("Ok", List.of(result));
+            } catch (IrijRuntimeError e) {
+                return new Tagged("Err", List.of(e.getMessage()));
+            }
         }));
 
         // ── fold — left fold over a collection ────────────────────────
@@ -54,6 +77,16 @@ public final class Interpreter {
 
     public Interpreter() {
         this(System.out);
+    }
+
+    /** Set the source root for file-based module resolution. */
+    public void setSourcePath(Path sourcePath) {
+        moduleRegistry.setSourcePath(sourcePath);
+    }
+
+    /** Get the module registry (for testing). */
+    public ModuleRegistry getModuleRegistry() {
+        return moduleRegistry;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -78,9 +111,14 @@ public final class Interpreter {
 
     /** Run a program (list of top-level declarations). */
     public Object run(List<Decl> program) {
+        return run(program, globalEnv);
+    }
+
+    /** Run a program in a specific environment (used for module loading). */
+    Object run(List<Decl> program, Environment env) {
         Object lastValue = Values.UNIT;
         for (var decl : program) {
-            lastValue = execDecl(decl, globalEnv);
+            lastValue = execDecl(decl, env);
         }
         return lastValue;
     }
@@ -135,9 +173,9 @@ public final class Interpreter {
                 exec(sd.scope(), env);
                 yield Values.UNIT;
             }
-            case Decl.ModDecl md -> Values.UNIT; // stub
-            case Decl.UseDecl ud -> Values.UNIT; // stub
-            case Decl.PubDecl pd -> execDecl((Decl) pd.inner(), env);
+            case Decl.ModDecl md -> evalModDecl(md);
+            case Decl.UseDecl ud -> evalUseDecl(ud, env);
+            case Decl.PubDecl pd -> evalPubDecl(pd, env);
             case Decl.EffectDecl ed -> evalEffectDecl(ed, env);
             case Decl.HandlerDecl hd -> evalHandlerDecl(hd, env);
             case Decl.RoleDecl rd -> Values.UNIT; // stub
@@ -197,6 +235,117 @@ public final class Interpreter {
 
     // ═══════════════════════════════════════════════════════════════════
     // Effects & Handlers
+    // ═══════════════════════════════════════════════════════════════════
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Module system
+    // ═══════════════════════════════════════════════════════════════════
+
+    private Object evalModDecl(Decl.ModDecl md) {
+        currentModuleName = md.qualifiedName();
+        return Values.UNIT;
+    }
+
+    private Object evalUseDecl(Decl.UseDecl ud, Environment env) {
+        var mod = moduleRegistry.resolve(ud.qualifiedName(), ud.loc());
+        // Extract short name (last segment after final dot)
+        var parts = ud.qualifiedName().split("\\.");
+        var shortName = parts[parts.length - 1];
+
+        if (ud.modifier() == null) {
+            // Qualified: bind short name → ModuleValue (dot-access only)
+            defineInScope(env, shortName, mod);
+        } else if (ud.modifier() instanceof Decl.UseModifier.Open) {
+            // :open — bind short name AND copy all exports
+            defineInScope(env, shortName, mod);
+            env.copyAllFrom(mod.exports());
+        } else if (ud.modifier() instanceof Decl.UseModifier.Selective sel) {
+            // {name1 name2} — bind short name AND copy only named exports
+            defineInScope(env, shortName, mod);
+            for (var name : sel.names()) {
+                if (!mod.exports().isDefined(name)) {
+                    throw new IrijRuntimeError(
+                        "Module '" + ud.qualifiedName() + "' does not export '" + name + "'", ud.loc());
+                }
+                defineInScope(env, name, mod.exports().lookup(name));
+            }
+        }
+        return Values.UNIT;
+    }
+
+    private Object evalPubDecl(Decl.PubDecl pd, Environment env) {
+        // Execute the inner declaration
+        var result = execDecl((Decl) pd.inner(), env);
+        // If we're loading a module, track the public name
+        if (pubNames != null) {
+            var name = extractDeclName(pd.inner());
+            if (name != null) pubNames.add(name);
+            // For type declarations, also export constructor names
+            if (pd.inner() instanceof Decl.TypeDecl td) {
+                if (td.body() instanceof Decl.TypeBody.SumType sum) {
+                    for (var variant : sum.variants()) {
+                        pubNames.add(variant.name());
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /** Extract the primary name from a declaration node. */
+    private String extractDeclName(Node node) {
+        if (node instanceof Decl.FnDecl fn) return fn.name();
+        if (node instanceof Decl.TypeDecl td) return td.name();
+        if (node instanceof Decl.BindingDecl bd) {
+            if (bd.stmt() instanceof Stmt.Bind b &&
+                b.target() instanceof Stmt.BindTarget.Simple s) return s.name();
+        }
+        if (node instanceof Decl.UseDecl ud) {
+            var parts = ud.qualifiedName().split("\\.");
+            return parts[parts.length - 1];
+        }
+        return null;
+    }
+
+    /**
+     * Load a module from Irij source code.
+     * Called by {@link ModuleRegistry} for both classpath and file-based modules.
+     */
+    private ModuleValue loadModuleSource(String source, String qualifiedName, SourceLoc loc) {
+        // Parse
+        var parseResult = IrijParseDriver.parse(source);
+        if (parseResult.hasErrors()) {
+            throw new IrijRuntimeError(
+                "Parse errors in module '" + qualifiedName + "': " + parseResult.errors(), loc);
+        }
+        var ast = new AstBuilder().build(parseResult.tree());
+
+        // Execute in a fresh environment with builtins
+        var moduleEnv = new Environment();
+        Builtins.install(moduleEnv, out);
+        // Install interpreter builtins (fold, spawn) in module env too
+        moduleEnv.define("fold", globalEnv.lookup("fold"));
+        moduleEnv.define("spawn", globalEnv.lookup("spawn"));
+        moduleEnv.define("try", globalEnv.lookup("try"));
+
+        // Track pub names
+        var savedPubNames = this.pubNames;
+        var savedModuleName = this.currentModuleName;
+        this.pubNames = new HashSet<>();
+        this.currentModuleName = qualifiedName;
+        try {
+            run(ast, moduleEnv);
+            // Build exports from tracked pub names
+            var exports = moduleEnv.exportBindings(this.pubNames);
+            return new ModuleValue(qualifiedName, exports);
+        } finally {
+            this.pubNames = savedPubNames;
+            this.currentModuleName = savedModuleName;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Effect system
     // ═══════════════════════════════════════════════════════════════════
 
     /**
@@ -515,10 +664,38 @@ public final class Interpreter {
         for (var stmt : stmts) {
             switch (stmt) {
                 case Stmt.ExprStmt es -> last = eval(es.expr(), env);
+                case Stmt.MatchStmt ms -> last = execMatchReturn(ms, env);
+                case Stmt.IfStmt is -> last = execIfReturn(is, env);
+                case Stmt.With w -> last = execWith(w, env);
                 default -> { exec(stmt, env); last = Values.UNIT; }
             }
         }
         return last;
+    }
+
+    private Object execMatchReturn(Stmt.MatchStmt ms, Environment env) {
+        var scrutinee = eval(ms.scrutinee(), env);
+        for (var arm : ms.arms()) {
+            var matchEnv = env.child();
+            if (matchPattern(arm.pattern(), scrutinee, matchEnv)) {
+                if (arm.guard() != null) {
+                    var guardVal = eval(arm.guard(), matchEnv);
+                    if (!Values.isTruthy(guardVal)) continue;
+                }
+                return eval(arm.body(), matchEnv);
+            }
+        }
+        throw new IrijRuntimeError("Non-exhaustive match", ms.loc());
+    }
+
+    private Object execIfReturn(Stmt.IfStmt is, Environment env) {
+        var condVal = eval(is.cond(), env);
+        if (Values.isTruthy(condVal)) {
+            return execStmtListReturn(is.thenBranch(), env.child());
+        } else if (!is.elseBranch().isEmpty()) {
+            return execStmtListReturn(is.elseBranch(), env.child());
+        }
+        return Values.UNIT;
     }
 
     private void execStmtList(List<Stmt> stmts, Environment env) {
@@ -640,6 +817,13 @@ public final class Interpreter {
                     }
                     throw new IrijRuntimeError("No field '" + da.field() + "' on handler " + hv.name(), da.loc());
                 }
+                // Module dot-access: read from module's exports environment
+                if (target instanceof ModuleValue mod) {
+                    if (mod.exports().isDefined(da.field())) {
+                        yield mod.exports().lookup(da.field());
+                    }
+                    throw new IrijRuntimeError("Module '" + mod.qualifiedName() + "' has no export '" + da.field() + "'", da.loc());
+                }
                 throw new IrijRuntimeError("Cannot access field '" + da.field() + "' on " + Values.typeName(target), da.loc());
             }
 
@@ -654,15 +838,7 @@ public final class Interpreter {
 
             // ── Block ───────────────────────────────────────────────────
             case Expr.Block bl -> {
-                var blockEnv = env.child();
-                Object last = Values.UNIT;
-                for (var stmt : bl.stmts()) {
-                    switch (stmt) {
-                        case Stmt.ExprStmt es -> last = eval(es.expr(), blockEnv);
-                        default -> { exec(stmt, blockEnv); last = Values.UNIT; }
-                    }
-                }
-                yield last;
+                yield execStmtListReturn(bl.stmts(), env.child());
             }
 
             // ── Choreography (stub) ─────────────────────────────────────
@@ -857,15 +1033,8 @@ public final class Interpreter {
                         throw new IrijRuntimeError("Pattern match failed in function call", loc);
                     }
                 }
-                // Execute body
-                Object last = Values.UNIT;
-                for (var stmt : imf.body()) {
-                    switch (stmt) {
-                        case Stmt.ExprStmt es -> last = eval(es.expr(), callEnv);
-                        default -> { exec(stmt, callEnv); last = Values.UNIT; }
-                    }
-                }
-                yield last;
+                // Execute body — returns last expression/match/if value
+                yield execStmtListReturn(imf.body(), callEnv);
             }
             case BuiltinFn bf -> {
                 if (args.size() < bf.arity()) {

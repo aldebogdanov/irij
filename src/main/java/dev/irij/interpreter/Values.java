@@ -145,7 +145,7 @@ public final class Values {
 
     public record IrijMap(Map<String, Object> entries) {
         public IrijMap {
-            entries = Map.copyOf(entries);
+            entries = Collections.unmodifiableMap(new LinkedHashMap<>(entries));
         }
 
         @Override
@@ -341,6 +341,20 @@ public final class Values {
         }
     }
 
+    // ── Module system values ────────────────────────────────────────────
+
+    /**
+     * A loaded module value, created by {@code use} declarations.
+     * The {@code exports} environment contains only public bindings.
+     * Dot-access on a ModuleValue looks up names in the exports environment.
+     */
+    public record ModuleValue(String qualifiedName, Environment exports) {
+        @Override
+        public String toString() {
+            return "<module " + qualifiedName + ">";
+        }
+    }
+
     // ── Value utilities ─────────────────────────────────────────────────
 
     /** Convert a runtime value to its Irij string representation. */
@@ -392,6 +406,7 @@ public final class Values {
         if (value instanceof EffectDescriptor ed) return "Effect(" + ed.name() + ")";
         if (value instanceof HandlerValue hv) return "Handler(" + hv.name() + ")";
         if (value instanceof ComposedHandler) return "ComposedHandler";
+        if (value instanceof ModuleValue mv) return "Module(" + mv.qualifiedName() + ")";
         if (value instanceof Thread) return "Thread";
         return value.getClass().getSimpleName();
     }

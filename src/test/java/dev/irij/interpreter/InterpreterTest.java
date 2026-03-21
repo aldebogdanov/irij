@@ -1538,4 +1538,378 @@ class InterpreterTest {
                 """);
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // New Builtins (Phase 4)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class NewBuiltins {
+        // ── Error & type-of ─────────────────────────────────────────
+        @Test void errorThrows() {
+            assertRuntimeError("error \"boom\"");
+        }
+
+        @Test void typeOfInt() {
+            assertEquals("Int", run("println ~ type-of 42"));
+        }
+
+        @Test void typeOfStr() {
+            assertEquals("Str", run("println ~ type-of \"hello\""));
+        }
+
+        @Test void typeOfVector() {
+            assertEquals("Vector", run("println ~ type-of #[1 2 3]"));
+        }
+
+        // ── Map operations ──────────────────────────────────────────
+        @Test void assocAddsKey() {
+            assertEquals("{x= 1 y= 2}", run("println ~ assoc {x= 1} \"y\" 2"));
+        }
+
+        @Test void assocOverrides() {
+            assertEquals("{x= 99}", run("println ~ assoc {x= 1} \"x\" 99"));
+        }
+
+        @Test void dissocRemovesKey() {
+            assertEquals("{x= 1}", run("println ~ dissoc {x= 1 y= 2} \"y\""));
+        }
+
+        @Test void mergeMaps() {
+            assertEquals("{x= 1 y= 2}", run("println ~ merge {x= 1} {y= 2}"));
+        }
+
+        @Test void mergeOverrides() {
+            assertEquals("{x= 99}", run("println ~ merge {x= 1} {x= 99}"));
+        }
+
+        // ── String operations ───────────────────────────────────────
+        @Test void splitString() {
+            assertEquals("#[a b c]", run("println ~ split \"a,b,c\" \",\""));
+        }
+
+        @Test void splitIntoChars() {
+            assertEquals("#[h i]", run("println ~ split \"hi\" \"\""));
+        }
+
+        @Test void joinStrings() {
+            assertEquals("a-b-c", run("println ~ join \"-\" #[\"a\" \"b\" \"c\"]"));
+        }
+
+        @Test void trimString() {
+            assertEquals("hello", run("println ~ trim \"  hello  \""));
+        }
+
+        @Test void upperCase() {
+            assertEquals("HELLO", run("println ~ upper-case \"hello\""));
+        }
+
+        @Test void lowerCase() {
+            assertEquals("hello", run("println ~ lower-case \"HELLO\""));
+        }
+
+        @Test void startsWithTrue() {
+            assertEquals("true", run("println ~ starts-with? \"hello\" \"hel\""));
+        }
+
+        @Test void endsWithFalse() {
+            assertEquals("false", run("println ~ ends-with? \"hello\" \"world\""));
+        }
+
+        @Test void replaceString() {
+            assertEquals("hellX", run("println ~ replace \"hello\" \"o\" \"X\""));
+        }
+
+        @Test void substringExtract() {
+            assertEquals("ell", run("println ~ substring \"hello\" 1 4"));
+        }
+
+        @Test void charAtIndex() {
+            assertEquals("e", run("println ~ char-at \"hello\" 1"));
+        }
+
+        @Test void indexOfFound() {
+            assertEquals("2", run("println ~ index-of \"hello\" \"ll\""));
+        }
+
+        @Test void indexOfNotFound() {
+            assertEquals("-1", run("println ~ index-of \"hello\" \"xyz\""));
+        }
+
+        // ── Math operations ─────────────────────────────────────────
+        @Test void sqrtOf16() {
+            assertEquals("4.0", run("println ~ sqrt 16"));
+        }
+
+        @Test void floorValue() {
+            assertEquals("3", run("println ~ floor 3.7"));
+        }
+
+        @Test void ceilValue() {
+            assertEquals("4", run("println ~ ceil 3.2"));
+        }
+
+        @Test void roundValue() {
+            assertEquals("4", run("println ~ round 3.5"));
+        }
+
+        @Test void powFunction() {
+            assertEquals("8.0", run("println ~ pow 2 3"));
+        }
+
+        @Test void sinZero() {
+            assertEquals("0.0", run("println ~ sin 0"));
+        }
+
+        // ── Conversion ──────────────────────────────────────────────
+        @Test void parseIntValid() {
+            assertEquals("42", run("println ~ parse-int \"42\""));
+        }
+
+        @Test void parseIntInvalid() {
+            assertRuntimeError("parse-int \"abc\"");
+        }
+
+        @Test void parseFloatValid() {
+            assertEquals("3.14", run("println ~ parse-float \"3.14\""));
+        }
+
+        @Test void charCodeAndBack() {
+            assertEquals("65", run("println ~ char-code \"A\""));
+        }
+
+        @Test void fromCharCode() {
+            assertEquals("A", run("println ~ from-char-code 65"));
+        }
+
+        // ── IO ──────────────────────────────────────────────────────
+        @Test void nowMsReturnsNumber() {
+            var result = eval("now-ms ()");
+            assertInstanceOf(Long.class, result);
+            assertTrue((Long) result > 0);
+        }
+
+        @Test void getEnvPath() {
+            // PATH should always exist on any system
+            var result = eval("get-env \"PATH\"");
+            assertInstanceOf(String.class, result);
+        }
+
+        @Test void getEnvMissing() {
+            var result = eval("get-env \"IRIJ_NONEXISTENT_VAR_12345\"");
+            assertEquals(Values.UNIT, result);
+        }
+
+        @Test void readWriteFileRoundTrip() {
+            var tmpFile = System.getProperty("java.io.tmpdir") + "/irij-test-" + System.nanoTime() + ".txt";
+            run("write-file \"" + tmpFile + "\" \"hello irij\"");
+            assertEquals("hello irij", run("println ~ read-file \"" + tmpFile + "\""));
+            // cleanup
+            new java.io.File(tmpFile).delete();
+        }
+
+        @Test void fileExistsCheck() {
+            assertEquals("false", run("println ~ file-exists? \"/nonexistent/path/xyz\""));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Module System (Phase 4)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class Modules {
+        @Test void useStdMathQualified() {
+            assertEquals("4.0", run("""
+                use std.math
+                println ~ math.sqrt 16
+                """));
+        }
+
+        @Test void useStdMathSelective() {
+            assertEquals("4.0", run("""
+                use std.math {sqrt pow}
+                println ~ sqrt 16
+                """));
+        }
+
+        @Test void useStdTextOpen() {
+            assertEquals("hello", run("""
+                use std.text :open
+                println ~ trim "  hello  "
+                """));
+        }
+
+        @Test void moduleNotFound() {
+            assertRuntimeError("use nonexistent.module");
+        }
+
+        @Test void selectiveImportMissing() {
+            assertRuntimeError("""
+                use std.math {nonexistent-fn}
+                """);
+        }
+
+        @Test void stdTextChars() {
+            assertEquals("#[h i]", run("""
+                use std.text :open
+                println ~ chars "hi"
+                """));
+        }
+
+        @Test void stdTextWords() {
+            assertEquals("#[hello world]", run("""
+                use std.text :open
+                println ~ words "hello world"
+                """));
+        }
+
+        @Test void stdTextBlank() {
+            assertEquals("true", run("""
+                use std.text :open
+                println ~ blank? "  "
+                """));
+        }
+
+        @Test void stdTextRepeat() {
+            assertEquals("abcabcabc", run("""
+                use std.text :open
+                println ~ repeat 3 "abc"
+                """));
+        }
+
+        @Test void stdMathEven() {
+            assertEquals("true", run("""
+                use std.math :open
+                println ~ even? 4
+                """));
+        }
+
+        @Test void stdMathOdd() {
+            assertEquals("true", run("""
+                use std.math :open
+                println ~ odd? 3
+                """));
+        }
+
+        @Test void stdMathGcd() {
+            assertEquals("6", run("""
+                use std.math :open
+                println ~ gcd 12 18
+                """));
+        }
+
+        @Test void stdMathClamp() {
+            assertEquals("10", run("""
+                use std.math :open
+                println ~ clamp 0 10 15
+                """));
+        }
+
+        @Test void stdCollectionZip() {
+            assertEquals("#[#(1 :a) #(2 :b)]", run("""
+                use std.collection :open
+                println ~ zip #[1 2 3] #[:a :b]
+                """));
+        }
+
+        @Test void stdCollectionEnumerate() {
+            assertEquals("#[#(0 a) #(1 b) #(2 c)]", run("""
+                use std.collection :open
+                println ~ enumerate #["a" "b" "c"]
+                """));
+        }
+
+        @Test void stdCollectionFlatten() {
+            assertEquals("#[1 2 3 4]", run("""
+                use std.collection :open
+                println ~ flatten #[#[1 2] #[3 4]]
+                """));
+        }
+
+        @Test void stdCollectionDistinct() {
+            assertEquals("#[1 2 3]", run("""
+                use std.collection :open
+                println ~ distinct #[1 2 1 3 2]
+                """));
+        }
+
+        @Test void stdCollectionAllAny() {
+            assertEquals("true\nfalse", run("""
+                use std.collection :open
+                println ~ all? (x -> x > 0) #[1 2 3]
+                println ~ any? (x -> x > 5) #[1 2 3]
+                """));
+        }
+
+        @Test void stdCollectionGroupBy() {
+            assertEquals("2", run("""
+                use std.collection :open
+                result := group-by (x -> x % 2) #[1 2 3 4 5]
+                println ~ length (keys result)
+                """));
+        }
+
+        @Test void stdCollectionPartition() {
+            assertEquals("#[#[1 2] #[3 4] #[5]]", run("""
+                use std.collection :open
+                println ~ partition 2 #[1 2 3 4 5]
+                """));
+        }
+
+        @Test void stdFnFlip() {
+            assertEquals("1", run("""
+                use std.func :open
+                println ~ flip (-) 3 4
+                """));
+        }
+
+        @Test void stdFnCompose() {
+            assertEquals("6", run("""
+                use std.func :open
+                double := (x -> x * 2)
+                inc := (x -> x + 1)
+                f := compose double inc
+                println ~ f 2
+                """));
+        }
+
+        @Test void stdCollectionSortBy() {
+            assertEquals("#[c bb aaa]", run("""
+                use std.collection :open
+                println ~ sort-by length #["aaa" "c" "bb"]
+                """));
+        }
+
+        @Test void stdCollectionMapVals() {
+            assertEquals("{x= 2 y= 4}", run("""
+                use std.collection :open
+                println ~ map-vals (x -> x * 2) {x= 1 y= 2}
+                """));
+        }
+
+        @Test void stdCollectionEach() {
+            assertEquals("1\n2\n3", run("""
+                use std.collection :open
+                each println #[1 2 3]
+                """));
+        }
+
+        @Test void moduleLoadCached() {
+            // Loading same module twice should work (cached)
+            assertEquals("hello\nhello", run("""
+                use std.text :open
+                println ~ trim "  hello  "
+                use std.text :open
+                println ~ trim "  hello  "
+                """));
+        }
+
+        @Test void qualifiedAndDotAccess() {
+            assertEquals("3.0", run("""
+                use std.math
+                println ~ math.sqrt 9
+                """));
+        }
+    }
 }

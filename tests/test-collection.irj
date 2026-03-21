@@ -1,0 +1,85 @@
+use std.test :open
+use std.collection :open
+
+;; ── zip / zip-with / enumerate ───────────────────────
+
+r1 := test "zip" (-> assert-eq #[#(1 :a) #(2 :b)] (zip #[1 2 3] #[:a :b]))
+r2 := test "zip-with" (-> assert-eq #[5 7 9] (zip-with (+) #[1 2 3] #[4 5 6]))
+r3 := test "enumerate" (-> assert-eq #[#(0 :a) #(1 :b) #(2 :c)] (enumerate #[:a :b :c]))
+
+;; ── flatten / distinct ───────────────────────────────
+
+r4 := test "flatten" (-> assert-eq #[1 2 3 4] (flatten #[#[1 2] #[3 4]]))
+r5 := test "distinct" (-> assert-eq #[1 2 3] (distinct #[1 2 1 3 2]))
+
+;; ── frequencies ──────────────────────────────────────
+
+r6 := test "frequencies" (-> assert-eq 3 (get ":a" (frequencies #[:a :b :a :c :b :a])))
+
+;; ── partition ────────────────────────────────────────
+
+r7 := test "partition" (-> assert-eq #[#[1 2] #[3 4] #[5]] (partition 2 #[1 2 3 4 5]))
+r8 := test "partition exact" (-> assert-eq #[#[1 2] #[3 4]] (partition 2 #[1 2 3 4]))
+
+;; ── sort-by ──────────────────────────────────────────
+
+r9 := test "sort-by" (-> assert-eq #["a" "bb" "ccc"] (sort-by length #["ccc" "a" "bb"]))
+
+;; ── map-vals / filter-vals / map-keys ────────────────
+
+m1 := {a= 1 b= 2}
+m2 := {a= 1 b= 20 c= 3}
+r10 := test "map-vals" (-> assert-eq 10 (get "a" (map-vals (x -> x * 10) m1)))
+r11 := test "filter-vals" (-> assert-eq 1 (length (keys (filter-vals (x -> x > 5) m2))))
+r12 := test "map-keys" (-> assert-eq 1 (get "A" (map-keys upper-case m1)))
+
+;; ── each ─────────────────────────────────────────────
+
+r13 := test "each returns unit" (-> assert-eq () (each (x -> x) #[]))
+
+;; ── find-index ───────────────────────────────────────
+
+r14 := test "find-index found" (-> assert-eq 2 (find-index (x -> x > 5) #[1 3 7 9]))
+r15 := test "find-index not found" (-> assert-eq (0 - 1) (find-index (x -> x > 100) #[1 2 3]))
+
+;; ── all? / any? / none? ─────────────────────────────
+
+r16 := test "all? true" (-> assert-true (all? (x -> x > 0) #[1 2 3]))
+r17 := test "all? false" (-> assert-false (all? (x -> x > 0) #[1 0 3]))
+r18 := test "any? true" (-> assert-true (any? (x -> x > 5) #[1 2 6]))
+r19 := test "any? false" (-> assert-false (any? (x -> x > 5) #[1 2 3]))
+r20 := test "none? true" (-> assert-true (none? (x -> x > 5) #[1 2 3]))
+r21 := test "none? false" (-> assert-false (none? (x -> x > 5) #[1 2 6]))
+
+;; ── flat-map ─────────────────────────────────────────
+
+r22 := test "flat-map" (-> assert-eq #[1 1 2 2 3 3] (flat-map (x -> #[x x]) #[1 2 3]))
+
+;; ── sum / product ────────────────────────────────────
+
+r23 := test "sum" (-> assert-eq 10 (sum #[1 2 3 4]))
+r24 := test "product" (-> assert-eq 24 (product #[1 2 3 4]))
+
+;; ── count-by ─────────────────────────────────────────
+
+r25 := test "count-by" (-> assert-eq 2 (count-by (x -> x > 3) #[1 2 4 5]))
+
+;; ── interleave ───────────────────────────────────────
+
+r26 := test "interleave" (-> assert-eq #[1 :a 2 :b 3 :c] (interleave #[1 2 3] #[:a :b :c]))
+
+;; ── take-while ───────────────────────────────────────
+
+r27 := test "take-while" (-> assert-eq #[1 2 3] (take-while (x -> x < 4) #[1 2 3 5 6]))
+r28 := test "take-while all" (-> assert-eq #[1 2 3] (take-while (x -> x < 10) #[1 2 3]))
+
+;; ── window ───────────────────────────────────────────
+
+r29 := test "window" (-> assert-eq #[#[1 2] #[2 3] #[3 4]] (window 2 #[1 2 3 4]))
+r30 := test "window too big" (-> assert-eq #[] (window 5 #[1 2 3]))
+
+;; ── group-by ─────────────────────────────────────────
+
+r31 := test "group-by" (-> assert-eq 2 (length (keys (group-by (x -> x % 2) #[1 2 3 4 5]))))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31]

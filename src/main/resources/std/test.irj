@@ -1,0 +1,76 @@
+mod std.test
+
+;; Simple test framework for Irij.
+;;
+;; Usage:
+;;   use std.test :open
+;;
+;;   r1 := test "adds numbers" (-> assert-eq 3 (1 + 2))
+;;   r2 := test "string trim" (-> assert-eq "hi" (trim "  hi  "))
+;;   summarize #[r1 r2]
+
+;; ── Assertions ──────────────────────────────────────
+
+pub fn assert-eq
+  => expected actual
+  if (expected /= actual)
+    error ~ "Expected " ++ (to-str expected) ++ " but got " ++ (to-str actual)
+  else
+    ()
+
+pub fn assert-neq
+  => a b
+  if (a == b)
+    error ~ "Expected values to differ, but both are " ++ (to-str a)
+  else
+    ()
+
+pub fn assert-true
+  => val
+  if (not val)
+    error "Expected true but got false"
+  else
+    ()
+
+pub fn assert-false
+  => val
+  if val
+    error "Expected false but got true"
+  else
+    ()
+
+pub fn assert-throws
+  => thunk
+  result := try thunk
+  match result
+    Ok _ => error "Expected an error but none was thrown"
+    Err _ => ()
+
+;; ── Test runner ─────────────────────────────────────
+
+;; Run a single test. Returns #(:pass name) or #(:fail name).
+pub fn test
+  => name thunk
+  result := try thunk
+  match result
+    Ok _ =>
+      println ~ "  [ok] " ++ name
+      #(:pass name)
+    Err msg =>
+      println ~ "  [FAIL] " ++ name ++ " -- " ++ msg
+      #(:fail name)
+
+;; Summarize test results. Takes a vector of test results from `test`.
+;; Returns the number of failures (0 = success).
+pub fn summarize
+  => results
+  total := length results
+  pass-results := /? (r -> nth 0 r == :pass)
+  passed := length (pass-results results)
+  failed := total - passed
+  println ""
+  if (failed == 0)
+    println ~ (to-str passed) ++ "/" ++ (to-str total) ++ " passed"
+  else
+    println ~ (to-str passed) ++ "/" ++ (to-str total) ++ " passed, " ++ (to-str failed) ++ " FAILED"
+  failed

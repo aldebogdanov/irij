@@ -122,6 +122,7 @@ public final class IrijCli {
 
         try {
             var interpreter = new Interpreter();
+            interpreter.setSourcePath(path.toAbsolutePath().getParent());
             interpreter.run(ast);
         } catch (IrijRuntimeError e) {
             System.err.println(path + ":" + e.getMessage());

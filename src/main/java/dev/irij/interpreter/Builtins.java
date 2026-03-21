@@ -3,8 +3,12 @@ package dev.irij.interpreter;
 import dev.irij.ast.Node.SourceLoc;
 import dev.irij.interpreter.Values.*;
 
+import java.io.IOException;
 import java.io.PrintStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -252,6 +256,229 @@ public final class Builtins {
             if (v instanceof String s) return s.isEmpty();
             return false;
         }));
+
+        // ── Error handling ─────────────────────────────────────────────
+        env.define("error", new BuiltinFn("error", 1, args -> {
+            throw new IrijRuntimeError(Values.toIrijString(args.get(0)));
+        }));
+
+        // ── Type introspection ─────────────────────────────────────────
+        env.define("type-of", new BuiltinFn("type-of", 1, args -> {
+            return Values.typeName(args.get(0));
+        }));
+
+        // ── Dynamic map operations ─────────────────────────────────────
+        env.define("assoc", new BuiltinFn("assoc", 3, args -> {
+            var m = args.get(0);
+            var key = Values.toIrijString(args.get(1));
+            var val = args.get(2);
+            if (m instanceof IrijMap map) {
+                var entries = new LinkedHashMap<>(map.entries());
+                entries.put(key, val);
+                return new IrijMap(entries);
+            }
+            throw new IrijRuntimeError("assoc expects a Map as first argument, got " + Values.typeName(m));
+        }));
+
+        env.define("dissoc", new BuiltinFn("dissoc", 2, args -> {
+            var m = args.get(0);
+            var key = Values.toIrijString(args.get(1));
+            if (m instanceof IrijMap map) {
+                var entries = new LinkedHashMap<>(map.entries());
+                entries.remove(key);
+                return new IrijMap(entries);
+            }
+            throw new IrijRuntimeError("dissoc expects a Map as first argument, got " + Values.typeName(m));
+        }));
+
+        env.define("merge", new BuiltinFn("merge", 2, args -> {
+            var m1 = args.get(0);
+            var m2 = args.get(1);
+            if (m1 instanceof IrijMap map1 && m2 instanceof IrijMap map2) {
+                var entries = new LinkedHashMap<>(map1.entries());
+                entries.putAll(map2.entries());
+                return new IrijMap(entries);
+            }
+            throw new IrijRuntimeError("merge expects two Maps, got " + Values.typeName(m1) + " and " + Values.typeName(m2));
+        }));
+
+        // ── String operations ──────────────────────────────────────────
+        env.define("split", new BuiltinFn("split", 2, args -> {
+            var str = asString(args.get(0), "split");
+            var sep = asString(args.get(1), "split");
+            var parts = sep.isEmpty()
+                ? str.chars().mapToObj(c -> String.valueOf((char) c)).toList()
+                : Arrays.asList(str.split(java.util.regex.Pattern.quote(sep), -1));
+            return new IrijVector(new ArrayList<>(parts));
+        }));
+
+        env.define("join", new BuiltinFn("join", 2, args -> {
+            var sep = asString(args.get(0), "join");
+            var coll = args.get(1);
+            var list = toList(coll);
+            return list.stream().map(Values::toIrijString).collect(Collectors.joining(sep));
+        }));
+
+        env.define("trim", new BuiltinFn("trim", 1, args -> {
+            return asString(args.get(0), "trim").strip();
+        }));
+
+        env.define("upper-case", new BuiltinFn("upper-case", 1, args -> {
+            return asString(args.get(0), "upper-case").toUpperCase();
+        }));
+
+        env.define("lower-case", new BuiltinFn("lower-case", 1, args -> {
+            return asString(args.get(0), "lower-case").toLowerCase();
+        }));
+
+        env.define("starts-with?", new BuiltinFn("starts-with?", 2, args -> {
+            return asString(args.get(0), "starts-with?").startsWith(asString(args.get(1), "starts-with?"));
+        }));
+
+        env.define("ends-with?", new BuiltinFn("ends-with?", 2, args -> {
+            return asString(args.get(0), "ends-with?").endsWith(asString(args.get(1), "ends-with?"));
+        }));
+
+        env.define("replace", new BuiltinFn("replace", 3, args -> {
+            var str = asString(args.get(0), "replace");
+            var from = asString(args.get(1), "replace");
+            var to = asString(args.get(2), "replace");
+            return str.replace(from, to);
+        }));
+
+        env.define("substring", new BuiltinFn("substring", 3, args -> {
+            var str = asString(args.get(0), "substring");
+            int start = (int) asLong(args.get(1), "substring");
+            int end = (int) asLong(args.get(2), "substring");
+            if (start < 0 || end > str.length() || start > end)
+                throw new IrijRuntimeError("substring: index out of bounds (start=" + start + ", end=" + end + ", length=" + str.length() + ")");
+            return str.substring(start, end);
+        }));
+
+        env.define("char-at", new BuiltinFn("char-at", 2, args -> {
+            var str = asString(args.get(0), "char-at");
+            int idx = (int) asLong(args.get(1), "char-at");
+            if (idx < 0 || idx >= str.length())
+                throw new IrijRuntimeError("char-at: index " + idx + " out of bounds (length " + str.length() + ")");
+            return String.valueOf(str.charAt(idx));
+        }));
+
+        env.define("index-of", new BuiltinFn("index-of", 2, args -> {
+            var str = asString(args.get(0), "index-of");
+            var sub = asString(args.get(1), "index-of");
+            return (long) str.indexOf(sub);
+        }));
+
+        // ── Math operations ────────────────────────────────────────────
+        env.define("sqrt", new BuiltinFn("sqrt", 1, args -> {
+            return Math.sqrt(asDouble(args.get(0), "sqrt"));
+        }));
+
+        env.define("floor", new BuiltinFn("floor", 1, args -> {
+            return (long) Math.floor(asDouble(args.get(0), "floor"));
+        }));
+
+        env.define("ceil", new BuiltinFn("ceil", 1, args -> {
+            return (long) Math.ceil(asDouble(args.get(0), "ceil"));
+        }));
+
+        env.define("round", new BuiltinFn("round", 1, args -> {
+            return Math.round(asDouble(args.get(0), "round"));
+        }));
+
+        env.define("sin", new BuiltinFn("sin", 1, args -> {
+            return Math.sin(asDouble(args.get(0), "sin"));
+        }));
+
+        env.define("cos", new BuiltinFn("cos", 1, args -> {
+            return Math.cos(asDouble(args.get(0), "cos"));
+        }));
+
+        env.define("tan", new BuiltinFn("tan", 1, args -> {
+            return Math.tan(asDouble(args.get(0), "tan"));
+        }));
+
+        env.define("log", new BuiltinFn("log", 1, args -> {
+            return Math.log(asDouble(args.get(0), "log"));
+        }));
+
+        env.define("exp", new BuiltinFn("exp", 1, args -> {
+            return Math.exp(asDouble(args.get(0), "exp"));
+        }));
+
+        env.define("pow", new BuiltinFn("pow", 2, args -> {
+            return Math.pow(asDouble(args.get(0), "pow"), asDouble(args.get(1), "pow"));
+        }));
+
+        env.define("random-int", new BuiltinFn("random-int", 1, args -> {
+            long bound = asLong(args.get(0), "random-int");
+            return ThreadLocalRandom.current().nextLong(bound);
+        }));
+
+        env.define("random-float", new BuiltinFn("random-float", 0, args -> {
+            return ThreadLocalRandom.current().nextDouble();
+        }));
+
+        // ── Conversion primitives ──────────────────────────────────────
+        env.define("parse-int", new BuiltinFn("parse-int", 1, args -> {
+            var str = asString(args.get(0), "parse-int");
+            try { return Long.parseLong(str.strip()); }
+            catch (NumberFormatException e) {
+                throw new IrijRuntimeError("parse-int: cannot parse '" + str + "' as Int");
+            }
+        }));
+
+        env.define("parse-float", new BuiltinFn("parse-float", 1, args -> {
+            var str = asString(args.get(0), "parse-float");
+            try { return Double.parseDouble(str.strip()); }
+            catch (NumberFormatException e) {
+                throw new IrijRuntimeError("parse-float: cannot parse '" + str + "' as Float");
+            }
+        }));
+
+        env.define("char-code", new BuiltinFn("char-code", 1, args -> {
+            var str = asString(args.get(0), "char-code");
+            if (str.isEmpty()) throw new IrijRuntimeError("char-code: empty string");
+            return (long) str.codePointAt(0);
+        }));
+
+        env.define("from-char-code", new BuiltinFn("from-char-code", 1, args -> {
+            int cp = (int) asLong(args.get(0), "from-char-code");
+            return String.valueOf(Character.toChars(cp));
+        }));
+
+        // ── IO primitives ──────────────────────────────────────────────
+        env.define("read-file", new BuiltinFn("read-file", 1, args -> {
+            var path = asString(args.get(0), "read-file");
+            try { return Files.readString(Path.of(path)); }
+            catch (IOException e) {
+                throw new IrijRuntimeError("read-file: " + e.getMessage());
+            }
+        }));
+
+        env.define("write-file", new BuiltinFn("write-file", 2, args -> {
+            var path = asString(args.get(0), "write-file");
+            var content = asString(args.get(1), "write-file");
+            try { Files.writeString(Path.of(path), content); }
+            catch (IOException e) {
+                throw new IrijRuntimeError("write-file: " + e.getMessage());
+            }
+            return Values.UNIT;
+        }));
+
+        env.define("file-exists?", new BuiltinFn("file-exists?", 1, args -> {
+            return Files.exists(Path.of(asString(args.get(0), "file-exists?")));
+        }));
+
+        env.define("get-env", new BuiltinFn("get-env", 1, args -> {
+            var name = asString(args.get(0), "get-env");
+            var val = System.getenv(name);
+            return val != null ? val : Values.UNIT;
+        }));
+
+        env.define("now-ms", new BuiltinFn("now-ms", 0, args -> {
+            return System.currentTimeMillis();
+        }));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -263,6 +490,17 @@ public final class Builtins {
         throw new IrijRuntimeError(context + " expects Int, got " + Values.typeName(value));
     }
 
+    static double asDouble(Object value, String context) {
+        if (value instanceof Double d) return d;
+        if (value instanceof Long l) return l.doubleValue();
+        throw new IrijRuntimeError(context + " expects a number, got " + Values.typeName(value));
+    }
+
+    static String asString(Object value, String context) {
+        if (value instanceof String s) return s;
+        throw new IrijRuntimeError(context + " expects Str, got " + Values.typeName(value));
+    }
+
     static int compare(Object a, Object b) {
         if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
         if (a instanceof Double da && b instanceof Double db) return Double.compare(da, db);
@@ -270,6 +508,24 @@ public final class Builtins {
         if (a instanceof Double da && b instanceof Long lb) return Double.compare(da, lb);
         if (a instanceof String sa && b instanceof String sb) return sa.compareTo(sb);
         if (a instanceof Keyword ka && b instanceof Keyword kb) return ka.name().compareTo(kb.name());
+        // Tuple comparison: lexicographic
+        if (a instanceof IrijTuple ta && b instanceof IrijTuple tb) {
+            int len = Math.min(ta.elements().length, tb.elements().length);
+            for (int i = 0; i < len; i++) {
+                int cmp = compare(ta.elements()[i], tb.elements()[i]);
+                if (cmp != 0) return cmp;
+            }
+            return Integer.compare(ta.elements().length, tb.elements().length);
+        }
+        // Vector comparison: lexicographic
+        if (a instanceof IrijVector va && b instanceof IrijVector vb) {
+            int len = Math.min(va.elements().size(), vb.elements().size());
+            for (int i = 0; i < len; i++) {
+                int cmp = compare(va.elements().get(i), vb.elements().get(i));
+                if (cmp != 0) return cmp;
+            }
+            return Integer.compare(va.elements().size(), vb.elements().size());
+        }
         throw new IrijRuntimeError("Cannot compare " + Values.typeName(a) + " and " + Values.typeName(b));
     }
 

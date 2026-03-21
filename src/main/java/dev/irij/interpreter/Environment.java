@@ -187,6 +187,41 @@ public final class Environment {
         return Collections.unmodifiableMap(bindings);
     }
 
+    /**
+     * Create a new root environment containing only the named bindings from this scope.
+     * Used for building module exports — copies only public names into a fresh env.
+     */
+    public Environment exportBindings(java.util.Set<String> names) {
+        var exports = new Environment();
+        for (var name : names) {
+            Cell cell = lookupCell(name);
+            if (cell != null) {
+                Object value = switch (cell) {
+                    case ImmutableCell(var v) -> v;
+                    case MutableCell mc -> mc.get();
+                    case VarCell vc -> vc.get();
+                };
+                exports.define(name, value);
+            }
+        }
+        return exports;
+    }
+
+    /**
+     * Copy all bindings from another environment into this one.
+     * Used for :open imports.
+     */
+    public void copyAllFrom(Environment other) {
+        for (var entry : other.bindings.entrySet()) {
+            Object value = switch (entry.getValue()) {
+                case ImmutableCell(var v) -> v;
+                case MutableCell mc -> mc.get();
+                case VarCell vc -> vc.get();
+            };
+            bindings.put(entry.getKey(), new ImmutableCell(value));
+        }
+    }
+
     // ── Internal ────────────────────────────────────────────────────────
 
     private Cell lookupCell(String name) {

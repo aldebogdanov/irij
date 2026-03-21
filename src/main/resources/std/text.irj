@@ -1,0 +1,44 @@
+mod std.text
+
+;; Text utilities built on top of string builtins.
+
+pub fn chars
+  (s -> split s "")
+
+pub fn words
+  (s -> split s " ")
+
+pub fn lines
+  (s -> split s "\n")
+
+pub fn unwords
+  (v -> join " " v)
+
+pub fn unlines
+  (v -> join "\n" v)
+
+pub fn blank?
+  (s -> trim s == "")
+
+pub fn contains-substr?
+  (s sub -> index-of s sub /= -1)
+
+pub fn pad-left
+  => n ch s
+  deficit := n - length s
+  if (deficit > 0)
+    (join "" ((0 ..< deficit) |> @ (_ -> ch))) ++ s
+  else
+    s
+
+pub fn pad-right
+  => n ch s
+  deficit := n - length s
+  if (deficit > 0)
+    s ++ (join "" ((0 ..< deficit) |> @ (_ -> ch)))
+  else
+    s
+
+pub fn repeat
+  => n s
+  join "" ((0 ..< n) |> @ (_ -> s))

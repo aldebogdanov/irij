@@ -1,0 +1,30 @@
+mod std.func
+
+;; Function combinators.
+
+pub fn flip
+  (f a b -> f b a)
+
+pub fn compose
+  (f g x -> f (g x))
+
+pub fn pipe
+  (f g x -> g (f x))
+
+pub fn apply-to
+  (x f -> f x)
+
+pub fn on
+  (f g a b -> f (g a) (g b))
+
+pub fn juxt
+  (f g x -> #((f x) (g x)))
+
+pub fn complement
+  (pred x -> not (pred x))
+
+pub fn constantly
+  (x _ -> x)
+
+pub fn times
+  (n f -> fold (_ i -> f ()) () (0 ..< n))
