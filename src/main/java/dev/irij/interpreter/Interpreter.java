@@ -26,6 +26,9 @@ public final class Interpreter {
     private String currentModuleName;
     private Set<String> pubNames; // non-null only during module file loading
 
+    // Protocol registry: proto name → descriptor (shared across all envs)
+    private final Map<String, ProtocolDescriptor> protocols = new LinkedHashMap<>();
+
     public Interpreter(PrintStream out) {
         this.out = out;
         this.globalEnv = new Environment();
@@ -178,6 +181,8 @@ public final class Interpreter {
             case Decl.PubDecl pd -> evalPubDecl(pd, env);
             case Decl.EffectDecl ed -> evalEffectDecl(ed, env);
             case Decl.HandlerDecl hd -> evalHandlerDecl(hd, env);
+            case Decl.ProtoDecl pd -> evalProtoDecl(pd, env);
+            case Decl.ImplDecl id -> evalImplDecl(id, env);
             case Decl.RoleDecl rd -> Values.UNIT; // stub
             case Decl.StubDecl sd -> Values.UNIT; // stub
         };
@@ -342,6 +347,78 @@ public final class Interpreter {
             this.pubNames = savedPubNames;
             this.currentModuleName = savedModuleName;
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Protocol system
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Evaluate a protocol declaration: register the protocol descriptor and
+     * install dispatch functions for each method.
+     *
+     * <p>Each method becomes a global function that dispatches on the runtime
+     * type of the first argument (Clojure-style). E.g., {@code proto Show a}
+     * with method {@code show :: a -> Str} installs a function {@code show}
+     * that checks {@code Values.typeName(arg)} and delegates to the matching
+     * impl binding.</p>
+     */
+    private Object evalProtoDecl(Decl.ProtoDecl pd, Environment env) {
+        var methodNames = pd.methods().stream().map(Decl.ProtoMethod::name).toList();
+        var descriptor = new ProtocolDescriptor(pd.name(), methodNames);
+        protocols.put(pd.name(), descriptor);
+        defineInScope(env, pd.name(), descriptor);
+
+        // Install dispatch functions for each method
+        for (var method : pd.methods()) {
+            String methodName = method.name();
+            String protoName = pd.name();
+            // Variadic dispatch function: checks first arg type, finds impl, calls binding
+            defineInScope(env, methodName, new BuiltinFn(methodName, -1, args -> {
+                if (args.isEmpty()) {
+                    throw new IrijRuntimeError(
+                        "Protocol method '" + methodName + "' requires at least one argument", null);
+                }
+                var firstArg = args.get(0);
+                String typeName = Values.typeName(firstArg);
+                Object implFn = descriptor.dispatch(methodName, typeName);
+                if (implFn == null) {
+                    throw new IrijRuntimeError(
+                        "No implementation of protocol '" + protoName + "' for type '" + typeName + "'", null);
+                }
+                // If the impl binding is a callable, apply it to all arguments.
+                // If it's a plain value (e.g., empty := 0), return it directly.
+                if (isCallable(implFn)) {
+                    return apply(implFn, args, null);
+                } else {
+                    return implFn;
+                }
+            }));
+        }
+
+        return descriptor;
+    }
+
+    /**
+     * Evaluate an impl declaration: register method bindings in the protocol's
+     * dispatch table for the given type.
+     */
+    private Object evalImplDecl(Decl.ImplDecl id, Environment env) {
+        var descriptor = protocols.get(id.protoName());
+        if (descriptor == null) {
+            throw new IrijRuntimeError(
+                "Cannot implement unknown protocol '" + id.protoName() + "'", id.loc());
+        }
+
+        // Evaluate each binding and register in the dispatch table
+        var bindingMap = new LinkedHashMap<String, Object>();
+        for (var binding : id.bindings()) {
+            var value = eval(binding.value(), env);
+            bindingMap.put(binding.name(), value);
+        }
+
+        descriptor.registerImpl(id.forType(), bindingMap);
+        return Values.UNIT;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -989,6 +1066,18 @@ public final class Interpreter {
     // ═══════════════════════════════════════════════════════════════════
     // Application
     // ═══════════════════════════════════════════════════════════════════
+
+    /** Check if a value is callable (can be passed to apply). */
+    private boolean isCallable(Object value) {
+        return value instanceof Lambda
+            || value instanceof MatchFn
+            || value instanceof ImperativeFn
+            || value instanceof BuiltinFn
+            || value instanceof Constructor
+            || value instanceof PartialApp
+            || value instanceof ComposedFn
+            || value instanceof Tagged;
+    }
 
     Object apply(Object fn, List<Object> args, SourceLoc loc) {
         return switch (fn) {

@@ -341,6 +341,44 @@ public final class Values {
         }
     }
 
+    // ── Protocol system values ───────────────────────────────────────────
+
+    /**
+     * Descriptor for a declared protocol (e.g., {@code proto Monoid a}).
+     * Holds method names and a dispatch table mapping type names to impl bindings.
+     *
+     * <p>When a protocol method is called, the dispatch function checks
+     * {@code Values.typeName(firstArg)} against this table to find the
+     * correct implementation.</p>
+     *
+     * @param name        protocol name (e.g., "Monoid")
+     * @param methodNames list of method names declared by this protocol
+     * @param impls       map from type name → (method name → value)
+     */
+    public record ProtocolDescriptor(String name, List<String> methodNames,
+                                     Map<String, Map<String, Object>> impls) {
+        public ProtocolDescriptor(String name, List<String> methodNames) {
+            this(name, methodNames, new LinkedHashMap<>());
+        }
+
+        /** Register an implementation for a given type. */
+        public void registerImpl(String typeName, Map<String, Object> bindings) {
+            impls.put(typeName, bindings);
+        }
+
+        /** Look up a method for a given runtime type. */
+        public Object dispatch(String methodName, String typeName) {
+            var typeImpls = impls.get(typeName);
+            if (typeImpls == null) return null;
+            return typeImpls.get(methodName);
+        }
+
+        @Override
+        public String toString() {
+            return "<proto " + name + ">";
+        }
+    }
+
     // ── Module system values ────────────────────────────────────────────
 
     /**
@@ -406,6 +444,7 @@ public final class Values {
         if (value instanceof EffectDescriptor ed) return "Effect(" + ed.name() + ")";
         if (value instanceof HandlerValue hv) return "Handler(" + hv.name() + ")";
         if (value instanceof ComposedHandler) return "ComposedHandler";
+        if (value instanceof ProtocolDescriptor pd) return "Proto(" + pd.name() + ")";
         if (value instanceof ModuleValue mv) return "Module(" + mv.qualifiedName() + ")";
         if (value instanceof Thread) return "Thread";
         return value.getClass().getSimpleName();

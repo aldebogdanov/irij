@@ -275,6 +275,28 @@ The universal joint. Everything interesting depends on this.
 - [x] **Stdlib bugfixes** — `count-by` and `take-while` in std.collection
 - [x] **Tests** — 372 Java tests + 89 Irij stdlib tests (via std.test)
 
+## Phase 4.5b — Protocols & Implementations ✅
+
+- [x] **Protocol declarations** (`proto Name a`)
+  - Registers `ProtocolDescriptor` in interpreter's protocol registry
+  - Installs dispatch functions for each method as global builtins
+  - Methods dispatch on `Values.typeName()` of first argument (Clojure-style)
+- [x] **Implementation declarations** (`impl Proto for Type`)
+  - Evaluates method bindings and registers in protocol's dispatch table
+  - Supports function bindings (lambdas, fn refs, operator sections) and value bindings
+  - Multiple impls for same type: last wins (override)
+  - Error on impl for unknown protocol
+- [x] **Dispatch mechanism**
+  - First-argument type dispatch via `Values.typeName()`
+  - Callable bindings: applied to all arguments
+  - Non-callable bindings (e.g., `empty := 0`): returned directly (type hint from first arg)
+  - Clear error messages: "No implementation of protocol 'X' for type 'Y'"
+- [x] **AST nodes** — `Decl.ProtoDecl`, `Decl.ImplDecl` (replaced StubDecl)
+  - `ProtoMethod`, `ProtoLaw`, `ImplBinding` helper records
+  - `AstBuilder.visitProtoDecl/visitImplDecl` — proper parse tree → AST
+- [x] **Laws** — parsed into AST (`ProtoLaw(name, body)`) but not verified at runtime (deferred to Phase 6)
+- [x] **Tests** — 393 total (+21: 15 interpreter protocol tests + 6 parser protocol tests)
+
 ---
 
 ## Phase 5 — Structured Concurrency
@@ -291,8 +313,8 @@ The universal joint. Everything interesting depends on this.
 
 - [ ] `pre` / `post` function-level contracts
 - [ ] `contract` / `in` / `out` module-boundary contracts with blame
-- [ ] `proto` with `law` declarations
-- [ ] Property-based test generation from laws
+- [x] `proto` with `law` declarations — parsing done, runtime dispatch done (Phase 4.5b)
+- [ ] Law verification: property-based test generation from `law` declarations
 
 ---
 

@@ -37,7 +37,16 @@ public sealed interface Decl extends Node {
     /** Role declaration: role $NAME. */
     record RoleDecl(String name, SourceLoc loc) implements Decl {}
 
-    /** Stub for cap/proto/impl declarations (parsed, not executed). */
+    /** Protocol declaration: proto Name a  methods/laws. */
+    record ProtoDecl(String name, List<String> typeParams,
+                     List<ProtoMethod> methods, List<ProtoLaw> laws,
+                     SourceLoc loc) implements Decl {}
+
+    /** Implementation declaration: impl Proto for Type  bindings. */
+    record ImplDecl(String protoName, String forType,
+                    List<ImplBinding> bindings, SourceLoc loc) implements Decl {}
+
+    /** Stub for cap declarations (parsed, not executed). */
     record StubDecl(String kind, String name, SourceLoc loc) implements Decl {}
 
     /** A binding used as a top-level declaration. */
@@ -91,6 +100,12 @@ public sealed interface Decl extends Node {
 
     record EffectOp(String name) {}
     record HandlerClause(String opName, List<Pattern> params, Expr body) {}
+
+    // ── Protocol helpers ────────────────────────────────────────────────
+
+    record ProtoMethod(String name) {}
+    record ProtoLaw(String name, Expr body) {}
+    record ImplBinding(String name, Expr value) {}
 
     // ── Use Modifier ────────────────────────────────────────────────────
 

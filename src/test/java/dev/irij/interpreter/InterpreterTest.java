@@ -2036,4 +2036,221 @@ class InterpreterTest {
                 """));
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Protocols & Implementations
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class Protocols {
+
+        @Test void basicProtoAndImpl() {
+            assertEquals("hello", run("""
+                proto Show a
+                  show :: a -> Str
+
+                impl Show for Str
+                  show := (s -> s)
+
+                println (show "hello")
+                """));
+        }
+
+        @Test void protoDispatchOnInt() {
+            assertEquals("42", run("""
+                proto Stringify a
+                  stringify :: a -> Str
+
+                impl Stringify for Int
+                  stringify := (n -> to-str n)
+
+                println (stringify 42)
+                """));
+        }
+
+        @Test void protoMultipleMethods() {
+            assertEquals("0\nhi hi", run("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+
+                impl Monoid for Str
+                  empty := ""
+                  append := (a b -> a ++ " " ++ b)
+
+                impl Monoid for Int
+                  empty := 0
+                  append := (+)
+
+                println (empty 999)
+                println (append "hi" "hi")
+                """));
+        }
+
+        @Test void protoDispatchByType() {
+            assertEquals("10\nhi world", run("""
+                proto Combine a
+                  combine :: a -> a -> a
+
+                impl Combine for Int
+                  combine := (+)
+
+                impl Combine for Str
+                  combine := (a b -> a ++ " " ++ b)
+
+                println (combine 3 7)
+                println (combine "hi" "world")
+                """));
+        }
+
+        @Test void protoWithTaggedType() {
+            assertEquals("Point(1, 2)", run("""
+                type Point
+                  Point Int Int
+
+                proto Displayable a
+                  display :: a -> Str
+
+                fn fmt-point
+                  (Point x y) => "Point(" ++ to-str x ++ ", " ++ to-str y ++ ")"
+
+                impl Displayable for Point
+                  display := fmt-point
+
+                println (display (Point 1 2))
+                """));
+        }
+
+        @Test void protoWithProductType() {
+            assertEquals("Person: Alice age 30", run("""
+                type Person
+                  name :: Str
+                  age :: Int
+
+                proto Describe a
+                  describe :: a -> Str
+
+                impl Describe for Person
+                  describe := (p -> "Person: " ++ p.name ++ " age " ++ to-str p.age)
+
+                println (describe (Person "Alice" 30))
+                """));
+        }
+
+        @Test void protoErrorNoImpl() {
+            assertRuntimeError("""
+                proto Foo a
+                  foo :: a -> Str
+
+                foo 42
+                """);
+        }
+
+        @Test void protoErrorUnknownProtocol() {
+            assertRuntimeError("""
+                impl Nonexistent for Int
+                  bar := (x -> x)
+                """);
+        }
+
+        @Test void protoMethodAsValue() {
+            // show with no args just returns the dispatch function
+            assertEquals("<builtin show>", run("""
+                proto Show a
+                  show :: a -> Str
+
+                impl Show for Int
+                  show := (n -> to-str n)
+
+                println show
+                """));
+        }
+
+        @Test void protoEmptyMethodDispatch() {
+            // empty is a zero-arg concept but dispatch still needs the type hint
+            // In practice the user passes a "seed" value for type dispatch
+            assertEquals("0", run("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+
+                impl Monoid for Int
+                  empty := 0
+                  append := (+)
+
+                println (empty 999)
+                """));
+        }
+
+        @Test void multipleProtos() {
+            assertEquals("42\ntrue", run("""
+                proto Show a
+                  show :: a -> Str
+
+                proto Eq a
+                  eq :: a -> a -> Bool
+
+                impl Show for Int
+                  show := (n -> to-str n)
+
+                impl Eq for Int
+                  eq := (a b -> a == b)
+
+                println (show 42)
+                println (eq 10 10)
+                """));
+        }
+
+        @Test void protoLambdaImpl() {
+            assertEquals("6", run("""
+                proto Doubler a
+                  double-it :: a -> a
+
+                impl Doubler for Int
+                  double-it := (x -> x * 2)
+
+                println (double-it 3)
+                """));
+        }
+
+        @Test void protoWithOperatorSection() {
+            assertEquals("30", run("""
+                proto Combine a
+                  combine :: a -> a -> a
+
+                impl Combine for Int
+                  combine := (+)
+
+                println (combine 10 20)
+                """));
+        }
+
+        @Test void protoWithFnRef() {
+            assertEquals("HELLO", run("""
+                proto Transform a
+                  transform :: a -> a
+
+                impl Transform for Str
+                  transform := upper-case
+
+                println (transform "hello")
+                """));
+        }
+
+        @Test void protoOverridePerType() {
+            // Second impl for same type replaces the first
+            assertEquals("200", run("""
+                proto Process a
+                  process :: a -> a
+
+                impl Process for Int
+                  process := (x -> x + 1)
+
+                impl Process for Int
+                  process := (x -> x * 2)
+
+                println (process 100)
+                """));
+        }
+    }
 }

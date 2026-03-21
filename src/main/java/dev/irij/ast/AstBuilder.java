@@ -222,13 +222,36 @@ public class AstBuilder {
 
     private Decl visitProtoDecl(ProtoDeclContext ctx) {
         String name = ctx.typeName().TYPE_NAME().getText();
-        return new Decl.StubDecl("proto", name, loc(ctx));
+        var typeParams = new ArrayList<String>();
+        if (ctx.typeParams() != null) {
+            for (var tp : ctx.typeParams().IDENT()) {
+                typeParams.add(tp.getText());
+            }
+        }
+        var methods = new ArrayList<Decl.ProtoMethod>();
+        var laws = new ArrayList<Decl.ProtoLaw>();
+        for (var member : ctx.protoBody().protoMember()) {
+            if (member.IDENT() != null && member.typeExpr() != null) {
+                methods.add(new Decl.ProtoMethod(member.IDENT().getText()));
+            } else if (member.LAW() != null) {
+                laws.add(new Decl.ProtoLaw(
+                    member.IDENT().getText(),
+                    visitExpr(member.expr())));
+            }
+        }
+        return new Decl.ProtoDecl(name, typeParams, methods, laws, loc(ctx));
     }
 
     private Decl visitImplDecl(ImplDeclContext ctx) {
         String protoName = ctx.typeName(0).TYPE_NAME().getText();
         String forType = ctx.typeName(1).TYPE_NAME().getText();
-        return new Decl.StubDecl("impl", protoName + " for " + forType, loc(ctx));
+        var bindings = new ArrayList<Decl.ImplBinding>();
+        for (var member : ctx.implBody().implMember()) {
+            bindings.add(new Decl.ImplBinding(
+                member.IDENT().getText(),
+                visitExpr(member.expr())));
+        }
+        return new Decl.ImplDecl(protoName, forType, bindings, loc(ctx));
     }
 
     // ═══════════════════════════════════════════════════════════════════

@@ -1,0 +1,66 @@
+;; ── Protocols & Implementations ──────────────────────────
+;; Ad-hoc polymorphism: define methods that dispatch on type
+
+;; ── Show protocol ───────────────────────────────────────
+proto Show a
+  show :: a -> Str
+
+impl Show for Int
+  show := (n -> to-str n)
+
+impl Show for Str
+  show := (s -> "\"" ++ s ++ "\"")
+
+impl Show for Bool
+  show := (b -> if b "true" else "false")
+
+println (show 42)           ;; → 42
+println (show "hello")      ;; → "hello"
+println (show true)         ;; → true
+
+;; ── Monoid protocol ────────────────────────────────────
+proto Monoid a
+  empty :: a
+  append :: a -> a -> a
+
+impl Monoid for Int
+  empty := 0
+  append := (+)
+
+impl Monoid for Str
+  empty := ""
+  append := (++)
+
+;; Use type hint for value methods
+println (empty 0)             ;; → 0
+println (empty "")            ;; → (empty string)
+println (append 10 20)        ;; → 30
+println (append "hi " "world") ;; → hi world
+
+;; ── Combine: multi-type dispatch ────────────────────────
+proto Combine a
+  combine :: a -> a -> a
+
+impl Combine for Int
+  combine := (*)
+
+impl Combine for Vector
+  combine := (++)
+
+println (combine 3 7)              ;; → 21
+println (combine #[1 2] #[3 4])   ;; → #[1 2 3 4]
+
+;; ── With data types ─────────────────────────────────────
+type Point
+  Point Int Int
+
+fn fmt-point
+  (Point x y) => to-str x ++ ", " ++ to-str y
+
+proto Displayable a
+  display :: a -> Str
+
+impl Displayable for Point
+  display := (p -> "(" ++ fmt-point p ++ ")")
+
+println (display (Point 3 4))    ;; → (3, 4)

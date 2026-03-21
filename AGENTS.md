@@ -42,11 +42,12 @@ editors/emacs/                 — irij-mode.el (syntax + REPL) + irij-nrepl.el 
 - **Phase 3a/3b**: Algebraic effects & handlers (with/resume/abort, handler state, composition, on-failure)
 - **Phase 4**: Module system (`mod`/`use`/`pub`), ~35 new builtins, 6 stdlib modules in Irij
 - **Phase 4.5a**: Vector/tuple destructuring in bindings, implicit continuation (multi-line pipelines)
+- **Phase 4.5b**: Protocols & implementations (`proto`/`impl`), first-arg type dispatch
 
 ## Build & test
 
 ```sh
-./gradlew test                                    # run all 372 Java tests
+./gradlew test                                    # run all 393 Java tests
 ./gradlew run --args="tests/run-all.irj"          # run Irij stdlib tests (35 tests)
 ./gradlew run --args="file.irj"                   # run a file
 ./gradlew run --args="--parse-only file.irj"      # parse only

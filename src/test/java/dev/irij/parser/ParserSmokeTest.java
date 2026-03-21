@@ -553,4 +553,64 @@ class ParserSmokeTest {
                 """);
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Protocols & Implementations
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class ProtocolsAndImpls {
+
+        @Test void basicProtoDecl() {
+            assertParses("""
+                proto Show a
+                  show :: a -> Str
+                """);
+        }
+
+        @Test void protoMultipleMethods() {
+            assertParses("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+                """);
+        }
+
+        @Test void protoWithLaws() {
+            assertParses("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+                  law identity = forall x. append empty x == x
+                """);
+        }
+
+        @Test void basicImplDecl() {
+            assertParses("""
+                impl Show for Int
+                  show := (n -> to-str n)
+                """);
+        }
+
+        @Test void implMultipleBindings() {
+            assertParses("""
+                impl Monoid for Str
+                  empty := ""
+                  append := (a b -> a ++ b)
+                """);
+        }
+
+        @Test void protoAndImplTogether() {
+            assertParses("""
+                proto Eq a
+                  eq :: a -> a -> Bool
+
+                impl Eq for Int
+                  eq := (a b -> a == b)
+
+                impl Eq for Str
+                  eq := (a b -> a == b)
+                """);
+        }
+    }
 }
