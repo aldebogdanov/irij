@@ -1,0 +1,119 @@
+mod std.collection
+
+;; Collection combinators built on existing builtins.
+
+pub fn zip
+  => v1 v2
+  n := min (length v1) (length v2)
+  to-vec ~ (0 ..< n) |> @ (i -> #((nth i v1) (nth i v2)))
+
+pub fn zip-with
+  => f v1 v2
+  n := min (length v1) (length v2)
+  to-vec ~ (0 ..< n) |> @ (i -> f (nth i v1) (nth i v2))
+
+pub fn enumerate
+  => vec
+  to-vec ~ (0 ..< length vec) |> @ (i -> #(i (nth i vec)))
+
+pub fn flatten
+  (vec -> fold (acc x -> acc ++ x) #[] vec)
+
+pub fn distinct
+  (vec -> fold (acc x -> if (contains? acc x) acc else (acc ++ #[x])) #[] vec)
+
+;; Helper for frequencies
+fn freq-step
+  => m x
+  k := to-str x
+  c := get k m
+  if (c == ())
+    assoc m k 1
+  else
+    assoc m k (c + 1)
+
+pub fn frequencies
+  (vec -> fold freq-step {} vec)
+
+pub fn partition
+  => n vec
+  total := length vec
+  chunks := div (total + n - 1) n
+  to-vec ~ (0 ..< chunks) |> @ (i -> take n (drop (i * n) vec))
+
+pub fn group-by
+  => f vec
+  fold (m x -> if (get (to-str (f x)) m == ()) (assoc m (to-str (f x)) #[x]) else (assoc m (to-str (f x)) ((get (to-str (f x)) m) ++ #[x]))) {} vec
+
+pub fn sort-by
+  => f vec
+  pairs := to-vec ~ vec |> @ (x -> #((f x) x))
+  sorted := sort pairs
+  to-vec ~ sorted |> @ (p -> nth 1 p)
+
+pub fn map-vals
+  => f m
+  fold (acc k -> assoc acc k (f (get k m))) {} (keys m)
+
+pub fn filter-vals
+  => pred m
+  fold (acc k -> if (pred (get k m)) (assoc acc k (get k m)) else acc) {} (keys m)
+
+pub fn map-keys
+  => f m
+  fold (acc k -> assoc acc (to-str (f k)) (get k m)) {} (keys m)
+
+pub fn each
+  => f vec
+  fold (_ x -> f x) () vec
+  ()
+
+pub fn find-index
+  => pred vec
+  n := length vec
+  fold (acc i -> if (acc /= (0 - 1)) acc else (if (pred (nth i vec)) i else (0 - 1))) (0 - 1) (0 ..< n)
+
+pub fn all?
+  (pred vec -> fold (acc x -> acc && (pred x)) true vec)
+
+pub fn any?
+  (pred vec -> fold (acc x -> acc || (pred x)) false vec)
+
+pub fn none?
+  (pred vec -> not ~ any? pred vec)
+
+pub fn flat-map
+  (f vec -> flatten ~ vec |> @ f)
+
+pub fn sum
+  (vec -> /+ vec)
+
+pub fn product
+  (vec -> /* vec)
+
+pub fn count-by
+  => pred vec
+  filtered := /? pred
+  length (filtered vec)
+
+pub fn interleave
+  => v1 v2
+  n := min (length v1) (length v2)
+  result := to-vec ~ (0 ..< n) |> @ (i -> #[(nth i v1) (nth i v2)])
+  flatten result
+
+pub fn take-while
+  => pred vec
+  idx := find-index (x -> not (pred x)) vec
+  if (idx == (0 - 1))
+    vec
+  else
+    take idx vec
+
+pub fn window
+  => n vec
+  total := length vec
+  if (n > total)
+    #[]
+  else
+    to-vec ~ (0 ..< (total - n + 1)) |> @ (i -> take n (drop i vec))

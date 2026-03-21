@@ -1,0 +1,8 @@
+use std.test :open
+use std.convert :open
+
+r1 := test "to-int from string" (-> assert-eq 42 (to-int "42"))
+r2 := test "to-float from string" (-> assert-eq 3.14 (to-float "3.14"))
+r3 := test "digits" (-> assert-eq #[1 2 3] (to-vec (digits "123")))
+
+summarize #[r1 r2 r3]

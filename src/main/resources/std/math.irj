@@ -1,0 +1,58 @@
+mod std.math
+
+;; Math utilities — re-exports math builtins plus derived combinators.
+
+;; Re-export builtins
+pub sqrt := sqrt
+pub floor := floor
+pub ceil := ceil
+pub round := round
+pub sin := sin
+pub cos := cos
+pub tan := tan
+pub log := log
+pub exp := exp
+pub pow := pow
+pub abs := abs
+pub min := min
+pub max := max
+pub pi := pi
+pub e := e
+pub random-int := random-int
+pub random-float := random-float
+
+;; Derived utilities
+pub fn clamp
+  (lo hi x -> min hi (max lo x))
+
+pub fn lerp
+  (a b t -> a + (b - a) * t)
+
+pub fn square
+  (x -> x * x)
+
+pub fn cube
+  (x -> x * x * x)
+
+pub fn sign
+  => x
+  if (x > 0) 1 else (if (x < 0) (0 - 1) else 0)
+
+pub fn even?
+  (n -> n % 2 == 0)
+
+pub fn odd?
+  (n -> n % 2 /= 0)
+
+pub fn gcd
+  => a b
+  if (b == 0) (abs a) else (gcd b (a % b))
+
+pub fn lcm
+  (a b -> div (abs (a * b)) (gcd a b))
+
+pub fn sum-of
+  (vec -> /+ vec)
+
+pub fn product-of
+  (vec -> /* vec)

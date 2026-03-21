@@ -1,0 +1,47 @@
+use std.test :open
+use std.math :open
+
+;; ── Builtin re-exports ───────────────────────────────
+
+r1 := test "sqrt" (-> assert-eq 4.0 (sqrt 16))
+r2 := test "floor" (-> assert-eq 3.0 (floor 3.7))
+r3 := test "ceil" (-> assert-eq 4.0 (ceil 3.2))
+r4 := test "round" (-> assert-eq 4 (round 3.5))
+r5 := test "pow" (-> assert-eq 8.0 (pow 2 3))
+r6 := test "abs positive" (-> assert-eq 5 (abs 5))
+r7 := test "abs negative" (-> assert-eq 5 (abs (0 - 5)))
+r8 := test "min" (-> assert-eq 3 (min 3 7))
+r9 := test "max" (-> assert-eq 7 (max 3 7))
+r10 := test "pi exists" (-> assert-true (pi > 3.14))
+r11 := test "e exists" (-> assert-true (e > 2.71))
+
+;; ── Derived functions ────────────────────────────────
+
+r12 := test "clamp low" (-> assert-eq 0 (clamp 0 10 (0 - 5)))
+r13 := test "clamp high" (-> assert-eq 10 (clamp 0 10 15))
+r14 := test "clamp mid" (-> assert-eq 5 (clamp 0 10 5))
+
+r15 := test "lerp start" (-> assert-eq 0.0 (lerp 0 10 0.0))
+r16 := test "lerp end" (-> assert-eq 10.0 (lerp 0 10 1.0))
+r17 := test "lerp mid" (-> assert-eq 5.0 (lerp 0 10 0.5))
+
+r18 := test "square" (-> assert-eq 25 (square 5))
+r19 := test "cube" (-> assert-eq 27 (cube 3))
+
+r20 := test "sign positive" (-> assert-eq 1 (sign 42))
+r21 := test "sign negative" (-> assert-eq (0 - 1) (sign (0 - 7)))
+r22 := test "sign zero" (-> assert-eq 0 (sign 0))
+
+r23 := test "even? true" (-> assert-true (even? 4))
+r24 := test "even? false" (-> assert-false (even? 3))
+r25 := test "odd? true" (-> assert-true (odd? 3))
+r26 := test "odd? false" (-> assert-false (odd? 4))
+
+r27 := test "gcd" (-> assert-eq 6 (gcd 12 18))
+r28 := test "gcd coprime" (-> assert-eq 1 (gcd 7 13))
+r29 := test "lcm" (-> assert-eq 36 (lcm 12 18))
+
+r30 := test "sum-of" (-> assert-eq 15 (sum-of #[1 2 3 4 5]))
+r31 := test "product-of" (-> assert-eq 120 (product-of #[1 2 3 4 5]))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31]

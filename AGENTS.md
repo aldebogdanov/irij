@@ -2,7 +2,7 @@
 
 ## What is this?
 
-Irij (ℑ) is an AI-first, effect-oriented programming language targeting the JVM. The language specification lives in `docs/irij-lang-spec.org` — that is the single source of truth for all syntax and semantics.
+Irij (ℑ) is a token-efficient, effect-oriented programming language targeting the JVM. The language specification lives in `docs/irij-lang-spec.org` — that is the single source of truth for all syntax and semantics.
 
 ## Project layout
 

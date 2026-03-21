@@ -1,0 +1,18 @@
+use std.test :open
+use std.func :open
+
+sub := (a b -> a - b)
+double := (x -> x * 2)
+inc := (x -> x + 1)
+pos? := (x -> x > 0)
+
+r1 := test "flip" (-> assert-eq (0 - 3) (flip sub 5 2))
+r2 := test "compose" (-> assert-eq 7 (compose inc double 3))
+r3 := test "pipe" (-> assert-eq 7 (pipe double inc 3))
+r4 := test "apply-to" (-> assert-eq 10 (apply-to 5 double))
+r5 := test "on" (-> assert-eq 13 (on (+) (x -> x * x) 2 3))
+r6 := test "juxt" (-> assert-eq #(6 10) (juxt inc double 5))
+r7 := test "complement" (-> assert-true ((complement pos?) (0 - 1)))
+r8 := test "constantly" (-> assert-eq 42 (constantly 42 "anything"))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8]

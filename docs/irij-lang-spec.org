@@ -1204,7 +1204,7 @@
 
   Rationale: Macros are the #1 source of confusing error messages in
   Lisp-family languages and would dramatically complicate LLM code
-  generation. For an AI-first language, the traditional uses of macros
+  generation. For a token-efficient language, the traditional uses of macros
   are better served by other mechanisms:
 
   - *Boilerplate elimination:* the LLM generates expanded code directly.
@@ -1589,4 +1589,4 @@
   | REPL quality         | ★★★★★  | ★★★★★ | ★★       | ★★     | ★★★   | ★★★   |
   | JVM interop          | Direct  | Direct  | Direct    | No      | Direct  | Direct |
   | Law verification     | Native  | No      | No        | LH      | No      | No     |
-  | AI-first design      | Yes     | No      | No        | No      | No      | No     |
+  | Token-efficient design | Yes     | No      | No        | No      | No      | No     |

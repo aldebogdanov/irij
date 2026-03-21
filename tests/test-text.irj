@@ -1,0 +1,23 @@
+use std.test :open
+use std.text :open
+
+r1 := test "chars" (-> assert-eq #["h" "e" "l" "l" "o"] (chars "hello"))
+r2 := test "words" (-> assert-eq #["hello" "world"] (words "hello world"))
+r3 := test "lines" (-> assert-eq #["a" "b" "c"] (lines "a\nb\nc"))
+r4 := test "unwords" (-> assert-eq "hello world" (unwords #["hello" "world"]))
+r5 := test "unlines" (-> assert-eq "a\nb\nc" (unlines #["a" "b" "c"]))
+r6 := test "blank? empty" (-> assert-true (blank? ""))
+r7 := test "blank? spaces" (-> assert-true (blank? "   "))
+r8 := test "blank? not" (-> assert-false (blank? "hi"))
+r9 := test "contains-substr? true" (-> assert-true (contains-substr? "hello world" "world"))
+r10 := test "contains-substr? false" (-> assert-false (contains-substr? "hello" "xyz"))
+r11 := test "pad-left" (-> assert-eq "00042" (pad-left 5 "0" "42"))
+r12 := test "pad-left no-op" (-> assert-eq "hello" (pad-left 3 "0" "hello"))
+r13 := test "pad-right" (-> assert-eq "42000" (pad-right 5 "0" "42"))
+r14 := test "repeat" (-> assert-eq "abcabcabc" (repeat 3 "abc"))
+r15 := test "repeat zero" (-> assert-eq "" (repeat 0 "abc"))
+
+;; Round-trip: words then unwords
+r16 := test "words/unwords round-trip" (-> assert-eq "a b c" (unwords (words "a b c")))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16]

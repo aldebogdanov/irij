@@ -228,12 +228,26 @@ The universal joint. Everything interesting depends on this.
 
 ---
 
-## Phase 4 — Module System
+## Phase 4 — Module System ✅
 
-- [ ] `mod name` declarations
-- [ ] `use mod.name` / `use mod.name {specific items}`
-- [ ] `pub` visibility
-- [ ] Qualified names (`mod.fn`)
+- [x] `mod name` declarations — sets current module name
+- [x] `use mod.name` — qualified import (dot-access: `mod.fn`)
+- [x] `use mod.name :open` — open import (all exports into current env)
+- [x] `use mod.name {name1 name2}` — selective import
+- [x] `pub` visibility — tracks public names during module loading
+- [x] Qualified names (`mod.fn`) — ModuleValue dot-access
+- [x] `ModuleRegistry` — lazy loading, caching, circular dependency detection
+- [x] File-based module resolution (dots → `/`, append `.irj`)
+- [x] Classpath resource modules (`src/main/resources/std/*.irj`)
+- [x] **New builtins** — error, type-of, assoc/dissoc/merge, string ops (11), math ops (12), conversion (4), IO (5)
+- [x] **Std library modules** (Irij source):
+  - `std.math` — re-exports math builtins + clamp, lerp, square, cube, sign, even?, odd?, gcd, lcm
+  - `std.text` — chars, words, lines, unwords, unlines, blank?, contains-substr?, pad-left, pad-right, repeat
+  - `std.collection` — zip, zip-with, enumerate, flatten, distinct, frequencies, partition, group-by, sort-by, map-vals, filter-vals, map-keys, each, find-index, all?, any?, none?, flat-map, sum, product, count-by, interleave, take-while, window
+  - `std.func` — flip, compose, pipe, apply-to, on, juxt, complement, constantly, times
+  - `std.convert` — to-int, to-float, digits
+- [x] **Tests** — 349 total (+65 new: 38 builtin tests + 27 module tests)
+- [x] Tuple and vector lexicographic comparison support
 
 ---
 
