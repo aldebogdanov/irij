@@ -1,3 +1,6 @@
 ;; Hello, World! — the simplest Irij program
 
 println "Hello, World!"
+
+x := match last #[#[] #[1 2]]
+  #[a b] => a + b

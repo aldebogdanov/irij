@@ -426,6 +426,7 @@ atomExpr
     | KEYWORD
     | UNDERSCORE
     | ifExpr
+    | matchExpr
     | lambdaExpr
     | operatorAsValue
     | unitExpr
@@ -435,6 +436,13 @@ atomExpr
     | tupleLiteral
     | mapLiteral
     | doExpr
+    ;
+
+// ── Match expression (block-level, usable in expression context) ────
+
+matchExpr
+    : MATCH expr (MAP_AT ROLE_NAME)?
+      NEWLINE INDENT matchArms NEWLINE* DEDENT
     ;
 
 // ── Unit value ───────────────────────────────────────────────────────

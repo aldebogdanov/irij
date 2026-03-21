@@ -303,6 +303,44 @@ class InterpreterTest {
                   n => n * fact (n - 1)
                 println (fact 5)"""));
         }
+
+        @Test void matchAsExpression() {
+            // match in a binding (the original user issue)
+            assertEquals("3", run("""
+                x := match last #[#[] #[1 2]]
+                  #[a b] => a + b
+                  _ => 0
+                println x"""));
+        }
+
+        @Test void matchExprInBinding() {
+            assertEquals("yes", run("""
+                result := match 42
+                  0 => "no"
+                  42 => "yes"
+                  _ => "maybe"
+                println result"""));
+        }
+
+        @Test void matchExprNested() {
+            // match expression used inside a function body
+            assertEquals("zero", run("""
+                fn classify
+                  x => match x
+                    0 => "zero"
+                    _ => "other"
+                println ~ classify 0"""));
+        }
+
+        @Test void matchExprWithGuards() {
+            assertEquals("medium", run("""
+                x := 50
+                label := match x
+                  n | n < 10 => "small"
+                  n | n < 100 => "medium"
+                  _ => "large"
+                println label"""));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1121,5 +1159,383 @@ class InterpreterTest {
             assertEquals("true", run("println ~ 3 > 2"));
         }
 
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 3: Algebraic Effects
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class Effects {
+
+        // ── Effect declaration ────────────────────────────────────────
+
+        @Test void effectDeclRegistersOps() {
+            // Effect ops become callable functions (error outside handler)
+            assertRuntimeError("""
+                effect Console
+                  print :: Str -> ()
+                print "hello"
+                """);
+        }
+
+        @Test void effectDeclRegistersDescriptor() {
+            var result = eval("""
+                effect Console
+                  print :: Str -> ()
+                  read-line :: () -> Str
+                Console
+                """);
+            assertEquals("<effect Console>", result.toString());
+        }
+
+        // ── Handler declaration ──────────────────────────────────────
+
+        @Test void handlerDeclCreatesValue() {
+            var result = eval("""
+                effect Console
+                  print :: Str -> ()
+                handler test-console :: Console
+                  print msg => resume ()
+                test-console
+                """);
+            assertTrue(result.toString().contains("handler test-console"));
+        }
+
+        // ── Basic with + resume ──────────────────────────────────────
+
+        @Test void withHandlerRunsBody() {
+            assertEquals("42", run("""
+                effect Console
+                  print :: Str -> ()
+                handler test-console :: Console
+                  print msg => resume ()
+                with test-console
+                  println 42
+                """));
+        }
+
+        @Test void effectOpDispatchesToHandler() {
+            // print is the EFFECT op, not the builtin;
+            // handler intercepts it and uses println (builtin) to actually output
+            assertEquals("handled: hello", run("""
+                effect Log
+                  log :: Str -> ()
+                handler console-log :: Log
+                  log msg =>
+                    println ~ "handled: " ++ msg
+                    resume ()
+                with console-log
+                  log "hello"
+                """));
+        }
+
+        @Test void resumeSendsValueToBody() {
+            // read-line is an effect op; handler resumes with "Alice"
+            assertEquals("Hello, Alice!", run("""
+                effect Console
+                  read-line :: () -> Str
+                handler mock-input :: Console
+                  read-line () => resume "Alice"
+                with mock-input
+                  name := read-line ()
+                  println ~ "Hello, " ++ name ++ "!"
+                """));
+        }
+
+        @Test void multipleEffectOps() {
+            assertEquals("a\nb", run("""
+                effect Log
+                  log :: Str -> ()
+                handler print-log :: Log
+                  log msg =>
+                    println msg
+                    resume ()
+                with print-log
+                  log "a"
+                  log "b"
+                """));
+        }
+
+        @Test void withBlockReturnsBodyValue() {
+            var result = eval("""
+                effect Log
+                  log :: Str -> ()
+                handler silent-log :: Log
+                  log msg => resume ()
+                with silent-log
+                  log "ignored"
+                  42
+                """);
+            assertEquals(42L, result);
+        }
+
+        // ── Abort (no resume) ────────────────────────────────────────
+
+        @Test void noResumeAbortsBody() {
+            // Handler doesn't call resume → body is aborted,
+            // handler arm's return value becomes the with block result
+            var result = eval("""
+                effect Exn
+                  throw :: Str -> ()
+                handler catch-all :: Exn
+                  throw msg => "caught: " ++ msg
+                with catch-all
+                  throw "boom"
+                  println "should not run"
+                  99
+                """);
+            assertEquals("caught: boom", result);
+        }
+
+        @Test void abortPreventsSubsequentStatements() {
+            // The println after throw should NOT execute
+            assertEquals("", run("""
+                effect Exn
+                  throw :: Str -> ()
+                handler catch-all :: Exn
+                  throw msg => "caught"
+                with catch-all
+                  throw "boom"
+                  println "should not appear"
+                """));
+        }
+
+        // ── Resume with transform ────────────────────────────────────
+
+        @Test void resumeReturnsBodyFinalValue() {
+            // After resume, handler arm can observe body's final result
+            var result = eval("""
+                effect Log
+                  log :: Str -> ()
+                handler counting-log :: Log
+                  log msg =>
+                    body-result := resume ()
+                    body-result + 1
+                with counting-log
+                  log "once"
+                  41
+                """);
+            assertEquals(42L, result);
+        }
+
+        // ── Nested handlers ──────────────────────────────────────────
+
+        @Test void nestedHandlersSameEffect() {
+            // Inner handler takes precedence
+            assertEquals("inner: hello", run("""
+                effect Log
+                  log :: Str -> ()
+                handler outer-log :: Log
+                  log msg =>
+                    println ~ "outer: " ++ msg
+                    resume ()
+                handler inner-log :: Log
+                  log msg =>
+                    println ~ "inner: " ++ msg
+                    resume ()
+                with outer-log
+                  with inner-log
+                    log "hello"
+                """));
+        }
+
+        @Test void nestedHandlersDifferentEffects() {
+            assertEquals("hello\n42", run("""
+                effect Log
+                  log :: Str -> ()
+                effect State
+                  get-val :: () -> Int
+                handler print-log :: Log
+                  log msg =>
+                    println msg
+                    resume ()
+                handler const-state :: State
+                  get-val () => resume 42
+                with print-log
+                  with const-state
+                    log "hello"
+                    println ~ get-val ()
+                """));
+        }
+
+        // ── Unhandled effect ─────────────────────────────────────────
+
+        @Test void unhandledEffectThrows() {
+            assertRuntimeError("""
+                effect Console
+                  print :: Str -> ()
+                print "no handler!"
+                """);
+        }
+
+        // ── One-shot enforcement ─────────────────────────────────────
+
+        @Test void doubleResumeThrows() {
+            assertRuntimeError("""
+                effect Ask
+                  ask :: () -> Int
+                handler bad-handler :: Ask
+                  ask () =>
+                    resume 1
+                    resume 2
+                with bad-handler
+                  ask ()
+                """);
+        }
+
+        // ── Handler-local state (Phase 3b preview) ──────────────────
+
+        @Test void handlerLocalState() {
+            assertEquals("3", run("""
+                effect Counter
+                  inc :: () -> ()
+                  get-count :: () -> Int
+                handler counting :: Counter
+                  state :! 0
+                  inc () =>
+                    state <- state + 1
+                    resume ()
+                  get-count () => resume state
+                with counting
+                  inc ()
+                  inc ()
+                  inc ()
+                  println ~ get-count ()
+                """));
+        }
+
+        @Test void mockConsolePattern() {
+            // The canonical test from the spec: mock-console collects output
+            assertEquals("#[Hello, world! done]", run("""
+                effect Console
+                  print :: Str -> ()
+                  get-output :: () -> ()
+                handler mock-console :: Console
+                  state :! #[]
+                  print msg =>
+                    state <- state ++ #[msg]
+                    resume ()
+                  get-output () => resume state
+                with mock-console
+                  print "Hello, world!"
+                  print "done"
+                  println ~ get-output ()
+                """));
+        }
+
+        // ── on-failure clause ─────────────────────────────────────
+
+        @Test void onFailureHandlesBodyError() {
+            assertEquals("recovered", run("""
+                effect Log
+                  log :: Str -> ()
+                handler silent :: Log
+                  log msg => resume ()
+                with silent
+                  x := 1 / 0
+                on-failure
+                  println "recovered"
+                """));
+        }
+
+        @Test void onFailureNotTriggeredOnSuccess() {
+            assertEquals("ok", run("""
+                effect Log
+                  log :: Str -> ()
+                handler silent :: Log
+                  log msg => resume ()
+                with silent
+                  log "hello"
+                  println "ok"
+                on-failure
+                  println "should not run"
+                """));
+        }
+
+        @Test void onFailureBindsErrorMessage() {
+            var result = eval("""
+                effect Log
+                  log :: Str -> ()
+                handler silent :: Log
+                  log msg => resume ()
+                with silent
+                  x := 1 / 0
+                on-failure
+                  error
+                """);
+            assertTrue(result.toString().contains("Division by zero"));
+        }
+
+        // ── Handler composition (>>) ──────────────────────────────
+
+        @Test void handlerCompositionTwoEffects() {
+            assertEquals("logged: hello\n42", run("""
+                effect Log
+                  log :: Str -> ()
+                effect State
+                  get-val :: () -> Int
+                handler print-log :: Log
+                  log msg =>
+                    println ~ "logged: " ++ msg
+                    resume ()
+                handler const-state :: State
+                  get-val () => resume 42
+                with (print-log >> const-state)
+                  log "hello"
+                  println ~ get-val ()
+                """));
+        }
+
+        @Test void handlerCompositionThreeHandlers() {
+            assertEquals("a\nb\n10", run("""
+                effect A
+                  get-a :: () -> Str
+                effect B
+                  get-b :: () -> Str
+                effect C
+                  get-c :: () -> Int
+                handler ha :: A
+                  get-a () => resume "a"
+                handler hb :: B
+                  get-b () => resume "b"
+                handler hc :: C
+                  get-c () => resume 10
+                with (ha >> hb >> hc)
+                  println ~ get-a ()
+                  println ~ get-b ()
+                  println ~ get-c ()
+                """));
+        }
+
+        // ── Handler dot-access ────────────────────────────────────
+
+        @Test void handlerDotAccessReadsState() {
+            var result = eval("""
+                effect Counter
+                  inc :: () -> ()
+                handler counting :: Counter
+                  state :! 0
+                  inc () =>
+                    state <- state + 1
+                    resume ()
+                with counting
+                  inc ()
+                  inc ()
+                  inc ()
+                counting.state
+                """);
+            assertEquals(3L, result);
+        }
+
+        @Test void handlerDotAccessNoField() {
+            assertRuntimeError("""
+                effect Log
+                  log :: Str -> ()
+                handler h :: Log
+                  log msg => resume ()
+                h.nonexistent
+                """);
+        }
     }
 }

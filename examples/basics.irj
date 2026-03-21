@@ -37,6 +37,14 @@ println (describe 0)     ;; zero
 println (describe (-5))   ;; negative
 println (describe 99)    ;; something else
 
+;; ── Match as expression (bind result) ────────────────────────────────────
+
+label := match 75
+  s | s >= 90 => "excellent"
+  s | s >= 70 => "good"
+  _           => "needs-work"
+println label    ;; good
+
 ;; ── Data types (sum types) ────────────────────────────────────────────────
 
 type Shape

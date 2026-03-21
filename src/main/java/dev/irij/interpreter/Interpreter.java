@@ -114,10 +114,10 @@ public final class Interpreter {
                 exec(bd.stmt(), env);
                 // Return the bound value so nREPL/REPL can display it
                 yield switch (bd.stmt()) {
-                    case Stmt.Bind b when b.target() instanceof Stmt.BindTarget.Simple s ->
-                        env.lookup(s.name());
-                    case Stmt.MutBind mb when mb.target() instanceof Stmt.BindTarget.Simple s ->
-                        env.lookup(s.name());
+                    case Stmt.Bind b when b.target() instanceof Stmt.BindTarget.Simple(String name) ->
+                        env.lookup(name);
+                    case Stmt.MutBind mb when mb.target() instanceof Stmt.BindTarget.Simple(String name) ->
+                        env.lookup(name);
                     default -> Values.UNIT;
                 };
             }
@@ -130,10 +130,7 @@ public final class Interpreter {
                 exec(id.ifStmt(), env);
                 yield Values.UNIT;
             }
-            case Decl.WithDecl wd -> {
-                exec(wd.with(), env);
-                yield Values.UNIT;
-            }
+            case Decl.WithDecl wd -> execWith(wd.with(), env);
             case Decl.ScopeDecl sd -> {
                 exec(sd.scope(), env);
                 yield Values.UNIT;
@@ -141,8 +138,8 @@ public final class Interpreter {
             case Decl.ModDecl md -> Values.UNIT; // stub
             case Decl.UseDecl ud -> Values.UNIT; // stub
             case Decl.PubDecl pd -> execDecl((Decl) pd.inner(), env);
-            case Decl.EffectDecl ed -> Values.UNIT; // stub: just register the name
-            case Decl.HandlerDecl hd -> Values.UNIT; // stub
+            case Decl.EffectDecl ed -> evalEffectDecl(ed, env);
+            case Decl.HandlerDecl hd -> evalHandlerDecl(hd, env);
             case Decl.RoleDecl rd -> Values.UNIT; // stub
             case Decl.StubDecl sd -> Values.UNIT; // stub
         };
@@ -196,6 +193,55 @@ public final class Interpreter {
                 defineInScope(env, td.name(), new Constructor(td.name(), fieldNames.size(), fieldNames));
             }
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Effects & Handlers
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Evaluate an effect declaration: register the effect descriptor and
+     * define each operation as a function that fires via the effect system.
+     */
+    private Object evalEffectDecl(Decl.EffectDecl ed, Environment env) {
+        var opNames = ed.ops().stream().map(Decl.EffectOp::name).toList();
+        var descriptor = new EffectDescriptor(ed.name(), opNames);
+        defineInScope(env, ed.name(), descriptor);
+
+        // Register each effect op as a function in the environment
+        for (var op : ed.ops()) {
+            String effectName = ed.name();
+            String opName = op.name();
+            // Arity -1 = variadic (type signatures not checked yet)
+            defineInScope(env, opName, new BuiltinFn(opName, -1, args ->
+                    EffectSystem.fireOp(effectName, opName, args)));
+        }
+
+        return descriptor;
+    }
+
+    /**
+     * Evaluate a handler declaration: create a HandlerValue and bind it.
+     * State bindings (`:!` lines) are executed into the handler's closure env.
+     */
+    private Object evalHandlerDecl(Decl.HandlerDecl hd, Environment env) {
+        // Create a closure environment for the handler (captures lexical scope)
+        var closureEnv = env.child();
+
+        // Execute state bindings into the closure env
+        for (var stmt : hd.stateBindings()) {
+            exec(stmt, closureEnv);
+        }
+
+        // Build clause map: opName → HandlerClause
+        var clauseMap = new LinkedHashMap<String, Decl.HandlerClause>();
+        for (var clause : hd.clauses()) {
+            clauseMap.put(clause.opName(), clause);
+        }
+
+        var handler = new HandlerValue(hd.name(), hd.effectName(), clauseMap, closureEnv);
+        defineInScope(env, hd.name(), handler);
+        return handler;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -270,10 +316,209 @@ public final class Interpreter {
         }
     }
 
-    private void execWith(Stmt.With w, Environment env) {
-        // For now, just execute the body without handler support
-        // This allows basic `with handler\n  body` to work as pass-through
-        execStmtList(w.body(), env.child());
+    private Object execWith(Stmt.With w, Environment env) {
+        var handlerVal = eval(w.handler(), env);
+
+        // ComposedHandler: decompose into nested with blocks
+        // with (h1 >> h2 >> h3) body  ≡  with h1 (with h2 (with h3 body))
+        if (handlerVal instanceof ComposedHandler ch) {
+            return execComposedWith(ch.handlers(), 0, w.body(), w.onFailure(), env, w.loc());
+        }
+
+        if (!(handlerVal instanceof HandlerValue handler)) {
+            throw new IrijRuntimeError("with requires a handler, got " + Values.typeName(handlerVal), w.loc());
+        }
+
+        var opChannel = new java.util.concurrent.SynchronousQueue<EffectSystem.EffectMessage>();
+        var ctx = new EffectSystem.HandlerContext(handler.effectName(), handler, opChannel);
+
+        // Snapshot the current thread's handler stack for the body thread
+        var parentStack = EffectSystem.STACK.get();
+
+        Thread bodyThread = Thread.startVirtualThread(() -> {
+            // Copy parent handler stack and push our context
+            var bodyStack = EffectSystem.STACK.get();
+            bodyStack.addAll(parentStack);
+            bodyStack.push(ctx);
+            try {
+                Object result = execStmtListReturn(w.body(), env.child());
+                opChannel.put(new EffectSystem.EffectMessage.Done(result));
+            } catch (IrijRuntimeError e) {
+                try { opChannel.put(new EffectSystem.EffectMessage.Err(e)); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            } catch (InterruptedException e) {
+                // Aborted by handler (no resume) — exit quietly
+            } catch (Exception e) {
+                try { opChannel.put(new EffectSystem.EffectMessage.Err(e)); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+        });
+
+        try {
+            return runHandlerLoop(handler, opChannel);
+        } catch (IrijRuntimeError e) {
+            // on-failure clause: runs when body raises an unhandled error
+            if (!w.onFailure().isEmpty()) {
+                var failEnv = env.child();
+                failEnv.define("error", e.getMessage());
+                return execStmtListReturn(w.onFailure(), failEnv);
+            }
+            throw e;
+        } finally {
+            // Ensure body thread is cleaned up if handler throws
+            if (bodyThread.isAlive()) {
+                bodyThread.interrupt();
+            }
+        }
+    }
+
+    /**
+     * Execute composed handlers as nested with blocks.
+     * with (h1 >> h2 >> h3) body  ≡  with h1 (with h2 (with h3 body))
+     */
+    private Object execComposedWith(List<Object> handlers, int index,
+                                     List<Stmt> body, List<Stmt> onFailure,
+                                     Environment env, Node.SourceLoc loc) {
+        if (index >= handlers.size()) {
+            // All handlers installed — execute the actual body
+            return execStmtListReturn(body, env);
+        }
+
+        var handlerVal = handlers.get(index);
+        if (!(handlerVal instanceof HandlerValue handler)) {
+            throw new IrijRuntimeError("Composed handler element is not a handler: "
+                    + Values.typeName(handlerVal), loc);
+        }
+
+        var opChannel = new java.util.concurrent.SynchronousQueue<EffectSystem.EffectMessage>();
+        var ctx = new EffectSystem.HandlerContext(handler.effectName(), handler, opChannel);
+        var parentStack = EffectSystem.STACK.get();
+
+        Thread bodyThread = Thread.startVirtualThread(() -> {
+            var bodyStack = EffectSystem.STACK.get();
+            bodyStack.addAll(parentStack);
+            bodyStack.push(ctx);
+            try {
+                // Recurse: install next handler, eventually runs the body
+                Object result = execComposedWith(handlers, index + 1, body, onFailure,
+                        env.child(), loc);
+                opChannel.put(new EffectSystem.EffectMessage.Done(result));
+            } catch (IrijRuntimeError e) {
+                try { opChannel.put(new EffectSystem.EffectMessage.Err(e)); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            } catch (InterruptedException e) {
+                // Aborted — exit quietly
+            } catch (Exception e) {
+                try { opChannel.put(new EffectSystem.EffectMessage.Err(e)); }
+                catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            }
+        });
+
+        try {
+            return runHandlerLoop(handler, opChannel);
+        } catch (IrijRuntimeError e) {
+            if (!onFailure.isEmpty() && index == 0) {
+                // on-failure only runs for the outermost handler
+                var failEnv = env.child();
+                failEnv.define("error", e.getMessage());
+                return execStmtListReturn(onFailure, failEnv);
+            }
+            throw e;
+        } finally {
+            if (bodyThread.isAlive()) {
+                bodyThread.interrupt();
+            }
+        }
+    }
+
+    /**
+     * Handler loop: reads messages from the body thread and dispatches to handler arms.
+     * Called initially from execWith, and recursively from resume.
+     */
+    private Object runHandlerLoop(HandlerValue handler,
+                                  java.util.concurrent.SynchronousQueue<EffectSystem.EffectMessage> opChannel) {
+        while (true) {
+            EffectSystem.EffectMessage msg;
+            try {
+                msg = opChannel.take();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IrijRuntimeError("Handler loop interrupted");
+            }
+
+            switch (msg) {
+                case EffectSystem.EffectMessage.Done(var value) -> {
+                    return value;
+                }
+                case EffectSystem.EffectMessage.Err(var error) -> {
+                    if (error instanceof IrijRuntimeError ire) throw ire;
+                    throw new IrijRuntimeError("Effect body error: " + error.getMessage());
+                }
+                case EffectSystem.EffectMessage.Op(var opName, var args, var resumeChannel) -> {
+                    var clause = handler.clauses().get(opName);
+                    if (clause == null) {
+                        throw new IrijRuntimeError("Handler " + handler.name()
+                                + " has no clause for operation: " + opName);
+                    }
+
+                    // Create arm environment as child of handler's closure env
+                    var armEnv = handler.closureEnv().child();
+
+                    // Bind params
+                    var params = clause.params();
+                    for (int i = 0; i < params.size() && i < args.size(); i++) {
+                        if (!matchPattern(params.get(i), args.get(i), armEnv)) {
+                            throw new IrijRuntimeError("Pattern match failed in handler arm: " + opName);
+                        }
+                    }
+
+                    // Inject one-shot resume function
+                    var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
+                    var resumeFn = new BuiltinFn("resume", 1, resumeArgs -> {
+                        if (!resumed.compareAndSet(false, true)) {
+                            throw new IrijRuntimeError("resume called twice (one-shot continuation)");
+                        }
+                        try {
+                            resumeChannel.put(resumeArgs.get(0)); // unblock body
+                            return runHandlerLoop(handler, opChannel); // handle further ops
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw new IrijRuntimeError("Interrupted during resume");
+                        }
+                    });
+                    armEnv.define("resume", resumeFn);
+
+                    // Evaluate handler arm body
+                    Object armResult = eval(clause.body(), armEnv);
+
+                    if (resumed.get()) {
+                        // resume was called — recursive runHandlerLoop already consumed
+                        // the Done/further ops. armResult is the final result.
+                        return armResult;
+                    } else {
+                        // resume NOT called — abort semantics
+                        // Body thread is still blocked on resumeChannel.take();
+                        // it will be interrupted by the finally block in execWith.
+                        return armResult;
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Execute a statement list and return the last expression's value.
+     * Non-expression statements yield UNIT.
+     */
+    private Object execStmtListReturn(List<Stmt> stmts, Environment env) {
+        Object last = Values.UNIT;
+        for (var stmt : stmts) {
+            switch (stmt) {
+                case Stmt.ExprStmt es -> last = eval(es.expr(), env);
+                default -> { exec(stmt, env); last = Values.UNIT; }
+            }
+        }
+        return last;
     }
 
     private void execStmtList(List<Stmt> stmts, Environment env) {
@@ -287,6 +532,7 @@ public final class Interpreter {
     // ═══════════════════════════════════════════════════════════════════
 
     Object eval(Expr expr, Environment env) {
+	System.out.println("PID=" + ProcessHandle.current().pid());
         return switch (expr) {
             // ── Literals ────────────────────────────────────────────────
             case Expr.IntLit(var v, _) -> v;
@@ -386,6 +632,13 @@ public final class Interpreter {
                     var v = tagged.namedFields().get(da.field());
                     if (v != null) yield v;
                     throw new IrijRuntimeError("No field '" + da.field() + "' on " + tagged.tag(), da.loc());
+                }
+                // Handler dot-access: read from handler's closure environment
+                if (target instanceof HandlerValue hv) {
+                    if (hv.closureEnv().isDefined(da.field())) {
+                        yield hv.closureEnv().lookup(da.field());
+                    }
+                    throw new IrijRuntimeError("No field '" + da.field() + "' on handler " + hv.name(), da.loc());
                 }
                 throw new IrijRuntimeError("Cannot access field '" + da.field() + "' on " + Values.typeName(target), da.loc());
             }
@@ -675,6 +928,18 @@ public final class Interpreter {
     private Object evalCompose(Expr.Compose c, Environment env) {
         var left = eval(c.left(), env);
         var right = eval(c.right(), env);
+
+        // Handler composition: h1 >> h2 creates a ComposedHandler
+        if (isHandler(left) && isHandler(right)) {
+            var handlers = new ArrayList<Object>();
+            // Flatten nested compositions
+            if (left instanceof ComposedHandler ch) handlers.addAll(ch.handlers());
+            else handlers.add(left);
+            if (right instanceof ComposedHandler ch) handlers.addAll(ch.handlers());
+            else handlers.add(right);
+            return new ComposedHandler(List.copyOf(handlers));
+        }
+
         if (c.forward()) {
             // f >> g: apply g after f
             return new ComposedFn(left, right);
@@ -682,6 +947,10 @@ public final class Interpreter {
             // g << f: apply f first, then g
             return new ComposedFn(right, left);
         }
+    }
+
+    private boolean isHandler(Object v) {
+        return v instanceof HandlerValue || v instanceof ComposedHandler;
     }
 
     // ═══════════════════════════════════════════════════════════════════

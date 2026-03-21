@@ -29,9 +29,10 @@ public sealed interface Decl extends Node {
     record EffectDecl(String name, List<String> typeParams,
                       List<EffectOp> ops, SourceLoc loc) implements Decl {}
 
-    /** Handler declaration (parsed, runtime stub). */
+    /** Handler declaration with optional state bindings. */
     record HandlerDecl(String name, String effectName,
-                       List<HandlerClause> clauses, SourceLoc loc) implements Decl {}
+                       List<HandlerClause> clauses, List<Stmt> stateBindings,
+                       SourceLoc loc) implements Decl {}
 
     /** Role declaration: role $NAME. */
     record RoleDecl(String name, SourceLoc loc) implements Decl {}

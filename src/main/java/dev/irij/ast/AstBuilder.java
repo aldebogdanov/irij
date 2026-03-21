@@ -197,6 +197,7 @@ public class AstBuilder {
         String name = ctx.fnName().IDENT().getText();
         String effectName = ctx.typeName().TYPE_NAME().getText();
         var clauses = new ArrayList<Decl.HandlerClause>();
+        var stateBindings = new ArrayList<Stmt>();
         for (var c : ctx.handlerBody().handlerClause()) {
             if (c.IDENT() != null) {
                 String opName = c.IDENT().getText();
@@ -206,10 +207,11 @@ public class AstBuilder {
                 }
                 Expr body = visitArmBody(c.armBody());
                 clauses.add(new Decl.HandlerClause(opName, params, body));
+            } else if (c.binding() != null) {
+                stateBindings.add(visitBinding(c.binding()));
             }
-            // handler-local bindings (binding alt) — skip for now
         }
-        return new Decl.HandlerDecl(name, effectName, clauses, loc(ctx));
+        return new Decl.HandlerDecl(name, effectName, clauses, stateBindings, loc(ctx));
     }
 
     // ── role / proto / impl ─────────────────────────────────────────────
@@ -570,6 +572,7 @@ public class AstBuilder {
         if (ctx.KEYWORD() != null) return visitKeyword(ctx.KEYWORD(), loc(ctx));
         if (ctx.UNDERSCORE() != null) return new Expr.Wildcard(loc(ctx));
         if (ctx.ifExpr() != null) return visitIfExpr(ctx.ifExpr());
+        if (ctx.matchExpr() != null) return visitMatchExpr(ctx.matchExpr());
         if (ctx.lambdaExpr() != null) return visitLambdaExpr(ctx.lambdaExpr());
         if (ctx.operatorAsValue() != null) return visitOperatorAsValue(ctx.operatorAsValue());
         if (ctx.unitExpr() != null) return new Expr.UnitLit(loc(ctx));
@@ -677,6 +680,12 @@ public class AstBuilder {
         var then_ = visitAtomExpr(ctx.atomExpr(1));
         var else_ = visitAtomExpr(ctx.atomExpr(2));
         return new Expr.IfExpr(cond, then_, else_, loc(ctx));
+    }
+
+    private Expr visitMatchExpr(MatchExprContext ctx) {
+        var scrutinee = visitExpr(ctx.expr());
+        var arms = visitMatchArms(ctx.matchArms());
+        return new Expr.MatchExpr(scrutinee, arms, loc(ctx));
     }
 
     private Expr visitLambdaExpr(LambdaExprContext ctx) {

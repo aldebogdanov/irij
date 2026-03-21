@@ -399,6 +399,12 @@
      #[]       => :empty
      #[x]      => :singleton x
      #[x ...r] => :cons x r      ;; head + rest (three dots = spread)
+
+   ;; match as expression — usable on the right side of :=
+   label := match score
+     s | s >= 90 => "excellent"
+     s | s >= 70 => "good"
+     _           => "needs-work"
    #+end_example
 
    Note: =...= (three dots) is the spread/rest operator in patterns,

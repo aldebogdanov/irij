@@ -93,7 +93,8 @@ Minimal working language: bindings, functions, pattern matching, data types.
   - [x] Lambda functions, function application (juxtaposition)
   - [x] Pattern-match arms (fn body form 2)
   - [x] Imperative blocks (`=>` / `=> params`)
-  - [x] `if`/`else` (block and inline), `match` expression
+  - [x] `if`/`else` (block and inline), `match` statement and expression
+  - [x] Match as expression: `x := match foo ...` (usable on RHS of bindings)
   - [x] Pipeline `|>` `<|`, composition `>>` `<<`
   - [x] Data types: `type` with variants (Tagged), `newtype`
   - [x] Destructuring in bindings and patterns
@@ -204,13 +205,26 @@ Minimal spawn/sleep for hot-redefinition demos, not the full structured concurre
 
 The universal joint. Everything interesting depends on this.
 
-- [ ] Effect declarations (`effect E`)
-- [ ] Handler definitions (`handler h :: E`)
-- [ ] `with handler expr` — install handler, run block
-- [ ] Effect rows in types: `-[E1 E2]>`
-- [ ] Resume / continuation (one-shot)
-- [ ] Handler composition (`>>`)
-- [ ] Pure test handlers (mock-console pattern from spec)
+### Phase 3a — Core Effect Infrastructure ✅
+
+- [x] **`EffectSystem.java`** — ThreadLocal handler stack, EffectMessage (Done/Err/Op), fireOp
+- [x] **Effect declarations** (`effect E`) — registers EffectDescriptor + op functions in env
+- [x] **Handler definitions** (`handler h :: E`) — creates HandlerValue with clause map + closure env
+- [x] **`with handler` block** — body runs in VirtualThread, handler loop on calling thread
+- [x] **Explicit resume** — one-shot, deep handlers, recursive runHandlerLoop
+- [x] **Abort semantics** — handler arm without resume → body interrupted, arm value returned
+- [x] **Handler-local state** — `:!` bindings in handler body, MutableCell in closure env
+- [x] **Nested handlers** — stack copied to body thread, inner handler takes precedence
+- [x] **Pure test handlers** — mock-console pattern (collect output in handler state)
+- [x] **Tests** — 277 total (+17 effect system tests, +5 match-as-expression)
+
+### Phase 3b — Handler Features ✅
+
+- [x] **`on-failure` clause** — runs when `with` body raises unhandled error; binds `error` variable
+- [x] **Handler composition (`>>`)** — `with (h1 >> h2 >> h3)` decomposes into nested `with` blocks
+- [x] **Handler dot-access** — `handler.field` reads from handler's closure env (e.g., state after `with`)
+- [x] **Tests** — 284 total (+7 Phase 3b tests)
+- [ ] Effect rows in types: `-[E1 E2]>` (deferred: needs type checker)
 
 ---
 

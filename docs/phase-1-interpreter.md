@@ -101,6 +101,7 @@ Per `docs/phase-1-design-decisions.md`:
 - **Evaluation**: Strict everywhere except lazy ranges
 - **Errors**: Runtime exceptions with source locations
 - **`~` operator**: Lowest precedence, right-associative. `f ~ rest` ≡ `f (rest)` — eliminates parens around arguments. Only works when the left side is a function value, not a keyword (`if`, `match` etc.)
+- **Match as expression**: `match` can be used on the right side of `:=` bindings: `x := match foo ...`. Match is both a statement and an expression — as a statement the result is discarded, as an expression the matched arm's value is returned.
 
 ## Known Limitations
 

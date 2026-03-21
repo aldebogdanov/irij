@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.irij"
-version = "0.1.0-SNAPSHOT"
+version = "0.0.1"
 
 java {
     toolchain {
@@ -139,4 +139,12 @@ tasks.register("install") {
         script.setExecutable(true)
         println("Installed: $binDir/irij")
     }
+}
+
+// ── Debug ────────────────────────────────────────────────────
+
+tasks.withType<JavaCompile>().configureEach {
+    options.isIncremental = true
+    // options.debugOptions.debugLevel = "source,lines,vars"
+    options.compilerArgs.add("-g") // Forces all debug information
 }

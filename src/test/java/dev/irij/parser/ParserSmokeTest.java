@@ -162,6 +162,14 @@ class ParserSmokeTest {
                 """);
         }
 
+        @Test void matchAsExpression() {
+            assertParses("""
+                x := match foo
+                  0 => "zero"
+                  _ => "other"
+                """);
+        }
+
         @Test void destructuringBinding() {
             assertParses("""
                 {name= n age= a} := get-user id

@@ -24,7 +24,7 @@ examples/                  — example .irj programs
 4. **Three fn body forms.** Disambiguated by first token after indent: `(` = lambda, `pattern =>` = match arm, `=>` alone/with params = imperative block.
 5. **Effects are the universal joint.** All side effects, concurrency, IO, and choreography are algebraic effects with handlers.
 6. **Test-driven.** Write the test (Irij source string → expected output) before implementing a feature.
-7. **Slow but confident.** Everything must be covered by tests. Run suitable tests often and all tests for regression testing at milestones. Do not start next step if not everything in current one is proven correct.
+7. **Slow but confident.** It's better to do it slowly, but with full confidence that everything is correct. Run tests, check code in irij-nrepl. Better many times to iterate but do correct, then return later to fix.
 8. **TODO.md updates.** Always update TODO.md if you confident in step correct implementation. Also possible to mark incomplete/problematic steps.
 9. **Docs after milestone.** When some phase or important steps are implemented - describe everything you created in corresponding files inside ./docs folder (including architecture.html). I need to know how to use or/and test everything implemented.
 10. **Wipe old things.** Completely purge any mentions of removed design patterns. If something changes, then spec, docs and examples must show like it always was so.

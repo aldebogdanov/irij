@@ -299,6 +299,48 @@ public final class Values {
         }
     }
 
+    // ── Effect system values ─────────────────────────────────────────────
+
+    /**
+     * Descriptor for a declared effect (e.g., {@code effect Console}).
+     * Stored in the environment so handlers can validate against it.
+     */
+    public record EffectDescriptor(String name, List<String> ops) {
+        @Override
+        public String toString() {
+            return "<effect " + name + ">";
+        }
+    }
+
+    /**
+     * A first-class handler value created by {@code handler h :: E}.
+     *
+     * @param name        handler name (e.g., "console-to-stdout")
+     * @param effectName  the effect this handler handles (e.g., "Console")
+     * @param clauses     map from op name → HandlerClause AST node
+     * @param closureEnv  environment capturing handler-local state
+     */
+    public record HandlerValue(String name, String effectName,
+                               Map<String, dev.irij.ast.Decl.HandlerClause> clauses,
+                               Environment closureEnv) {
+        @Override
+        public String toString() {
+            return "<handler " + name + " :: " + effectName + ">";
+        }
+    }
+
+    /**
+     * Two or more handlers composed via {@code >>}.
+     * When used with {@code with}, decomposes into nested {@code with} blocks:
+     * {@code with (h1 >> h2)} ≡ {@code with h1 (with h2 body)}.
+     */
+    public record ComposedHandler(List<Object> handlers) {
+        @Override
+        public String toString() {
+            return "<composed-handler " + handlers.size() + ">";
+        }
+    }
+
     // ── Value utilities ─────────────────────────────────────────────────
 
     /** Convert a runtime value to its Irij string representation. */
@@ -347,6 +389,9 @@ public final class Values {
         if (value instanceof PartialApp) return "PartialApp";
         if (value instanceof ComposedFn) return "ComposedFn";
         if (value instanceof Constructor) return "Constructor";
+        if (value instanceof EffectDescriptor ed) return "Effect(" + ed.name() + ")";
+        if (value instanceof HandlerValue hv) return "Handler(" + hv.name() + ")";
+        if (value instanceof ComposedHandler) return "ComposedHandler";
         if (value instanceof Thread) return "Thread";
         return value.getClass().getSimpleName();
     }
