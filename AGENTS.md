@@ -7,13 +7,16 @@ Irij (ℑ) is a token-efficient, effect-oriented programming language targeting 
 ## Project layout
 
 ```
-docs/irij-lang-spec.org    — language specification (READ THIS FIRST)
-TODO.md                    — phased implementation roadmap
-build.gradle.kts           — Gradle build (Java 25, ANTLR4, JUnit 5)
-src/main/antlr/            — ANTLR4 grammar files (.g4)
-src/main/java/dev/irij/    — implementation
-src/test/java/dev/irij/    — tests
-examples/                  — example .irj programs
+docs/irij-lang-spec.org        — language specification (READ THIS FIRST)
+TODO.md                        — phased implementation roadmap
+build.gradle.kts               — Gradle build (Java 25, ANTLR4, JUnit 5)
+src/main/antlr/                — ANTLR4 grammar files (.g4)
+src/main/java/dev/irij/        — implementation
+src/test/java/dev/irij/        — tests (372 Java tests)
+src/main/resources/std/        — stdlib modules (.irj): math, text, collection, func, convert, test
+examples/                      — example .irj programs
+tests/                         — Irij-native stdlib test suites (89 tests via std.test)
+editors/emacs/                 — irij-mode.el (syntax + REPL) + irij-nrepl.el (nREPL client)
 ```
 
 ## Key rules
@@ -29,12 +32,25 @@ examples/                  — example .irj programs
 9. **Docs after milestone.** When some phase or important steps are implemented - describe everything you created in corresponding files inside ./docs folder (including architecture.html). I need to know how to use or/and test everything implemented.
 10. **Wipe old things.** Completely purge any mentions of removed design patterns. If something changes, then spec, docs and examples must show like it always was so.
 
+## Current implementation status
+
+- **Phase 0**: Grammar & parser (ANTLR4, Python-style INDENT/DEDENT, strict 2-space)
+- **Phase 1**: AST & tree-walk interpreter (bindings, functions, pattern matching, data types, builtins)
+- **Phase 2**: REPL (JLine3), CLI runner, examples, Emacs irij-mode
+- **Phase 2.5**: VarCell hot-redefinition, nREPL server, Emacs nREPL client
+- **Phase 2.75**: `spawn`/`sleep` concurrency primitives, `~` apply-to-rest operator
+- **Phase 3a/3b**: Algebraic effects & handlers (with/resume/abort, handler state, composition, on-failure)
+- **Phase 4**: Module system (`mod`/`use`/`pub`), ~35 new builtins, 6 stdlib modules in Irij
+- **Phase 4.5a**: Vector/tuple destructuring in bindings, implicit continuation (multi-line pipelines)
+
 ## Build & test
 
 ```sh
-./gradlew test                                    # run all tests
+./gradlew test                                    # run all 372 Java tests
+./gradlew run --args="tests/run-all.irj"          # run Irij stdlib tests (35 tests)
 ./gradlew run --args="file.irj"                   # run a file
-./gradlew run --args="--parse-only file.irj"      # parse only (when implemented)
+./gradlew run --args="--parse-only file.irj"      # parse only
+./gradlew run --args="--nrepl-server"             # start nREPL server (port 7888)
 ```
 
 ## Style

@@ -59,7 +59,7 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
   - [x] Located types: `@$ROLE`
   - [x] Choreography: `~>`, `<~`, `~*>`, `~/`, `par-each`, `forall`, `on-failure`, `enclave`
   - [x] Unit value `()` as expression and pattern
-  - [ ] Implicit continuation (more-indented line starting with binary op)
+  - [x] Implicit continuation (more-indented line starting with binary op) — implemented in Phase 4.5a
 
 - [x] **Lexer base class** — `src/main/java/dev/irij/parser/IrijLexerBase.java`
   - [x] INDENT/DEDENT post-processing (Python-style indent stack)
@@ -248,6 +248,32 @@ The universal joint. Everything interesting depends on this.
   - `std.convert` — to-int, to-float, digits
 - [x] **Tests** — 349 total (+65 new: 38 builtin tests + 27 module tests)
 - [x] Tuple and vector lexicographic comparison support
+
+---
+
+## Phase 4.5a — Parser QoL ✅
+
+- [x] **Vector/tuple destructuring in bindings**
+  - `#[a b c] := #[1 2 3]` — vector destructuring with spread support
+  - `#(x y) := #(42 "hello")` — tuple destructuring
+  - Nested patterns: `#[#(k v) _] := vec`
+  - Grammar: added `vectorPattern | tuplePattern` to `bindTarget` rule
+  - Interpreter: zero changes — reuses existing `matchPattern` infrastructure
+- [x] **Implicit continuation**
+  - More-indented line starting with binary op auto-joins to previous line
+  - Triggers: `|> <| >> << + * ** % < > <= >= == ++ && || .. ..<`
+  - Does NOT trigger: `-` (ambiguous with unary negation), `/` (ambiguous with seq ops)
+  - Lexer-level: `nextLineStartsWithBinaryOp()` in `IrijLexerBase.java`
+  - Parser and interpreter: zero changes needed
+- [x] **`!` identifier suffix** — confirmed working (ANTLR longest-match resolves correctly)
+- [x] **`std.test` module** — Irij-native test framework
+  - `assert-eq`, `assert-neq`, `assert-true`, `assert-false`, `assert-throws`
+  - `test "name" (-> body)` — runs thunk, catches errors, returns `#(:pass name)` or `#(:fail name)`
+  - `summarize results` — counts pass/fail, prints summary
+- [x] **`try` builtin** — `try (-> expr)` returns `Ok value` or `Err msg` (genuine primitive for error catching)
+- [x] **`execStmtListReturn` fix** — match/if/with statements now return values in imperative fn bodies and blocks
+- [x] **Stdlib bugfixes** — `count-by` and `take-while` in std.collection
+- [x] **Tests** — 372 Java tests + 89 Irij stdlib tests (via std.test)
 
 ---
 

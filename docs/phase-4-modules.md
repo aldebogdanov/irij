@@ -72,6 +72,22 @@ All Irij-defined: `flip`, `compose`, `pipe`, `apply-to`, `on`, `juxt`, `compleme
 
 All Irij-defined: `to-int`, `to-float`, `digits`
 
+### `std.test`
+
+All Irij-defined test framework using the `try` builtin:
+
+- **Assertions**: `assert-eq expected actual`, `assert-neq a b`, `assert-true val`, `assert-false val`, `assert-throws thunk`
+- **Runner**: `test "name" (-> body)` — runs thunk, catches errors, prints `[ok]`/`[FAIL]`, returns `#(:pass name)` or `#(:fail name)`
+- **Summary**: `summarize #[r1 r2 ...]` — counts pass/fail, prints totals, returns failure count (0 = success)
+
+```irj
+use std.test :open
+
+r1 := test "adds numbers" (-> assert-eq 3 (1 + 2))
+r2 := test "string trim" (-> assert-eq "hi" (trim "  hi  "))
+summarize #[r1 r2]
+```
+
 ## New Global Builtins
 
 These are always available (no `use` needed) — they're Java primitives that can't be expressed in Irij:
@@ -94,6 +110,9 @@ These are always available (no `use` needed) — they're Java primitives that ca
 ### Conversion
 `parse-int`, `parse-float`, `char-code`, `from-char-code`
 
+### Error Handling
+- `try thunk` — execute thunk, return `Ok value` or `Err msg` (genuine primitive for error catching)
+
 ### IO
 `read-file`, `write-file`, `file-exists?`, `get-env`, `now-ms`
 
@@ -112,6 +131,9 @@ These are always available (no `use` needed) — they're Java primitives that ca
 | `src/main/resources/std/collection.irj` | std.collection module |
 | `src/main/resources/std/func.irj` | std.func module |
 | `src/main/resources/std/convert.irj` | std.convert module |
+| `src/main/resources/std/test.irj` | std.test module — Irij-native test framework |
+| `tests/test-*.irj` | Irij stdlib test suites (89 tests) |
+| `tests/run-all.irj` | All-in-one test runner (35 tests) |
 
 ## Limitations
 

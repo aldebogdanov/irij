@@ -122,24 +122,22 @@ The REPL buffer uses `irij-repl-mode` (derived from `comint-mode`) with the same
 
 ## Known limitations
 
-- **Multi-line pipelines** (implicit continuation) are not yet supported. Lines starting with a binary operator at greater indentation are not joined to the previous line. Workaround: break chains into intermediate bindings, or wrap in parentheses (newlines inside parens are suppressed):
+- **Multi-line pipelines** — now supported via implicit continuation (Phase 4.5a). A more-indented line starting with a binary operator auto-joins to the previous line. Does not trigger for `-` (unary negation ambiguity) or `/` (seq op ambiguity). Example:
   ```irij
-  ;; works — intermediate bindings
-  step1 := to-vec (1 .. 20)
-  step2 := step1 |> /? (n -> n % 2 == 0)
-  result := /+ (step2 |> @ (n -> n * n))
+  result := to-vec (1 .. 20)
+    |> /? (n -> n % 2 == 0)
+    |> @ (n -> n * n)
+    |> /+
   ```
 
 - **`:type` command** — stub, prints a placeholder message until type inference is implemented in a later phase.
 
-- **`bindTarget` only supports `IDENT` or `{field= name}` map patterns.** Vector/tuple destructuring in bind position requires `match`:
+- **Destructuring bindings** — vector and tuple patterns now work in bind position (Phase 4.5a):
   ```irij
-  ;; works
+  #[a b c] := #[1 2 3]
+  #[first ...rest] := #[10 20 30 40]
+  #(x y) := #(42 "hello")
   {name= n} := person
-
-  ;; requires match for vector patterns
-  match vec
-    #[a b ...rest] => println a
   ```
 
 ## Additional builtins

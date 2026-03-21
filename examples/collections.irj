@@ -63,12 +63,11 @@ println (get 99 nums)             ;; () — out of bounds returns unit
 
 ;; ── Pipelines ────────────────────────────────────────────────────────────
 
-;; sum of squares of even numbers 1..20 — broken into steps
-;; (multi-line pipelines require implicit continuation, not yet implemented)
-range-vec := to-vec (1 .. 20)
-evens-only := range-vec |> /? (n -> n % 2 == 0)
-squares    := evens-only |> @ (n -> n * n)
-result     := /+ squares
+;; sum of squares of even numbers 1..20 — multi-line pipeline
+result := to-vec (1 .. 20)
+  |> /? (n -> n % 2 == 0)
+  |> @ (n -> n * n)
+  |> /+
 println result                  ;; 1540
 
 ;; ── Maps ─────────────────────────────────────────────────────────────────

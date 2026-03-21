@@ -99,7 +99,15 @@
     "contains?" "keys" "vals" "get"
     "nth" "last" "fold"
     "identity" "const" "not" "empty?"
-    "spawn" "sleep")
+    "spawn" "sleep" "try"
+    "error" "type-of"
+    "assoc" "dissoc" "merge"
+    "split" "join" "trim" "upper-case" "lower-case"
+    "starts-with?" "ends-with?" "replace" "substring" "char-at" "index-of"
+    "sqrt" "floor" "ceil" "round" "sin" "cos" "tan" "log" "exp" "pow"
+    "random-int" "random-float"
+    "parse-int" "parse-float" "char-code" "from-char-code"
+    "read-file" "write-file" "file-exists?" "get-env" "now-ms")
   "Built-in functions in Irij.")
 
 ;; Emacs 29+ introduced `font-lock-number-face'.  On older versions

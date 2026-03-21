@@ -152,6 +152,6 @@ apply-to (`~`) → choreography → pipeline → composition → or → and → 
 
 ## Known Limitations
 
-- **Implicit continuation** (more-indented line starting with binary op) is not yet implemented — marked as incomplete in TODO.md.
+- **Implicit continuation** — implemented in Phase 4.5a. A more-indented line starting with a binary operator (`|>`, `+`, `++`, `&&`, `==`, `..`, etc.) is automatically joined to the previous line. Handled at the lexer level in `IrijLexerBase.nextLineStartsWithBinaryOp()`. Does not trigger for `-` (ambiguous with unary negation) or `/` (ambiguous with seq ops like `/?`, `/+`).
 - **No AST or interpreter** — Phase 0 only validates parse correctness; the tree is an ANTLR `ParseTree`, not a custom AST.
 - **No error recovery** — a single parse error stops meaningful parsing of the rest.
