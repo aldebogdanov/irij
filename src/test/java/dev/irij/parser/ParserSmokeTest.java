@@ -613,4 +613,61 @@ class ParserSmokeTest {
                 """);
         }
     }
+
+    @Nested
+    class Contracts {
+
+        @Test void preCondition() {
+            assertParses("""
+                fn positive
+                  pre (x -> x > 0)
+                  (x -> x)
+                """);
+        }
+
+        @Test void postCondition() {
+            assertParses("""
+                fn half
+                  post (r -> r >= 0)
+                  (x -> div x 2)
+                """);
+        }
+
+        @Test void preAndPost() {
+            assertParses("""
+                fn withdraw
+                  pre (amt bal -> amt > 0 && amt <= bal)
+                  post (r -> r >= 0)
+                  (amt bal -> bal - amt)
+                """);
+        }
+
+        @Test void multiplePreConditions() {
+            assertParses("""
+                fn transfer
+                  pre (amt from to -> amt > 0)
+                  pre (amt from to -> from /= to)
+                  (amt from to -> from - amt)
+                """);
+        }
+
+        @Test void contractWithImperativeBody() {
+            assertParses("""
+                fn safe-div
+                  pre (a b -> b /= 0)
+                  => a b
+                  result := div a b
+                  result
+                """);
+        }
+
+        @Test void contractWithMatchArms() {
+            assertParses("""
+                fn abs-val
+                  post (r -> r >= 0)
+                  x | x >= 0 => x
+                  x           => 0 - x
+                """);
+        }
+    }
 }

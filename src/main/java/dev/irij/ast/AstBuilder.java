@@ -96,17 +96,28 @@ public class AstBuilder {
 
     private Decl.FnDecl visitFnDecl(FnDeclContext ctx, boolean isPub) {
         String name = ctx.fnName().IDENT().getText();
-        Decl.FnBody body;
-        if (ctx.fnBody() != null) {
-            body = visitFnBody(ctx.fnBody());
-        } else {
-            body = new Decl.FnBody.NoBody();
+        if (ctx.fnBody() == null) {
+            return new Decl.FnDecl(name, isPub, new Decl.FnBody.NoBody(), loc(ctx));
         }
-        return new Decl.FnDecl(name, isPub, body, loc(ctx));
+        var content = ctx.fnBody().fnBodyContent();
+
+        // Extract contract clauses (pre/post) from fnBodyContent
+        var pres = new ArrayList<Expr>();
+        var posts = new ArrayList<Expr>();
+        for (var cc : content.contractClause()) {
+            if (cc.PRE() != null) {
+                pres.add(visitExpr(cc.expr()));
+            } else if (cc.POST() != null) {
+                posts.add(visitExpr(cc.expr()));
+            }
+            // LAW in fn body: ignored for now (Phase 6c)
+        }
+
+        Decl.FnBody body = visitFnBody(content);
+        return new Decl.FnDecl(name, isPub, body, pres, posts, loc(ctx));
     }
 
-    private Decl.FnBody visitFnBody(FnBodyContext ctx) {
-        var content = ctx.fnBodyContent();
+    private Decl.FnBody visitFnBody(IrijParser.FnBodyContentContext content) {
         if (content.lambdaBody() != null) {
             return visitLambdaBodyAsFnBody(content.lambdaBody());
         }
@@ -116,7 +127,7 @@ public class AstBuilder {
         if (content.matchArms() != null) {
             return new Decl.FnBody.MatchArmsBody(visitMatchArms(content.matchArms()));
         }
-        throw new IllegalStateException("Unknown fn body form at " + loc(ctx));
+        throw new IllegalStateException("Unknown fn body form");
     }
 
     private Decl.FnBody.LambdaBody visitLambdaBodyAsFnBody(LambdaBodyContext ctx) {

@@ -100,6 +100,7 @@
     "nth" "last" "fold"
     "identity" "const" "not" "empty?"
     "spawn" "sleep" "try"
+    "await" "timeout" "par" "race"
     "error" "type-of"
     "assoc" "dissoc" "merge"
     "split" "join" "trim" "upper-case" "lower-case"

@@ -12,7 +12,7 @@ TODO.md                        — phased implementation roadmap
 build.gradle.kts               — Gradle build (Java 25, ANTLR4, JUnit 5)
 src/main/antlr/                — ANTLR4 grammar files (.g4)
 src/main/java/dev/irij/        — implementation
-src/test/java/dev/irij/        — tests (372 Java tests)
+src/test/java/dev/irij/        — tests (444 Java tests)
 src/main/resources/std/        — stdlib modules (.irj): math, text, collection, func, convert, test
 examples/                      — example .irj programs
 tests/                         — Irij-native stdlib test suites (89 tests via std.test)
@@ -43,11 +43,12 @@ editors/emacs/                 — irij-mode.el (syntax + REPL) + irij-nrepl.el 
 - **Phase 4**: Module system (`mod`/`use`/`pub`), ~35 new builtins, 6 stdlib modules in Irij
 - **Phase 4.5a**: Vector/tuple destructuring in bindings, implicit continuation (multi-line pipelines)
 - **Phase 4.5b**: Protocols & implementations (`proto`/`impl`), first-arg type dispatch
+- **Phase 5**: Structured concurrency (`scope`/`fork`/`await`, `par`, `race`, `timeout`)
 
 ## Build & test
 
 ```sh
-./gradlew test                                    # run all 393 Java tests
+./gradlew test                                    # run all 423 Java tests
 ./gradlew run --args="tests/run-all.irj"          # run Irij stdlib tests (35 tests)
 ./gradlew run --args="file.irj"                   # run a file
 ./gradlew run --args="--parse-only file.irj"      # parse only

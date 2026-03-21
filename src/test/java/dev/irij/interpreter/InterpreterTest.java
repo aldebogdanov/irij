@@ -2252,5 +2252,455 @@ class InterpreterTest {
                 println (process 100)
                 """));
         }
+
+        @Test void protoDispatchOnFloat() {
+            assertEquals("3.14", run("""
+                proto Stringify a
+                  stringify :: a -> Str
+
+                impl Stringify for Float
+                  stringify := (x -> to-str x)
+
+                println (stringify 3.14)
+                """));
+        }
+
+        @Test void protoDispatchOnBool() {
+            assertEquals("yes", run("""
+                proto Label a
+                  label :: a -> Str
+
+                impl Label for Bool
+                  label := (b -> if b "yes" else "no")
+
+                println (label true)
+                """));
+        }
+
+        @Test void protoDispatchOnKeyword() {
+            assertEquals(":ok", run("""
+                proto Stringify a
+                  stringify :: a -> Str
+
+                impl Stringify for Keyword
+                  stringify := (k -> to-str k)
+
+                println (stringify :ok)
+                """));
+        }
+
+        @Test void protoDispatchOnVector() {
+            assertEquals("3", run("""
+                proto Size a
+                  size :: a -> Int
+
+                impl Size for Vector
+                  size := (v -> length v)
+
+                println (size #[1 2 3])
+                """));
+        }
+
+        @Test void protoDispatchOnMap() {
+            assertEquals("2", run("""
+                proto Size a
+                  size :: a -> Int
+
+                impl Size for Map
+                  size := (m -> length (keys m))
+
+                println (size {a= 1 b= 2})
+                """));
+        }
+
+        @Test void protoInPipeline() {
+            assertEquals("10", run("""
+                proto Double a
+                  dbl :: a -> a
+
+                impl Double for Int
+                  dbl := (x -> x * 2)
+
+                println (5 |> dbl)
+                """));
+        }
+
+        @Test void protoMethodInMap() {
+            assertEquals("#[2 4 6]", run("""
+                proto Double a
+                  dbl :: a -> a
+
+                impl Double for Int
+                  dbl := (x -> x * 2)
+
+                println (#[1 2 3] |> @ dbl)
+                """));
+        }
+
+        @Test void implExtraMethodError() {
+            // impl binding not declared in protocol should error
+            assertRuntimeError("""
+                proto Show a
+                  show :: a -> Str
+
+                impl Show for Int
+                  show := (n -> to-str n)
+                  extra := 42
+                """);
+        }
+
+        @Test void protoRedefinitionOverwrites() {
+            // Redefining a proto replaces the old one
+            assertEquals("42", run("""
+                proto P a
+                  foo :: a -> Int
+
+                impl P for Str
+                  foo := (s -> 0)
+
+                proto P a
+                  foo :: a -> Int
+
+                impl P for Str
+                  foo := (s -> 42)
+
+                println (foo "x")
+                """));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Structured Concurrency
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class StructuredConcurrency {
+
+        @Test void scopeBasicNoForks() {
+            assertEquals("42", run("""
+                scope s
+                  println 42
+                """));
+        }
+
+        @Test void scopeForkAndAwait() {
+            assertEquals("30", run("""
+                scope s
+                  f := s.fork (-> 10 + 20)
+                  println (await f)
+                """));
+        }
+
+        @Test void scopeMultipleForks() {
+            assertEquals("30\n21", run("""
+                scope s
+                  f1 := s.fork (-> 10 + 20)
+                  f2 := s.fork (-> 3 * 7)
+                  println (await f1)
+                  println (await f2)
+                """));
+        }
+
+        @Test void scopeWaitsForAllFibers() {
+            // Even without explicit await, scope waits for all forks
+            assertEquals("from fiber", run("""
+                scope s
+                  s.fork (-> sleep 10; println "from fiber")
+                """));
+        }
+
+        @Test void scopePropagatesError() {
+            assertRuntimeError("""
+                scope s
+                  s.fork (-> error "boom")
+                """);
+        }
+
+        @Test void scopeRaceFirstWins() {
+            assertEquals("fast", run("""
+                result := race (-> sleep 200; "slow") (-> sleep 10; "fast")
+                println result
+                """));
+        }
+
+        @Test void scopeRaceBlock() {
+            // scope.race block returns first fiber success
+            // We verify the fast fiber finishes first by printing inside it
+            assertEquals("fast", run("""
+                scope.race s
+                  s.fork (-> sleep 200; "slow")
+                  s.fork (-> sleep 10; println "fast")
+                """));
+        }
+
+        @Test void scopeSupervisedIsolatesErrors() {
+            // supervised: one fiber failing doesn't cancel others
+            assertEquals("[supervised] fiber error: boom\nok", run("""
+                scope.supervised s
+                  s.fork (-> error "boom")
+                  s.fork (-> sleep 30; println "ok")
+                """));
+        }
+
+        @Test void awaitReturnsResult() {
+            assertEquals("42", run("""
+                scope s
+                  f := s.fork (-> 42)
+                  println (await f)
+                """));
+        }
+
+        @Test void awaitPropagatesError() {
+            assertRuntimeError("""
+                scope s
+                  f := s.fork (-> error "fiber failed")
+                  await f
+                """);
+        }
+
+        @Test void timeoutReturnsResult() {
+            assertEquals("42", run("""
+                result := timeout 1000 (-> 42)
+                println result
+                """));
+        }
+
+        @Test void timeoutThrowsOnExpiry() {
+            assertRuntimeError("""
+                timeout 10 (-> sleep 5000; 42)
+                """);
+        }
+
+        @Test void parCombinesResults() {
+            assertEquals("30", run("""
+                result := par (+) (-> 10) (-> 20)
+                println result
+                """));
+        }
+
+        @Test void parThreeThunks() {
+            assertEquals("#[1 2 3]", run("""
+                fn collect
+                  => a b c
+                  #[a b c]
+                result := par collect (-> 1) (-> 2) (-> 3)
+                println result
+                """));
+        }
+
+        @Test void parPropagatesError() {
+            assertRuntimeError("""
+                par (+) (-> 10) (-> error "fail")
+                """);
+        }
+
+        @Test void raceStandalone() {
+            assertEquals("fast", run("""
+                result := race (-> sleep 200; "slow") (-> "fast")
+                println result
+                """));
+        }
+
+        @Test void raceAllFail() {
+            assertRuntimeError("""
+                race (-> error "a") (-> error "b")
+                """);
+        }
+
+        @Test void nestedScopes() {
+            assertEquals("inner\nouter", run("""
+                fn inner-work
+                  => x
+                  scope s
+                    s.fork (-> println "inner")
+                scope outer
+                  outer.fork (-> inner-work 1)
+                  sleep 50
+                  println "outer"
+                """));
+        }
+
+        @Test void fiberTypeName() {
+            assertEquals("Fiber", run("""
+                scope s
+                  f := s.fork (-> 42)
+                  println (type-of f)
+                  await f
+                """));
+        }
+
+        @Test void scopeHandleTypeName() {
+            assertEquals("Scope", run("""
+                scope s
+                  println (type-of s)
+                """));
+        }
+
+        @Test void timeoutWithFloatDuration() {
+            assertEquals("ok", run("""
+                result := timeout 1.0 (-> "ok")
+                println result
+                """));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Contracts (pre/post)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class Contracts {
+
+        @Test void prePassing() {
+            assertEquals("10", run("""
+                fn positive
+                  pre (x -> x > 0)
+                  (x -> x * 2)
+                println (positive 5)
+                """));
+        }
+
+        @Test void preFailing() {
+            assertRuntimeError("""
+                fn positive
+                  pre (x -> x > 0)
+                  (x -> x * 2)
+                positive (0 - 3)
+                """);
+        }
+
+        @Test void preBlameMessage() {
+            assertEquals("true", run("""
+                fn positive
+                  pre (x -> x > 0)
+                  (x -> x)
+                result := try (-> positive 0)
+                match result
+                  (Err msg) => println (index-of msg "caller" /= -1)
+                """));
+        }
+
+        @Test void postPassing() {
+            assertEquals("5", run("""
+                fn half
+                  post (r -> r >= 0)
+                  (x -> div x 2)
+                println (half 10)
+                """));
+        }
+
+        @Test void postFailing() {
+            assertRuntimeError("""
+                fn only-positive
+                  post (r -> r > 0)
+                  (x -> x)
+                only-positive (0 - 5)
+                """);
+        }
+
+        @Test void postBlameMessage() {
+            assertEquals("true", run("""
+                fn only-positive
+                  post (r -> r > 0)
+                  (x -> x)
+                result := try (-> only-positive (0 - 1))
+                match result
+                  (Err msg) => println (index-of msg "implementation" /= -1)
+                """));
+        }
+
+        @Test void preAndPostTogether() {
+            assertEquals("70", run("""
+                fn withdraw
+                  pre  (account amt -> amt > 0)
+                  pre  (account amt -> account.balance >= amt)
+                  post (result -> result.balance >= 0)
+                  => account amount
+                  {...account balance= account.balance - amount}
+                result := withdraw {balance= 100} 30
+                println result.balance
+                """));
+        }
+
+        @Test void multiplePresCombined() {
+            // All pre-conditions must pass (AND semantics)
+            assertRuntimeError("""
+                fn bounded
+                  pre (x -> x > 0)
+                  pre (x -> x < 100)
+                  (x -> x)
+                bounded 200
+                """);
+        }
+
+        @Test void contractOnImperativeFn() {
+            assertEquals("6", run("""
+                fn double-positive
+                  pre (x -> x > 0)
+                  post (r -> r > 0)
+                  => x
+                  x * 2
+                println (double-positive 3)
+                """));
+        }
+
+        @Test void contractOnMatchFn() {
+            assertEquals("5\n3", run("""
+                fn abs-val
+                  post (r -> r >= 0)
+                  x | x >= 0 => x
+                  x => 0 - x
+                println (abs-val 5)
+                println (abs-val (0 - 3))
+                """));
+        }
+
+        @Test void contractWithPartialApplication() {
+            // Contracts deferred until all args provided
+            assertEquals("8", run("""
+                fn add-positive
+                  pre (a b -> a > 0 && b > 0)
+                  (a b -> a + b)
+                add5 := add-positive 5
+                println (add5 3)
+                """));
+        }
+
+        @Test void contractPartialThenFail() {
+            assertRuntimeError("""
+                fn add-positive
+                  pre (a b -> a > 0 && b > 0)
+                  (a b -> a + b)
+                add5 := add-positive 5
+                add5 (0 - 1)
+                """);
+        }
+
+        @Test void contractInPipeline() {
+            assertEquals("20", run("""
+                fn double-positive
+                  pre (x -> x > 0)
+                  (x -> x * 2)
+                println (10 |> double-positive)
+                """));
+        }
+
+        @Test void contractPipelineFails() {
+            assertRuntimeError("""
+                fn double-positive
+                  pre (x -> x > 0)
+                  (x -> x * 2)
+                (0 - 5) |> double-positive
+                """);
+        }
+
+        @Test void noContractFnUnaffected() {
+            // Functions without contracts work as before
+            assertEquals("6", run("""
+                fn double
+                  (x -> x * 2)
+                println (double 3)
+                """));
+        }
     }
 }

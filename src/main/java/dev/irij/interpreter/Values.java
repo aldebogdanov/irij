@@ -358,15 +358,15 @@ public final class Values {
     public record ProtocolDescriptor(String name, List<String> methodNames,
                                      Map<String, Map<String, Object>> impls) {
         public ProtocolDescriptor(String name, List<String> methodNames) {
-            this(name, methodNames, new LinkedHashMap<>());
+            this(name, methodNames, new java.util.concurrent.ConcurrentHashMap<>());
         }
 
-        /** Register an implementation for a given type. */
+        /** Register an implementation for a given type (thread-safe). */
         public void registerImpl(String typeName, Map<String, Object> bindings) {
             impls.put(typeName, bindings);
         }
 
-        /** Look up a method for a given runtime type. */
+        /** Look up a method for a given runtime type (thread-safe). */
         public Object dispatch(String methodName, String typeName) {
             var typeImpls = impls.get(typeName);
             if (typeImpls == null) return null;
@@ -390,6 +390,37 @@ public final class Values {
         @Override
         public String toString() {
             return "<module " + qualifiedName + ">";
+        }
+    }
+
+    // ── Structured concurrency values ──────────────────────────────────
+
+    /**
+     * A fiber: a virtual thread with a {@link java.util.concurrent.CompletableFuture}
+     * for result delivery. Created by {@code scope.fork}.
+     *
+     * @param result  future that completes when the fiber finishes
+     * @param thread  the virtual thread running the fiber body
+     */
+    public record Fiber(java.util.concurrent.CompletableFuture<Object> result, Thread thread) {
+        @Override
+        public String toString() {
+            return "<fiber " + thread.threadId() + ">";
+        }
+    }
+
+    /**
+     * A scope handle: provides {@code fork} method via dot-access.
+     * Created by {@code scope s} blocks.
+     *
+     * @param modifier  null, "race", or "supervised"
+     * @param fibers    thread-safe list of forked fibers (shared with scope execution)
+     * @param forkFn    BuiltinFn for {@code s.fork(thunk)} — captures scope context
+     */
+    public record ScopeHandle(String modifier, java.util.List<Fiber> fibers, Object forkFn) {
+        @Override
+        public String toString() {
+            return "<scope" + (modifier != null ? "." + modifier : "") + ">";
         }
     }
 
@@ -437,6 +468,7 @@ public final class Values {
         if (value instanceof IrijRange) return "Range";
         if (value instanceof Tagged t) return t.tag();
         if (value instanceof Lambda) return "Lambda";
+        if (value instanceof Interpreter.ContractedFn cf) return Values.typeName(cf.fn());
         if (value instanceof BuiltinFn) return "BuiltinFn";
         if (value instanceof PartialApp) return "PartialApp";
         if (value instanceof ComposedFn) return "ComposedFn";
@@ -446,6 +478,8 @@ public final class Values {
         if (value instanceof ComposedHandler) return "ComposedHandler";
         if (value instanceof ProtocolDescriptor pd) return "Proto(" + pd.name() + ")";
         if (value instanceof ModuleValue mv) return "Module(" + mv.qualifiedName() + ")";
+        if (value instanceof Fiber) return "Fiber";
+        if (value instanceof ScopeHandle) return "Scope";
         if (value instanceof Thread) return "Thread";
         return value.getClass().getSimpleName();
     }

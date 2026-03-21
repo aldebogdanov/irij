@@ -1,0 +1,98 @@
+;; contracts.irj — pre/post-condition contracts (Phase 6a)
+;;
+;; Contracts attach runtime checks to functions:
+;;   pre  (params -> condition)   checked before the call (caller's fault)
+;;   post (result -> condition)   checked after  the call (implementation's fault)
+
+;; ── 1. Simple pre-condition ─────────────────────────────────────────────
+;;
+;; The caller must provide a positive number.
+
+fn double-positive
+  pre (x -> x > 0)
+  (x -> x * 2)
+
+println (double-positive 5)     ;; 10
+
+;; ── 2. Post-condition (result guarantee) ────────────────────────────────
+;;
+;; The implementation guarantees the result is non-negative,
+;; regardless of what the caller passes in.
+
+fn abs-val
+  post (r -> r >= 0)
+  x | x >= 0 => x
+  x => 0 - x
+
+println (abs-val 7)             ;; 7
+println (abs-val (0 - 3))       ;; 3
+
+;; ── 3. Pre + post together (withdraw from account) ─────────────────────
+;;
+;; Pre: amount must be positive and not exceed balance (caller's job).
+;; Post: resulting balance is never negative (implementation's promise).
+
+fn withdraw
+  pre  (account amt -> amt > 0)
+  pre  (account amt -> account.balance >= amt)
+  post (result -> result.balance >= 0)
+  => account amount
+  {...account balance= account.balance - amount}
+
+acct := {balance= 100}
+result := withdraw acct 30
+println result.balance           ;; 70
+
+;; ── 4. Multiple pre-conditions ──────────────────────────────────────────
+;;
+;; All pre-conditions must pass (AND semantics).
+;; Here: value must be both positive AND less than 100.
+
+fn bounded
+  pre (x -> x > 0)
+  pre (x -> x < 100)
+  (x -> x)
+
+println (bounded 50)            ;; 50
+
+;; ── 5. Contracts with partial application ───────────────────────────────
+;;
+;; When a contracted function is partially applied, the checks are
+;; deferred until all arguments arrive.
+
+fn add-positive
+  pre (a b -> a > 0 && b > 0)
+  (a b -> a + b)
+
+add5 := add-positive 5          ;; no check yet — still waiting for b
+println (add5 3)                ;; 8  (both args now present, pre passes)
+
+;; ── 6. Catching contract violations with try ────────────────────────────
+;;
+;; Pre-condition failures blame the caller.
+;; Post-condition failures blame the implementation.
+
+;; 6a. Pre-condition violation
+r1 := try (-> double-positive (0 - 1))
+match r1
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("caught: " ++ msg)
+;; caught: Pre-condition violated in 'double-positive' (caller's fault)
+
+;; 6b. Post-condition violation (function that promises r > 0 but returns negative)
+fn only-positive
+  post (r -> r > 0)
+  (x -> x)
+
+r2 := try (-> only-positive (0 - 5))
+match r2
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("caught: " ++ msg)
+;; caught: Post-condition violated in 'only-positive' (implementation's fault)
+
+;; 6c. Pre-condition on partial application — deferred check still fires
+r3 := try (-> add5 (0 - 2))
+match r3
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("caught: " ++ msg)
+;; caught: Pre-condition violated in 'add-positive' (caller's fault)

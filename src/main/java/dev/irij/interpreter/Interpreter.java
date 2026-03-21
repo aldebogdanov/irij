@@ -26,8 +26,8 @@ public final class Interpreter {
     private String currentModuleName;
     private Set<String> pubNames; // non-null only during module file loading
 
-    // Protocol registry: proto name → descriptor (shared across all envs)
-    private final Map<String, ProtocolDescriptor> protocols = new LinkedHashMap<>();
+    // Protocol registry: proto name → descriptor (shared across all envs, thread-safe for spawn)
+    private final Map<String, ProtocolDescriptor> protocols = new java.util.concurrent.ConcurrentHashMap<>();
 
     public Interpreter(PrintStream out) {
         this.out = out;
@@ -75,6 +75,149 @@ public final class Interpreter {
                 acc = apply(fn, List.of(acc, elem), SourceLoc.UNKNOWN);
             }
             return acc;
+        }));
+
+        // ── await — block until a fiber completes ─────────────────────
+        globalEnv.define("await", new BuiltinFn("await", 1, args -> {
+            if (!(args.get(0) instanceof Fiber f)) {
+                throw new IrijRuntimeError(
+                    "await expects a Fiber, got " + Values.typeName(args.get(0)), null);
+            }
+            try {
+                return f.result().join();
+            } catch (java.util.concurrent.CompletionException ce) {
+                if (ce.getCause() instanceof IrijRuntimeError ire) throw ire;
+                throw new IrijRuntimeError("Fiber failed: " + ce.getCause().getMessage(), null);
+            }
+        }));
+
+        // ── timeout — run a thunk with a deadline ─────────────────────
+        globalEnv.define("timeout", new BuiltinFn("timeout", 2, args -> {
+            long ms = Builtins.toMillis(args.get(0));
+            var thunk = args.get(1);
+            var future = new java.util.concurrent.CompletableFuture<Object>();
+            var parentStack = EffectSystem.STACK.get();
+            var thread = Thread.startVirtualThread(() -> {
+                var fiberStack = EffectSystem.STACK.get();
+                fiberStack.addAll(parentStack);
+                try {
+                    future.complete(apply(thunk, List.of(), SourceLoc.UNKNOWN));
+                } catch (Exception e) {
+                    future.completeExceptionally(e);
+                }
+            });
+            try {
+                return future.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.TimeoutException e) {
+                thread.interrupt();
+                throw new IrijRuntimeError("timeout: operation exceeded " + ms + "ms", null);
+            } catch (java.util.concurrent.ExecutionException e) {
+                if (e.getCause() instanceof IrijRuntimeError ire) throw ire;
+                throw new IrijRuntimeError("timeout: " + e.getCause().getMessage(), null);
+            } catch (InterruptedException e) {
+                thread.interrupt();
+                Thread.currentThread().interrupt();
+                throw new IrijRuntimeError("timeout: interrupted", null);
+            }
+        }));
+
+        // ── par — run thunks concurrently, combine results ────────────
+        // par f (-> a) (-> b) ... → f a-result b-result ...
+        globalEnv.define("par", new BuiltinFn("par", -1, args -> {
+            if (args.size() < 2) {
+                throw new IrijRuntimeError("par requires a combiner function and at least one thunk", null);
+            }
+            var combiner = args.get(0);
+            var thunks = args.subList(1, args.size());
+            var futures = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Object>>();
+            var threads = new java.util.ArrayList<Thread>();
+            var parentStack = EffectSystem.STACK.get();
+
+            for (var thunk : thunks) {
+                var future = new java.util.concurrent.CompletableFuture<Object>();
+                var t = Thread.startVirtualThread(() -> {
+                    var fiberStack = EffectSystem.STACK.get();
+                    fiberStack.addAll(parentStack);
+                    try {
+                        future.complete(apply(thunk, List.of(), SourceLoc.UNKNOWN));
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    }
+                });
+                futures.add(future);
+                threads.add(t);
+            }
+
+            // Wait for all — if any fails, cancel the rest
+            var results = new java.util.ArrayList<Object>();
+            try {
+                for (var f : futures) {
+                    try {
+                        results.add(f.join());
+                    } catch (java.util.concurrent.CompletionException ce) {
+                        // Cancel remaining
+                        for (var t : threads) t.interrupt();
+                        if (ce.getCause() instanceof IrijRuntimeError ire) throw ire;
+                        throw new IrijRuntimeError("par: " + ce.getCause().getMessage(), null);
+                    }
+                }
+            } catch (IrijRuntimeError e) {
+                throw e;
+            }
+            return apply(combiner, results, SourceLoc.UNKNOWN);
+        }));
+
+        // ── race — first thunk to succeed wins, cancel others ─────────
+        globalEnv.define("race", new BuiltinFn("race", -1, args -> {
+            if (args.isEmpty()) {
+                throw new IrijRuntimeError("race requires at least one thunk", null);
+            }
+            var futures = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Object>>();
+            var threads = new java.util.ArrayList<Thread>();
+            var parentStack = EffectSystem.STACK.get();
+
+            for (var thunk : args) {
+                var future = new java.util.concurrent.CompletableFuture<Object>();
+                var t = Thread.startVirtualThread(() -> {
+                    var fiberStack = EffectSystem.STACK.get();
+                    fiberStack.addAll(parentStack);
+                    try {
+                        future.complete(apply(thunk, List.of(), SourceLoc.UNKNOWN));
+                    } catch (Exception e) {
+                        future.completeExceptionally(e);
+                    }
+                });
+                futures.add(future);
+                threads.add(t);
+            }
+
+            // Wait for first success
+            var result = new java.util.concurrent.CompletableFuture<Object>();
+            var errors = java.util.Collections.synchronizedList(new java.util.ArrayList<Throwable>());
+            for (int i = 0; i < futures.size(); i++) {
+                futures.get(i).whenComplete((value, ex) -> {
+                    if (ex != null) {
+                        errors.add(ex);
+                        if (errors.size() == futures.size()) {
+                            // All failed — complete with first error
+                            result.completeExceptionally(errors.get(0));
+                        }
+                    } else {
+                        result.complete(value);
+                    }
+                });
+            }
+
+            try {
+                var winner = result.join();
+                // Cancel all threads (winners already done, harmless interrupt)
+                for (var t : threads) t.interrupt();
+                return winner;
+            } catch (java.util.concurrent.CompletionException ce) {
+                for (var t : threads) t.interrupt();
+                if (ce.getCause() instanceof IrijRuntimeError ire) throw ire;
+                throw new IrijRuntimeError("race: all thunks failed", null);
+            }
         }));
     }
 
@@ -172,10 +315,7 @@ public final class Interpreter {
                 yield Values.UNIT;
             }
             case Decl.WithDecl wd -> execWith(wd.with(), env);
-            case Decl.ScopeDecl sd -> {
-                exec(sd.scope(), env);
-                yield Values.UNIT;
-            }
+            case Decl.ScopeDecl sd -> execScope(sd.scope(), env);
             case Decl.ModDecl md -> evalModDecl(md);
             case Decl.UseDecl ud -> evalUseDecl(ud, env);
             case Decl.PubDecl pd -> evalPubDecl(pd, env);
@@ -189,7 +329,7 @@ public final class Interpreter {
     }
 
     private Object makeFnValue(Decl.FnDecl fn, Environment env) {
-        return switch (fn.body()) {
+        Object baseFn = switch (fn.body()) {
             case Decl.FnBody.LambdaBody lb ->
                 new Lambda(lb.params(), lb.body(), env, fn.name());
             case Decl.FnBody.MatchArmsBody mab ->
@@ -199,6 +339,15 @@ public final class Interpreter {
             case Decl.FnBody.NoBody() ->
                 Values.UNIT; // type-only declaration
         };
+        // Wrap with contracts if any pre/post conditions exist
+        if (!fn.preConditions().isEmpty() || !fn.postConditions().isEmpty()) {
+            var evalPres = fn.preConditions().stream()
+                .map(e -> eval(e, env)).toList();
+            var evalPosts = fn.postConditions().stream()
+                .map(e -> eval(e, env)).toList();
+            return new ContractedFn(baseFn, evalPres, evalPosts, fn.name(), fn.loc());
+        }
+        return baseFn;
     }
 
     /** A match-arm function: tries each arm against the argument. */
@@ -211,6 +360,15 @@ public final class Interpreter {
     record ImperativeFn(String name, List<Pattern> params, List<Stmt> body, Environment closure) {
         @Override
         public String toString() { return "<fn " + name + ">"; }
+    }
+
+    /** A function wrapped with pre/post-condition contracts. */
+    record ContractedFn(Object fn, List<Object> pres, List<Object> posts,
+                        String name, SourceLoc loc) {
+        @Override
+        public String toString() {
+            return fn.toString();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -350,6 +508,148 @@ public final class Interpreter {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // Structured Concurrency (scope / fork / await)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * Execute a {@code scope} block with structured concurrency guarantees.
+     * All fibers forked within the scope must complete before the scope exits.
+     *
+     * <p>Modifiers:
+     * <ul>
+     *   <li>{@code scope s} — join-all: waits for all fibers, propagates first error</li>
+     *   <li>{@code scope.race s} — first success wins, cancel others</li>
+     *   <li>{@code scope.supervised s} — failures isolated per fiber, no sibling cancellation</li>
+     * </ul>
+     */
+    private Object execScope(Stmt.Scope s, Environment env) {
+        var fibers = java.util.Collections.synchronizedList(
+            new java.util.ArrayList<Fiber>());
+        var parentStack = EffectSystem.STACK.get();
+
+        // Create the fork function that captures this scope's fiber list
+        var forkFn = new BuiltinFn("fork", 1, args -> {
+            var thunk = args.get(0);
+            var future = new java.util.concurrent.CompletableFuture<Object>();
+            var thread = Thread.startVirtualThread(() -> {
+                // Inherit parent's effect handler stack
+                var fiberStack = EffectSystem.STACK.get();
+                fiberStack.addAll(parentStack);
+                try {
+                    future.complete(apply(thunk, List.of(), s.loc()));
+                } catch (Exception e) {
+                    future.completeExceptionally(e);
+                }
+            });
+            var fiber = new Fiber(future, thread);
+            fibers.add(fiber);
+            return fiber;
+        });
+
+        var handle = new ScopeHandle(s.modifier(), fibers, forkFn);
+
+        // Set up scope environment with handle binding
+        var scopeEnv = env.child();
+        if (s.name() != null) {
+            scopeEnv.define(s.name(), handle);
+        }
+
+        Object bodyResult;
+        try {
+            bodyResult = execStmtListReturn(s.body(), scopeEnv);
+        } catch (Exception e) {
+            // Body failed — cancel all fibers and propagate
+            for (var fiber : fibers) fiber.thread().interrupt();
+            joinAllQuietly(fibers);
+            throw e;
+        }
+
+        // After body completes, join fibers based on modifier
+        return switch (s.modifier()) {
+            case null -> joinAll(fibers, bodyResult, s.loc());
+            case "race" -> raceAll(fibers, bodyResult, s.loc());
+            case "supervised" -> supervisedJoinAll(fibers, bodyResult, s.loc());
+            default -> throw new IrijRuntimeError(
+                "Unknown scope modifier: " + s.modifier(), s.loc());
+        };
+    }
+
+    /** scope s: wait for all fibers. Propagate first error. Return body result. */
+    private Object joinAll(java.util.List<Fiber> fibers, Object bodyResult, SourceLoc loc) {
+        IrijRuntimeError firstError = null;
+        for (var fiber : fibers) {
+            try {
+                fiber.result().join();
+            } catch (java.util.concurrent.CompletionException ce) {
+                if (firstError == null) {
+                    // Cancel remaining fibers on first error
+                    for (var f : fibers) f.thread().interrupt();
+                    if (ce.getCause() instanceof IrijRuntimeError ire) {
+                        firstError = ire;
+                    } else {
+                        firstError = new IrijRuntimeError(
+                            "Fiber failed: " + ce.getCause().getMessage(), loc);
+                    }
+                }
+            }
+        }
+        if (firstError != null) throw firstError;
+        return bodyResult;
+    }
+
+    /** scope.race s: first fiber success wins. Cancel losers. */
+    private Object raceAll(java.util.List<Fiber> fibers, Object bodyResult, SourceLoc loc) {
+        if (fibers.isEmpty()) return bodyResult;
+
+        var winner = new java.util.concurrent.CompletableFuture<Object>();
+        var errorCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        int total = fibers.size();
+
+        for (var fiber : fibers) {
+            fiber.result().whenComplete((value, ex) -> {
+                if (ex != null) {
+                    if (errorCount.incrementAndGet() == total) {
+                        winner.completeExceptionally(ex);
+                    }
+                } else {
+                    winner.complete(value);
+                }
+            });
+        }
+
+        try {
+            var result = winner.join();
+            for (var fiber : fibers) fiber.thread().interrupt();
+            return result;
+        } catch (java.util.concurrent.CompletionException ce) {
+            for (var fiber : fibers) fiber.thread().interrupt();
+            if (ce.getCause() instanceof IrijRuntimeError ire) throw ire;
+            throw new IrijRuntimeError("scope.race: all fibers failed", loc);
+        }
+    }
+
+    /** scope.supervised s: fibers run independently. Failures don't cancel siblings. */
+    private Object supervisedJoinAll(java.util.List<Fiber> fibers, Object bodyResult, SourceLoc loc) {
+        for (var fiber : fibers) {
+            try {
+                fiber.result().join();
+            } catch (java.util.concurrent.CompletionException ce) {
+                // Log error but don't propagate or cancel siblings
+                out.println("[supervised] fiber error: " + ce.getCause().getMessage());
+            }
+        }
+        return bodyResult;
+    }
+
+    /** Interrupt and wait for all fibers to terminate (used in cleanup). */
+    private void joinAllQuietly(java.util.List<Fiber> fibers) {
+        for (var fiber : fibers) {
+            try { fiber.result().join(); }
+            catch (Exception ignored) {}
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // Protocol system
     // ═══════════════════════════════════════════════════════════════════
 
@@ -373,23 +673,25 @@ public final class Interpreter {
         for (var method : pd.methods()) {
             String methodName = method.name();
             String protoName = pd.name();
+            var protoLoc = pd.loc();
             // Variadic dispatch function: checks first arg type, finds impl, calls binding
             defineInScope(env, methodName, new BuiltinFn(methodName, -1, args -> {
                 if (args.isEmpty()) {
                     throw new IrijRuntimeError(
-                        "Protocol method '" + methodName + "' requires at least one argument", null);
+                        "Protocol method '" + methodName + "' requires at least one argument", protoLoc);
                 }
                 var firstArg = args.get(0);
                 String typeName = Values.typeName(firstArg);
                 Object implFn = descriptor.dispatch(methodName, typeName);
                 if (implFn == null) {
                     throw new IrijRuntimeError(
-                        "No implementation of protocol '" + protoName + "' for type '" + typeName + "'", null);
+                        "No implementation of protocol '" + protoName
+                            + "' for type '" + typeName + "'", protoLoc);
                 }
                 // If the impl binding is a callable, apply it to all arguments.
                 // If it's a plain value (e.g., empty := 0), return it directly.
                 if (isCallable(implFn)) {
-                    return apply(implFn, args, null);
+                    return apply(implFn, args, protoLoc);
                 } else {
                     return implFn;
                 }
@@ -402,12 +704,23 @@ public final class Interpreter {
     /**
      * Evaluate an impl declaration: register method bindings in the protocol's
      * dispatch table for the given type.
+     * Validates that all binding names match declared protocol methods.
      */
     private Object evalImplDecl(Decl.ImplDecl id, Environment env) {
         var descriptor = protocols.get(id.protoName());
         if (descriptor == null) {
             throw new IrijRuntimeError(
                 "Cannot implement unknown protocol '" + id.protoName() + "'", id.loc());
+        }
+
+        // Validate that impl methods match protocol declaration
+        var protoMethods = descriptor.methodNames();
+        for (var binding : id.bindings()) {
+            if (!protoMethods.contains(binding.name())) {
+                throw new IrijRuntimeError(
+                    "Method '" + binding.name() + "' is not declared in protocol '"
+                        + id.protoName() + "' (available: " + protoMethods + ")", id.loc());
+            }
         }
 
         // Evaluate each binding and register in the dispatch table
@@ -483,7 +796,7 @@ public final class Interpreter {
             case Stmt.MatchStmt ms -> execMatch(ms, env);
             case Stmt.IfStmt is -> execIf(is, env);
             case Stmt.With w -> execWith(w, env);
-            case Stmt.Scope s -> throw new IrijRuntimeError("Structured concurrency not yet implemented", s.loc());
+            case Stmt.Scope s -> execScope(s, env);
         }
     }
 
@@ -744,6 +1057,7 @@ public final class Interpreter {
                 case Stmt.MatchStmt ms -> last = execMatchReturn(ms, env);
                 case Stmt.IfStmt is -> last = execIfReturn(is, env);
                 case Stmt.With w -> last = execWith(w, env);
+                case Stmt.Scope sc -> last = execScope(sc, env);
                 default -> { exec(stmt, env); last = Values.UNIT; }
             }
         }
@@ -892,6 +1206,13 @@ public final class Interpreter {
                         yield hv.closureEnv().lookup(da.field());
                     }
                     throw new IrijRuntimeError("No field '" + da.field() + "' on handler " + hv.name(), da.loc());
+                }
+                // Scope handle dot-access: fork method
+                if (target instanceof ScopeHandle sh) {
+                    if ("fork".equals(da.field())) {
+                        yield sh.forkFn();
+                    }
+                    throw new IrijRuntimeError("No field '" + da.field() + "' on scope handle", da.loc());
                 }
                 // Module dot-access: read from module's exports environment
                 if (target instanceof ModuleValue mod) {
@@ -1076,6 +1397,7 @@ public final class Interpreter {
             || value instanceof Constructor
             || value instanceof PartialApp
             || value instanceof ComposedFn
+            || value instanceof ContractedFn
             || value instanceof Tagged;
     }
 
@@ -1144,6 +1466,33 @@ public final class Interpreter {
             case ComposedFn cf -> {
                 var intermediate = apply(cf.first(), args, loc);
                 yield apply(cf.second(), List.of(intermediate), loc);
+            }
+            case ContractedFn cf -> {
+                // Partial application: defer contracts until all args are provided
+                if (cf.fn() instanceof Lambda lam && args.size() < lam.arity()) {
+                    yield new PartialApp(cf, List.copyOf(args));
+                }
+                // Check pre-conditions (caller's responsibility)
+                for (var pre : cf.pres()) {
+                    var check = apply(pre, args, cf.loc());
+                    if (!Values.isTruthy(check)) {
+                        throw new IrijRuntimeError(
+                            "Pre-condition violated in '" + cf.name()
+                                + "' (caller's fault)", cf.loc());
+                    }
+                }
+                // Execute the actual function
+                var result = apply(cf.fn(), args, loc);
+                // Check post-conditions (implementation's responsibility)
+                for (var post : cf.posts()) {
+                    var check = apply(post, List.of(result), cf.loc());
+                    if (!Values.isTruthy(check)) {
+                        throw new IrijRuntimeError(
+                            "Post-condition violated in '" + cf.name()
+                                + "' (implementation's fault)", cf.loc());
+                    }
+                }
+                yield result;
             }
             case Tagged t -> {
                 // Tagged value used as a function (zero-arg constructor called again)

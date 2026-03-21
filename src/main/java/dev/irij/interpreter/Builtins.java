@@ -55,7 +55,10 @@ public final class Builtins {
             else throw new IrijRuntimeError(
                     "sleep expects Int (milliseconds) or Float (seconds), got " + Values.typeName(ms));
             try { Thread.sleep(millis); }
-            catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IrijRuntimeError("interrupted");
+            }
             return Values.UNIT;
         }));
 
@@ -484,6 +487,14 @@ public final class Builtins {
     // ═══════════════════════════════════════════════════════════════════
     // Utilities
     // ═══════════════════════════════════════════════════════════════════
+
+    /** Convert a duration argument to milliseconds (Int=ms, Float=seconds). */
+    static long toMillis(Object value) {
+        if (value instanceof Long l) return l;
+        if (value instanceof Double d) return (long)(d * 1000);
+        throw new IrijRuntimeError(
+            "Duration expects Int (milliseconds) or Float (seconds), got " + Values.typeName(value));
+    }
 
     static long asLong(Object value, String context) {
         if (value instanceof Long l) return l;

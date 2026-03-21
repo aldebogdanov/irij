@@ -8,7 +8,14 @@ import java.util.List;
 public sealed interface Decl extends Node {
 
     /** Function declaration: fn name :: Type  body. */
-    record FnDecl(String name, boolean isPub, FnBody body, SourceLoc loc) implements Decl {}
+    record FnDecl(String name, boolean isPub, FnBody body,
+                  List<Expr> preConditions, List<Expr> postConditions,
+                  SourceLoc loc) implements Decl {
+        /** Convenience constructor for functions without contracts. */
+        public FnDecl(String name, boolean isPub, FnBody body, SourceLoc loc) {
+            this(name, isPub, body, List.of(), List.of(), loc);
+        }
+    }
 
     /** Type declaration: type Name params  variants|fields. */
     record TypeDecl(String name, List<String> typeParams, TypeBody body, SourceLoc loc) implements Decl {}

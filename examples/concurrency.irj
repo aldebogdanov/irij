@@ -1,0 +1,44 @@
+;; ── Structured Concurrency ───────────────────────────────
+;; Inspired by Clojure's Missionary library:
+;; tasks as values, structured cancellation, combinators
+
+;; ── Basic scope: fork and await ─────────────────────────
+scope s
+  f1 := s.fork (-> 10 + 20)
+  f2 := s.fork (-> 3 * 7)
+  println ("f1 = " ++ to-str (await f1))
+  println ("f2 = " ++ to-str (await f2))
+
+;; ── scope waits for all fibers ──────────────────────────
+scope s
+  s.fork (-> sleep 50; println "fiber A done")
+  s.fork (-> sleep 30; println "fiber B done")
+  ;; scope exits only after both fibers complete
+
+;; ── scope.race: first success wins ──────────────────────
+scope.race s
+  s.fork (-> sleep 200; "slow answer")
+  s.fork (-> sleep 10; println "fast wins!")
+  s.fork (-> sleep 500; "slowest answer")
+
+;; ── scope.supervised: failures don't cancel siblings ────
+scope.supervised s
+  s.fork (-> error "one fiber fails")
+  s.fork (-> sleep 50; println "other fiber survives")
+
+;; ── par: parallel combinator ────────────────────────────
+;; Run thunks concurrently, combine results with a function
+sum := par (+) (-> sleep 10; 100) (-> sleep 10; 200)
+println ("par sum = " ++ to-str sum)
+
+;; ── race: standalone first-wins combinator ──────────────
+winner := race (-> sleep 200; "slow") (-> sleep 10; "fast") (-> sleep 500; "slowest")
+println ("race winner = " ++ winner)
+
+;; ── timeout: deadline combinator ────────────────────────
+ok := timeout 1000 (-> sleep 10; "completed")
+println ("timeout ok = " ++ ok)
+
+;; timeout that expires:
+result := try (-> timeout 10 (-> sleep 2000; "never"))
+println ("timeout expired = " ++ to-str result)

@@ -74,7 +74,7 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
   - [x] `parse(String)`, `parseFile(Path)`, `tokenize(String)` API
 
 - [x] **Smoke tests** — `src/test/java/dev/irij/parser/ParserSmokeTest.java`
-  - [x] 81 tests covering all spec sections (all passing)
+  - [x] 93 tests covering all spec sections (all passing)
 
 ---
 
@@ -295,23 +295,67 @@ The universal joint. Everything interesting depends on this.
   - `ProtoMethod`, `ProtoLaw`, `ImplBinding` helper records
   - `AstBuilder.visitProtoDecl/visitImplDecl` — proper parse tree → AST
 - [x] **Laws** — parsed into AST (`ProtoLaw(name, body)`) but not verified at runtime (deferred to Phase 6)
-- [x] **Tests** — 393 total (+21: 15 interpreter protocol tests + 6 parser protocol tests)
+- [x] **Impl method validation** — binding names checked against protocol declaration; unknown methods error
+- [x] **Thread safety** — `ConcurrentHashMap` for protocol registry and dispatch tables (safe with `spawn`)
+- [x] **Tests** — 402 total (+30: 24 interpreter protocol tests + 6 parser protocol tests)
 
 ---
 
-## Phase 5 — Structured Concurrency
+## Phase 5 — Structured Concurrency ✅
 
-- [ ] `scope` / `fork` / `await` as Async effects
-- [ ] `scope.race`, `scope.supervised`
-- [ ] `detach!` escape hatch
-- [ ] Channels: `send`, `recv`, `select`
-- [ ] Backed by Java virtual threads (Loom)
+Inspired by Clojure's Missionary library (tasks as values, structured cancellation, combinators).
+
+- [x] **`scope s` block** — structured task scope with fork/await
+  - `s.fork (-> body)` — fork a virtual thread, returns Fiber value
+  - `await fiber` — block until fiber completes, return result or rethrow
+  - Scope exit waits for ALL forked fibers (structured guarantee)
+  - First error cancels remaining fibers, propagates upward
+- [x] **`scope.race s`** — first fiber success wins, cancel others
+  - If all fibers fail, propagates the first error
+- [x] **`scope.supervised s`** — failures isolated per fiber
+  - Failed fibers log error but don't cancel siblings
+  - Scope still waits for all fibers to complete
+- [x] **`par f thunk1 thunk2 ...`** — Missionary-inspired parallel combinator
+  - Runs thunks concurrently in virtual threads
+  - Applies combiner function `f` to all results: `par (+) (-> 1) (-> 2)` → 3
+  - First failure cancels remaining, propagates error
+- [x] **`race thunk1 thunk2 ...`** — standalone race combinator
+  - First thunk to succeed wins, cancel others
+  - If all fail, propagates first error
+- [x] **`timeout ms thunk`** — deadline combinator
+  - Runs thunk in virtual thread, cancels if not done in time
+  - Duration: Int (ms) or Float (seconds)
+  - Returns result or throws timeout error
+- [x] **Value types** — `Fiber` (CompletableFuture + Thread), `ScopeHandle` (fiber list + fork fn)
+- [x] **Effect stack inheritance** — fibers inherit parent's effect handler stack (ThreadLocal copy)
+- [x] **Cooperative cancellation** — via `Thread.interrupt()`, `sleep` throws on interrupt
+- [x] **Backed by Java virtual threads (Loom)**
+- [x] **Tests** — 423 total (+21 structured concurrency tests)
+- [ ] Channels: `send`, `recv`, `select` (deferred to Phase 5b)
+- [ ] `detach!` escape hatch (deferred — `spawn` serves this role for now)
 
 ---
 
 ## Phase 6 — Contracts & Verification (L0–L3)
 
-- [ ] `pre` / `post` function-level contracts
+### Phase 6a — Pre/Post Function Contracts ✅
+
+- [x] **`pre (params -> bool)` contract clause** — checked before function body executes
+  - Blame: "caller's fault" (caller provided invalid arguments)
+  - Multiple pre-conditions: all must pass
+- [x] **`post (result -> bool)` contract clause** — checked after function body returns
+  - Blame: "implementation's fault" (function returned invalid result)
+  - Multiple post-conditions: all must pass
+- [x] **`ContractedFn` wrapper** — wraps Lambda/MatchFn/ImperativeFn with contract checks
+  - Pre/post expressions evaluated at fn declaration time (closures captured)
+  - Transparent to callers: displays as underlying fn type
+  - Defers checks on partial application until all args provided
+- [x] **Works with all fn body forms**: lambda `(x -> expr)`, imperative `=> x`, match arms `x => expr`
+- [x] **AST support** — `FnDecl` extended with `preConditions`/`postConditions` lists; AstBuilder extracts from `contractClause*`
+- [x] **Tests** — 444 total (+21: 15 interpreter contract tests + 6 parser contract tests)
+
+### Phase 6b–6c — Module Contracts & Law Verification (TODO)
+
 - [ ] `contract` / `in` / `out` module-boundary contracts with blame
 - [x] `proto` with `law` declarations — parsing done, runtime dispatch done (Phase 4.5b)
 - [ ] Law verification: property-based test generation from `law` declarations
