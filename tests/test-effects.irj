@@ -1,0 +1,167 @@
+use std.test :open
+
+;; ── Effect declaration & ops ───────────────────────────
+
+effect Log
+  log :: Str -> ()
+
+effect Ask
+  ask :: Str -> Str
+
+effect Counter
+  bump :: () -> ()
+  get-count :: () -> Int
+
+effect Exn
+  throw :: Str -> ()
+
+;; ── Basic handler + resume ─────────────────────────────
+
+handler silent-log :: Log
+  log msg => resume ()
+
+fn run-with-silent
+  _ =>
+    with silent-log
+      log "a"
+      42
+
+r1 := test "with handler runs body" (-> assert-eq 42 (run-with-silent ()))
+
+handler mock-ask :: Ask
+  ask q => resume "Alice"
+
+fn ask-name
+  _ =>
+    with mock-ask
+      ask "who?"
+
+r2 := test "resume sends value to body" (-> assert-eq "Alice" (ask-name ()))
+
+;; ── Abort (no resume) ──────────────────────────────────
+
+handler catch-exn :: Exn
+  throw msg => "caught: " ++ msg
+
+fn do-throw
+  _ =>
+    with catch-exn
+      throw "boom"
+      42
+
+r3 := test "no resume aborts body" (-> assert-eq "caught: boom" (do-throw ()))
+
+;; ── Handler-local state ────────────────────────────────
+
+handler counting :: Counter
+  state :! 0
+  bump () =>
+    state <- state + 1
+    resume ()
+  get-count () => resume state
+
+fn count-3
+  _ =>
+    with counting
+      bump ()
+      bump ()
+      bump ()
+      get-count ()
+
+r4 := test "handler-local state" (-> assert-eq 3 (count-3 ()))
+
+;; ── Nested handlers ────────────────────────────────────
+
+effect State
+  get-val :: () -> Int
+
+handler const-state :: State
+  get-val () => resume 42
+
+fn nested-test
+  _ =>
+    with silent-log
+      with const-state
+        v := get-val ()
+        log "ignored"
+        v
+
+r5 := test "nested handlers different effects" (-> assert-eq 42 (nested-test ()))
+
+;; ── Handler composition (>>) ───────────────────────────
+
+fn composed-test
+  _ =>
+    combined := silent-log >> const-state
+    with combined
+      log "ignored"
+      get-val ()
+
+r6 := test "handler composition >>" (-> assert-eq 42 (composed-test ()))
+
+;; ── on-failure ─────────────────────────────────────────
+
+handler err-thrower :: Exn
+  throw msg => error msg
+
+fn on-fail-test
+  _ =>
+    with err-thrower
+      throw "kaboom"
+      42
+    on-failure
+      "recovered"
+
+r7 := test "on-failure catches error" (-> assert-eq "recovered" (on-fail-test ()))
+
+fn on-fail-msg-test
+  _ =>
+    with err-thrower
+      throw "kaboom"
+    on-failure
+      error
+
+r8 := test "on-failure binds error msg" (-> assert-true (length (on-fail-msg-test ()) > 0))
+
+;; ── Handler dot-access ─────────────────────────────────
+
+handler acc :: Counter
+  state :! 0
+  bump () =>
+    state <- state + 1
+    resume ()
+  get-count () => resume state
+
+fn dot-access-test
+  _ =>
+    with acc
+      bump ()
+      bump ()
+    acc.state
+
+r9 := test "handler dot-access reads state" (-> assert-eq 2 (dot-access-test ()))
+
+;; ── Multiple effect ops ────────────────────────────────
+
+effect IO
+  read-in :: () -> Str
+  write-out :: Str -> ()
+
+handler mock-io :: IO
+  output :! #[]
+  read-in () => resume "test-input"
+  write-out msg =>
+    output <- output ++ #[msg]
+    resume ()
+
+fn multi-ops-test
+  _ =>
+    with mock-io
+      x := read-in ()
+      write-out x
+      write-out "done"
+    mock-io.output
+
+r10 := test "multiple effect ops" (-> assert-eq #["test-input" "done"] (multi-ops-test ()))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10]

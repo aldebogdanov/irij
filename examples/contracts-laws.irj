@@ -1,0 +1,105 @@
+;; contracts-laws.irj — Phase 6b (in/out contracts) and 6c (laws + verify-laws)
+;;
+;; Demonstrates:
+;;   - in/out module-boundary contracts (Phase 6b)
+;;   - All four contract types together (pre/in/post/out)
+;;   - Protocol laws with verify-laws (Phase 6c)
+;;   - Fn-level laws with verify-laws
+;;   - Failing law detection
+
+;; ── 1. In/Out Module-Boundary Contracts ────────────────────────────────
+;;
+;; `in`  — checked at the module boundary on entry  (caller's fault)
+;; `out` — checked at the module boundary on exit   (implementation's fault)
+;;
+;; These complement `pre`/`post` for APIs that need clear blame assignment.
+
+fn safe-div
+  in (a b -> b > 0)
+  out (r -> r >= 0)
+  (a b -> a / b)
+
+println (safe-div 10 2)                ;; 5.0
+
+;; Violating the `in` contract (caller passes b = 0):
+r1 := try (-> safe-div 10 0)
+match r1
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("caught: " ++ msg)
+;; caught: Input contract violated in 'safe-div' (caller's fault)
+
+;; ── 2. All Four Contract Types Together ────────────────────────────────
+;;
+;; pre  — precondition (caller's fault, checked first)
+;; in   — input contract at module boundary (caller's fault)
+;; post — postcondition (implementation's fault)
+;; out  — output contract at module boundary (implementation's fault)
+
+fn bounded-double
+  pre (x -> x > 0)
+  in (x -> x < 100)
+  post (r -> r > 0)
+  out (r -> r < 200)
+  (x -> x * 2)
+
+println (bounded-double 50)            ;; 100
+
+;; Violating `in` (x = 150 passes pre but fails in):
+r2 := try (-> bounded-double 150)
+match r2
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("caught: " ++ msg)
+
+;; ── 3. Protocol with Laws ──────────────────────────────────────────────
+;;
+;; Laws declare algebraic properties that implementations must satisfy.
+;; `verify-laws Proto` runs QuickCheck-style random testing.
+
+proto Monoid a
+  empty :: a
+  append :: a -> a -> a
+  law identity-left = forall x. append empty x == x
+  law identity-right = forall x. append x empty == x
+  law associative = forall x y z. append (append x y) z == append x (append y z)
+
+impl Monoid for Int
+  empty := 0
+  append := (+)
+
+impl Monoid for Str
+  empty := ""
+  append := (++)
+
+println ";; Verifying Monoid laws:"
+verify-laws Monoid
+
+;; ── 4. Fn-Level Law ───────────────────────────────────────────────────
+;;
+;; Laws can also appear inside fn declarations.
+;; Verify with: verify-laws "fn-name"
+
+fn double-it
+  law doubles = forall x. double-it x == x + x
+  (x -> x * 2)
+
+println ""
+println ";; Verifying fn-level law:"
+verify-laws "double-it"
+
+;; ── 5. Failing Law Detection ──────────────────────────────────────────
+;;
+;; String concatenation is NOT commutative.
+;; verify-laws catches this and reports the failing counterexample.
+
+proto BadMonoid a
+  empty :: a
+  combine :: a -> a -> a
+  law commutative = forall x y. combine x y == combine y x
+
+impl BadMonoid for Str
+  empty := ""
+  combine := (++)
+
+println ""
+println ";; Detecting broken law (string concat is not commutative):"
+verify-laws BadMonoid

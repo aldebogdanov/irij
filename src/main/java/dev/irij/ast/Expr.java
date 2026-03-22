@@ -39,8 +39,13 @@ public sealed interface Expr extends Node {
     /** Function application: fn applied to args (juxtaposition). */
     record App(Expr fn, List<Expr> args, SourceLoc loc) implements Expr {}
 
-    /** Lambda expression: (params -> body). */
-    record Lambda(List<Pattern> params, Expr body, SourceLoc loc) implements Expr {}
+    /** Lambda expression: (params -> body) or (params ...rest -> body). */
+    record Lambda(List<Pattern> params, String restParam, Expr body, SourceLoc loc) implements Expr {
+        /** Convenience constructor without rest param. */
+        public Lambda(List<Pattern> params, Expr body, SourceLoc loc) {
+            this(params, null, body, loc);
+        }
+    }
 
     // ── Pipeline & Composition ──────────────────────────────────────────
 

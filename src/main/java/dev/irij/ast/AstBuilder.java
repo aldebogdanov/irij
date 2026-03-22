@@ -101,20 +101,34 @@ public class AstBuilder {
         }
         var content = ctx.fnBody().fnBodyContent();
 
-        // Extract contract clauses (pre/post) from fnBodyContent
+        // Extract contract clauses (pre/post/in/out/law) from fnBodyContent
         var pres = new ArrayList<Expr>();
         var posts = new ArrayList<Expr>();
+        var ins = new ArrayList<Expr>();
+        var outs = new ArrayList<Expr>();
+        var fnLaws = new ArrayList<Decl.FnLaw>();
         for (var cc : content.contractClause()) {
             if (cc.PRE() != null) {
                 pres.add(visitExpr(cc.expr()));
             } else if (cc.POST() != null) {
                 posts.add(visitExpr(cc.expr()));
+            } else if (cc.IN() != null) {
+                ins.add(visitExpr(cc.expr()));
+            } else if (cc.OUT() != null) {
+                outs.add(visitExpr(cc.expr()));
+            } else if (cc.LAW() != null) {
+                var forallVars = new ArrayList<String>();
+                if (cc.forallBinders() != null) {
+                    for (var id : cc.forallBinders().IDENT()) {
+                        forallVars.add(id.getText());
+                    }
+                }
+                fnLaws.add(new Decl.FnLaw(cc.IDENT().getText(), forallVars, visitExpr(cc.expr())));
             }
-            // LAW in fn body: ignored for now (Phase 6c)
         }
 
         Decl.FnBody body = visitFnBody(content);
-        return new Decl.FnDecl(name, isPub, body, pres, posts, loc(ctx));
+        return new Decl.FnDecl(name, isPub, body, pres, posts, ins, outs, fnLaws, loc(ctx));
     }
 
     private Decl.FnBody visitFnBody(IrijParser.FnBodyContentContext content) {
@@ -132,8 +146,9 @@ public class AstBuilder {
 
     private Decl.FnBody.LambdaBody visitLambdaBodyAsFnBody(LambdaBodyContext ctx) {
         var params = visitLambdaParams(ctx.lambdaParams());
+        String restParam = extractRestParam(params);
         var body = visitExprSeq(ctx.exprSeq());
-        return new Decl.FnBody.LambdaBody(params, body);
+        return new Decl.FnBody.LambdaBody(params, restParam, body);
     }
 
     private Decl.FnBody.ImperativeBody visitImperativeBlockAsFnBody(ImperativeBlockContext ctx) {
@@ -141,8 +156,25 @@ public class AstBuilder {
         for (var p : ctx.pattern()) {
             params.add(visitPattern(p));
         }
+        String restParam = extractRestParam(params);
         var stmts = visitStmtList(ctx.stmtList());
-        return new Decl.FnBody.ImperativeBody(params, stmts);
+        return new Decl.FnBody.ImperativeBody(params, restParam, stmts);
+    }
+
+    /**
+     * If the last pattern is a Spread(...name), remove it from the list
+     * and return the name as the rest parameter. Otherwise return null.
+     */
+    /**
+     * If the last pattern is a SpreadPat(...name), remove it from the list
+     * and return the name as the rest parameter. Otherwise return null.
+     */
+    private String extractRestParam(List<Pattern> params) {
+        if (!params.isEmpty() && params.get(params.size() - 1) instanceof Pattern.SpreadPat sp) {
+            params.remove(params.size() - 1);
+            return sp.name();
+        }
+        return null;
     }
 
     // ── type / newtype ──────────────────────────────────────────────────
@@ -245,8 +277,15 @@ public class AstBuilder {
             if (member.IDENT() != null && member.typeExpr() != null) {
                 methods.add(new Decl.ProtoMethod(member.IDENT().getText()));
             } else if (member.LAW() != null) {
+                var forallVars = new ArrayList<String>();
+                if (member.forallBinders() != null) {
+                    for (var id : member.forallBinders().IDENT()) {
+                        forallVars.add(id.getText());
+                    }
+                }
                 laws.add(new Decl.ProtoLaw(
                     member.IDENT().getText(),
+                    forallVars,
                     visitExpr(member.expr())));
             }
         }
@@ -730,8 +769,9 @@ public class AstBuilder {
 
     private Expr visitLambdaExpr(LambdaExprContext ctx) {
         var params = visitLambdaParams(ctx.lambdaParams());
+        String restParam = extractRestParam(params);
         var body = visitExprSeq(ctx.exprSeq());
-        return new Expr.Lambda(params, body, loc(ctx));
+        return new Expr.Lambda(params, restParam, body, loc(ctx));
     }
 
     private List<Pattern> visitLambdaParams(LambdaParamsContext ctx) {
@@ -749,14 +789,30 @@ public class AstBuilder {
     }
 
     private Expr visitExprSeq(ExprSeqContext ctx) {
-        var exprs = ctx.expr();
-        if (exprs.size() == 1) return visitExpr(exprs.get(0));
-        // Multiple expressions separated by semicolons → Block
+        var items = ctx.seqItem();
+        if (items.size() == 1 && items.get(0).expr() != null
+                && items.get(0).bindTarget() == null) {
+            return visitExpr(items.get(0).expr());
+        }
+        // Multiple items separated by semicolons → Block
         var stmts = new ArrayList<Stmt>();
-        for (var e : exprs) {
-            stmts.add(new Stmt.ExprStmt(visitExpr(e), loc(e)));
+        for (var item : items) {
+            stmts.add(visitSeqItem(item));
         }
         return new Expr.Block(stmts, loc(ctx));
+    }
+
+    private Stmt visitSeqItem(SeqItemContext ctx) {
+        if (ctx.bindTarget() != null) {
+            var target = visitBindTarget(ctx.bindTarget());
+            var value = visitExpr(ctx.expr());
+            if (ctx.ASSIGN() != null) {
+                return new Stmt.Assign(target, value, loc(ctx));
+            } else {
+                return new Stmt.Bind(target, value, loc(ctx));
+            }
+        }
+        return new Stmt.ExprStmt(visitExpr(ctx.expr()), loc(ctx));
     }
 
     private Expr visitParenExpr(ParenExprContext ctx) {

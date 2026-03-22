@@ -354,11 +354,40 @@ Inspired by Clojure's Missionary library (tasks as values, structured cancellati
 - [x] **AST support** — `FnDecl` extended with `preConditions`/`postConditions` lists; AstBuilder extracts from `contractClause*`
 - [x] **Tests** — 444 total (+21: 15 interpreter contract tests + 6 parser contract tests)
 
-### Phase 6b–6c — Module Contracts & Law Verification (TODO)
+### Phase 6b — Module-Boundary Contracts (`in`/`out`) ✅
 
-- [ ] `contract` / `in` / `out` module-boundary contracts with blame
-- [x] `proto` with `law` declarations — parsing done, runtime dispatch done (Phase 4.5b)
-- [ ] Law verification: property-based test generation from `law` declarations
+- [x] **`in (params -> bool)` contract clause** — checked before function body (caller's fault)
+  - Module-aware blame: "caller violated X's input contract (module Y)"
+  - Works alongside `pre` conditions
+- [x] **`out (result -> bool)` contract clause** — checked after function body (implementation's fault)
+  - Module-aware blame: "X violated its output contract (module Y)"
+  - Works alongside `post` conditions
+- [x] **Grammar** — `IN expr NEWLINE` and `OUT expr NEWLINE` added to `contractClause` rule
+  - Flat syntax (no nested `contract` block) — consistent with `pre`/`post`
+- [x] **All four contract types coexist**: `pre`, `in`, `post`, `out` in any order
+- [x] **Works with all fn body forms**: lambda, imperative, match arms
+- [x] **ContractedFn extended** with `ins`, `outs`, `moduleName` fields
+- [x] **Tests** — 471 total (+10 interpreter in/out tests + 8 parser tests)
+
+### Phase 6c — Law Verification (QuickCheck-style) ✅
+
+- [x] **Protocol laws** — `law name = forall x y z. expr` in proto declarations
+  - Methods pre-bound to concrete implementations per type during verification
+  - `forall` binders generate random values of the implementation type
+- [x] **Fn-level laws** — `law name = forall x. expr` in fn body (alongside contracts)
+  - Random value generation: Int, Float, Bool, Str, Vector
+  - Type-error trials skipped (QuickCheck filtering)
+- [x] **`verify-laws` builtin** — property-based random testing
+  - `verify-laws ProtoName` — verifies all laws for all registered type implementations
+  - `verify-laws "fn-name"` — verifies fn-level laws
+  - Optional trial count: `verify-laws Monoid 50` (default: 100)
+  - Returns `#[Pass "desc" | Fail "desc" "reason"]` vector
+  - Prints PASS/FAIL/SKIP with counterexamples
+- [x] **AST support** — `ProtoLaw` extended with `forallVars`; new `FnLaw(name, forallVars, body)` record
+  - `FnDecl` extended with `fnLaws` field
+  - `ProtocolDescriptor` extended with `laws` field
+- [x] **Deterministic seed** (42) for reproducible test results
+- [x] **Tests** — 471 total (+9 law verification interpreter tests)
 
 ---
 

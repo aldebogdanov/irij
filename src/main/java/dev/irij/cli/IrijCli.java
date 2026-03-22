@@ -4,6 +4,7 @@ import dev.irij.ast.AstBuilder;
 import dev.irij.interpreter.Interpreter;
 import dev.irij.interpreter.IrijRuntimeError;
 import dev.irij.interpreter.Values;
+import dev.irij.mcp.IrijMcpServer;
 import dev.irij.nrepl.NReplServer;
 import dev.irij.parser.IrijParseDriver;
 import dev.irij.repl.IrijRepl;
@@ -24,7 +25,7 @@ import java.nio.file.Path;
  */
 public final class IrijCli {
 
-    private static final String VERSION = "0.1.0-SNAPSHOT";
+    private static final String VERSION = "0.1.0";
     private static final int DEFAULT_NREPL_PORT = 7888;
 
     public static void main(String[] args) throws Exception {
@@ -34,16 +35,20 @@ public final class IrijCli {
         }
 
         // Walk flags
-        boolean parseOnly   = false;
-        boolean dumpAst     = false;
-        int     nreplPort   = -1;
-        String  filePath    = null;
+        boolean parseOnly    = false;
+        boolean dumpAst      = false;
+        boolean mcpServer    = false;
+        boolean verifyLaws   = false;
+        int     nreplPort    = -1;
+        String  filePath     = null;
 
         for (String arg : args) {
             switch (arg) {
                 case "--parse-only" -> parseOnly = true;
                 case "--ast"        -> dumpAst   = true;
                 case "--nrepl-server" -> nreplPort = DEFAULT_NREPL_PORT;
+                case "--mcp-server" -> mcpServer = true;
+                case "--verify-laws" -> verifyLaws = true;
                 case "--version", "-v" -> {
                     System.out.println("Irij ℑ  version " + VERSION);
                     return;
@@ -71,6 +76,13 @@ public final class IrijCli {
             }
         }
 
+        // MCP server mode (stdio JSON-RPC)
+        if (mcpServer) {
+            var root = Path.of(System.getProperty("user.dir"));
+            new IrijMcpServer(root).start();
+            return;
+        }
+
         // nREPL server mode
         if (nreplPort >= 0) {
             new NReplServer(nreplPort).start();
@@ -83,12 +95,12 @@ public final class IrijCli {
             System.exit(1);
         }
 
-        runFile(Path.of(filePath), parseOnly, dumpAst);
+        runFile(Path.of(filePath), parseOnly, dumpAst, verifyLaws);
     }
 
     // ── File runner ──────────────────────────────────────────────────────
 
-    private static void runFile(Path path, boolean parseOnly, boolean dumpAst) throws IOException {
+    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean verifyLaws) throws IOException {
         IrijParseDriver.ParseResult result;
         try {
             result = IrijParseDriver.parseFile(path);
@@ -123,6 +135,7 @@ public final class IrijCli {
         try {
             var interpreter = new Interpreter();
             interpreter.setSourcePath(path.toAbsolutePath().getParent());
+            if (verifyLaws) interpreter.setAutoVerifyLaws(true);
             interpreter.run(ast);
         } catch (IrijRuntimeError e) {
             System.err.println(path + ":" + e.getMessage());
@@ -152,6 +165,8 @@ public final class IrijCli {
               irij <file.irj>            run a source file
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
+              irij --verify-laws <file>   run file with automatic law verification on impl
+              irij --mcp-server          start MCP server (stdio, for Claude Code)
               irij --nrepl-server        start nREPL server (port 7888)
               irij --nrepl-server=PORT   start nREPL server on PORT
               irij --version             print version

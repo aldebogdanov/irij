@@ -1,0 +1,155 @@
+use std.test :open
+use std.text {contains-substr?}
+
+;; ── Pre-condition ──────────────────────────────────────
+
+fn positive-only
+  pre (x -> x > 0)
+  (x -> x * 2)
+
+r1 := test "pre passes" (-> assert-eq 10 (positive-only 5))
+
+fn check-pre-fail
+  _ =>
+    r := try (-> positive-only (0 - 1))
+    match r
+      (Err msg) => contains-substr? msg "Pre-condition"
+      _ => false
+
+r2 := test "pre fails" (-> assert-true (check-pre-fail ()))
+
+;; ── Post-condition ─────────────────────────────────────
+
+fn always-positive
+  post (r -> r > 0)
+  (x -> x)
+
+r3 := test "post passes" (-> assert-eq 5 (always-positive 5))
+
+fn check-post-fail
+  _ =>
+    r := try (-> always-positive (0 - 1))
+    match r
+      (Err msg) => contains-substr? msg "Post-condition"
+      _ => false
+
+r4 := test "post fails" (-> assert-true (check-post-fail ()))
+
+;; ── Pre + post together ────────────────────────────────
+
+fn safe-sqrt
+  pre (x -> x >= 0)
+  post (r -> r >= 0)
+  (x -> x ** 0.5)
+
+r5 := test "pre+post both pass" (-> assert-eq 3.0 (safe-sqrt 9))
+
+fn check-prepost-fail
+  _ =>
+    r := try (-> safe-sqrt (0 - 1))
+    match r
+      (Err msg) => contains-substr? msg "Pre-condition"
+      _ => false
+
+r6 := test "pre+post pre fails" (-> assert-true (check-prepost-fail ()))
+
+;; ── Multiple pre-conditions ────────────────────────────
+
+fn bounded
+  pre (x -> x > 0)
+  pre (x -> x < 100)
+  (x -> x)
+
+r7 := test "multiple pre all pass" (-> assert-eq 50 (bounded 50))
+
+fn check-multi-pre-fail
+  _ =>
+    r := try (-> bounded 200)
+    match r
+      (Err msg) => contains-substr? msg "Pre-condition"
+      _ => false
+
+r8 := test "multiple pre second fails" (-> assert-true (check-multi-pre-fail ()))
+
+;; ── Partial application defers checks ──────────────────
+
+fn add-pos
+  pre (a b -> a > 0 && b > 0)
+  (a b -> a + b)
+
+r9 := test "partial app defers" (-> assert-eq 8 (add-pos 5 3))
+
+fn check-partial-fail
+  _ =>
+    add5 := add-pos 5
+    r := try (-> add5 (0 - 1))
+    match r
+      (Err msg) => contains-substr? msg "Pre-condition"
+      _ => false
+
+r10 := test "partial app deferred check fails" (-> assert-true (check-partial-fail ()))
+
+;; ── In-contract (caller's fault) ───────────────────────
+
+fn safe-div
+  in (a b -> b /= 0)
+  (a b -> a / b)
+
+r11 := test "in-contract passes" (-> assert-eq 5.0 (safe-div 10 2))
+
+fn check-in-fail
+  _ =>
+    r := try (-> safe-div 10 0)
+    match r
+      (Err msg) => contains-substr? msg "caller"
+      _ => false
+
+r12 := test "in-contract fails with blame" (-> assert-true (check-in-fail ()))
+
+;; ── Out-contract (impl's fault) ────────────────────────
+
+fn non-negative
+  out (r -> r >= 0)
+  (x -> x)
+
+r13 := test "out-contract passes" (-> assert-eq 5 (non-negative 5))
+
+fn check-out-fail
+  _ =>
+    r := try (-> non-negative (0 - 1))
+    match r
+      (Err msg) => contains-substr? msg "implementation"
+      _ => false
+
+r14 := test "out-contract fails with blame" (-> assert-true (check-out-fail ()))
+
+;; ── All four contract types ────────────────────────────
+
+fn fully-contracted
+  pre (x -> x > 0)
+  in (x -> x < 1000)
+  post (r -> r > 0)
+  out (r -> r < 2000)
+  (x -> x * 2)
+
+r15 := test "all four pass" (-> assert-eq 100 (fully-contracted 50))
+
+;; ── In-contract on imperative fn ───────────────────────
+
+fn imp-div
+  in (a b -> b /= 0)
+  => a b
+  a / b
+
+r16 := test "in-contract imperative fn" (-> assert-eq 5.0 (imp-div 10 2))
+
+;; ── In-contract on match fn (single arg) ──────────────
+
+fn match-abs
+  in (x -> true)
+  x | x >= 0 => x
+  x => 0 - x
+
+r17 := test "in-contract match fn" (-> assert-eq 5 (match-abs (0 - 5)))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17]

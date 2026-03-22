@@ -10,12 +10,23 @@ public sealed interface Decl extends Node {
     /** Function declaration: fn name :: Type  body. */
     record FnDecl(String name, boolean isPub, FnBody body,
                   List<Expr> preConditions, List<Expr> postConditions,
+                  List<Expr> inContracts, List<Expr> outContracts,
+                  List<FnLaw> fnLaws,
                   SourceLoc loc) implements Decl {
         /** Convenience constructor for functions without contracts. */
         public FnDecl(String name, boolean isPub, FnBody body, SourceLoc loc) {
-            this(name, isPub, body, List.of(), List.of(), loc);
+            this(name, isPub, body, List.of(), List.of(), List.of(), List.of(), List.of(), loc);
+        }
+        /** Convenience constructor for pre/post only (backward compat). */
+        public FnDecl(String name, boolean isPub, FnBody body,
+                      List<Expr> preConditions, List<Expr> postConditions,
+                      SourceLoc loc) {
+            this(name, isPub, body, preConditions, postConditions, List.of(), List.of(), List.of(), loc);
         }
     }
+
+    /** A law declared inside a function body. */
+    record FnLaw(String name, List<String> forallVars, Expr body) {}
 
     /** Type declaration: type Name params  variants|fields. */
     record TypeDecl(String name, List<String> typeParams, TypeBody body, SourceLoc loc) implements Decl {}
@@ -78,13 +89,23 @@ public sealed interface Decl extends Node {
 
     sealed interface FnBody {
         /** Lambda body: (params -> expr). */
-        record LambdaBody(List<Pattern> params, Expr body) implements FnBody {}
+        record LambdaBody(List<Pattern> params, String restParam, Expr body) implements FnBody {
+            /** Convenience constructor without rest param. */
+            public LambdaBody(List<Pattern> params, Expr body) {
+                this(params, null, body);
+            }
+        }
 
         /** Match arms body: pattern => expr, one per line. */
         record MatchArmsBody(List<Expr.MatchArm> arms) implements FnBody {}
 
         /** Imperative block: => params  stmts. */
-        record ImperativeBody(List<Pattern> params, List<Stmt> stmts) implements FnBody {}
+        record ImperativeBody(List<Pattern> params, String restParam, List<Stmt> stmts) implements FnBody {
+            /** Convenience constructor without rest param. */
+            public ImperativeBody(List<Pattern> params, List<Stmt> stmts) {
+                this(params, null, stmts);
+            }
+        }
 
         /** No body provided (just type signature). */
         record NoBody() implements FnBody {}
@@ -111,7 +132,7 @@ public sealed interface Decl extends Node {
     // ── Protocol helpers ────────────────────────────────────────────────
 
     record ProtoMethod(String name) {}
-    record ProtoLaw(String name, Expr body) {}
+    record ProtoLaw(String name, List<String> forallVars, Expr body) {}
     record ImplBinding(String name, Expr value) {}
 
     // ── Use Modifier ────────────────────────────────────────────────────

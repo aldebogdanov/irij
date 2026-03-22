@@ -220,14 +220,23 @@ public final class Values {
 
     // ── Lambda (closure) ────────────────────────────────────────────────
 
-    public record Lambda(List<Pattern> params, Expr body, Environment closure, String name) {
-        /** Anonymous lambda. */
+    public record Lambda(List<Pattern> params, String restParam, Expr body, Environment closure, String name) {
+        /** Anonymous lambda without rest param. */
         public Lambda(List<Pattern> params, Expr body, Environment closure) {
-            this(params, body, closure, null);
+            this(params, null, body, closure, null);
+        }
+        /** Named lambda without rest param. */
+        public Lambda(List<Pattern> params, Expr body, Environment closure, String name) {
+            this(params, null, body, closure, name);
         }
 
         public int arity() {
             return params.size();
+        }
+
+        /** Whether this lambda accepts extra args via ...rest. */
+        public boolean isVariadic() {
+            return restParam != null;
         }
 
         @Override
@@ -356,9 +365,11 @@ public final class Values {
      * @param impls       map from type name → (method name → value)
      */
     public record ProtocolDescriptor(String name, List<String> methodNames,
+                                     List<dev.irij.ast.Decl.ProtoLaw> laws,
                                      Map<String, Map<String, Object>> impls) {
-        public ProtocolDescriptor(String name, List<String> methodNames) {
-            this(name, methodNames, new java.util.concurrent.ConcurrentHashMap<>());
+        public ProtocolDescriptor(String name, List<String> methodNames,
+                                  List<dev.irij.ast.Decl.ProtoLaw> laws) {
+            this(name, methodNames, laws, new java.util.concurrent.ConcurrentHashMap<>());
         }
 
         /** Register an implementation for a given type (thread-safe). */

@@ -669,5 +669,121 @@ class ParserSmokeTest {
                   x           => 0 - x
                 """);
         }
+
+        // ── Phase 6b: in/out contracts ──────────────────────────
+
+        @Test void inContract() {
+            assertParses("""
+                fn api-endpoint
+                  in (r -> r > 0)
+                  (r -> r * 2)
+                """);
+        }
+
+        @Test void outContract() {
+            assertParses("""
+                fn api-endpoint
+                  out (r -> r > 0)
+                  (r -> r * 2)
+                """);
+        }
+
+        @Test void inAndOutContracts() {
+            assertParses("""
+                fn api-endpoint
+                  in (r -> r > 0)
+                  out (r -> r < 500)
+                  (r -> r * 2)
+                """);
+        }
+
+        @Test void allContractTypes() {
+            assertParses("""
+                fn complete
+                  pre (x -> x > 0)
+                  in (x -> x < 100)
+                  post (r -> r > 0)
+                  out (r -> r < 200)
+                  (x -> x * 2)
+                """);
+        }
+
+        // ── Phase 6c: law clauses ───────────────────────────────
+
+        @Test void fnLevelLaw() {
+            assertParses("""
+                fn my-sort
+                  law idempotent = forall xs. my-sort (my-sort xs) == my-sort xs
+                  (xs -> sort xs)
+                """);
+        }
+
+        @Test void fnLevelLawNoForall() {
+            assertParses("""
+                fn add-zero
+                  law identity = add-zero 0 == 0
+                  (x -> x + 0)
+                """);
+        }
+
+        @Test void protoWithLawAndForall() {
+            assertParses("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+                  law identity-left = forall x. append empty x == x
+                  law identity-right = forall x. append x empty == x
+                  law associative = forall x y z. append (append x y) z == append x (append y z)
+                """);
+        }
+
+        @Test void inOutOnImperativeFn() {
+            assertParses("""
+                fn safe-add
+                  in (a b -> a > 0)
+                  out (r -> r > 0)
+                  => a b
+                  a + b
+                """);
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Rest Parameters
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class RestParameters {
+
+        @Test void lambdaRestParam() {
+            assertParses("(x ...rest -> rest)");
+        }
+
+        @Test void lambdaRestParamNoFixed() {
+            assertParses("(...args -> length args)");
+        }
+
+        @Test void fnDeclLambdaRestParam() {
+            assertParses("""
+                fn variadic
+                  (first ...rest -> rest)
+                """);
+        }
+
+        @Test void fnDeclImperativeRestParam() {
+            assertParses("""
+                fn sum-all
+                  => ...nums
+                  /+ nums
+                """);
+        }
+
+        @Test void fnDeclImperativeRestParamWithFixed() {
+            assertParses("""
+                fn log-msg
+                  => level ...parts
+                  join " " parts
+                """);
+        }
     }
 }

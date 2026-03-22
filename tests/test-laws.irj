@@ -1,0 +1,113 @@
+use std.test :open
+use std.collection {all? any?}
+
+;; Helper matchers for verify-laws results
+fn is-pass
+  (Pass _) => true
+  _ => false
+
+fn is-fail
+  (Fail _ _) => true
+  _ => false
+
+;; ── Protocol laws pass ─────────────────────────────────
+
+proto Semigroup a
+  sappend :: a -> a -> a
+  law associativity = forall x y z. sappend (sappend x y) z == sappend x (sappend y z)
+
+impl Semigroup for Int
+  sappend := (+)
+
+impl Semigroup for Str
+  sappend := (++)
+
+fn check-semigroup
+  _ =>
+    results := verify-laws Semigroup
+    all? is-pass results
+
+r1 := test "proto law associativity passes" (-> assert-true (check-semigroup ()))
+
+;; ── Protocol laws with identity ────────────────────────
+
+proto Monoid a
+  empty :: a
+  mappend :: a -> a -> a
+  law left-identity = forall x. mappend empty x == x
+  law right-identity = forall x. mappend x empty == x
+
+impl Monoid for Int
+  empty := 0
+  mappend := (+)
+
+fn check-monoid
+  _ =>
+    results := verify-laws Monoid
+    all? is-pass results
+
+r2 := test "monoid identity laws pass" (-> assert-true (check-monoid ()))
+
+;; ── Failing law detection ──────────────────────────────
+
+proto BadComm a
+  bop :: a -> a -> a
+  law commutativity = forall x y. bop x y == bop y x
+
+impl BadComm for Str
+  bop := (++)
+
+fn check-bad-comm
+  _ =>
+    results := verify-laws BadComm
+    any? is-fail results
+
+r3 := test "detects failing law" (-> assert-true (check-bad-comm ()))
+
+;; ── Fn-level law passes ────────────────────────────────
+
+fn double
+  law correct = forall x. double x == x + x
+  (x -> x * 2)
+
+fn check-double-law
+  _ =>
+    results := verify-laws "double"
+    all? is-pass results
+
+r4 := test "fn-level law passes" (-> assert-true (check-double-law ()))
+
+;; ── Fn-level law fails ─────────────────────────────────
+
+fn bad-triple
+  law wrong = forall x. bad-triple x == x + x
+  (x -> x * 3)
+
+fn check-bad-triple
+  _ =>
+    results := verify-laws "bad-triple"
+    any? is-fail results
+
+r5 := test "fn-level law fails" (-> assert-true (check-bad-triple ()))
+
+;; ── verify-laws returns vector ─────────────────────────
+
+r6 := test "verify-laws returns vector" (-> assert-true (length (verify-laws Semigroup) > 0))
+
+;; ── Multiple impls checked ─────────────────────────────
+
+proto Addable a
+  add :: a -> a -> a
+  law commutative = forall x y. add x y == add y x
+
+impl Addable for Int
+  add := (+)
+
+fn check-addable
+  _ =>
+    results := verify-laws Addable
+    all? is-pass results
+
+r7 := test "law checked for each impl" (-> assert-true (check-addable ()))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7]

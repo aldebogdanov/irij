@@ -124,6 +124,8 @@ guard
 contractClause
     : PRE expr NEWLINE
     | POST expr NEWLINE
+    | IN expr NEWLINE
+    | OUT expr NEWLINE
     | LAW IDENT EQUALS forallBinders? expr NEWLINE
     ;
 
@@ -225,12 +227,12 @@ implMember
 // ── contract block (module-boundary) ─────────────────────────────────
 
 contractBlock
-    : CONTRACT NEWLINE INDENT contractInOut+ NEWLINE* DEDENT
+    : CONTRACT NEWLINE INDENT contractInOut (NEWLINE contractInOut)* NEWLINE* DEDENT
     ;
 
 contractInOut
-    : IN expr NEWLINE?
-    | OUT expr NEWLINE?
+    : IN expr
+    | OUT expr
     ;
 
 forallBinders
@@ -479,7 +481,13 @@ parenExpr
     ;
 
 exprSeq
-    : expr (SEMICOLON expr)*
+    : seqItem (SEMICOLON seqItem)*
+    ;
+
+seqItem
+    : bindTarget ASSIGN expr    // x <- value  (mutation)
+    | bindTarget BIND expr      // x := value  (local binding)
+    | expr
     ;
 
 // ── Collection Literals ──────────────────────────────────────────────

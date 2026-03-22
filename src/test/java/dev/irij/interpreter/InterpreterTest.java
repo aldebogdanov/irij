@@ -2702,5 +2702,382 @@ class InterpreterTest {
                 println (double 3)
                 """));
         }
+
+        // ── Phase 6b: in/out module-boundary contracts ──────────────
+
+        @Test void inContractPassing() {
+            assertEquals("10", run("""
+                fn safe-double
+                  in (x -> x > 0)
+                  (x -> x * 2)
+                println (safe-double 5)
+                """));
+        }
+
+        @Test void inContractFailing() {
+            var output = run("""
+                fn safe-double
+                  in (x -> x > 0)
+                  (x -> x * 2)
+                println (try (-> safe-double 0))
+                """);
+            assertTrue(output.contains("Err"));
+            assertTrue(output.contains("caller"));
+        }
+
+        @Test void outContractPassing() {
+            assertEquals("5", run("""
+                fn positive-fn
+                  out (r -> r > 0)
+                  (x -> x + 1)
+                println (positive-fn 4)
+                """));
+        }
+
+        @Test void outContractFailing() {
+            var output = run("""
+                fn positive-fn
+                  out (r -> r > 0)
+                  (x -> 0 - x)
+                println (try (-> positive-fn 5))
+                """);
+            assertTrue(output.contains("Err"));
+            assertTrue(output.contains("output contract") || output.contains("Output contract"));
+        }
+
+        @Test void inAndOutTogether() {
+            assertEquals("10", run("""
+                fn safe-fn
+                  in (x -> x > 0)
+                  out (r -> r > 0)
+                  (x -> x * 2)
+                println (safe-fn 5)
+                """));
+        }
+
+        @Test void inOutWithPrePost() {
+            // in/out and pre/post can coexist
+            assertEquals("10", run("""
+                fn safe-fn
+                  pre (x -> x > 0)
+                  in (x -> x < 100)
+                  post (r -> r > 0)
+                  out (r -> r < 200)
+                  (x -> x * 2)
+                println (safe-fn 5)
+                """));
+        }
+
+        @Test void inContractBlameMessage() {
+            var output = run("""
+                fn api-endpoint
+                  in (r -> r > 0)
+                  (r -> r * 2)
+                println (try (-> api-endpoint 0))
+                """);
+            assertTrue(output.contains("caller"));
+            assertTrue(output.contains("input contract") || output.contains("Input contract"));
+        }
+
+        @Test void outContractBlameMessage() {
+            var output = run("""
+                fn api-endpoint
+                  out (r -> r > 0)
+                  (x -> 0 - x)
+                println (try (-> api-endpoint 5))
+                """);
+            assertTrue(output.contains("output contract") || output.contains("Output contract"));
+        }
+
+        @Test void inOnImperativeFn() {
+            assertEquals("15", run("""
+                fn safe-add
+                  in (a b -> a > 0 && b > 0)
+                  => a b
+                  result := a + b
+                  result
+                println (safe-add 5 10)
+                """));
+        }
+
+        @Test void inOnMatchFn() {
+            assertEquals("1", run("""
+                fn safe-head
+                  in (xs -> length xs > 0)
+                  #[x ...rest] => x
+                println (safe-head #[1 2 3])
+                """));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 6c — Law Verification
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class LawVerification {
+
+        @Test void protoLawAllPass() {
+            var output = run("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+                  law identity-left = forall x. append empty x == x
+                  law identity-right = forall x. append x empty == x
+
+                impl Monoid for Int
+                  empty := 0
+                  append := (+)
+
+                verify-laws Monoid
+                """);
+            assertTrue(output.contains("PASS"));
+            assertTrue(output.contains("identity-left"));
+            assertTrue(output.contains("identity-right"));
+            assertFalse(output.contains("FAIL"));
+        }
+
+        @Test void protoLawFailing() {
+            var output = run("""
+                proto BadMonoid a
+                  empty :: a
+                  combine :: a -> a -> a
+                  law commutative = forall x y. combine x y == combine y x
+
+                impl BadMonoid for Str
+                  empty := ""
+                  combine := (++)
+
+                verify-laws BadMonoid
+                """);
+            assertTrue(output.contains("FAIL"));
+            assertTrue(output.contains("commutative"));
+            assertTrue(output.contains("with"));
+        }
+
+        @Test void protoLawMultipleTypes() {
+            var output = run("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+                  law identity-left = forall x. append empty x == x
+
+                impl Monoid for Int
+                  empty := 0
+                  append := (+)
+
+                impl Monoid for Str
+                  empty := ""
+                  append := (++)
+
+                verify-laws Monoid
+                """);
+            assertTrue(output.contains("Monoid/Int"));
+            assertTrue(output.contains("Monoid/Str"));
+        }
+
+        @Test void protoNoLaws() {
+            var output = run("""
+                proto Show a
+                  show :: a -> a
+
+                verify-laws Show
+                """);
+            assertTrue(output.contains("no laws"));
+        }
+
+        @Test void fnLevelLaw() {
+            var output = run("""
+                fn double-it
+                  law doubles = forall x. double-it x == x + x
+                  (x -> x * 2)
+
+                verify-laws "double-it"
+                """);
+            assertTrue(output.contains("PASS"));
+            assertTrue(output.contains("doubles"));
+        }
+
+        @Test void fnLevelLawFailing() {
+            var output = run("""
+                fn buggy
+                  law always-positive = forall x. buggy x > 0
+                  (x -> x)
+
+                verify-laws "buggy"
+                """);
+            assertTrue(output.contains("FAIL"));
+            assertTrue(output.contains("always-positive"));
+        }
+
+        @Test void verifyLawsReturnsVector() {
+            var output = run("""
+                proto Eq a
+                  eq :: a -> a -> a
+                  law reflexive = forall x. eq x x == true
+
+                impl Eq for Int
+                  eq := (==)
+
+                results := verify-laws Eq
+                println (type-of results)
+                """);
+            assertTrue(output.contains("Vector"));
+        }
+
+        @Test void protoLawAssociativity() {
+            var output = run("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+                  law assoc = forall x y z. append (append x y) z == append x (append y z)
+
+                impl Monoid for Int
+                  empty := 0
+                  append := (+)
+
+                verify-laws Monoid
+                """);
+            assertTrue(output.contains("PASS"));
+            assertTrue(output.contains("assoc"));
+        }
+
+        @Test void customTrialCount() {
+            var output = run("""
+                proto Monoid a
+                  empty :: a
+                  append :: a -> a -> a
+                  law identity = forall x. append empty x == x
+
+                impl Monoid for Int
+                  empty := 0
+                  append := (+)
+
+                verify-laws Monoid 10
+                """);
+            assertTrue(output.contains("10 trials"));
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Apply builtin + Rest params
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class ApplyAndRestParams {
+
+        // ── apply builtin ──────────────────────────────────────────────
+
+        @Test void applySpreadVector() {
+            assertEquals(6L, eval("apply (+) #[2 4]"));
+        }
+
+        @Test void applyWithLeadingArgs() {
+            // apply fn arg1 vec → fn(arg1, ...vec)
+            var result = run("""
+                fn my-fn
+                  => a b c
+                  println (to-str a ++ " " ++ to-str b ++ " " ++ to-str c)
+                apply my-fn 1 #[2 3]
+                """);
+            assertEquals("1 2 3", result);
+        }
+
+        @Test void applyWithEmptyVector() {
+            assertEquals(42L, eval("apply (x -> x) #[42]"));
+        }
+
+        @Test void applyOnBuiltin() {
+            assertEquals("hello world", eval("apply concat #[\"hello \" \"world\"]"));
+        }
+
+        @Test void applyTooFewArgs() {
+            assertRuntimeError("apply (+)");
+        }
+
+        @Test void applyWithPartialAndSpread() {
+            // apply (f a1 ...rest) where rest needs spreading
+            assertEquals(10L, eval("apply (+) #[3 7]"));
+        }
+
+        // ── rest params in lambdas ─────────────────────────────────────
+
+        @Test void lambdaRestParamBasic() {
+            var result = eval("(x ...rest -> rest) 1 2 3");
+            assertEquals(new Values.IrijVector(List.of(2L, 3L)), result);
+        }
+
+        @Test void lambdaRestParamEmpty() {
+            var result = eval("(x ...rest -> rest) 42");
+            assertEquals(new Values.IrijVector(List.of()), result);
+        }
+
+        @Test void lambdaRestParamNoFixed() {
+            var result = eval("(...args -> length args) 1 2 3 4 5");
+            assertEquals(5L, result);
+        }
+
+        @Test void lambdaRestParamWithApply() {
+            // Combine rest params with apply
+            var result = eval("""
+                (f ...args -> apply f args) (+) 3 7
+                """);
+            assertEquals(10L, result);
+        }
+
+        // ── rest params in fn declarations (lambda body) ───────────────
+
+        @Test void fnDeclLambdaRestParam() {
+            var result = run("""
+                fn variadic
+                  (first ...rest -> println (to-str first ++ " got " ++ to-str (length rest) ++ " more"))
+                variadic 1 2 3 4
+                """);
+            assertEquals("1 got 3 more", result);
+        }
+
+        // ── rest params in imperative fn ────────────────────────────────
+
+        @Test void imperativeFnRestParam() {
+            var result = run("""
+                fn sum-all
+                  => ...nums
+                  /+ nums
+                println (sum-all 1 2 3 4 5)
+                """);
+            assertEquals("15", result);
+        }
+
+        @Test void imperativeFnRestParamWithFixed() {
+            var result = run("""
+                fn log-msg
+                  => level ...parts
+                  msg := join " " parts
+                  println (to-str level ++ ": " ++ msg)
+                log-msg "INFO" "hello" "world"
+                """);
+            assertEquals("INFO: hello world", result);
+        }
+
+        // ── par with apply + rest params ───────────────────────────────
+
+        @Test void parWithDynamicThunks() {
+            // Build a vector of thunks, use apply to pass them to par
+            var result = eval("""
+                thunks := #[(-> 1) (-> 2) (-> 3)]
+                apply par (x y z -> x + y + z) thunks
+                """);
+            assertEquals(6L, result);
+        }
+
+        // ── rest params forwarding ─────────────────────────────────────
+
+        @Test void restParamForwarding() {
+            // Collect args via rest, then reduce with /+
+            var result = eval("""
+                (...args -> /+ args) 10 20 30
+                """);
+            assertEquals(60L, result);
+        }
     }
 }

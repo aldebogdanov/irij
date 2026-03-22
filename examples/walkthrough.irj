@@ -1,0 +1,226 @@
+;; walkthrough.irj — Interactive tour of Irij (post-Phase 3)
+;;
+;; Load sections one-by-one in an nREPL session to explore features.
+;; Each section is self-contained — eval from ";; ==" to the next ";; ==".
+
+;; ══════════════════════════════════════════════════════════════════════
+;; PART 1: Algebraic Effects (Phase 3a)
+;; ══════════════════════════════════════════════════════════════════════
+
+;; Declare an effect — a set of operations
+effect Greeting
+  greet :: Str -> Str
+
+;; A handler implements the operations
+;; `resume` returns a value to the caller of the effect op
+handler polite :: Greeting
+  greet name => resume ("Hello, " ++ name ++ "!")
+
+handler pirate :: Greeting
+  greet name => resume ("Arrr, " ++ name ++ "!")
+
+;; Same code, different behavior depending on handler
+with polite
+  println (greet "World")
+
+with pirate
+  println (greet "World")
+
+;; ══════════════════════════════════════════════════════════════════════
+;; PART 2: Handler State & Composition (Phase 3b)
+;; ══════════════════════════════════════════════════════════════════════
+
+effect Logger
+  log :: Str -> ()
+  get-logs :: () -> Str
+
+handler buffered-logger :: Logger
+  buf :! ""
+  log msg =>
+    buf <- buf ++ msg ++ "\n"
+    resume ()
+  get-logs () => resume buf
+
+with buffered-logger
+  log "step 1"
+  log "step 2"
+  log "step 3"
+  println (get-logs ())
+
+;; Dot-access: read handler state after the block
+println ("buffer after: " ++ buffered-logger.buf)
+
+;; Handler composition with >>
+effect Config
+  get-config :: () -> Str
+
+handler my-config :: Config
+  get-config () => resume "production"
+
+combined := buffered-logger >> my-config
+
+with combined
+  log ("env = " ++ get-config ())
+  println (get-logs ())
+
+;; on-failure recovery (eval this whole block as one region in nREPL)
+effect Boom
+  explode :: () -> ()
+
+handler kaboom :: Boom
+  explode () => error "KABOOM"
+
+with kaboom
+  explode ()
+on-failure
+  println ("recovered: " ++ error)
+
+;; ══════════════════════════════════════════════════════════════════════
+;; PART 3: Protocols & Implementations (Phase 4.5b)
+;; ══════════════════════════════════════════════════════════════════════
+
+proto Show a
+  show :: a -> Str
+
+impl Show for Int
+  show := (n -> "<" ++ to-str n ++ ">")
+
+impl Show for Bool
+  show := (b -> if b "yes" else "no")
+
+println (show 42)
+println (show true)
+
+;; Monoid — a protocol with a value method (empty) and a binary op
+proto Monoid a
+  empty :: a
+  append :: a -> a -> a
+
+impl Monoid for Int
+  empty := 0
+  append := (+)
+
+impl Monoid for Str
+  empty := ""
+  append := (++)
+
+println (append 10 20)
+println (append "hello " "world")
+println (empty 0)
+
+;; ══════════════════════════════════════════════════════════════════════
+;; PART 4: Structured Concurrency (Phase 5)
+;; ══════════════════════════════════════════════════════════════════════
+
+;; scope: fork tasks, await results
+scope s
+  a := s.fork (-> 10 + 20)
+  b := s.fork (-> 3 * 7)
+  println ("a=" ++ to-str (await a) ++ " b=" ++ to-str (await b))
+
+;; par: parallel combinator
+sum := par (+) (-> sleep 10; 100) (-> sleep 10; 200)
+println ("par sum = " ++ to-str sum)
+
+;; race: first-wins
+winner := race (-> sleep 200; "slow") (-> sleep 10; "fast")
+println ("race winner = " ++ winner)
+
+;; timeout
+ok := timeout 1000 (-> sleep 10; "done")
+println ("timeout = " ++ ok)
+
+result := try (-> timeout 10 (-> sleep 2000; "never"))
+println ("timeout expired = " ++ to-str result)
+
+;; ══════════════════════════════════════════════════════════════════════
+;; PART 5: Pre/Post Contracts (Phase 6a)
+;; ══════════════════════════════════════════════════════════════════════
+
+fn safe-sqrt
+  pre (x -> x >= 0)
+  post (r -> r >= 0)
+  (x -> x ** 0.5)
+
+println (safe-sqrt 9)
+
+;; Violation — caught with try
+r := try (-> safe-sqrt (0 - 1))
+match r
+  (Ok v)    => println v
+  (Err msg) => println ("caught: " ++ msg)
+
+;; Partial application defers checks
+fn add-pos
+  pre (a b -> a > 0 && b > 0)
+  (a b -> a + b)
+
+add5 := add-pos 5
+println (add5 3)
+
+;; ══════════════════════════════════════════════════════════════════════
+;; PART 6: Module-Boundary Contracts — in/out (Phase 6b)
+;; ══════════════════════════════════════════════════════════════════════
+
+;; `in`  = caller's fault    (checked on entry)
+;; `out` = impl's fault      (checked on exit)
+
+fn safe-div
+  in (a b -> b /= 0)
+  out (r -> true)
+  (a b -> a / b)
+
+println (safe-div 10 2)
+
+r2 := try (-> safe-div 10 0)
+match r2
+  (Ok v)    => println v
+  (Err msg) => println ("caught: " ++ msg)
+
+;; All four contract types together
+fn bounded
+  pre (x -> x > 0)
+  in (x -> x < 1000)
+  post (r -> r > 0)
+  out (r -> r < 2000)
+  (x -> x * 2)
+
+println (bounded 50)
+
+;; ══════════════════════════════════════════════════════════════════════
+;; PART 7: Laws & Verification (Phase 6c)
+;; ══════════════════════════════════════════════════════════════════════
+
+;; Protocol laws — algebraic properties that impls must satisfy
+proto Semigroup a
+  sappend :: a -> a -> a
+  law associative = forall x y z. sappend (sappend x y) z == sappend x (sappend y z)
+
+impl Semigroup for Int
+  sappend := (+)
+
+impl Semigroup for Str
+  sappend := (++)
+
+;; QuickCheck-style verification — random values, 100 trials
+println "\nVerifying Semigroup laws:"
+verify-laws Semigroup
+
+;; Fn-level laws
+fn double
+  law correct = forall x. double x == x + x
+  (x -> x * 2)
+
+println "\nVerifying fn-level law:"
+verify-laws "double"
+
+;; Detecting a broken law (string concat is NOT commutative)
+proto BadComm a
+  bop :: a -> a -> a
+  law commutative = forall x y. bop x y == bop y x
+
+impl BadComm for Str
+  bop := (++)
+
+println "\nDetecting broken law:"
+verify-laws BadComm

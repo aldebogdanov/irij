@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.irij"
-version = "0.0.1"
+version = "0.1.0"
 
 java {
     toolchain {
@@ -22,6 +22,7 @@ dependencies {
     antlr("org.antlr:antlr4:4.13.2")
     implementation("org.antlr:antlr4-runtime:4.13.2")
     implementation("org.jline:jline:3.26.3")
+    implementation("com.google.code.gson:gson:2.11.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

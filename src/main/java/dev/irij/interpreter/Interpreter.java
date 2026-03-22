@@ -29,6 +29,11 @@ public final class Interpreter {
     // Protocol registry: proto name → descriptor (shared across all envs, thread-safe for spawn)
     private final Map<String, ProtocolDescriptor> protocols = new java.util.concurrent.ConcurrentHashMap<>();
 
+    /** When true, automatically verify protocol laws on each `impl` declaration. */
+    private boolean autoVerifyLaws = false;
+
+    public void setAutoVerifyLaws(boolean on) { this.autoVerifyLaws = on; }
+
     public Interpreter(PrintStream out) {
         this.out = out;
         this.globalEnv = new Environment();
@@ -219,6 +224,208 @@ public final class Interpreter {
                 throw new IrijRuntimeError("race: all thunks failed", null);
             }
         }));
+
+        // ── apply — spread last arg (vector) into function call ─────────
+        globalEnv.define("apply", new BuiltinFn("apply", -1, args -> {
+            if (args.size() < 2) {
+                throw new IrijRuntimeError("apply requires a function and at least one argument", null);
+            }
+            var fn = args.get(0);
+            var lastArg = args.get(args.size() - 1);
+            var spreadElems = Builtins.toList(lastArg);
+            var allArgs = new ArrayList<Object>();
+            for (int i = 1; i < args.size() - 1; i++) {
+                allArgs.add(args.get(i));
+            }
+            allArgs.addAll(spreadElems);
+            return apply(fn, allArgs, SourceLoc.UNKNOWN);
+        }));
+
+        // ── verify-laws — QuickCheck-style law verification ─────────────
+        globalEnv.define("verify-laws", new BuiltinFn("verify-laws", -1, args -> {
+            if (args.isEmpty()) {
+                throw new IrijRuntimeError("verify-laws requires a protocol name or function name", null);
+            }
+            var target = args.get(0);
+            int trials = args.size() > 1 && args.get(1) instanceof Long n ? n.intValue() : 100;
+            if (target instanceof ProtocolDescriptor pd) {
+                return verifyProtoLaws(pd, trials);
+            }
+            if (target instanceof String s) {
+                // Look up protocol by name
+                var pd = protocols.get(s);
+                if (pd != null) return verifyProtoLaws(pd, trials);
+                // Look up fn-level laws by name
+                var laws = fnLaws.get(s);
+                if (laws != null) return verifyFnLaws(s, laws, fnLawEnvs.get(s), trials);
+            }
+            throw new IrijRuntimeError("verify-laws: expected a protocol or fn name, got " + Values.typeName(target), null);
+        }));
+    }
+
+    /** Registry of fn-level laws, populated during fn declaration. */
+    private final Map<String, List<Decl.FnLaw>> fnLaws = new LinkedHashMap<>();
+    private final Map<String, Environment> fnLawEnvs = new LinkedHashMap<>();
+
+    /** Random value generator for forall-bound variables. */
+    private final java.util.Random lawRandom = new java.util.Random(42);
+
+    private Object generateRandomValue() {
+        return switch (lawRandom.nextInt(5)) {
+            case 0 -> (long) (lawRandom.nextInt(201) - 100);   // Int: -100..100
+            case 1 -> lawRandom.nextDouble() * 200.0 - 100.0;  // Float
+            case 2 -> lawRandom.nextBoolean();                  // Bool
+            case 3 -> {                                          // Str
+                int len = lawRandom.nextInt(10);
+                var sb = new StringBuilder(len);
+                for (int i = 0; i < len; i++) sb.append((char)('a' + lawRandom.nextInt(26)));
+                yield sb.toString();
+            }
+            case 4 -> {                                          // small Vector
+                int len = lawRandom.nextInt(6);
+                var elems = new ArrayList<Object>(len);
+                for (int i = 0; i < len; i++) elems.add((long) lawRandom.nextInt(21) - 10);
+                yield new IrijVector(elems);
+            }
+            default -> 0L;
+        };
+    }
+
+    /** Generate random values of a specific type (for typed protocol impls). */
+    private Object generateRandomForType(String typeName) {
+        return switch (typeName) {
+            case "Int" -> (long) (lawRandom.nextInt(201) - 100);
+            case "Float" -> lawRandom.nextDouble() * 200.0 - 100.0;
+            case "Bool" -> lawRandom.nextBoolean();
+            case "Str" -> {
+                int len = lawRandom.nextInt(10);
+                var sb = new StringBuilder(len);
+                for (int i = 0; i < len; i++) sb.append((char)('a' + lawRandom.nextInt(26)));
+                yield sb.toString();
+            }
+            case "Vector" -> {
+                int len = lawRandom.nextInt(6);
+                var elems = new ArrayList<Object>(len);
+                for (int i = 0; i < len; i++) elems.add((long) lawRandom.nextInt(21) - 10);
+                yield new IrijVector(elems);
+            }
+            default -> generateRandomValue();
+        };
+    }
+
+    private Object verifyProtoLaws(ProtocolDescriptor pd, int trials) {
+        if (pd.laws().isEmpty()) {
+            out.println("Protocol '" + pd.name() + "' has no laws to verify.");
+            return Values.UNIT;
+        }
+        var results = new ArrayList<Object>();
+        // Verify laws for each registered type implementation
+        for (var entry : pd.impls().entrySet()) {
+            String typeName = entry.getKey();
+            Map<String, Object> typeImpls = entry.getValue();
+            for (var law : pd.laws()) {
+                boolean passed = true;
+                String failInfo = null;
+                for (int i = 0; i < trials; i++) {
+                    var childEnv = globalEnv.child();
+                    // Pre-bind protocol methods to their concrete implementations for this type.
+                    // This allows laws like `append empty x == x` to work — `empty` resolves
+                    // to the concrete value (e.g., 0 for Int) instead of the dispatch function.
+                    for (var methodName : pd.methodNames()) {
+                        Object implBinding = typeImpls.get(methodName);
+                        if (implBinding != null) {
+                            childEnv.define(methodName, implBinding);
+                        }
+                    }
+                    // Bind forall vars with random values of the impl type
+                    for (var varName : law.forallVars()) {
+                        childEnv.define(varName, generateRandomForType(typeName));
+                    }
+                    try {
+                        var result = eval(law.body(), childEnv);
+                        if (!Values.isTruthy(result)) {
+                            passed = false;
+                            var bindings = new StringBuilder();
+                            for (var varName : law.forallVars()) {
+                                if (!bindings.isEmpty()) bindings.append(", ");
+                                bindings.append(varName).append("=")
+                                    .append(Values.toIrijString(childEnv.lookup(varName)));
+                            }
+                            failInfo = "with " + bindings;
+                            break;
+                        }
+                    } catch (IrijRuntimeError e) {
+                        passed = false;
+                        failInfo = e.getMessage();
+                        break;
+                    }
+                }
+                var desc = pd.name() + "/" + typeName + ": " + law.name();
+                if (passed) {
+                    results.add(new Tagged("Pass", List.of(desc)));
+                    out.println("  PASS  " + desc + " (" + trials + " trials)");
+                } else {
+                    results.add(new Tagged("Fail", List.of(desc, failInfo)));
+                    out.println("  FAIL  " + desc + " — " + failInfo);
+                }
+            }
+        }
+        return new IrijVector(results);
+    }
+
+    private Object verifyFnLaws(String fnName, List<Decl.FnLaw> laws, Environment env, int trials) {
+        var results = new ArrayList<Object>();
+        for (var law : laws) {
+            boolean passed = true;
+            String failInfo = null;
+            int validTrials = 0;
+            int maxAttempts = trials * 5; // try harder to find valid inputs
+            for (int i = 0; i < maxAttempts && validTrials < trials; i++) {
+                var childEnv = env.child();
+                for (var varName : law.forallVars()) {
+                    childEnv.define(varName, generateRandomValue());
+                }
+                try {
+                    var result = eval(law.body(), childEnv);
+                    validTrials++;
+                    if (!Values.isTruthy(result)) {
+                        passed = false;
+                        var bindings = new StringBuilder();
+                        for (var varName : law.forallVars()) {
+                            if (!bindings.isEmpty()) bindings.append(", ");
+                            bindings.append(varName).append("=")
+                                .append(Values.toIrijString(childEnv.lookup(varName)));
+                        }
+                        failInfo = "with " + bindings;
+                        break;
+                    }
+                } catch (IrijRuntimeError e) {
+                    // Type errors → skip (input didn't satisfy implicit preconditions)
+                    // Genuine assertion errors → fail
+                    if (e.getMessage() != null && (e.getMessage().contains("expects a")
+                        || e.getMessage().contains("Cannot apply")
+                        || e.getMessage().contains("Cannot concat")
+                        || e.getMessage().contains("Cannot compare"))) {
+                        continue; // skip invalid input
+                    }
+                    passed = false;
+                    failInfo = e.getMessage();
+                    break;
+                }
+            }
+            var desc = fnName + ": " + law.name();
+            if (validTrials == 0) {
+                results.add(new Tagged("Skip", List.of(desc)));
+                out.println("  SKIP  " + desc + " (no valid inputs found)");
+            } else if (passed) {
+                results.add(new Tagged("Pass", List.of(desc)));
+                out.println("  PASS  " + desc + " (" + validTrials + " trials)");
+            } else {
+                results.add(new Tagged("Fail", List.of(desc, failInfo)));
+                out.println("  FAIL  " + desc + " — " + failInfo);
+            }
+        }
+        return new IrijVector(results);
     }
 
     public Interpreter() {
@@ -331,21 +538,33 @@ public final class Interpreter {
     private Object makeFnValue(Decl.FnDecl fn, Environment env) {
         Object baseFn = switch (fn.body()) {
             case Decl.FnBody.LambdaBody lb ->
-                new Lambda(lb.params(), lb.body(), env, fn.name());
+                new Lambda(lb.params(), lb.restParam(), lb.body(), env, fn.name());
             case Decl.FnBody.MatchArmsBody mab ->
                 new MatchFn(fn.name(), mab.arms(), env);
             case Decl.FnBody.ImperativeBody ib ->
-                new ImperativeFn(fn.name(), ib.params(), ib.stmts(), env);
+                new ImperativeFn(fn.name(), ib.params(), ib.restParam(), ib.stmts(), env);
             case Decl.FnBody.NoBody() ->
                 Values.UNIT; // type-only declaration
         };
-        // Wrap with contracts if any pre/post conditions exist
-        if (!fn.preConditions().isEmpty() || !fn.postConditions().isEmpty()) {
+        // Wrap with contracts if any conditions exist
+        boolean hasContracts = !fn.preConditions().isEmpty() || !fn.postConditions().isEmpty()
+            || !fn.inContracts().isEmpty() || !fn.outContracts().isEmpty();
+        if (hasContracts) {
             var evalPres = fn.preConditions().stream()
                 .map(e -> eval(e, env)).toList();
             var evalPosts = fn.postConditions().stream()
                 .map(e -> eval(e, env)).toList();
-            return new ContractedFn(baseFn, evalPres, evalPosts, fn.name(), fn.loc());
+            var evalIns = fn.inContracts().stream()
+                .map(e -> eval(e, env)).toList();
+            var evalOuts = fn.outContracts().stream()
+                .map(e -> eval(e, env)).toList();
+            return new ContractedFn(baseFn, evalPres, evalPosts,
+                evalIns, evalOuts, fn.name(), currentModuleName, fn.loc());
+        }
+        // Store fn-level laws for later verification
+        if (!fn.fnLaws().isEmpty()) {
+            fnLaws.put(fn.name(), fn.fnLaws());
+            fnLawEnvs.put(fn.name(), env);
         }
         return baseFn;
     }
@@ -357,14 +576,28 @@ public final class Interpreter {
     }
 
     /** An imperative-block function: binds params then executes statements. */
-    record ImperativeFn(String name, List<Pattern> params, List<Stmt> body, Environment closure) {
+    record ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body, Environment closure) {
+        /** Convenience constructor without rest param. */
+        ImperativeFn(String name, List<Pattern> params, List<Stmt> body, Environment closure) {
+            this(name, params, null, body, closure);
+        }
+
+        /** Whether this function accepts extra args via ...rest. */
+        boolean isVariadic() { return restParam != null; }
+
         @Override
         public String toString() { return "<fn " + name + ">"; }
     }
 
-    /** A function wrapped with pre/post-condition contracts. */
+    /** A function wrapped with pre/post/in/out contracts. */
     record ContractedFn(Object fn, List<Object> pres, List<Object> posts,
-                        String name, SourceLoc loc) {
+                        List<Object> ins, List<Object> outs,
+                        String name, String moduleName, SourceLoc loc) {
+        /** Convenience constructor for pre/post only (no module contracts). */
+        ContractedFn(Object fn, List<Object> pres, List<Object> posts,
+                     String name, SourceLoc loc) {
+            this(fn, pres, posts, List.of(), List.of(), name, null, loc);
+        }
         @Override
         public String toString() {
             return fn.toString();
@@ -665,7 +898,7 @@ public final class Interpreter {
      */
     private Object evalProtoDecl(Decl.ProtoDecl pd, Environment env) {
         var methodNames = pd.methods().stream().map(Decl.ProtoMethod::name).toList();
-        var descriptor = new ProtocolDescriptor(pd.name(), methodNames);
+        var descriptor = new ProtocolDescriptor(pd.name(), methodNames, pd.laws());
         protocols.put(pd.name(), descriptor);
         defineInScope(env, pd.name(), descriptor);
 
@@ -731,7 +964,59 @@ public final class Interpreter {
         }
 
         descriptor.registerImpl(id.forType(), bindingMap);
+
+        // Auto-verify laws if --verify-laws flag is active
+        if (autoVerifyLaws && !descriptor.laws().isEmpty()) {
+            verifyImplLaws(descriptor, id.forType(), bindingMap, 100);
+        }
+
         return Values.UNIT;
+    }
+
+    /** Verify laws for a single type implementation (used by --verify-laws). */
+    private void verifyImplLaws(ProtocolDescriptor pd, String typeName,
+                                Map<String, Object> typeImpls, int trials) {
+        for (var law : pd.laws()) {
+            boolean passed = true;
+            String failInfo = null;
+            for (int i = 0; i < trials; i++) {
+                var childEnv = globalEnv.child();
+                for (var methodName : pd.methodNames()) {
+                    Object implBinding = typeImpls.get(methodName);
+                    if (implBinding != null) childEnv.define(methodName, implBinding);
+                }
+                for (var varName : law.forallVars()) {
+                    childEnv.define(varName, generateRandomForType(typeName));
+                }
+                try {
+                    var result = eval(law.body(), childEnv);
+                    if (!Values.isTruthy(result)) {
+                        passed = false;
+                        var bindings = new StringBuilder();
+                        for (var varName : law.forallVars()) {
+                            if (!bindings.isEmpty()) bindings.append(", ");
+                            bindings.append(varName).append("=")
+                                .append(Values.toIrijString(childEnv.lookup(varName)));
+                        }
+                        failInfo = "with " + bindings;
+                        break;
+                    }
+                } catch (IrijRuntimeError e) {
+                    passed = false;
+                    failInfo = e.getMessage();
+                    break;
+                }
+            }
+            var desc = pd.name() + "/" + typeName + ": " + law.name();
+            if (passed) {
+                out.println("  PASS  " + desc + " (" + trials + " trials)");
+            } else {
+                out.println("  FAIL  " + desc + " — " + failInfo);
+                throw new IrijRuntimeError(
+                    "Law '" + law.name() + "' failed for " + pd.name() + "/" + typeName
+                        + " — " + failInfo, null);
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1124,7 +1409,7 @@ public final class Interpreter {
             // ── Application ─────────────────────────────────────────────
             case Expr.App app -> evalApp(app, env);
             case Expr.Lambda lam ->
-                new Lambda(lam.params(), lam.body(), env);
+                new Lambda(lam.params(), lam.restParam(), lam.body(), env, null);
 
             // ── Pipeline & Composition ──────────────────────────────────
             case Expr.Pipe p -> evalPipe(p, env);
@@ -1404,16 +1689,23 @@ public final class Interpreter {
     Object apply(Object fn, List<Object> args, SourceLoc loc) {
         return switch (fn) {
             case Lambda lam -> {
-                // Check arity for partial application
-                if (args.size() < lam.arity()) {
+                // Check arity for partial application (variadic never partial-applies)
+                if (args.size() < lam.arity() && !lam.isVariadic()) {
                     yield new PartialApp(lam, List.copyOf(args));
                 }
                 var callEnv = lam.closure().child();
                 // Bind params via pattern matching
-                for (int i = 0; i < lam.params().size(); i++) {
+                for (int i = 0; i < lam.params().size() && i < args.size(); i++) {
                     if (!matchPattern(lam.params().get(i), args.get(i), callEnv)) {
                         throw new IrijRuntimeError("Pattern match failed in function call", loc);
                     }
+                }
+                // Bind rest param if present
+                if (lam.restParam() != null) {
+                    var restArgs = args.size() > lam.params().size()
+                        ? args.subList(lam.params().size(), args.size())
+                        : List.<Object>of();
+                    callEnv.define(lam.restParam(), new IrijVector(restArgs));
                 }
                 yield eval(lam.body(), callEnv);
             }
@@ -1443,6 +1735,13 @@ public final class Interpreter {
                         throw new IrijRuntimeError("Pattern match failed in function call", loc);
                     }
                 }
+                // Bind rest param if present
+                if (imf.restParam() != null) {
+                    var restArgs = args.size() > imf.params().size()
+                        ? args.subList(imf.params().size(), args.size())
+                        : List.<Object>of();
+                    callEnv.define(imf.restParam(), new IrijVector(restArgs));
+                }
                 // Execute body — returns last expression/match/if value
                 yield execStmtListReturn(imf.body(), callEnv);
             }
@@ -1469,7 +1768,7 @@ public final class Interpreter {
             }
             case ContractedFn cf -> {
                 // Partial application: defer contracts until all args are provided
-                if (cf.fn() instanceof Lambda lam && args.size() < lam.arity()) {
+                if (cf.fn() instanceof Lambda lam && args.size() < lam.arity() && !lam.isVariadic()) {
                     yield new PartialApp(cf, List.copyOf(args));
                 }
                 // Check pre-conditions (caller's responsibility)
@@ -1481,6 +1780,16 @@ public final class Interpreter {
                                 + "' (caller's fault)", cf.loc());
                     }
                 }
+                // Check in-contracts (caller's responsibility, module-boundary blame)
+                for (var inC : cf.ins()) {
+                    var check = apply(inC, args, cf.loc());
+                    if (!Values.isTruthy(check)) {
+                        String blame = cf.moduleName() != null
+                            ? "caller violated " + cf.name() + "'s input contract (module " + cf.moduleName() + ")"
+                            : "Input contract violated in '" + cf.name() + "' (caller's fault)";
+                        throw new IrijRuntimeError(blame, cf.loc());
+                    }
+                }
                 // Execute the actual function
                 var result = apply(cf.fn(), args, loc);
                 // Check post-conditions (implementation's responsibility)
@@ -1490,6 +1799,16 @@ public final class Interpreter {
                         throw new IrijRuntimeError(
                             "Post-condition violated in '" + cf.name()
                                 + "' (implementation's fault)", cf.loc());
+                    }
+                }
+                // Check out-contracts (implementation's responsibility, module-boundary blame)
+                for (var outC : cf.outs()) {
+                    var check = apply(outC, List.of(result), cf.loc());
+                    if (!Values.isTruthy(check)) {
+                        String blame = cf.moduleName() != null
+                            ? cf.name() + " violated its output contract (module " + cf.moduleName() + ")"
+                            : "Output contract violated in '" + cf.name() + "' (implementation's fault)";
+                        throw new IrijRuntimeError(blame, cf.loc());
                     }
                 }
                 yield result;

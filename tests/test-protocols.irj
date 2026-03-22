@@ -1,0 +1,84 @@
+use std.test :open
+
+;; ── Protocol declaration & dispatch ────────────────────
+
+proto Show a
+  show :: a -> Str
+
+impl Show for Int
+  show := (n -> "Int:" ++ to-str n)
+
+impl Show for Str
+  show := (s -> "Str:" ++ s)
+
+impl Show for Bool
+  show := (b -> if b "Bool:true" else "Bool:false")
+
+r1 := test "dispatch on Int" (-> assert-eq "Int:42" (show 42))
+r2 := test "dispatch on Str" (-> assert-eq "Str:hello" (show "hello"))
+r3 := test "dispatch on Bool" (-> assert-eq "Bool:true" (show true))
+
+;; ── Value method (no args) ─────────────────────────────
+
+proto Monoid a
+  empty :: a
+  append :: a -> a -> a
+
+impl Monoid for Int
+  empty := 0
+  append := (+)
+
+impl Monoid for Str
+  empty := ""
+  append := (++)
+
+r4 := test "value method Int" (-> assert-eq 0 (empty 0))
+r5 := test "value method Str" (-> assert-eq "" (empty ""))
+r6 := test "binary method Int" (-> assert-eq 30 (append 10 20))
+r7 := test "binary method Str" (-> assert-eq "ab" (append "a" "b"))
+
+;; ── Operator sections as impls ─────────────────────────
+
+proto Combine a
+  combine :: a -> a -> a
+
+impl Combine for Int
+  combine := (*)
+
+impl Combine for Vector
+  combine := (++)
+
+r8 := test "impl with (*)" (-> assert-eq 21 (combine 3 7))
+r9 := test "impl with (++) on Vector" (-> assert-eq #[1 2 3 4] (combine #[1 2] #[3 4]))
+
+;; ── Custom data type impls ─────────────────────────────
+
+type Point
+  Point Int Int
+
+proto Describable a
+  describe :: a -> Str
+
+fn fmt-pt
+  (Point x y) => to-str x ++ "," ++ to-str y
+
+impl Describable for Point
+  describe := fmt-pt
+
+r10 := test "impl for custom type" (-> assert-eq "3,4" (describe (Point 3 4)))
+
+;; ── Multiple impls for same proto ──────────────────────
+
+proto Sizeable a
+  size :: a -> Int
+
+impl Sizeable for Str
+  size := length
+
+impl Sizeable for Vector
+  size := length
+
+r11 := test "same proto multiple types Str" (-> assert-eq 5 (size "hello"))
+r12 := test "same proto multiple types Vec" (-> assert-eq 3 (size #[1 2 3]))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12]
