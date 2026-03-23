@@ -1,226 +1,285 @@
-;; walkthrough.irj — Interactive tour of Irij (post-Phase 3)
+;; walkthrough.irj — Interactive tour of Irij features (Phase 3+)
 ;;
-;; Load sections one-by-one in an nREPL session to explore features.
-;; Each section is self-contained — eval from ";; ==" to the next ";; ==".
+;; Each section is self-contained for nREPL eval.
+;; Run the whole file: irij examples/walkthrough.irj
 
-;; ══════════════════════════════════════════════════════════════════════
-;; PART 1: Algebraic Effects (Phase 3a)
-;; ══════════════════════════════════════════════════════════════════════
+;; ═══════════════════════════════════════════════════════════════
+;; 1. Algebraic Effects (Phase 3a)
+;; ═══════════════════════════════════════════════════════════════
 
-;; Declare an effect — a set of operations
-effect Greeting
+effect Greet
   greet :: Str -> Str
 
-;; A handler implements the operations
-;; `resume` returns a value to the caller of the effect op
-handler polite :: Greeting
+;; A handler implements effect ops; `resume` returns a value to the caller
+handler cheerful :: Greet
   greet name => resume ("Hello, " ++ name ++ "!")
 
-handler pirate :: Greeting
-  greet name => resume ("Arrr, " ++ name ++ "!")
+;; Abort: handler returns without calling resume
+effect Fail
+  fail :: Str -> ()
 
-;; Same code, different behavior depending on handler
-with polite
-  println (greet "World")
+handler catch-fail :: Fail
+  fail msg => "FAILED: " ++ msg
 
-with pirate
-  println (greet "World")
+fn effects-demo
+  _ =>
+    with cheerful
+      greet "world"
 
-;; ══════════════════════════════════════════════════════════════════════
-;; PART 2: Handler State & Composition (Phase 3b)
-;; ══════════════════════════════════════════════════════════════════════
+println (effects-demo ())           ;; Hello, world!
 
-effect Logger
-  log :: Str -> ()
-  get-logs :: () -> Str
+fn abort-demo
+  _ =>
+    with catch-fail
+      fail "something broke"
+      "unreachable"
 
-handler buffered-logger :: Logger
-  buf :! ""
-  log msg =>
-    buf <- buf ++ msg ++ "\n"
+println (abort-demo ())             ;; FAILED: something broke
+
+;; ═══════════════════════════════════════════════════════════════
+;; 2. Handler Features (Phase 3b)
+;; ═══════════════════════════════════════════════════════════════
+
+;; Handler-local mutable state
+effect Tally
+  tick :: () -> ()
+  total :: () -> Int
+
+handler tally :: Tally
+  state :! 0
+  tick () =>
+    state <- state + 1
     resume ()
-  get-logs () => resume buf
+  total () => resume state
 
-with buffered-logger
-  log "step 1"
-  log "step 2"
-  log "step 3"
-  println (get-logs ())
+fn tally-demo
+  _ =>
+    with tally
+      tick ()
+      tick ()
+      tick ()
+      total ()
 
-;; Dot-access: read handler state after the block
-println ("buffer after: " ++ buffered-logger.buf)
+println ("tally = " ++ to-str (tally-demo ()))    ;; 3
 
-;; Handler composition with >>
-effect Config
-  get-config :: () -> Str
+;; Handler composition (>>)
+handler greeter :: Greet
+  greet name => resume ("Hi, " ++ name ++ "!")
 
-handler my-config :: Config
-  get-config () => resume "production"
+handler counter :: Tally
+  state :! 0
+  tick () =>
+    state <- state + 1
+    resume ()
+  total () => resume state
 
-combined := buffered-logger >> my-config
+fn composed-demo
+  _ =>
+    both := greeter >> counter
+    with both
+      msg := greet "Irij"
+      tick ()
+      tick ()
+      msg ++ " (ticks=" ++ to-str (total ()) ++ ")"
 
-with combined
-  log ("env = " ++ get-config ())
-  println (get-logs ())
+println (composed-demo ())          ;; Hi, Irij! (ticks=2)
 
-;; on-failure recovery (eval this whole block as one region in nREPL)
-effect Boom
+;; Dot-access to handler state after `with` block
+handler counter2 :: Tally
+  state :! 0
+  tick () =>
+    state <- state + 1
+    resume ()
+  total () => resume state
+
+fn dot-access-demo
+  _ =>
+    with counter2
+      tick ()
+      tick ()
+    counter2.state
+
+println ("state after = " ++ to-str (dot-access-demo ()))  ;; 2
+
+;; on-failure (must be inside fn + with)
+effect Bomb
   explode :: () -> ()
 
-handler kaboom :: Boom
-  explode () => error "KABOOM"
+handler bomb :: Bomb
+  explode () => error "kaboom"
 
-with kaboom
-  explode ()
-on-failure
-  println ("recovered: " ++ error)
+fn on-failure-demo
+  _ =>
+    with bomb
+      explode ()
+      "unreachable"
+    on-failure
+      "recovered: " ++ error
 
-;; ══════════════════════════════════════════════════════════════════════
-;; PART 3: Protocols & Implementations (Phase 4.5b)
-;; ══════════════════════════════════════════════════════════════════════
+println (on-failure-demo ())        ;; recovered: kaboom
 
-proto Show a
-  show :: a -> Str
+;; ═══════════════════════════════════════════════════════════════
+;; 3. Protocols (Phase 4.5b)
+;; ═══════════════════════════════════════════════════════════════
 
-impl Show for Int
-  show := (n -> "<" ++ to-str n ++ ">")
+proto Describable a
+  describe :: a -> Str
 
-impl Show for Bool
-  show := (b -> if b "yes" else "no")
+impl Describable for Int
+  describe := (n -> "the number " ++ to-str n)
 
-println (show 42)
-println (show true)
+impl Describable for Str
+  describe := (s -> "the string \"" ++ s ++ "\"")
 
-;; Monoid — a protocol with a value method (empty) and a binary op
-proto Monoid a
-  empty :: a
-  append :: a -> a -> a
+impl Describable for Bool
+  describe := (b -> if b "yes" else "no")
 
-impl Monoid for Int
-  empty := 0
-  append := (+)
+println (describe 42)               ;; the number 42
+println (describe "hi")             ;; the string "hi"
+println (describe true)             ;; yes
 
-impl Monoid for Str
-  empty := ""
-  append := (++)
+;; Protocol with value methods (type-hint dispatch)
+proto Neutral a
+  zero :: a
+  plus :: a -> a -> a
 
-println (append 10 20)
-println (append "hello " "world")
-println (empty 0)
+impl Neutral for Int
+  zero := 0
+  plus := (+)
 
-;; ══════════════════════════════════════════════════════════════════════
-;; PART 4: Structured Concurrency (Phase 5)
-;; ══════════════════════════════════════════════════════════════════════
+impl Neutral for Str
+  zero := ""
+  plus := (++)
 
-;; scope: fork tasks, await results
+println (plus (zero 0) 5)          ;; 5
+println (plus (zero "") "ok")      ;; ok
+
+;; ═══════════════════════════════════════════════════════════════
+;; 4. Structured Concurrency (Phase 5)
+;; ═══════════════════════════════════════════════════════════════
+
+;; scope / fork / await
 scope s
   a := s.fork (-> 10 + 20)
   b := s.fork (-> 3 * 7)
-  println ("a=" ++ to-str (await a) ++ " b=" ++ to-str (await b))
+  println ("fork: " ++ to-str (await a) ++ ", " ++ to-str (await b))
 
-;; par: parallel combinator
+;; par combinator — run thunks concurrently, combine results
 sum := par (+) (-> sleep 10; 100) (-> sleep 10; 200)
-println ("par sum = " ++ to-str sum)
+println ("par sum = " ++ to-str sum)              ;; 300
 
-;; race: first-wins
+;; race — first result wins, others cancelled
 winner := race (-> sleep 200; "slow") (-> sleep 10; "fast")
-println ("race winner = " ++ winner)
+println ("race winner = " ++ winner)              ;; fast
 
-;; timeout
+;; timeout — deadline combinator
 ok := timeout 1000 (-> sleep 10; "done")
-println ("timeout = " ++ ok)
+println ("timeout ok = " ++ ok)                   ;; done
 
-result := try (-> timeout 10 (-> sleep 2000; "never"))
-println ("timeout expired = " ++ to-str result)
+expired := try (-> timeout 10 (-> sleep 2000; "never"))
+println ("timeout expired = " ++ to-str expired)
 
-;; ══════════════════════════════════════════════════════════════════════
-;; PART 5: Pre/Post Contracts (Phase 6a)
-;; ══════════════════════════════════════════════════════════════════════
+;; ═══════════════════════════════════════════════════════════════
+;; 5. Pre/Post Contracts (Phase 6a)
+;; ═══════════════════════════════════════════════════════════════
 
-fn safe-sqrt
-  pre (x -> x >= 0)
-  post (r -> r >= 0)
-  (x -> x ** 0.5)
+fn positive-double
+  pre (x -> x > 0)
+  post (r -> r > 0)
+  (x -> x * 2)
 
-println (safe-sqrt 9)
+println (positive-double 5)        ;; 10
 
-;; Violation — caught with try
-r := try (-> safe-sqrt (0 - 1))
-match r
-  (Ok v)    => println v
-  (Err msg) => println ("caught: " ++ msg)
-
-;; Partial application defers checks
+;; Partial application defers all checks until full args arrive
 fn add-pos
   pre (a b -> a > 0 && b > 0)
   (a b -> a + b)
 
-add5 := add-pos 5
-println (add5 3)
+add5 := add-pos 5                  ;; no check yet
+println (add5 3)                   ;; 8
 
-;; ══════════════════════════════════════════════════════════════════════
-;; PART 6: Module-Boundary Contracts — in/out (Phase 6b)
-;; ══════════════════════════════════════════════════════════════════════
+;; Catching violations with try
+r1 := try (-> positive-double (0 - 1))
+match r1
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("pre violated: " ++ msg)
 
-;; `in`  = caller's fault    (checked on entry)
-;; `out` = impl's fault      (checked on exit)
+r2 := try (-> add5 (0 - 2))
+match r2
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("deferred pre: " ++ msg)
+
+;; ═══════════════════════════════════════════════════════════════
+;; 6. Module Boundary Contracts (Phase 6b)
+;; ═══════════════════════════════════════════════════════════════
+
+;; `in`  — caller's fault   (checked on entry)
+;; `out` — impl's fault     (checked on exit)
 
 fn safe-div
-  in (a b -> b /= 0)
-  out (r -> true)
+  in (a b -> b > 0)
+  out (r -> r >= 0)
   (a b -> a / b)
 
-println (safe-div 10 2)
+println (safe-div 10 2)            ;; 5.0
 
-r2 := try (-> safe-div 10 0)
-match r2
-  (Ok v)    => println v
-  (Err msg) => println ("caught: " ++ msg)
+r3 := try (-> safe-div 10 0)
+match r3
+  (Ok v)    => println ("ok: " ++ to-str v)
+  (Err msg) => println ("in violated: " ++ msg)
 
 ;; All four contract types together
-fn bounded
+fn guarded
   pre (x -> x > 0)
-  in (x -> x < 1000)
+  in  (x -> x < 100)
   post (r -> r > 0)
-  out (r -> r < 2000)
+  out  (r -> r < 200)
   (x -> x * 2)
 
-println (bounded 50)
+println (guarded 50)               ;; 100
 
-;; ══════════════════════════════════════════════════════════════════════
-;; PART 7: Laws & Verification (Phase 6c)
-;; ══════════════════════════════════════════════════════════════════════
+;; ═══════════════════════════════════════════════════════════════
+;; 7. Law Verification (Phase 6c)
+;; ═══════════════════════════════════════════════════════════════
 
-;; Protocol laws — algebraic properties that impls must satisfy
-proto Semigroup a
-  sappend :: a -> a -> a
-  law associative = forall x y z. sappend (sappend x y) z == sappend x (sappend y z)
+;; Protocol laws — algebraic properties impls must satisfy
+proto Additive a
+  nil :: a
+  add :: a -> a -> a
+  law left-id  = forall x. add nil x == x
+  law right-id = forall x. add x nil == x
+  law assoc    = forall x y z. add (add x y) z == add x (add y z)
 
-impl Semigroup for Int
-  sappend := (+)
+impl Additive for Int
+  nil := 0
+  add := (+)
 
-impl Semigroup for Str
-  sappend := (++)
+impl Additive for Str
+  nil := ""
+  add := (++)
 
-;; QuickCheck-style verification — random values, 100 trials
-println "\nVerifying Semigroup laws:"
-verify-laws Semigroup
+println ";; Verifying Additive laws (should pass):"
+verify-laws Additive
 
-;; Fn-level laws
-fn double
-  law correct = forall x. double x == x + x
-  (x -> x * 2)
+;; Fn-level law
+fn triple
+  law triples = forall x. triple x == x + x + x
+  (x -> x * 3)
 
-println "\nVerifying fn-level law:"
-verify-laws "double"
+println ""
+println ";; Verifying fn-level law (should pass):"
+verify-laws "triple"
 
-;; Detecting a broken law (string concat is NOT commutative)
+;; Detecting a broken law — string concat is NOT commutative
 proto BadComm a
-  bop :: a -> a -> a
-  law commutative = forall x y. bop x y == bop y x
+  unit :: a
+  op :: a -> a -> a
+  law commutative = forall x y. op x y == op y x
 
 impl BadComm for Str
-  bop := (++)
+  unit := ""
+  op := (++)
 
-println "\nDetecting broken law:"
+println ""
+println ";; Detecting broken law (string concat not commutative):"
 verify-laws BadComm

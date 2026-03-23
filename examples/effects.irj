@@ -1,71 +1,77 @@
-;; effects.irj — Algebraic Effects & Handlers (Phase 3a-3b)
-;;
-;; Irij's effect system lets you define side-effects as values,
-;; then interpret them with handlers. Handlers can resume, abort,
-;; or transform the computation.
+;; ── Algebraic Effects & Handlers ──────────────────────────
+;; Irij's effect system lets you declare side effects as
+;; interfaces, then supply concrete behavior via handlers.
+;; Handlers can resume, abort, carry mutable state, and compose.
 
-;; ── 1. Declaring Effects ──────────────────────────────────────────────
-;;
-;; An effect declares operations (like an interface).
+;; ════════════════════════════════════════════════════════════
+;; 1. Effect Declaration
+;; ════════════════════════════════════════════════════════════
+;; An effect declares a set of operations with type signatures.
+;; Operations become callable functions inside `with` blocks.
 
-effect Console
-  print :: Str -> ()
-  read-line :: () -> Str
+effect Greet
+  greet :: Str -> Str
 
-effect Log
+effect Logger
   log :: Str -> ()
 
-;; ── 2. Basic Handler + resume ─────────────────────────────────────────
-;;
-;; A handler implements effect operations.
-;; `resume` continues the body where the effect was performed.
+;; ════════════════════════════════════════════════════════════
+;; 2. Handler Declaration & resume
+;; ════════════════════════════════════════════════════════════
+;; A handler implements an effect's ops. Use `resume value`
+;; to return a value back to the call site in the body.
 
-handler console-impl :: Console
-  print msg =>
-    println msg
+handler friendly :: Greet
+  greet name => resume ("Hello, " ++ name ++ "!")
+
+handler console-log :: Logger
+  log msg =>
+    println ("[LOG] " ++ msg)
     resume ()
-  read-line () => resume "world"
 
-with console-impl
-  print "Hello from effect!"
-  name := read-line ()
-  print ("Got: " ++ name)
+;; ════════════════════════════════════════════════════════════
+;; 3. Basic `with handler` usage
+;; ════════════════════════════════════════════════════════════
+;; The `with` block runs code where effect ops are available.
+;; The block's last expression is the overall result.
 
-;; ── 3. Resume Sends Values Back ───────────────────────────────────────
-;;
-;; The value passed to `resume` becomes the result of the effect call
-;; in the body.
+fn basic-example
+  _ =>
+    with friendly
+      greeting := greet "World"
+      println greeting
+      greeting
 
-handler mock-input :: Console
-  print msg =>
-    println ~ "[mock] " ++ msg
-    resume ()
-  read-line () => resume "Alice"
+result := basic-example ()
+println ("Basic: " ++ result)
 
-with mock-input
-  name := read-line ()
-  print ("Hello, " ++ name ++ "!")
+;; ════════════════════════════════════════════════════════════
+;; 4. Abort (no resume)
+;; ════════════════════════════════════════════════════════════
+;; If a handler does NOT call `resume`, the body is abandoned
+;; and the handler's return value becomes the block's result.
 
-;; ── 4. Abort (No Resume) ─────────────────────────────────────────────
-;;
-;; If the handler doesn't call `resume`, the body is abandoned.
-;; The handler arm's return value becomes the `with` block result.
+effect Fail
+  fail :: Str -> ()
 
-effect Exn
-  raise :: Str -> ()
+handler catch-fail :: Fail
+  fail msg => "CAUGHT: " ++ msg
 
-handler catch-all :: Exn
-  raise msg =>
-    println ("caught: " ++ msg)
+fn abort-example
+  _ =>
+    with catch-fail
+      fail "something went wrong"
+      ;; this line never executes
+      "unreachable"
 
-with catch-all
-  raise "something went wrong"
-  println "this never runs"
+println ("Abort: " ++ abort-example ())
 
-;; ── 5. Handler-Local State ────────────────────────────────────────────
-;;
-;; Handlers can have mutable local bindings (:!) that persist
-;; across effect calls. Mutate with `<-`.
+;; ════════════════════════════════════════════════════════════
+;; 5. Handler-local mutable state
+;; ════════════════════════════════════════════════════════════
+;; Handlers can hold mutable state with `state :! initial`.
+;; Mutate with `state <- newval`. State persists across
+;; multiple op calls within one `with` block.
 
 effect Counter
   bump :: () -> ()
@@ -78,74 +84,83 @@ handler counting :: Counter
     resume ()
   get-count () => resume state
 
-with counting
-  bump ()
-  bump ()
-  bump ()
-  n := get-count ()
-  println ("count = " ++ to-str n)
+fn state-example
+  _ =>
+    with counting
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      get-count ()
 
-;; ── 6. Nested Handlers ────────────────────────────────────────────────
-;;
-;; Inner handler takes precedence for the same effect.
-;; Different effects compose naturally.
+println ("State: counted to " ++ to-str (state-example ()))
 
-effect State
-  get-val :: () -> Int
+;; ════════════════════════════════════════════════════════════
+;; 6. Nested handlers
+;; ════════════════════════════════════════════════════════════
+;; Different effects can be nested — each `with` handles
+;; its own effect, and inner code can use ops from both.
 
-handler outer-log :: Log
-  log msg =>
-    println ~ "[outer] " ++ msg
-    resume ()
+handler quiet-log :: Logger
+  log msg => resume ()
 
-handler inner-log :: Log
-  log msg =>
-    println ~ "[inner] " ++ msg
-    resume ()
+fn nested-example
+  _ =>
+    with quiet-log
+      log "entering"
+      with friendly
+        msg := greet "Nested"
+        log "greeted someone"
+        msg
 
-with outer-log
-  log "from outer scope"
-  with inner-log
-    log "from inner scope"
+println ("Nested: " ++ nested-example ())
 
-;; Different effects:
-handler const-state :: State
-  get-val () => resume 42
+;; ════════════════════════════════════════════════════════════
+;; 7. Handler composition with >>
+;; ════════════════════════════════════════════════════════════
+;; The >> operator combines two handlers into one, so you
+;; can handle multiple effects in a single `with` block.
 
-with outer-log
-  with const-state
-    v := get-val ()
-    log ("state is " ++ to-str v)
+fn composition-example
+  _ =>
+    combined := quiet-log >> friendly
+    with combined
+      log "about to greet"
+      greet "Composed"
 
-;; ── 7. Handler Composition (>>) ───────────────────────────────────────
-;;
-;; Compose two handlers with >> for cleaner syntax.
+println ("Composed: " ++ composition-example ())
 
-combined := outer-log >> const-state
+;; ════════════════════════════════════════════════════════════
+;; 8. on-failure blocks
+;; ════════════════════════════════════════════════════════════
+;; `on-failure` catches errors from a `with` block.
+;; It MUST appear at the same indent level as `with`,
+;; immediately after the with-block body.
+;; The variable `error` is bound to the error message.
+;; Wrapping in a fn ensures reliable parsing.
 
-with combined
-  v := get-val ()
-  log ("composed: state = " ++ to-str v)
+effect Boom
+  explode :: () -> ()
 
-;; ── 8. on-failure ─────────────────────────────────────────────────────
-;;
-;; Catch errors from the `with` block. The variable `error`
-;; is bound to the error message in the on-failure block.
-;;
-;; NOTE: `on-failure` must be in the same parse unit as `with`.
-;; In nREPL, eval this entire block at once (select region, then eval).
+handler bomb :: Boom
+  explode () => error "kaboom!"
 
-handler fragile :: Exn
-  raise msg => error msg
+fn on-failure-example
+  _ =>
+    with bomb
+      explode ()
+      "never reached"
+    on-failure
+      "recovered from: " ++ error
 
-with fragile
-  raise "boom"
-on-failure
-  println ("recovered: " ++ error)
+println ("on-failure: " ++ on-failure-example ())
 
-;; ── 9. Handler Dot-Access (reading state from outside) ────────────────
-;;
-;; After a `with` block runs, you can read the handler's final state.
+;; ════════════════════════════════════════════════════════════
+;; 9. Handler dot-access
+;; ════════════════════════════════════════════════════════════
+;; After a `with` block finishes, you can read handler state
+;; using `handler-name.state-field` syntax.
 
 handler accumulator :: Counter
   state :! 0
@@ -154,8 +169,49 @@ handler accumulator :: Counter
     resume ()
   get-count () => resume state
 
-with accumulator
-  bump ()
-  bump ()
+fn dot-access-example
+  _ =>
+    with accumulator
+      bump ()
+      bump ()
+      bump ()
+    ;; read the handler's internal state directly
+    accumulator.state
 
-println ("final count via dot-access: " ++ to-str accumulator.state)
+println ("Dot-access: state = " ++ to-str (dot-access-example ()))
+
+;; ════════════════════════════════════════════════════════════
+;; 10. Multi-op effects
+;; ════════════════════════════════════════════════════════════
+;; An effect can declare multiple operations. The handler
+;; must implement all of them.
+
+effect Store
+  read-val :: () -> Str
+  write-val :: Str -> ()
+  history :: () -> Vec
+
+handler memo :: Store
+  current :! "empty"
+  log :! #[]
+  read-val () => resume current
+  write-val v =>
+    log <- log ++ #[v]
+    current <- v
+    resume ()
+  history () => resume log
+
+fn multi-op-example
+  _ =>
+    with memo
+      write-val "first"
+      write-val "second"
+      write-val "third"
+      val := read-val ()
+      hist := history ()
+      println ("Current: " ++ val)
+      println ("History: " ++ to-str hist)
+      hist
+
+result := multi-op-example ()
+println ("Multi-op result: " ++ to-str result)
