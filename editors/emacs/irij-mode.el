@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024  Irij Contributors
 ;; Author: Irij Contributors
-;; Version: 0.1.0
+;; Version: 0.1.1
 ;; Keywords: languages irij
 ;; URL: https://github.com/irij-lang/irij
 ;; Package-Requires: ((emacs "27.1"))
@@ -222,7 +222,7 @@ and decrease after a line that is less indented than its predecessor."
     "\\|\\b\\(?:match\\|if\\|else\\|with\\|do\\|scope\\|handler\\|effect\\|impl\\|proto\\)\\b.*$"
     ;; Arrow at end of line:  =>  or  ->
     "\\|=>[ \t]*$"
-    "\\|-[\\[>].*$"
+    "\\|:::.*$"
     "\\)")
    (string-trim-right line)))
 

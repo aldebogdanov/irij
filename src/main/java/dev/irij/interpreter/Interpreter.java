@@ -34,6 +34,44 @@ public final class Interpreter {
 
     public void setAutoVerifyLaws(boolean on) { this.autoVerifyLaws = on; }
 
+    // ── Effect row checking ─────────────────────────────────────────────
+    // Stack tracks what effects are available in the current execution context.
+    // AMBIENT_EFFECTS at top = all effects available (top-level or unannotated fn)
+    // Any other Set<String> = only those effects are available
+    private static final Set<String> AMBIENT_EFFECTS = Collections.unmodifiableSet(new HashSet<>() {
+        @Override public boolean contains(Object o) { return true; } // everything is available
+    });
+
+    static final ThreadLocal<Deque<Set<String>>> AVAILABLE_EFFECTS =
+        ThreadLocal.withInitial(() -> {
+            var d = new ArrayDeque<Set<String>>();
+            d.push(AMBIENT_EFFECTS); // top-level = all effects available
+            return d;
+        });
+
+    /** Check that required effects are available in the current context. */
+    private void checkEffectsAvailable(List<String> required, String opName, SourceLoc loc) {
+        Set<String> available = AVAILABLE_EFFECTS.get().peek();
+        for (String eff : required) {
+            if (!available.contains(eff)) {
+                throw new IrijRuntimeError(
+                    "Effect '" + eff + "' not declared: '" + opName
+                    + "' requires ::: " + eff + " in enclosing function's effect row", loc);
+            }
+        }
+    }
+
+    /** Get the effect row from a function value, or null if not annotated. */
+    private static List<String> getEffectRow(Object fn) {
+        return switch (fn) {
+            case Lambda lam -> lam.effectRow();
+            case MatchFn mf -> mf.effectRow();
+            case ImperativeFn imf -> imf.effectRow();
+            case ContractedFn cf -> getEffectRow(cf.fn());
+            default -> null;
+        };
+    }
+
     public Interpreter(PrintStream out) {
         this.out = out;
         this.globalEnv = new Environment();
@@ -48,7 +86,9 @@ public final class Interpreter {
         // ── spawn — run a thunk in a virtual thread ──────────────────
         globalEnv.define("spawn", new BuiltinFn("spawn", 1, args -> {
             var thunk = args.get(0);
+            var parentEffects = AVAILABLE_EFFECTS.get().peek();
             var thread = Thread.startVirtualThread(() -> {
+                AVAILABLE_EFFECTS.get().push(parentEffects); // propagate
                 try {
                     apply(thunk, List.of(), SourceLoc.UNKNOWN);
                 } catch (Exception e) {
@@ -102,9 +142,11 @@ public final class Interpreter {
             var thunk = args.get(1);
             var future = new java.util.concurrent.CompletableFuture<Object>();
             var parentStack = EffectSystem.STACK.get();
+            var parentEffects = AVAILABLE_EFFECTS.get().peek();
             var thread = Thread.startVirtualThread(() -> {
                 var fiberStack = EffectSystem.STACK.get();
                 fiberStack.addAll(parentStack);
+                AVAILABLE_EFFECTS.get().push(parentEffects);
                 try {
                     future.complete(apply(thunk, List.of(), SourceLoc.UNKNOWN));
                 } catch (Exception e) {
@@ -137,12 +179,14 @@ public final class Interpreter {
             var futures = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Object>>();
             var threads = new java.util.ArrayList<Thread>();
             var parentStack = EffectSystem.STACK.get();
+            var parentEffects = AVAILABLE_EFFECTS.get().peek();
 
             for (var thunk : thunks) {
                 var future = new java.util.concurrent.CompletableFuture<Object>();
                 var t = Thread.startVirtualThread(() -> {
                     var fiberStack = EffectSystem.STACK.get();
                     fiberStack.addAll(parentStack);
+                    AVAILABLE_EFFECTS.get().push(parentEffects);
                     try {
                         future.complete(apply(thunk, List.of(), SourceLoc.UNKNOWN));
                     } catch (Exception e) {
@@ -180,12 +224,14 @@ public final class Interpreter {
             var futures = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Object>>();
             var threads = new java.util.ArrayList<Thread>();
             var parentStack = EffectSystem.STACK.get();
+            var parentEffects = AVAILABLE_EFFECTS.get().peek();
 
             for (var thunk : args) {
                 var future = new java.util.concurrent.CompletableFuture<Object>();
                 var t = Thread.startVirtualThread(() -> {
                     var fiberStack = EffectSystem.STACK.get();
                     fiberStack.addAll(parentStack);
+                    AVAILABLE_EFFECTS.get().push(parentEffects);
                     try {
                         future.complete(apply(thunk, List.of(), SourceLoc.UNKNOWN));
                     } catch (Exception e) {
@@ -536,13 +582,15 @@ public final class Interpreter {
     }
 
     private Object makeFnValue(Decl.FnDecl fn, Environment env) {
+        // Unannotated fn = pure (empty effect row). Only anonymous lambdas get null (inherit context).
+        var effectRow = fn.effectRow() != null ? fn.effectRow() : List.<String>of();
         Object baseFn = switch (fn.body()) {
             case Decl.FnBody.LambdaBody lb ->
-                new Lambda(lb.params(), lb.restParam(), lb.body(), env, fn.name());
+                new Lambda(lb.params(), lb.restParam(), lb.body(), env, fn.name(), effectRow);
             case Decl.FnBody.MatchArmsBody mab ->
-                new MatchFn(fn.name(), mab.arms(), env);
+                new MatchFn(fn.name(), mab.arms(), env, effectRow);
             case Decl.FnBody.ImperativeBody ib ->
-                new ImperativeFn(fn.name(), ib.params(), ib.restParam(), ib.stmts(), env);
+                new ImperativeFn(fn.name(), ib.params(), ib.restParam(), ib.stmts(), env, effectRow);
             case Decl.FnBody.NoBody() ->
                 Values.UNIT; // type-only declaration
         };
@@ -570,16 +618,25 @@ public final class Interpreter {
     }
 
     /** A match-arm function: tries each arm against the argument. */
-    record MatchFn(String name, List<Expr.MatchArm> arms, Environment closure) {
+    record MatchFn(String name, List<Expr.MatchArm> arms, Environment closure, List<String> effectRow) {
+        /** Convenience constructor without effect row. */
+        MatchFn(String name, List<Expr.MatchArm> arms, Environment closure) {
+            this(name, arms, closure, null);
+        }
         @Override
         public String toString() { return "<fn " + name + ">"; }
     }
 
     /** An imperative-block function: binds params then executes statements. */
-    record ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body, Environment closure) {
-        /** Convenience constructor without rest param. */
+    record ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body,
+                        Environment closure, List<String> effectRow) {
+        /** Convenience constructor without rest param or effects. */
         ImperativeFn(String name, List<Pattern> params, List<Stmt> body, Environment closure) {
-            this(name, params, null, body, closure);
+            this(name, params, null, body, closure, null);
+        }
+        /** Convenience constructor without effects. */
+        ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body, Environment closure) {
+            this(name, params, restParam, body, closure, null);
         }
 
         /** Whether this function accepts extra args via ...rest. */
@@ -759,15 +816,17 @@ public final class Interpreter {
         var fibers = java.util.Collections.synchronizedList(
             new java.util.ArrayList<Fiber>());
         var parentStack = EffectSystem.STACK.get();
+        var parentEffects = AVAILABLE_EFFECTS.get().peek();
 
         // Create the fork function that captures this scope's fiber list
         var forkFn = new BuiltinFn("fork", 1, args -> {
             var thunk = args.get(0);
             var future = new java.util.concurrent.CompletableFuture<Object>();
             var thread = Thread.startVirtualThread(() -> {
-                // Inherit parent's effect handler stack
+                // Inherit parent's effect handler stack and available effects
                 var fiberStack = EffectSystem.STACK.get();
                 fiberStack.addAll(parentStack);
+                AVAILABLE_EFFECTS.get().push(parentEffects);
                 try {
                     future.complete(apply(thunk, List.of(), s.loc()));
                 } catch (Exception e) {
@@ -1033,11 +1092,12 @@ public final class Interpreter {
         defineInScope(env, ed.name(), descriptor);
 
         // Register each effect op as a function in the environment
+        // Tagged with their effect name for effect row checking
         for (var op : ed.ops()) {
             String effectName = ed.name();
             String opName = op.name();
             // Arity -1 = variadic (type signatures not checked yet)
-            defineInScope(env, opName, new BuiltinFn(opName, -1, args ->
+            defineInScope(env, opName, new BuiltinFn(opName, -1, List.of(effectName), args ->
                     EffectSystem.fireOp(effectName, opName, args)));
         }
 
@@ -1063,7 +1123,9 @@ public final class Interpreter {
             clauseMap.put(clause.opName(), clause);
         }
 
-        var handler = new HandlerValue(hd.name(), hd.effectName(), clauseMap, closureEnv);
+        // Unannotated handler = pure (empty effect row, same as functions)
+        var requiredEffects = hd.requiredEffects() != null ? hd.requiredEffects() : List.<String>of();
+        var handler = new HandlerValue(hd.name(), hd.effectName(), requiredEffects, clauseMap, closureEnv);
         defineInScope(env, hd.name(), handler);
         return handler;
     }
@@ -1156,14 +1218,23 @@ public final class Interpreter {
         var opChannel = new java.util.concurrent.SynchronousQueue<EffectSystem.EffectMessage>();
         var ctx = new EffectSystem.HandlerContext(handler.effectName(), handler, opChannel);
 
-        // Snapshot the current thread's handler stack for the body thread
+        // Snapshot the current thread's handler stack and available effects for the body thread
         var parentStack = EffectSystem.STACK.get();
+        var parentEffects = AVAILABLE_EFFECTS.get().peek();
 
         Thread bodyThread = Thread.startVirtualThread(() -> {
             // Copy parent handler stack and push our context
             var bodyStack = EffectSystem.STACK.get();
             bodyStack.addAll(parentStack);
             bodyStack.push(ctx);
+            // Propagate available effects and ADD the handler's effect
+            if (parentEffects == AMBIENT_EFFECTS) {
+                AVAILABLE_EFFECTS.get().push(AMBIENT_EFFECTS);
+            } else {
+                var expanded = new HashSet<>(parentEffects);
+                expanded.add(handler.effectName());
+                AVAILABLE_EFFECTS.get().push(expanded);
+            }
             try {
                 Object result = execStmtListReturn(w.body(), env.child());
                 opChannel.put(new EffectSystem.EffectMessage.Done(result));
@@ -1217,11 +1288,20 @@ public final class Interpreter {
         var opChannel = new java.util.concurrent.SynchronousQueue<EffectSystem.EffectMessage>();
         var ctx = new EffectSystem.HandlerContext(handler.effectName(), handler, opChannel);
         var parentStack = EffectSystem.STACK.get();
+        var parentEffects = AVAILABLE_EFFECTS.get().peek();
 
         Thread bodyThread = Thread.startVirtualThread(() -> {
             var bodyStack = EffectSystem.STACK.get();
             bodyStack.addAll(parentStack);
             bodyStack.push(ctx);
+            // Propagate available effects and ADD the handler's effect
+            if (parentEffects == AMBIENT_EFFECTS) {
+                AVAILABLE_EFFECTS.get().push(AMBIENT_EFFECTS);
+            } else {
+                var expanded = new HashSet<>(parentEffects);
+                expanded.add(handler.effectName());
+                AVAILABLE_EFFECTS.get().push(expanded);
+            }
             try {
                 // Recurse: install next handler, eventually runs the body
                 Object result = execComposedWith(handlers, index + 1, body, onFailure,
@@ -1312,8 +1392,16 @@ public final class Interpreter {
                     });
                     armEnv.define("resume", resumeFn);
 
-                    // Evaluate handler arm body
-                    Object armResult = eval(clause.body(), armEnv);
+                    // Evaluate handler arm body with the handler's declared effects.
+                    // Handler clauses must declare what effects they need, e.g.:
+                    //   handler console-log :: Logger ::: Console
+                    AVAILABLE_EFFECTS.get().push(new HashSet<>(handler.requiredEffects()));
+                    Object armResult;
+                    try {
+                        armResult = eval(clause.body(), armEnv);
+                    } finally {
+                        AVAILABLE_EFFECTS.get().pop();
+                    }
 
                     if (resumed.get()) {
                         // resume was called — recursive runHandlerLoop already consumed
@@ -1707,25 +1795,47 @@ public final class Interpreter {
                         : List.<Object>of();
                     callEnv.define(lam.restParam(), new IrijVector(restArgs));
                 }
-                yield eval(lam.body(), callEnv);
+                // Push effect row context (null = unchecked/unannotated)
+                var effRow = lam.effectRow();
+                if (effRow != null) {
+                    AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
+                }
+                try {
+                    yield eval(lam.body(), callEnv);
+                } finally {
+                    if (effRow != null) {
+                        AVAILABLE_EFFECTS.get().pop();
+                    }
+                }
             }
             case MatchFn mf -> {
                 // Match-arm function: first arg is the scrutinee
                 if (args.isEmpty()) {
                     throw new IrijRuntimeError("Match function requires at least one argument", loc);
                 }
-                var scrutinee = args.get(0);
-                for (var arm : mf.arms()) {
-                    var matchEnv = mf.closure().child();
-                    if (matchPattern(arm.pattern(), scrutinee, matchEnv)) {
-                        if (arm.guard() != null) {
-                            var guardVal = eval(arm.guard(), matchEnv);
-                            if (!Values.isTruthy(guardVal)) continue;
+                // Push effect row context
+                var effRow = mf.effectRow();
+                if (effRow != null) {
+                    AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
+                }
+                try {
+                    var scrutinee = args.get(0);
+                    for (var arm : mf.arms()) {
+                        var matchEnv = mf.closure().child();
+                        if (matchPattern(arm.pattern(), scrutinee, matchEnv)) {
+                            if (arm.guard() != null) {
+                                var guardVal = eval(arm.guard(), matchEnv);
+                                if (!Values.isTruthy(guardVal)) continue;
+                            }
+                            yield eval(arm.body(), matchEnv);
                         }
-                        yield eval(arm.body(), matchEnv);
+                    }
+                    throw new IrijRuntimeError("Non-exhaustive match in function " + mf.name(), loc);
+                } finally {
+                    if (effRow != null) {
+                        AVAILABLE_EFFECTS.get().pop();
                     }
                 }
-                throw new IrijRuntimeError("Non-exhaustive match in function " + mf.name(), loc);
             }
             case ImperativeFn imf -> {
                 var callEnv = imf.closure().child();
@@ -1742,12 +1852,27 @@ public final class Interpreter {
                         : List.<Object>of();
                     callEnv.define(imf.restParam(), new IrijVector(restArgs));
                 }
-                // Execute body — returns last expression/match/if value
-                yield execStmtListReturn(imf.body(), callEnv);
+                // Push effect row context
+                var effRow = imf.effectRow();
+                if (effRow != null) {
+                    AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
+                }
+                try {
+                    // Execute body — returns last expression/match/if value
+                    yield execStmtListReturn(imf.body(), callEnv);
+                } finally {
+                    if (effRow != null) {
+                        AVAILABLE_EFFECTS.get().pop();
+                    }
+                }
             }
             case BuiltinFn bf -> {
                 if (args.size() < bf.arity()) {
                     yield new PartialApp(bf, List.copyOf(args));
+                }
+                // Check effect requirements before executing
+                if (!bf.requiredEffects().isEmpty()) {
+                    checkEffectsAvailable(bf.requiredEffects(), bf.name(), loc);
                 }
                 yield bf.apply(args);
             }

@@ -87,7 +87,7 @@ record ParseResult(
 
 **Keywords (30):** `fn`, `do`, `if`, `else`, `match`, `type`, `newtype`, `mod`, `use`, `pub`, `with`, `scope`, `effect`, `role`, `cap`, `handler`, `impl`, `proto`, `pre`, `post`, `law`, `contract`, `select`, `enclave`, `forall`, `par-each`, `on-failure`, `in`, `out`, `for`, `proof`
 
-**Digraph operators (35+):** `:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `==`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `**`, `++`, `..`, `..<`, `...`, `/+`, `/*`, `/#`, `/&`, `/|`, `/?`, `/!`, `/^`, `/$`, `@`, `@i`
+**Digraph operators (35+):** `:=`, `:!`, `<-`, `->`, `=>`, `::`, `:::`, `|>`, `<|`, `>>`, `<<`, `~>`, `<~`, `~*>`, `~/`, `==`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `**`, `++`, `..`, `..<`, `...`, `/+`, `/*`, `/#`, `/&`, `/|`, `/?`, `/!`, `/^`, `/$`, `@`, `@i`
 
 **Literals:** `INT_LIT`, `FLOAT_LIT`, `HEX_LIT`, `RATIONAL`, `STRING` (with `${}` interpolation), `KEYWORD` (`:ok`, `:error`), `ROLE_NAME` (`$BUYER`), `TYPE_NAME` (`Int`), `IDENT` (kebab-case)
 
@@ -107,7 +107,7 @@ apply-to (`~`) → choreography → pipeline → composition → or → and → 
 
 **Patterns:** constructors, keywords, variables, wildcards, literals, unit `()`, grouped `(pat)`, vectors `#[x ...rest]`, tuples `#(a b)`, destructure `{name= n}`, spread `...rest`
 
-**Types:** type application (`Result a e`), function arrows (`A -> B`), effect arrows (`A -[E1 E2]> B`), located types (`T @$ROLE`), unit `()`, collections
+**Types:** type application (`Result a e`), function arrows (`A -> B`), effect declarations (`::: E1 E2`), located types (`T @$ROLE`), unit `()`, collections
 
 ---
 

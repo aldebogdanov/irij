@@ -77,7 +77,7 @@ class ParserSmokeTest {
 
         @Test void imperativeBlockNoParams() {
             assertParses("""
-                fn main :: () -[IO]> ()
+                fn main :: () () ::: IO
                   =>
                   config := read-config ()
                   run-server config
@@ -86,7 +86,7 @@ class ParserSmokeTest {
 
         @Test void imperativeBlockWithParams() {
             assertParses("""
-                fn greet :: Str -[Console]> ()
+                fn greet :: Str () ::: Console
                   => name
                   print "Hello"
                 """);
@@ -236,7 +236,7 @@ class ParserSmokeTest {
 
         @Test void effectfulFunction() {
             assertParses("""
-                fn greet :: Str -[Console]> ()
+                fn greet :: Str () ::: Console
                   => name
                   print "Hello"
                 """);
@@ -244,7 +244,7 @@ class ParserSmokeTest {
 
         @Test void multipleEffects() {
             assertParses("""
-                fn sync-data :: () -[Http FileIO Log]> Result Data Error
+                fn sync-data :: () (Result Data Error) ::: Http FileIO Log
                 """);
         }
     }
@@ -277,7 +277,7 @@ class ParserSmokeTest {
     @Nested class Concurrency {
         @Test void scopeWithForks() {
             assertParses("""
-                fn fetch-dashboard :: Id -[Http Async]> Dashboard
+                fn fetch-dashboard :: Id Dashboard ::: Http Async
                   => id
                   scope s
                     user-f := s.fork (-> fetch-user id)
@@ -298,7 +298,7 @@ class ParserSmokeTest {
 
         @Test void choreographicSend() {
             assertParses("""
-                fn buy-protocol :: Str -[Choreo]> Result
+                fn buy-protocol :: Str Result ::: Choreo
                   => title
                   title ~> $SELLER
                   price := $SELLER.lookup title
@@ -450,7 +450,7 @@ class ParserSmokeTest {
 
     @Nested class LexerTests {
         @Test void tokenizesDigraphs() {
-            var tokens = IrijParseDriver.tokenize(":= :! <- -> => :: |> <| >> << -[ ]> ~> <~ ~*> ~/ == /= && ||");
+            var tokens = IrijParseDriver.tokenize(":= :! <- -> => :: ::: |> <| >> << ~> <~ ~*> ~/ == /= && ||");
             // Just verify no errors — tokens are produced
             assertTrue(tokens.size() > 1);
         }
@@ -784,6 +784,107 @@ class ParserSmokeTest {
                   => level ...parts
                   join " " parts
                 """);
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Effect Row Annotations
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class EffectRowAnnotations {
+
+        @Test void effectRowShorthandSingle() {
+            assertParses("""
+                fn greet ::: Console
+                  (name -> println name)
+                """);
+        }
+
+        @Test void effectRowShorthandMultiple() {
+            assertParses("""
+                fn sync ::: Console FileIO Async
+                  => x
+                  println x
+                """);
+        }
+
+        @Test void effectRowEmptyIsParseError() {
+            // Empty effect row ::: with no names is prohibited; unannotated = pure
+            assertParseError("""
+                fn add :::
+                  (a b -> a + b)
+                """);
+        }
+
+        @Test void handlerWithEffectAnnotation() {
+            assertParses("""
+                effect Logger
+                  log :: Str -> ()
+                handler console-log :: Logger ::: Console
+                  log msg => resume ()
+                """);
+        }
+
+        @Test void handlerWithMultipleEffects() {
+            assertParses("""
+                effect Logger
+                  log :: Str -> ()
+                handler fancy-log :: Logger ::: Console FileIO
+                  log msg => resume ()
+                """);
+        }
+
+        @Test void handlerWithEmptyEffectRowIsParseError() {
+            assertParseError("""
+                effect Logger
+                  log :: Str -> ()
+                handler bad :: Logger :::
+                  log msg => resume ()
+                """);
+        }
+
+        @Test void effectRowWithTypeAnnotation() {
+            assertParses("""
+                fn greet :: Str () ::: Console
+                  (name -> println name)
+                """);
+        }
+
+        @Test void effectRowWithFullTypeSignature() {
+            assertParses("""
+                fn fetch :: Id Result ::: Http Async
+                  (id -> id)
+                """);
+        }
+
+        @Test void effectRowOnImperativeFn() {
+            assertParses("""
+                fn do-stuff ::: Console
+                  => x
+                  println x
+                """);
+        }
+
+        @Test void effectRowOnMatchFn() {
+            assertParses("""
+                fn describe ::: Console
+                  0 => println "zero"
+                  n => println n
+                """);
+        }
+
+        @Test void effectRowWithContracts() {
+            assertParses("""
+                fn safe-print ::: Console
+                  pre (x -> x /= "")
+                  post (r -> true)
+                  (x -> println x)
+                """);
+        }
+
+        @Test void effectRowNoBody() {
+            assertParses("fn abstract-fn ::: IO\n");
         }
     }
 }

@@ -220,14 +220,19 @@ public final class Values {
 
     // ── Lambda (closure) ────────────────────────────────────────────────
 
-    public record Lambda(List<Pattern> params, String restParam, Expr body, Environment closure, String name) {
-        /** Anonymous lambda without rest param. */
+    public record Lambda(List<Pattern> params, String restParam, Expr body,
+                         Environment closure, String name, List<String> effectRow) {
+        /** Anonymous lambda without rest param or effects. */
         public Lambda(List<Pattern> params, Expr body, Environment closure) {
-            this(params, null, body, closure, null);
+            this(params, null, body, closure, null, null);
         }
-        /** Named lambda without rest param. */
+        /** Named lambda without rest param or effects. */
         public Lambda(List<Pattern> params, Expr body, Environment closure, String name) {
-            this(params, null, body, closure, name);
+            this(params, null, body, closure, name, null);
+        }
+        /** Named lambda with rest param but no effects. */
+        public Lambda(List<Pattern> params, String restParam, Expr body, Environment closure, String name) {
+            this(params, restParam, body, closure, name, null);
         }
 
         public int arity() {
@@ -247,8 +252,13 @@ public final class Values {
 
     // ── Builtin function ────────────────────────────────────────────────
 
-    public record BuiltinFn(String name, int arity,
+    public record BuiltinFn(String name, int arity, List<String> requiredEffects,
                             Function<List<Object>, Object> impl) {
+        /** Convenience constructor for builtins with no effect requirements. */
+        public BuiltinFn(String name, int arity, Function<List<Object>, Object> impl) {
+            this(name, arity, List.of(), impl);
+        }
+
         public Object apply(List<Object> args) {
             return impl.apply(args);
         }
@@ -324,12 +334,13 @@ public final class Values {
     /**
      * A first-class handler value created by {@code handler h :: E}.
      *
-     * @param name        handler name (e.g., "console-to-stdout")
-     * @param effectName  the effect this handler handles (e.g., "Console")
-     * @param clauses     map from op name → HandlerClause AST node
-     * @param closureEnv  environment capturing handler-local state
+     * @param name             handler name (e.g., "console-to-stdout")
+     * @param effectName       the effect this handler handles (e.g., "Console")
+     * @param requiredEffects  effects the handler's clause bodies need (e.g., ["Console"])
+     * @param clauses          map from op name → HandlerClause AST node
+     * @param closureEnv       environment capturing handler-local state
      */
-    public record HandlerValue(String name, String effectName,
+    public record HandlerValue(String name, String effectName, List<String> requiredEffects,
                                Map<String, dev.irij.ast.Decl.HandlerClause> clauses,
                                Environment closureEnv) {
         @Override

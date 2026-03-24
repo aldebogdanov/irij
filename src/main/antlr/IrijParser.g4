@@ -71,7 +71,11 @@ roleDecl
 // ── fn ───────────────────────────────────────────────────────────────
 
 fnDecl
-    : FN fnName typeAnnotation? fnBody?
+    : FN fnName typeAnnotation? effectAnnotation? fnBody?
+    ;
+
+effectAnnotation
+    : EFFECT_SEP typeName+
     ;
 
 fnName
@@ -177,7 +181,7 @@ effectOp
 // ── handler ──────────────────────────────────────────────────────────
 
 handlerDecl
-    : HANDLER fnName TYPE_ANN typeName NEWLINE INDENT handlerBody NEWLINE* DEDENT
+    : HANDLER fnName TYPE_ANN typeName effectAnnotation? NEWLINE INDENT handlerBody NEWLINE* DEDENT
     ;
 
 handlerBody
@@ -245,16 +249,11 @@ forallBinders
 
 typeExpr
     : typeApp ARROW typeExpr                  // A -> B
-    | typeApp effectArrow typeExpr             // A -[E]> B
     | typeApp
     ;
 
 typeApp
     : typeAtom+                               // Result a e  (type application)
-    ;
-
-effectArrow
-    : EFFECT_OPEN typeName* EFFECT_CLOSE
     ;
 
 typeAtom

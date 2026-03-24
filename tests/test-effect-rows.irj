@@ -1,0 +1,246 @@
+;; test-effect-rows.irj — Effect row declarations and checking (Phase 7a)
+use std.test :open
+use std.text {contains-substr?}
+
+;; ── 1. Shorthand effect annotation ::: Console ──────────────────────
+
+fn greet ::: Console
+  (name -> println ("Hello, " ++ name))
+
+fn run-greet
+  _ =>
+    greet "world"
+    true
+
+r1 := test "fn with ::: Console can call println" (-> assert-true (run-greet ()))
+
+;; ── 2. Pure fn (unannotated) computes correctly ──────────────────────
+
+fn add
+  (a b -> a + b)
+
+r2 := test "pure fn computes correctly" (-> assert-eq (add 3 4) 7)
+
+;; ── 3. Pure fn cannot call println ──────────────────────────────────
+
+fn bad-pure
+  (x -> println x)
+
+fn check-pure-fails
+  _ =>
+    r := try (-> bad-pure "hello")
+    match r
+      (Err msg) => true
+      _ => false
+
+r3 := test "pure fn cannot call println" (-> assert-true (check-pure-fails ()))
+
+;; ── 4. Unannotated fn = pure (mandatory effects) ──────────────────
+
+fn unannotated-print
+  (x -> println x)
+
+fn check-unannotated-fails
+  _ =>
+    r := try (-> unannotated-print "hello")
+    match r
+      (Err msg) => true
+      _ => false
+
+r4 := test "unannotated fn is pure (cannot call println)" (-> assert-true (check-unannotated-fails ()))
+
+;; ── 5. User-defined effect checked ──────────────────────────────────
+
+effect MyLog
+  log-it :: Str -> ()
+
+handler my-logger :: MyLog ::: Console
+  log-it msg => resume (println msg)
+
+fn do-stuff ::: MyLog
+  (x -> log-it x)
+
+fn run-user-effect
+  _ =>
+    with my-logger
+      do-stuff "test-msg"
+    true
+
+r5 := test "fn with ::: MyLog can call MyLog ops" (-> assert-true (run-user-effect ()))
+
+;; ── 6. Pure fn cannot call user effect ops ──────────────────────────
+
+fn silent
+  (_ -> log-it "nope")
+
+fn try-silent
+  _ =>
+    with my-logger
+      silent ()
+
+fn check-silent-fails
+  _ =>
+    r := try (-> try-silent ())
+    match r
+      (Err msg) => true
+      _ => false
+
+r6 := test "pure fn cannot call user effect ops" (-> assert-true (check-silent-fails ()))
+
+;; ── 7. Multiple effects in row ──────────────────────────────────────
+
+effect Beep
+  beep :: () -> ()
+
+handler beeper :: Beep
+  beep () => resume ()
+
+fn multi ::: MyLog Beep
+  =>
+  log-it "beeping"
+  beep ()
+
+fn run-multi
+  _ =>
+    with my-logger >> beeper
+      multi ()
+    true
+
+r7 := test "fn with multiple effects in row" (-> assert-true (run-multi ()))
+
+;; ── 8. Missing effect in row fails ──────────────────────────────────
+
+fn only-log ::: MyLog
+  (_ -> beep ())
+
+fn try-missing-effect
+  _ =>
+    with my-logger >> beeper
+      only-log ()
+
+fn check-missing-effect
+  _ =>
+    r := try (-> try-missing-effect ())
+    match r
+      (Err msg) => true
+      _ => false
+
+r8 := test "calling effect not in row fails" (-> assert-true (check-missing-effect ()))
+
+;; ── 9. Effect via type annotation syntax ────────────────────────────
+
+fn typed-greet :: Str () ::: Console
+  (name -> println ("Typed: " ++ name))
+
+fn run-typed
+  _ =>
+    typed-greet "world"
+    true
+
+r9 := test "effect row from type annotation works" (-> assert-true (run-typed ()))
+
+;; ── 10. Imperative fn with effect row ───────────────────────────────
+
+fn imp-greet ::: Console
+  => name
+  println ("Imp: " ++ name)
+
+fn run-imp
+  _ =>
+    imp-greet "test"
+    true
+
+r10 := test "imperative fn with effect row" (-> assert-true (run-imp ()))
+
+;; ── 11. Match fn with effect row ────────────────────────────────────
+
+fn describe ::: Console
+  0 => println "zero"
+  n => println ("num: " ++ to-str n)
+
+fn run-describe
+  _ =>
+    describe 0
+    describe 42
+    true
+
+r11 := test "match fn with effect row" (-> assert-true (run-describe ()))
+
+;; ── 12. Partial application preserves effect row ────────────────────
+
+fn greet2 ::: Console
+  (prefix name -> println (prefix ++ name))
+
+fn run-partial
+  _ =>
+    hi := greet2 "Hi, "
+    hi "Irij"
+    true
+
+r12 := test "partial app preserves effect row" (-> assert-true (run-partial ()))
+
+;; ── 13. Contracts + effects ─────────────────────────────────────────
+
+fn safe-print ::: Console
+  pre (x -> x /= "")
+  (x -> println x)
+
+fn check-contract-effect
+  _ =>
+    safe-print "works"
+    r := try (-> safe-print "")
+    match r
+      (Err _) => true
+      _ => false
+
+r13 := test "contracted fn with effect row" (-> assert-true (check-contract-effect ()))
+
+;; ── 14. Error message includes effect name ──────────────────────────
+
+fn bad-fn
+  (x -> println x)
+
+fn check-error-msg
+  _ =>
+    r := try (-> bad-fn "x")
+    match r
+      (Err msg) => contains-substr? msg "Console"
+      _ => false
+
+r14 := test "error mentions effect name" (-> assert-true (check-error-msg ()))
+
+;; ── 15. Handler without effect annotation is pure ───────────────────
+
+handler pure-logger :: MyLog
+  log-it msg => resume (println msg)
+
+fn try-pure-handler
+  _ =>
+    with pure-logger
+      do-stuff "test"
+
+fn check-pure-handler-fails
+  _ =>
+    r := try (-> try-pure-handler ())
+    match r
+      (Err msg) => contains-substr? msg "Console"
+      _ => false
+
+r15 := test "handler without annotation is pure (clause fails)" (-> assert-true (check-pure-handler-fails ()))
+
+;; ── 16. Handler with effect annotation allows declared effects ──────
+
+handler annotated-logger :: MyLog ::: Console
+  log-it msg => resume (println msg)
+
+fn run-annotated-handler
+  _ =>
+    with annotated-logger
+      do-stuff "test"
+    true
+
+r16 := test "handler with ::: Console allows println in clause" (-> assert-true (run-annotated-handler ()))
+
+;; ── Summarize ───────────────────────────────────────────────────────
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16]

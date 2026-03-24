@@ -155,7 +155,7 @@ with outer-handler
 
 1. **No multi-shot continuations**: `resume` can only be called once per handler arm
 2. **Effect ops shadow builtins**: declaring an effect op with a builtin's name replaces it
-3. **No effect rows in types**: `-[E1 E2]>` is parsed but not enforced (needs type checker)
+3. **Effect rows enforced at runtime** (Phase 7a): `::: E1 E2` declares required effects, checked at call time
 4. **INDENT/DEDENT in parens**: `match` expressions in handler arms work, but not inside lambda `(x -> match ...)`
 5. **Spawned threads**: have no handler stack — effect ops in spawned threads fail with "unhandled effect"
 

@@ -44,11 +44,8 @@ MUT_BIND    : ':!' ;       // mutable binding
 ARROW       : '->' ;       // function arrow
 FAT_ARROW   : '=>' ;       // match arm / imperative block
 ASSIGN      : '<-' ;       // mutation
+EFFECT_SEP  : ':::' ;      // effect separator (must precede TYPE_ANN for maximal munch)
 TYPE_ANN    : '::' ;       // type annotation
-
-// ── Effect Arrow Digraphs ────────────────────────────────────────────
-EFFECT_OPEN : '-[' ;       // effect row open
-EFFECT_CLOSE: ']>' ;       // effect row close
 
 // ── Pipeline & Composition ───────────────────────────────────────────
 PIPE        : '|>' ;       // pipe forward

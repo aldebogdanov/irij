@@ -33,7 +33,7 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
 - [x] **Lexer (ANTLR4)** — `src/main/antlr/IrijLexer.g4`
   - [x] Identifiers: kebab-case, PascalCase types, `$ROLE` names
   - [x] Literals: int, float, hex, underscore separators, rationals (`2/3`), strings with `${}` interpolation, keywords (`:ok`, `:error`)
-  - [x] All digraph operators (`:=`, `:!`, `<-`, `->`, `=>`, `::`, `|>`, `<|`, `>>`, `<<`, `-[`, `]>`, `~>`, `<~`, `~*>`, `~/`, `/+`, `/*`, `/#`, `/&`, `/|`, `/^`, `/$`, `/?`, `/!`, `@`, `@i`, `..`, `..<`, `++`, `**`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `...`)
+  - [x] All digraph operators (`:=`, `:!`, `<-`, `->`, `=>`, `::`, `:::`, `|>`, `<|`, `>>`, `<<`, `~>`, `<~`, `~*>`, `~/`, `/+`, `/*`, `/#`, `/&`, `/|`, `/^`, `/$`, `/?`, `/!`, `@`, `@i`, `..`, `..<`, `++`, `**`, `/=`, `<=`, `>=`, `&&`, `||`, `|`, `...`)
   - [x] `=` as map-field separator (context: inside `{}`)
   - [x] INDENT/DEDENT token generation (strict 2-space, hard error otherwise)
   - [x] Semicolons inside parenthesized expressions only
@@ -55,7 +55,7 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
   - [x] Record update: `{...record field= val}`
   - [x] `if`/`else` (block-level and inline expression), `with`, `scope`, `select`
   - [x] Mutable bindings: `:!`, `<-`, read by name
-  - [x] Type annotations: `:: Type`, type application (`Result a e`), effect arrows `-[E1 E2]> T`
+  - [x] Type annotations: `:: Type`, type application (`Result a e`), effect separator `::: E1 E2`
   - [x] Located types: `@$ROLE`
   - [x] Choreography: `~>`, `<~`, `~*>`, `~/`, `par-each`, `forall`, `on-failure`, `enclave`
   - [x] Unit value `()` as expression and pattern
@@ -74,7 +74,7 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
   - [x] `parse(String)`, `parseFile(Path)`, `tokenize(String)` API
 
 - [x] **Smoke tests** — `src/test/java/dev/irij/parser/ParserSmokeTest.java`
-  - [x] 93 tests covering all spec sections (all passing)
+  - [x] 113 tests covering all spec sections (all passing)
 
 ---
 
@@ -224,7 +224,7 @@ The universal joint. Everything interesting depends on this.
 - [x] **Handler composition (`>>`)** — `with (h1 >> h2 >> h3)` decomposes into nested `with` blocks
 - [x] **Handler dot-access** — `handler.field` reads from handler's closure env (e.g., state after `with`)
 - [x] **Tests** — 284 total (+7 Phase 3b tests)
-- [ ] Effect rows in types: `-[E1 E2]>` (deferred: needs type checker)
+- [x] Effect rows in types: `::: E1 E2` (implemented in Phase 7a as runtime checking, no HM needed)
 
 ---
 
@@ -391,26 +391,96 @@ Inspired by Clojure's Missionary library (tasks as values, structured cancellati
 
 ---
 
-## Phase 7 — Choreographic Programming
+## Phase 7a — Effect Row Declarations ✅
 
-- [ ] Located types (`@$ROLE`)
-- [ ] Communication: `~>`, `<~`, `~*>`, `~/`
-- [ ] Endpoint Projection (EPP)
-- [ ] `forall` / `par-each` / `census`
-- [ ] `on-failure` fault tolerance
-- [ ] `enclave`
+- [x] **Effect row syntax** — `fn name ::: Console` (shorthand) and `fn name :: Str ::: Console ()` (full)
+- [x] **Mandatory enforcement** — unannotated `fn` = pure (empty effect row, no effects allowed)
+- [x] **Empty effect row `:::` is parse error** — omit annotation for purity
+- [x] **Handler effect annotations** — `handler h :: E ::: Console` (clause bodies get declared effects)
+- [x] **Unannotated handler = pure** — clause bodies can't call effectful builtins
+- [x] **Anonymous lambdas inherit parent context** — `(x -> ...)` doesn't push/pop
+- [x] **Top-level = ambient** — all effects available at module top level
+- [x] **`AVAILABLE_EFFECTS` ThreadLocal stack** — per-thread, propagated to child threads
+- [x] **Built-in effect tags** — `println`/`print`/`dbg`/`read-line` require Console
+- [x] **`read-line` builtin** — reads line from stdin, requires Console effect
+- [x] **`std.test` updated** — `test` and `summarize` annotated with `::: Console`
+- [x] **Tests** — 529 Java tests + 161 integration tests (16 in test-effect-rows.irj)
 
 ---
 
-## Phase 8 — Advanced
+## Phase 8 — Schemas (Malli-like)
 
+Built-in runtime schema system. Replaces HM type inference. Powers validation, Arbitrary generation, docs, serialization.
+
+- [ ] `schema Name` declarations — schema as data
+- [ ] Primitive schemas: `Str`, `Int`, `Float`, `Bool`, `Keyword`
+- [ ] Composite schemas: `(Vec Schema)`, `(Map KeySchema ValSchema)`, `(Tuple S1 S2)`
+- [ ] Constraint schemas: `(Int :min 0 :max 150)`, `(Str :min-len 1)`
+- [ ] `Enum` schemas: `(Enum :admin :user :guest)`
+- [ ] `validate` / `validate!` builtins — runtime schema checking
+- [ ] Schema-powered `Arbitrary` generation — replaces manual `generateRandomValue()`
+- [ ] Schema annotations on `fn` — `fn name :: InputSchema OutputSchema ::: Effects`
+- [ ] Schema syntax design for partial annotations (input-only, output-only)
+- [ ] Integration with law verification — schemas generate typed random values
+- [ ] `pub fn` convention: schema annotations recommended (lint/warn)
+
+---
+
+## Phase 9 — Package Management (Git Deps)
+
+- [ ] `deps.irj` file format — git URLs + tags/commits + local paths
+- [ ] Dependency resolver — clone/cache repos
+- [ ] Load `pub` declarations from deps
+- [ ] Version pinning (tags, commits)
+- [ ] Local path deps for development
+
+---
+
+## Phase 10 — I/O Effects
+
+Effect-based I/O operations, mockable via handlers in tests.
+
+- [ ] **HTTP server/client** — `::: Http` effect
+- [ ] **JSON** serialization/deserialization (schema-driven)
+- [ ] **TOML** — config file support
+- [ ] **TOON** (Token-Oriented Object Notation) — token-efficient format for AI contexts
+- [ ] **File I/O** — `::: FileIO` effect (read/write/list files)
+
+---
+
+## Phase 11 — Database
+
+- [ ] Database effect — `::: Db` effect
+- [ ] SQL query builder or raw queries
+- [ ] Connection pooling
+- [ ] Transaction support via effect handlers
+
+---
+
+## Phase 12 — Irij Package Registry
+
+First real-world application written in Irij. Dogfoods Phases 8–11.
+
+- [ ] HTTP server serving registry API
+- [ ] Package upload/download
+- [ ] Schema-validated package metadata
+- [ ] Git-based package storage
+- [ ] Search and discovery
+
+---
+
+## Future / Deferred
+
+- [ ] Choreographic programming (located types, EPP, `~>`, `<~`, roles)
 - [ ] Capabilities (`cap`)
 - [ ] Streams & Flows
-- [ ] Refinement types (L4)
+- [ ] Refinement types (L4) — SMT integration
 - [ ] Dependent types / proofs (L5)
 - [ ] Content-addressed code (hash-based identity)
 - [ ] JVM interop (`use java.*`, `JClass/method`)
 - [ ] GraalVM Native Image
+- [ ] Channels: `send`, `recv`, `select`
+- [ ] LSP server
 
 ---
 

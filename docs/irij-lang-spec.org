@@ -1,4 +1,4 @@
-#+TITLE: ℑ (Irij) — AI-First Effect-Oriented Language
+#+TITLE: ℑ (Irij) — Token-Efficient Effect-Oriented Language
 #+SUBTITLE: Base Specification & Implementation Roadmap v0.2
 #+AUTHOR: Language Design Working Document
 #+DATE: 2026-03-04
@@ -180,8 +180,7 @@
     (==)  ;; equality as function
 
     ;; ── Effect & Control ────────────────────────────────────
-    -[    ;; effect arrow open          fn f :: A -[E1 E2]> B
-    ]>    ;; effect arrow close         (digraph pair with -[)
+    :::   ;; effect separator           fn f :: A B ::: E1 E2
     do    ;; sequence effects           do (print "a") (print "b")
     if    ;; conditional                if cond then-expr else-expr
     match ;; pattern match              match x (:ok v => ...) (:err e => ...)
@@ -306,11 +305,11 @@
    ;; 3. Imperative block — => binds params, body is multi-statement
    ;;    => alone means the function takes ()
    ;;    => params binds positional arguments from the type signature
-   fn greet :: Str -[Console]> ()
+   fn greet :: Str () ::: Console
      => name
      print "Hello, ${name}!"
 
-   fn main :: () -[IO]> ()
+   fn main :: () () ::: IO
      =>
      config := read-config ()
      run-server config
@@ -460,23 +459,22 @@
    effect Http
      fetch :: Request -> Response
 
-   ;; function with effects declared in its type
-   fn greet :: Str -[Console]> ()
+   ;; function with effects declared
+   fn greet :: Str () ::: Console
      => name
      print "Hello, ${name}!"
 
    ;; multiple effects
-   fn sync-data :: () -[Http FileIO Log]> Result Data Error
+   fn sync-data :: () (Result Data Error) ::: Http FileIO Log
 
-   ;; pure function (no effects — the default)
+   ;; pure function (no effects — the default, no annotation needed)
    fn add :: Int -> Int -> Int
      (x y -> x + y)
    #+end_example
 
-   The effect annotation =-[E1 E2]>= between arrow tokens lists which
-   effects the function may perform. No annotation means *pure*. This is
-   the effect row, polymorphic by default (functions can be generic over
-   additional effects).
+   The effect declaration =::: E1 E2= after the type signature lists which
+   effects the function may perform. No annotation means *pure*. =::= is
+   for data types (input/output schemas), =:::= is for effects.
 
 ** 3.2 Effect Handlers
 
@@ -554,11 +552,11 @@
      delete :: Table -> Query -> ()
 
    ;; function requiring capability: must receive it from caller
-   fn migrate :: () -[DbWrite Log]> ()
+   fn migrate :: () () ::: DbWrite Log
      ...
 
    ;; granting capability: scoped, cannot escape the with-block
-   fn main :: () -[IO]> ()
+   fn main :: () () ::: IO
      =>
      with (db-connect "postgres://..." |> grant DbWrite)
        migrate ()
@@ -576,7 +574,7 @@
    #+begin_example
    ;; built-in concurrency effect
    effect Async
-     fork   :: (() -[e]> a) -> Fiber a
+     fork   :: (() -> a) -> Fiber a
      await  :: Fiber a -> a
      sleep  :: Duration -> ()
      cancel :: Fiber a -> ()
@@ -596,7 +594,7 @@
 
    #+begin_example
    ;; basic structured concurrency
-   fn fetch-dashboard :: Id -[Http Async]> Dashboard
+   fn fetch-dashboard :: Id Dashboard ::: Http Async
      => id
      scope s
        user-f   := s.fork (-> fetch-user id)
@@ -607,7 +605,7 @@
        make-dashboard (await user-f) (await orders-f) (await stats-f)
 
    ;; racing — first result wins, others cancelled
-   fn fetch-fastest :: () -[Http Async]> Data
+   fn fetch-fastest :: () Data ::: Http Async
      =>
      scope.race
        (-> fetch-from-primary)
@@ -615,7 +613,7 @@
        (-> fetch-from-cache)
 
    ;; supervised — failures isolated per child
-   fn process-batch :: #[Job] -[Async Log]> #[Result]
+   fn process-batch :: #[Job] #[Result] ::: Async Log
      => jobs
      scope.supervised s
        jobs |> @ (j -> s.fork (-> process j))
@@ -623,7 +621,7 @@
 
    ;; escape hatch: fire-and-forget (use sparingly!)
    ;; the ! suffix signals this breaks structured concurrency
-   fn notify-and-continue :: Event -[Async]> Response
+   fn notify-and-continue :: Event Response ::: Async
      => event
      detach! (-> send-analytics event)  ;; runs independently
      :ok                                ;; returns immediately
@@ -644,7 +642,7 @@
      sample :: () -> a
 
    ;; stream operations (lazy, pull-based by default)
-   fn process-events :: #[Event] -[Async Log]> ()
+   fn process-events :: #[Event] () ::: Async Log
      => events
      events
        |> /? (e -> e.type == :purchase)
@@ -688,7 +686,7 @@
    ;; located type syntax: value @$ROLE
    ;; declares which participant holds the data
 
-   fn buy-protocol :: Str @$BUYER -[Choreo]> Result @$BUYER
+   fn buy-protocol :: (Str @$BUYER) (Result @$BUYER) ::: Choreo
      => title
      ;; $BUYER sends title to $SELLER
      title ~> $SELLER                         ;; communicate $BUYER->$SELLER
@@ -739,7 +737,7 @@
    ;; The buy-protocol above compiles to:
 
    ;; ── $BUYER projection ────────────────────────────────────
-   fn buy-protocol-BUYER :: () -[Net IO]> Result
+   fn buy-protocol-BUYER :: () Result ::: Net IO
      =>
      title := input "What book?"
      send $SELLER title
@@ -754,7 +752,7 @@
          :cancelled
 
    ;; ── $SELLER projection ───────────────────────────────────
-   fn buy-protocol-SELLER :: () -[Net IO Db]> ()
+   fn buy-protocol-SELLER :: () () ::: Net IO Db
      =>
      title := recv $BUYER
      price := lookup title
@@ -798,7 +796,7 @@
      -> #[a] @$COORD
      -> (b -> b -> b) @$COORD
      -> b @$COORD
-     -[Choreo]>
+     ::: Choreo
      forall $WORKERS
      => f data merge
      ;; $COORD splits data into as many chunks as there are $WORKERS
@@ -825,7 +823,7 @@
 
    #+begin_example
    ;; choreography with failure handling
-   fn safe-transfer :: () -[Choreo Async]> ()
+   fn safe-transfer :: () () ::: Choreo Async
      =>
      with choreo-retry {max= 3 backoff= :exponential}
        amount := $SENDER.input-amount
@@ -847,7 +845,7 @@
 
    #+begin_example
    ;; scope blocks: replication finishes BEFORE Ok is returned
-   fn replicated-put :: Str -> Str -[Choreo Async]> Reply @$CLIENT
+   fn replicated-put :: Str Str (Reply @$CLIENT) ::: Choreo Async
      => k v
      $PRIMARY.store k v
      scope s
@@ -856,7 +854,7 @@
      Ok @$CLIENT   ;; client gets Ok AFTER replication
 
    ;; if you want "reply first, replicate later" you need detach!
-   fn fast-put :: Str -> Str -[Choreo Async]> Reply @$CLIENT
+   fn fast-put :: Str Str (Reply @$CLIENT) ::: Choreo Async
      => k v
      $PRIMARY.store k v
      detach! (-> k ~> $REPLICA; v ~> $REPLICA; $REPLICA.store k v)
@@ -873,23 +871,37 @@
      (data -> data |> transform |> validate |> save)
    #+end_example
 
-** 6.2 Level 1 — Gradual Types (Hints)
+** 6.2 Level 1 — Schemas (Runtime-Validated Specs)
+
+   Irij uses a Malli/spec-inspired schema system instead of Hindley-Milner
+   type inference. Schemas are data, serve multiple purposes (validation,
+   generation, documentation, serialization), and compose like values.
 
    #+begin_example
-   ;; optional type hints (a la TypeScript)
-   ;; argument name still appears — the signature just adds types above
+   ;; schema declaration — one definition gives validation + generation + docs
+   schema Person
+     :name Str
+     :age  (Int :min 0 :max 150)
+     :role (Enum :admin :user :guest)
+
+   ;; schema annotations on functions (optional but recommended for pub API)
    fn process :: Data -> Result
      (data -> data |> transform |> validate |> save)
 
-   ;; partial annotation — mix typed and untyped
-   fn transform :: Data -> _    ;; return type inferred
+   ;; partial annotation — mix annotated and unannotated
+   fn transform :: Data -> _    ;; return shape unspecified
      (data -> ...)
+
+   ;; schemas power Arbitrary generation for law checking
+   fn sort
+     law idempotent = forall (xs : #[Int]). sort (sort xs) == sort xs
+     ...
    #+end_example
 
    Note: Level 0 and Level 1 have the same function *body* (a lambda).
-   The only difference is the optional =:: Data -> Result= type annotation.
-   The argument name =data= appears in the lambda in both — the
-   annotation constrains the type, but doesn't replace naming it.
+   The only difference is the optional =:: Data -> Result= annotation.
+   Schemas are checked at runtime, not compile time. No HM inference —
+   the language relies on contracts, laws, and effects for verification.
 
 ** 6.3 Level 2 — Contracts (Runtime Checks)
 
@@ -1022,7 +1034,7 @@
    ;; hash captures: AST structure + type signature + effect row
    ;; two functions with same body but different effects get different hashes
 
-   fn read-config :: () -[FileIO]> Config      ;; hash: #x1...
+   fn read-config :: () Config ::: FileIO       ;; hash: #x1...
    fn read-config-test :: () -> Config           ;; hash: #x2... (different!)
 
    ;; enables: effect-polymorphic caching
@@ -1063,7 +1075,7 @@
 
    ;; inspect effect requirements
    > :effects sync-data
-   sync-data :: () -[Http FileIO Log]> Result Data Error
+   sync-data :: () (Result Data Error) ::: Http FileIO Log
 
    ;; hot-reload a definition (dependents auto-recompute)
    > fn transform ...  ;; updated
@@ -1121,7 +1133,7 @@
    ;; calling Java methods
    use java.util.ArrayList as JList
 
-   fn java-example :: () -[JVM]> Int
+   fn java-example :: () Int ::: JVM
      =>
      list := JList/new ()          ;; constructor
      list |> JList/add "hello"     ;; instance method (void, side-effect)
@@ -1185,11 +1197,11 @@
 
   #+begin_example
   ;; loop: call a thunk forever (returns Never)
-  fn loop :: (() -[e]> ()) -[e]> Never
+  fn loop :: (() -> ()) Never
   ;; usage: loop (-> read-cmd |> process |> display)
 
   ;; recur: loop with accumulator (tail-recursive)
-  fn recur :: a -> (a -[e]> Either a b) -[e]> b
+  fn recur :: a (a -> Either a b) b
   ;; usage: recur 0 (n -> if n > 10 (Right n) (Left (n + 1)))
 
   ;; identity, const, flip: standard combinators
@@ -1233,7 +1245,7 @@
    | Grammar spec (ANTLR 4)       | Indentation + S-expr forms      | ANTLR4    | MUST      |
    | AST definition               | Algebraic data types in Java    | Java 21+  | MUST      |
    | Lexer + Parser               | Dense ASCII + S-expression mode | ANTLR4    | MUST      |
-   | Basic type checker            | HM inference, effect rows       | Java      | MUST      |
+   | Effect row checking           | Runtime effect enforcement      | Java      | MUST      |
    | JVM bytecode emitter         | Core expressions only           | ASM 9.x   | MUST      |
    | REPL (basic)                 | Read-eval-print, no network     | JLine3    | MUST      |
    |------------------------------+---------------------------------+-----------+-----------|
@@ -1262,7 +1274,7 @@
    |------------------------------+---------------------------------+-----------+-----------|
    | Task                         | Details                         | Tool      | Priority  |
    |------------------------------+---------------------------------+-----------+-----------|
-   | Gradual typing (L0-L2)       | Dynamic + hints + contracts     | Custom    | MUST      |
+   | Schemas (L1) + Contracts (L2) | Malli-like specs + contracts    | Custom    | MUST      |
    | Property testing (L3)        | Laws, QuickCheck-style          | Custom    | MUST      |
    | Content-addressed store      | Hash-based codebase DB          | SQLite    | SHOULD    |
    | Located types + EPP          | Choreographic core              | Custom    | MUST      |
@@ -1405,7 +1417,7 @@
    ;;  Requires database read access and logging."
 
    ;; ── Representation 2: Irij canonical (indented) form ────────
-   fn fetch-user :: Id -[DbRead Log]> Result User NotFound
+   fn fetch-user :: Id (Result User NotFound) ::: DbRead Log
      => id
      log "fetching user ${id}"
      result := db.query "SELECT * FROM users WHERE id = ?" id
@@ -1414,7 +1426,7 @@
        #[]          => Err NotFound
 
    ;; ── Representation 3: Irij S-expression (interchange) form ──
-   (fn fetch-user (:: Id (-[DbRead Log]> (Result User NotFound)))
+   (fn fetch-user (:: Id (Result User NotFound) ::: DbRead Log)
      (=> id (do (log "fetching user ${id}")
        (:= result (db.query "SELECT * FROM users WHERE id = ?" id))
        (match result (=> (#[row ..._]) (Ok (row->user row)))
@@ -1474,7 +1486,7 @@
   ║  ARRAY OPS      @ map  /? filter  /! find  /+ /* /^ /$ /#  ║
   ║  COLLECTIONS    #[1 2]  #{:a}  #(1 2)  {k= v}              ║
   ║  PURE FN        fn f :: A -> B                              ║
-  ║  EFFECTFUL FN   fn f :: A -[E1 E2]> B                     ║
+  ║  EFFECTFUL FN   fn f :: A B ::: E1 E2                      ║
   ║  LOOP           loop (-> body)   recur init (acc -> ...)    ║
   ╚══════════════════════════════════════════════════════════════╝
   #+end_example
@@ -1507,7 +1519,7 @@
     Ok
 
   ;; ── Choreography ──────────────────────────────────────
-  fn kv-protocol :: Command @$CLIENT -[Choreo Async]> Reply @$CLIENT
+  fn kv-protocol :: (Command @$CLIENT) (Reply @$CLIENT) ::: Choreo Async
     => cmd
     cmd ~> $PRIMARY
 
@@ -1538,7 +1550,7 @@
         Ok @$CLIENT
 
   ;; ── Entry Point ───────────────────────────────────────
-  fn main :: () -[IO]> ()
+  fn main :: () () ::: IO
     =>
     config := read-config ()
     with (tcp-transport config)

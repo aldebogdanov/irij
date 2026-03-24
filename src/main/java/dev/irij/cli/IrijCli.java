@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
  */
 public final class IrijCli {
 
-    private static final String VERSION = "0.1.0";
+    private static final String VERSION = "0.1.1";
     private static final int DEFAULT_NREPL_PORT = 7888;
 
     public static void main(String[] args) throws Exception {

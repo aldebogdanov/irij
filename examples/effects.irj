@@ -24,7 +24,7 @@ effect Logger
 handler friendly :: Greet
   greet name => resume ("Hello, " ++ name ++ "!")
 
-handler console-log :: Logger
+handler console-log :: Logger ::: Console
   log msg =>
     println ("[LOG] " ++ msg)
     resume ()
@@ -35,7 +35,7 @@ handler console-log :: Logger
 ;; The `with` block runs code where effect ops are available.
 ;; The block's last expression is the overall result.
 
-fn basic-example
+fn basic-example ::: Console
   _ =>
     with friendly
       greeting := greet "World"
@@ -201,7 +201,7 @@ handler memo :: Store
     resume ()
   history () => resume log
 
-fn multi-op-example
+fn multi-op-example ::: Console
   _ =>
     with memo
       write-val "first"

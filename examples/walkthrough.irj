@@ -1,46 +1,243 @@
-;; walkthrough.irj — Interactive tour of Irij features (Phase 3+)
+;; walkthrough.irj — Complete language tour for debugging
 ;;
-;; Each section is self-contained for nREPL eval.
-;; Run the whole file: irij examples/walkthrough.irj
+;; This file exercises every major Interpreter.java code path.
+;; Use it with nREPL (eval section-by-section) or run the whole file.
+;; Set breakpoints in Interpreter.java to trace each feature.
+;;
+;; Sections map to Java methods:
+;;   1. Bindings         → eval(Expr.Let), eval(Expr.MutLet), eval(Expr.Assign)
+;;   2. Functions        → makeFnValue(), apply()
+;;   3. Pattern matching → matchPattern(), eval(Expr.Match)
+;;   4. Collections      → eval(Expr.VecLit), eval(Expr.MapLit), etc.
+;;   5. Pipelines        → eval(Expr.Pipeline), eval(Expr.Compose)
+;;   6. Data types       → eval(Decl.TypeDecl), Tagged values
+;;   7. Effects          → evalEffectDecl(), evalHandlerDecl(), execWith()
+;;   8. Handler features → runHandlerLoop(), handler composition
+;;   9. Protocols        → evalProtoDecl(), evalImplDecl(), dispatch
+;;  10. Concurrency      → scope/fork/await, par, race, timeout
+;;  11. Contracts        → ContractedFn, pre/post/in/out checks
+;;  12. Laws             → verifyLaws(), generateRandomValue()
+;;  13. Effect rows      → AVAILABLE_EFFECTS stack, checkEffectsAvailable()
+;;  14. Modules          → ModuleRegistry, use/pub
 
 ;; ═══════════════════════════════════════════════════════════════
-;; 1. Algebraic Effects (Phase 3a)
+;; 1. Bindings & Mutability
 ;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: eval(Expr.Let) → Environment.define()
+;; Immutable bindings use ImmutableCell; mutable use MutableCell
 
-effect Greet
-  greet :: Str -> Str
+x := 42                        ;; ImmutableCell — cannot reassign
+greeting := "hello " ++ "world"
 
-;; A handler implements effect ops; `resume` returns a value to the caller
-handler cheerful :: Greet
-  greet name => resume ("Hello, " ++ name ++ "!")
+;; Mutable binding: Interpreter.eval(Expr.MutLet)
+counter :! 0                   ;; MutableCell — allows <-
+counter <- counter + 1
+counter <- counter + 1
+println ("counter = " ++ to-str counter)   ;; 2
 
-;; Abort: handler returns without calling resume
-effect Fail
-  fail :: Str -> ()
+;; Destructuring in bindings: matchPattern() on LHS
+#[a b c] := #[10 20 30]
+println ("destructured: " ++ to-str a ++ " " ++ to-str b ++ " " ++ to-str c)
 
-handler catch-fail :: Fail
-  fail msg => "FAILED: " ++ msg
+#(first second) := #(100 200)
+println ("tuple: " ++ to-str first ++ " " ++ to-str second)
 
-fn effects-demo
+;; ═══════════════════════════════════════════════════════════════
+;; 2. Functions (all 3 body forms)
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: makeFnValue() creates Lambda/MatchFn/ImperativeFn
+;; apply() dispatches on function value type
+
+;; Form 1: Lambda — (params -> expr)
+fn double
+  (x -> x * 2)
+
+;; Form 2: Match arms — pattern => body
+fn describe-num
+  0 => "zero"
+  1 => "one"
+  n => "other: " ++ to-str n
+
+;; Form 3: Imperative — => params; multi-statement body
+fn greet-person ::: Console
+  => name age
+  label := if (age > 18) "adult" else "young"
+  println (name ++ " is " ++ label)
+  label
+
+;; Partial application: apply() returns Lambda with captured args
+add := (a b -> a + b)
+add5 := add 5                  ;; curried — arity check in apply()
+println ("double 21 = " ++ to-str (double 21))
+println ("describe 0 = " ++ describe-num 0)
+println ("describe 7 = " ++ describe-num 7)
+greet-person "Alice" 25
+println ("add5 3 = " ++ to-str (add5 3))
+
+;; ═══════════════════════════════════════════════════════════════
+;; 3. Pattern Matching
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: matchPattern() — recursive descent over patterns
+;; eval(Expr.Match) iterates arms until one matches
+
+vals := #[1 2 3 4 5]
+
+;; Match as expression (usable on RHS)
+label := match (length vals)
+  0 => "empty"
+  1 => "single"
+  n => to-str n ++ " items"
+
+println ("match result: " ++ label)   ;; 5 items
+
+;; Spread patterns in vectors
+fn show-parts ::: Console
+  #[]        => println "empty"
+  #[x]       => println ("just " ++ to-str x)
+  #[x ...xs] => println (to-str x ++ " then " ++ to-str xs)
+
+show-parts #[]
+show-parts #[42]
+show-parts #[1 2 3]
+
+;; Guards
+fn classify
+  n | n < 0  => "negative"
+  0          => "zero"
+  n | n > 99 => "big"
+  n          => "small positive"
+
+println ("classify -5 = " ++ classify (0 - 5))
+println ("classify 0 = " ++ classify 0)
+println ("classify 100 = " ++ classify 100)
+println ("classify 7 = " ++ classify 7)
+
+;; ═══════════════════════════════════════════════════════════════
+;; 4. Collections & Seq Ops
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: eval for VecLit, MapLit, SetLit, TupleLit
+;; Builtins: @, /?, /+, /*, /#, /&, /|, fold
+
+nums := #[1 2 3 4 5]
+doubled := nums |> @ (n -> n * 2)     ;; map: [2 4 6 8 10]
+evens := nums |> /? (n -> n % 2 == 0) ;; filter: [2 4]
+total := /+ nums                      ;; reduce: 15
+
+println ("doubled = " ++ to-str doubled)
+println ("evens = " ++ to-str evens)
+println ("total = " ++ to-str total)
+
+;; Maps
+person := {name= "Bob" age= 30}
+println ("name = " ++ person.name)
+println ("age = " ++ to-str person.age)
+
+;; Record update
+senior := {...person age= 55}
+println ("senior = " ++ to-str senior)
+
+;; Sets
+s := #{1 2 3 2 1}
+println ("set = " ++ to-str s ++ " size = " ++ to-str (length s))
+
+;; Ranges
+r := 1..5
+println ("range = " ++ to-str (to-vec r))
+
+;; ═══════════════════════════════════════════════════════════════
+;; 5. Pipelines & Composition
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: eval(Expr.Pipeline), eval(Expr.Compose)
+
+;; Pipeline: x |> f = f(x)
+pipe-result := #[1 2 3 4 5]
+  |> /? (n -> n > 2)
+  |> @ (n -> n * 10)
+println ("pipeline = " ++ to-str pipe-result)
+
+;; Reverse pipeline: f <| x = f(x)
+println ~ "reverse pipe = " ++ to-str (to-str <| 42)
+
+;; Function composition: f >> g = (x -> g(f(x)))
+double-then-add1 := (x -> x * 2) >> (x -> x + 1)
+println ("compose = " ++ to-str (double-then-add1 5))   ;; 11
+
+;; ~ operator (apply-to-rest): f ~ expr = f(expr)
+println ~ "tilde works: " ++ to-str 42
+
+;; ═══════════════════════════════════════════════════════════════
+;; 6. Data Types (ADTs)
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: evalTypeDecl() creates Tagged constructors
+;; matchPattern() handles constructor patterns
+
+type Shape
+  Circle Float
+  Rect Float Float
+
+type Maybe a
+  Just a
+  Nothing
+
+fn area
+  (Circle r) => 3.14159 * r * r
+  (Rect w h) => w * h
+
+println ("circle area = " ++ to-str (area (Circle 5.0)))
+println ("rect area = " ++ to-str (area (Rect 3.0 4.0)))
+
+fn show-maybe ::: Console
+  (Just v) => println ("Just " ++ to-str v)
+  Nothing  => println "Nothing"
+
+show-maybe (Just 42)
+show-maybe Nothing
+
+;; ═══════════════════════════════════════════════════════════════
+;; 7. Algebraic Effects & Handlers
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: evalEffectDecl() → EffectDescriptor
+;; evalHandlerDecl() → HandlerValue with clause map
+;; execWith() → body in VirtualThread, handler loop on caller thread
+;; fireOp() sends EffectMessage to handler via SynchronousQueue
+
+effect Greet2
+  greet2 :: Str -> Str
+
+;; Handler: resume sends value back to call site
+handler cheerful2 :: Greet2
+  greet2 name => resume ("Hello, " ++ name ++ "!")
+
+;; with block: execWith() in Interpreter.java
+fn greet-demo
   _ =>
-    with cheerful
-      greet "world"
+    with cheerful2
+      greet2 "world"
 
-println (effects-demo ())           ;; Hello, world!
+println ("effect: " ++ greet-demo ())
+
+;; Abort: handler returns without calling resume → body interrupted
+effect Fail2
+  fail2 :: Str -> ()
+
+handler catch-fail2 :: Fail2
+  fail2 msg => "CAUGHT: " ++ msg
 
 fn abort-demo
   _ =>
-    with catch-fail
-      fail "something broke"
+    with catch-fail2
+      fail2 "something broke"
       "unreachable"
 
-println (abort-demo ())             ;; FAILED: something broke
+println ("abort: " ++ abort-demo ())
 
 ;; ═══════════════════════════════════════════════════════════════
-;; 2. Handler Features (Phase 3b)
+;; 8. Handler Features
 ;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: runHandlerLoop() — handles mutable state,
+;; handler composition, dot-access, on-failure
 
-;; Handler-local mutable state
+;; Handler-local mutable state (MutableCell in handler closure)
 effect Tally
   tick :: () -> ()
   total :: () -> Int
@@ -60,13 +257,13 @@ fn tally-demo
       tick ()
       total ()
 
-println ("tally = " ++ to-str (tally-demo ()))    ;; 3
+println ("tally = " ++ to-str (tally-demo ()))
 
-;; Handler composition (>>)
-handler greeter :: Greet
-  greet name => resume ("Hi, " ++ name ++ "!")
+;; Handler composition: >> creates nested with blocks
+handler greeter2 :: Greet2
+  greet2 name => resume ("Hi, " ++ name)
 
-handler counter :: Tally
+handler tally2 :: Tally
   state :! 0
   tick () =>
     state <- state + 1
@@ -75,70 +272,71 @@ handler counter :: Tally
 
 fn composed-demo
   _ =>
-    both := greeter >> counter
-    with both
-      msg := greet "Irij"
+    with (greeter2 >> tally2)
       tick ()
-      tick ()
+      msg := greet2 "Irij"
       msg ++ " (ticks=" ++ to-str (total ()) ++ ")"
 
-println (composed-demo ())          ;; Hi, Irij! (ticks=2)
+println ("composed: " ++ composed-demo ())
 
-;; Dot-access to handler state after `with` block
-handler counter2 :: Tally
+;; Dot-access to handler state after with block
+handler counter-for-dot :: Tally
   state :! 0
   tick () =>
     state <- state + 1
     resume ()
   total () => resume state
 
-fn dot-access-demo
+fn dot-demo
   _ =>
-    with counter2
+    with counter-for-dot
       tick ()
       tick ()
-    counter2.state
+    counter-for-dot.state
 
-println ("state after = " ++ to-str (dot-access-demo ()))  ;; 2
+println ("dot-access = " ++ to-str (dot-demo ()))
 
-;; on-failure (must be inside fn + with)
-effect Bomb
+;; on-failure: catches errors from with block
+effect Boom
   explode :: () -> ()
 
-handler bomb :: Bomb
+handler bomb :: Boom
   explode () => error "kaboom"
 
 fn on-failure-demo
   _ =>
     with bomb
       explode ()
-      "unreachable"
+      "never"
     on-failure
       "recovered: " ++ error
 
-println (on-failure-demo ())        ;; recovered: kaboom
+println ("on-failure: " ++ on-failure-demo ())
 
 ;; ═══════════════════════════════════════════════════════════════
-;; 3. Protocols (Phase 4.5b)
+;; 9. Protocols & Implementations
 ;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: evalProtoDecl() → ProtocolDescriptor
+;; evalImplDecl() → dispatch table entries
+;; Protocol dispatch in apply() via Values.typeName()
 
 proto Describable a
   describe :: a -> Str
 
 impl Describable for Int
-  describe := (n -> "the number " ++ to-str n)
+  describe := (n -> "int:" ++ to-str n)
 
 impl Describable for Str
-  describe := (s -> "the string \"" ++ s ++ "\"")
+  describe := (s -> "str:" ++ s)
 
 impl Describable for Bool
   describe := (b -> if b "yes" else "no")
 
-println (describe 42)               ;; the number 42
-println (describe "hi")             ;; the string "hi"
-println (describe true)             ;; yes
+println (describe 42)
+println (describe "hi")
+println (describe true)
 
-;; Protocol with value methods (type-hint dispatch)
+;; Value methods: dispatch on type hint (first arg determines impl)
 proto Neutral a
   zero :: a
   plus :: a -> a -> a
@@ -151,12 +349,15 @@ impl Neutral for Str
   zero := ""
   plus := (++)
 
-println (plus (zero 0) 5)          ;; 5
-println (plus (zero "") "ok")      ;; ok
+println ("neutral int: " ++ to-str (plus (zero 0) 5))
+println ("neutral str: " ++ plus (zero "") "ok")
 
 ;; ═══════════════════════════════════════════════════════════════
-;; 4. Structured Concurrency (Phase 5)
+;; 10. Structured Concurrency
 ;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: evalScope() → ScopeHandle, fork → CompletableFuture
+;; evalPar() → parallel thunks, evalRace() → first success wins
+;; All use Java virtual threads (Loom)
 
 ;; scope / fork / await
 scope s
@@ -164,100 +365,87 @@ scope s
   b := s.fork (-> 3 * 7)
   println ("fork: " ++ to-str (await a) ++ ", " ++ to-str (await b))
 
-;; par combinator — run thunks concurrently, combine results
+;; par: combine results from parallel thunks
 sum := par (+) (-> sleep 10; 100) (-> sleep 10; 200)
-println ("par sum = " ++ to-str sum)              ;; 300
+println ("par = " ++ to-str sum)
 
-;; race — first result wins, others cancelled
+;; race: first result wins, others cancelled
 winner := race (-> sleep 200; "slow") (-> sleep 10; "fast")
-println ("race winner = " ++ winner)              ;; fast
+println ("race = " ++ winner)
 
-;; timeout — deadline combinator
+;; timeout: deadline combinator
 ok := timeout 1000 (-> sleep 10; "done")
-println ("timeout ok = " ++ ok)                   ;; done
+println ("timeout ok = " ++ ok)
 
 expired := try (-> timeout 10 (-> sleep 2000; "never"))
 println ("timeout expired = " ++ to-str expired)
 
 ;; ═══════════════════════════════════════════════════════════════
-;; 5. Pre/Post Contracts (Phase 6a)
+;; 11. Contracts (pre/post/in/out)
 ;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: ContractedFn wraps function values
+;; apply() checks: pre → in → [execute] → post → out
+;; Partial application defers ALL checks
 
 fn positive-double
   pre (x -> x > 0)
   post (r -> r > 0)
   (x -> x * 2)
 
-println (positive-double 5)        ;; 10
+println ("contract: " ++ to-str (positive-double 5))
 
-;; Partial application defers all checks until full args arrive
+;; Deferred checks: partial app does NOT check until full args
 fn add-pos
   pre (a b -> a > 0 && b > 0)
   (a b -> a + b)
 
-add5 := add-pos 5                  ;; no check yet
-println (add5 3)                   ;; 8
+add-5 := add-pos 5           ;; no check yet
+println ("deferred: " ++ to-str (add-5 3))
 
-;; Catching violations with try
+;; Violations caught with try
 r1 := try (-> positive-double (0 - 1))
-match r1
-  (Ok v)    => println ("ok: " ++ to-str v)
-  (Err msg) => println ("pre violated: " ++ msg)
+println ("pre violation: " ++ to-str r1)
 
-r2 := try (-> add5 (0 - 2))
-match r2
-  (Ok v)    => println ("ok: " ++ to-str v)
-  (Err msg) => println ("deferred pre: " ++ msg)
-
-;; ═══════════════════════════════════════════════════════════════
-;; 6. Module Boundary Contracts (Phase 6b)
-;; ═══════════════════════════════════════════════════════════════
-
-;; `in`  — caller's fault   (checked on entry)
-;; `out` — impl's fault     (checked on exit)
-
+;; Module-boundary contracts: in/out with blame tracking
 fn safe-div
   in (a b -> b > 0)
   out (r -> r >= 0)
   (a b -> a / b)
 
-println (safe-div 10 2)            ;; 5.0
+println ("safe-div: " ++ to-str (safe-div 10 2))
 
-r3 := try (-> safe-div 10 0)
-match r3
-  (Ok v)    => println ("ok: " ++ to-str v)
-  (Err msg) => println ("in violated: " ++ msg)
+r2 := try (-> safe-div 10 0)
+println ("in violation: " ++ to-str r2)
 
-;; All four contract types together
+;; All four contract types
 fn guarded
-  pre (x -> x > 0)
-  in  (x -> x < 100)
+  pre  (x -> x > 0)
+  in   (x -> x < 100)
   post (r -> r > 0)
   out  (r -> r < 200)
   (x -> x * 2)
 
-println (guarded 50)               ;; 100
+println ("all contracts: " ++ to-str (guarded 50))
 
 ;; ═══════════════════════════════════════════════════════════════
-;; 7. Law Verification (Phase 6c)
+;; 12. Law Verification (QuickCheck)
 ;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: verifyLaws() → generateRandomValue() per type
+;; Evaluates law body with random inputs, 100 trials by default
+;; Seed fixed at 42 for reproducibility
 
-;; Protocol laws — algebraic properties impls must satisfy
 proto Additive a
   nil :: a
-  add :: a -> a -> a
-  law left-id  = forall x. add nil x == x
-  law right-id = forall x. add x nil == x
-  law assoc    = forall x y z. add (add x y) z == add x (add y z)
+  combine :: a -> a -> a
+  law left-id  = forall x. combine nil x == x
+  law right-id = forall x. combine x nil == x
+  law assoc    = forall x y z. combine (combine x y) z == combine x (combine y z)
 
 impl Additive for Int
   nil := 0
-  add := (+)
+  combine := (+)
 
-impl Additive for Str
-  nil := ""
-  add := (++)
-
+println ""
 println ";; Verifying Additive laws (should pass):"
 verify-laws Additive
 
@@ -270,7 +458,7 @@ println ""
 println ";; Verifying fn-level law (should pass):"
 verify-laws "triple"
 
-;; Detecting a broken law — string concat is NOT commutative
+;; Detecting a broken law
 proto BadComm a
   unit :: a
   op :: a -> a -> a
@@ -283,3 +471,91 @@ impl BadComm for Str
 println ""
 println ";; Detecting broken law (string concat not commutative):"
 verify-laws BadComm
+
+;; ═══════════════════════════════════════════════════════════════
+;; 13. Effect Rows (Mandatory)
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: AVAILABLE_EFFECTS ThreadLocal stack
+;; makeFnValue() → unannotated fn gets empty effect row (pure)
+;; apply() → push effect row, execute, pop
+;; checkEffectsAvailable() → called by builtins and effect ops
+
+;; This fn is pure — calling println inside would fail
+fn pure-add
+  (a b -> a + b)
+
+println ("pure: " ++ to-str (pure-add 3 4))
+
+;; This fn declares Console — can call println
+fn say ::: Console
+  (msg -> println msg)
+
+say "effect row works"
+
+;; Pure fn can call annotated fn (each fn has its own context)
+fn caller
+  (x -> say x)   ;; ok: say pushes its own {Console}
+
+caller "transitive call works"
+
+;; Handler with effect annotation — clause body gets declared effects
+effect MyLog
+  log-msg :: Str -> ()
+
+handler console-logger :: MyLog ::: Console
+  log-msg msg =>
+    println ("[LOG] " ++ msg)
+    resume ()
+
+;; Unannotated handler = pure clauses (no effects available)
+handler silent-logger :: MyLog
+  log-msg msg => resume ()
+
+fn do-logging ::: MyLog
+  (msg -> log-msg msg)
+
+fn run-logging
+  _ =>
+    with console-logger
+      do-logging "annotated handler"
+    with silent-logger
+      do-logging "silent handler"
+
+run-logging ()
+
+;; Verify pure fn cannot call println
+;; Named fn (not lambda) gets empty effect row → println fails
+fn try-print
+  (x -> println x)
+
+err := try (-> try-print "test")
+println ("pure violation: " ++ to-str err)
+
+;; ═══════════════════════════════════════════════════════════════
+;; 14. Modules & Stdlib
+;; ═══════════════════════════════════════════════════════════════
+;; Interpreter.java: ModuleRegistry handles loading
+;; use → loadModule() → evalFile() in fresh interpreter
+;; pub → tracks exported names
+
+use std.text {words unwords}
+use std.collection {zip enumerate}
+use std.func {flip}
+
+sentence := "the quick brown fox"
+ws := words sentence
+println ("words: " ++ to-str ws)
+println ("unwords: " ++ unwords ws)
+
+pairs := zip #[1 2 3] #["a" "b" "c"]
+println ("zip: " ++ to-str pairs)
+
+indexed := enumerate #["x" "y" "z"]
+println ("enumerate: " ++ to-str indexed)
+
+;; flip reverses first two args
+sub := flip (-)
+println ("flip sub 3 10 = " ++ to-str (sub 3 10))   ;; 7
+
+println ""
+println ";; Walkthrough complete. All features exercised."

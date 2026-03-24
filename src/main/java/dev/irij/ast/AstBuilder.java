@@ -96,8 +96,19 @@ public class AstBuilder {
 
     private Decl.FnDecl visitFnDecl(FnDeclContext ctx, boolean isPub) {
         String name = ctx.fnName().IDENT().getText();
+
+        // Extract effect row from ::: annotation: fn name ::: Console IO
+        List<String> effectRow = null;
+        if (ctx.effectAnnotation() != null) {
+            effectRow = new ArrayList<>();
+            for (var tn : ctx.effectAnnotation().typeName()) {
+                effectRow.add(tn.getText());
+            }
+        }
+
         if (ctx.fnBody() == null) {
-            return new Decl.FnDecl(name, isPub, new Decl.FnBody.NoBody(), loc(ctx));
+            return new Decl.FnDecl(name, isPub, effectRow, new Decl.FnBody.NoBody(),
+                List.of(), List.of(), List.of(), List.of(), List.of(), loc(ctx));
         }
         var content = ctx.fnBody().fnBodyContent();
 
@@ -128,7 +139,7 @@ public class AstBuilder {
         }
 
         Decl.FnBody body = visitFnBody(content);
-        return new Decl.FnDecl(name, isPub, body, pres, posts, ins, outs, fnLaws, loc(ctx));
+        return new Decl.FnDecl(name, isPub, effectRow, body, pres, posts, ins, outs, fnLaws, loc(ctx));
     }
 
     private Decl.FnBody visitFnBody(IrijParser.FnBodyContentContext content) {
@@ -239,6 +250,16 @@ public class AstBuilder {
     private Decl visitHandlerDecl(HandlerDeclContext ctx) {
         String name = ctx.fnName().IDENT().getText();
         String effectName = ctx.typeName().TYPE_NAME().getText();
+
+        // Extract required effects from optional effect annotation
+        List<String> requiredEffects = null;
+        if (ctx.effectAnnotation() != null) {
+            requiredEffects = new ArrayList<>();
+            for (var tn : ctx.effectAnnotation().typeName()) {
+                requiredEffects.add(tn.getText());
+            }
+        }
+
         var clauses = new ArrayList<Decl.HandlerClause>();
         var stateBindings = new ArrayList<Stmt>();
         for (var c : ctx.handlerBody().handlerClause()) {
@@ -254,7 +275,7 @@ public class AstBuilder {
                 stateBindings.add(visitBinding(c.binding()));
             }
         }
-        return new Decl.HandlerDecl(name, effectName, clauses, stateBindings, loc(ctx));
+        return new Decl.HandlerDecl(name, effectName, requiredEffects, clauses, stateBindings, loc(ctx));
     }
 
     // ── role / proto / impl ─────────────────────────────────────────────

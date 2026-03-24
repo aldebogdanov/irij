@@ -49,7 +49,7 @@ pub fn assert-throws
 ;; ── Test runner ─────────────────────────────────────
 
 ;; Run a single test. Returns #(:pass name) or #(:fail name).
-pub fn test
+pub fn test ::: Console
   => name thunk
   result := try thunk
   match result
@@ -62,7 +62,7 @@ pub fn test
 
 ;; Summarize test results. Takes a vector of test results from `test`.
 ;; Returns the number of failures (0 = success).
-pub fn summarize
+pub fn summarize ::: Console
   => results
   total := length results
   pass-results := /? (r -> nth 0 r == :pass)

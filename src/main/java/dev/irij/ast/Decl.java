@@ -7,21 +7,29 @@ import java.util.List;
  */
 public sealed interface Decl extends Node {
 
-    /** Function declaration: fn name :: Type  body. */
-    record FnDecl(String name, boolean isPub, FnBody body,
+    /** Function declaration: fn name :: Type ::: Effects  body. */
+    record FnDecl(String name, boolean isPub, List<String> effectRow, FnBody body,
                   List<Expr> preConditions, List<Expr> postConditions,
                   List<Expr> inContracts, List<Expr> outContracts,
                   List<FnLaw> fnLaws,
                   SourceLoc loc) implements Decl {
-        /** Convenience constructor for functions without contracts. */
+        /** Convenience constructor for functions without contracts or effects. */
         public FnDecl(String name, boolean isPub, FnBody body, SourceLoc loc) {
-            this(name, isPub, body, List.of(), List.of(), List.of(), List.of(), List.of(), loc);
+            this(name, isPub, null, body, List.of(), List.of(), List.of(), List.of(), List.of(), loc);
         }
         /** Convenience constructor for pre/post only (backward compat). */
         public FnDecl(String name, boolean isPub, FnBody body,
                       List<Expr> preConditions, List<Expr> postConditions,
                       SourceLoc loc) {
-            this(name, isPub, body, preConditions, postConditions, List.of(), List.of(), List.of(), loc);
+            this(name, isPub, null, body, preConditions, postConditions, List.of(), List.of(), List.of(), loc);
+        }
+        /** Convenience constructor with all contracts but no effects. */
+        public FnDecl(String name, boolean isPub, FnBody body,
+                      List<Expr> preConditions, List<Expr> postConditions,
+                      List<Expr> inContracts, List<Expr> outContracts,
+                      List<FnLaw> fnLaws,
+                      SourceLoc loc) {
+            this(name, isPub, null, body, preConditions, postConditions, inContracts, outContracts, fnLaws, loc);
         }
     }
 
@@ -47,8 +55,8 @@ public sealed interface Decl extends Node {
     record EffectDecl(String name, List<String> typeParams,
                       List<EffectOp> ops, SourceLoc loc) implements Decl {}
 
-    /** Handler declaration with optional state bindings. */
-    record HandlerDecl(String name, String effectName,
+    /** Handler declaration with optional state bindings and required effects. */
+    record HandlerDecl(String name, String effectName, List<String> requiredEffects,
                        List<HandlerClause> clauses, List<Stmt> stateBindings,
                        SourceLoc loc) implements Decl {}
 

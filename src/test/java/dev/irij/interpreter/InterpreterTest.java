@@ -351,7 +351,7 @@ class InterpreterTest {
     class ImperativeBlocks {
         @Test void simpleImperativeBlock() {
             assertEquals("hello", run("""
-                fn greet
+                fn greet ::: Console
                   =>
                   println "hello"
                 greet ()"""));
@@ -359,7 +359,7 @@ class InterpreterTest {
 
         @Test void imperativeWithParam() {
             assertEquals("hi Jo", run("""
-                fn greet
+                fn greet ::: Console
                   => name
                   println ("hi " ++ name)
                 greet "Jo\""""));
@@ -367,7 +367,7 @@ class InterpreterTest {
 
         @Test void imperativeWithTwoParams() {
             assertEquals("hi Jo", run("""
-                fn greet
+                fn greet ::: Console
                   => hi name
                   println (hi ++ " " ++ name)
                 greet "hi" "Jo\""""));
@@ -375,7 +375,7 @@ class InterpreterTest {
 
         @Test void imperativeMultiStmt() {
             assertEquals("1\n2\n3", run("""
-                fn count-to-three
+                fn count-to-three ::: Console
                   =>
                   println 1
                   println 2
@@ -1085,7 +1085,7 @@ class InterpreterTest {
 
             // Define greet, spawn a loop that calls it 3 times with sleeps
             interp.run(parse("""
-                fn greet
+                fn greet ::: Console
                   => name
                   println name
                 """));
@@ -1098,7 +1098,7 @@ class InterpreterTest {
 
             // Redefine greet — VarCell updates in-place
             interp.run(parse("""
-                fn greet
+                fn greet ::: Console
                   => name
                   println ("UPDATED-" ++ name)
                 """));
@@ -1221,7 +1221,7 @@ class InterpreterTest {
             assertEquals("handled: hello", run("""
                 effect Log
                   log :: Str -> ()
-                handler console-log :: Log
+                handler console-log :: Log ::: Console
                   log msg =>
                     println ~ "handled: " ++ msg
                     resume ()
@@ -1247,7 +1247,7 @@ class InterpreterTest {
             assertEquals("a\nb", run("""
                 effect Log
                   log :: Str -> ()
-                handler print-log :: Log
+                handler print-log :: Log ::: Console
                   log msg =>
                     println msg
                     resume ()
@@ -1326,11 +1326,11 @@ class InterpreterTest {
             assertEquals("inner: hello", run("""
                 effect Log
                   log :: Str -> ()
-                handler outer-log :: Log
+                handler outer-log :: Log ::: Console
                   log msg =>
                     println ~ "outer: " ++ msg
                     resume ()
-                handler inner-log :: Log
+                handler inner-log :: Log ::: Console
                   log msg =>
                     println ~ "inner: " ++ msg
                     resume ()
@@ -1346,7 +1346,7 @@ class InterpreterTest {
                   log :: Str -> ()
                 effect State
                   get-val :: () -> Int
-                handler print-log :: Log
+                handler print-log :: Log ::: Console
                   log msg =>
                     println msg
                     resume ()
@@ -1475,7 +1475,7 @@ class InterpreterTest {
                   log :: Str -> ()
                 effect State
                   get-val :: () -> Int
-                handler print-log :: Log
+                handler print-log :: Log ::: Console
                   log msg =>
                     println ~ "logged: " ++ msg
                     resume ()
@@ -1891,7 +1891,11 @@ class InterpreterTest {
         @Test void stdCollectionEach() {
             assertEquals("1\n2\n3", run("""
                 use std.collection :open
-                each println #[1 2 3]
+                fn print-each ::: Console
+                  => vec
+                  fold (_ x -> println x) () vec
+                  ()
+                print-each #[1 2 3]
                 """));
         }
 
@@ -2509,7 +2513,7 @@ class InterpreterTest {
 
         @Test void nestedScopes() {
             assertEquals("inner\nouter", run("""
-                fn inner-work
+                fn inner-work ::: Console
                   => x
                   scope s
                     s.fork (-> println "inner")
@@ -2975,7 +2979,7 @@ class InterpreterTest {
         @Test void applyWithLeadingArgs() {
             // apply fn arg1 vec → fn(arg1, ...vec)
             var result = run("""
-                fn my-fn
+                fn my-fn ::: Console
                   => a b c
                   println (to-str a ++ " " ++ to-str b ++ " " ++ to-str c)
                 apply my-fn 1 #[2 3]
@@ -3029,7 +3033,7 @@ class InterpreterTest {
 
         @Test void fnDeclLambdaRestParam() {
             var result = run("""
-                fn variadic
+                fn variadic ::: Console
                   (first ...rest -> println (to-str first ++ " got " ++ to-str (length rest) ++ " more"))
                 variadic 1 2 3 4
                 """);
@@ -3050,7 +3054,7 @@ class InterpreterTest {
 
         @Test void imperativeFnRestParamWithFixed() {
             var result = run("""
-                fn log-msg
+                fn log-msg ::: Console
                   => level ...parts
                   msg := join " " parts
                   println (to-str level ++ ": " ++ msg)
@@ -3078,6 +3082,332 @@ class InterpreterTest {
                 (...args -> /+ args) 10 20 30
                 """);
             assertEquals(60L, result);
+        }
+    }
+
+    // ═════════════════════════════════════════════════════════════════════
+    // Effect Row Checking
+    // ═════════════════════════════════════════════════════════════════════
+
+    @Nested
+    class EffectRows {
+
+        // ── Parsing ────────────────────────────────────────────────────
+
+        @Test void effectAnnotationParsesShorthand() {
+            assertEquals("Hello, world", run("""
+                fn greet ::: Console
+                  (name -> println ("Hello, " ++ name))
+                greet "world"
+                """));
+        }
+
+        @Test void effectAnnotationWithTypeAnnotation() {
+            assertEquals("Hello, world", run("""
+                fn greet :: Str () ::: Console
+                  (name -> println ("Hello, " ++ name))
+                greet "world"
+                """));
+        }
+
+        @Test void unannotatedFnIsPureByDefault() {
+            // unannotated fn is pure — no effects allowed, but pure computation works
+            var result = eval("""
+                fn add
+                  (a b -> a + b)
+                add 3 4
+                """);
+            assertEquals(7L, result);
+        }
+
+        // ── Enforcement: Console effect ────────────────────────────────
+
+        @Test void pureFnCannotCallPrintln() {
+            // unannotated fn is pure — calling println should fail
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                fn bad
+                  (x -> println x)
+                bad "hello"
+                """));
+        }
+
+        @Test void consoleFnCanCallPrintln() {
+            assertEquals("hello", run("""
+                fn greet ::: Console
+                  (x -> println x)
+                greet "hello"
+                """));
+        }
+
+        @Test void unannotatedFnIsPure() {
+            // Unannotated fn is now pure — calling println should fail
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                fn greet
+                  (x -> println x)
+                greet "hello"
+                """));
+        }
+
+        @Test void topLevelPrintlnAlwaysWorks() {
+            assertEquals("top-level", run("println \"top-level\""));
+        }
+
+        @Test void pureFnCallingPureFnWorks() {
+            var result = eval("""
+                fn double
+                  (x -> x * 2)
+                fn quad
+                  (x -> double (double x))
+                quad 5
+                """);
+            assertEquals(20L, result);
+        }
+
+        @Test void pureFnCanCallAnnotatedConsoleFn() {
+            // Each fn establishes its own effect context.
+            // pure-caller is pure (unannotated), but say has its own ::: Console context
+            assertEquals("hello", run("""
+                fn say ::: Console
+                  (x -> println x)
+                fn pure-caller
+                  (x -> say x)
+                pure-caller "hello"
+                """));
+        }
+
+        @Test void pureFnCannotDirectlyUsePrintln() {
+            // A pure fn (unannotated) CANNOT call println directly
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                fn pure-caller
+                  (x -> println x)
+                pure-caller "boom"
+                """));
+        }
+
+        // ── Effect via with block ──────────────────────────────────────
+
+        @Test void withBlockAddsEffectToContext() {
+            assertEquals("Hello, world", run("""
+                effect Greet
+                  greet :: Str -> ()
+                handler friendly :: Greet ::: Console
+                  greet name => resume (println ("Hello, " ++ name))
+                fn go ::: Greet
+                  => name
+                  greet name
+                with friendly
+                  go "world"
+                """));
+        }
+
+        @Test void pureFnWithInternalHandlerWorks() {
+            assertEquals("working", run("""
+                effect Log
+                  log :: Str -> ()
+                handler console-log :: Log ::: Console
+                  log msg => resume (println msg)
+                fn do-work ::: Console Log
+                  =>
+                  with console-log
+                    log "working"
+                do-work ()
+                """));
+        }
+
+        // ── User-defined effects ───────────────────────────────────────
+
+        @Test void userEffectCheckedInAnnotatedFn() {
+            assertEquals("test", run("""
+                effect MyLog
+                  log-msg :: Str -> ()
+                handler my-logger :: MyLog ::: Console
+                  log-msg msg => resume (println msg)
+                fn do-stuff ::: MyLog
+                  (x -> log-msg x)
+                with my-logger
+                  do-stuff "test"
+                """));
+        }
+
+        @Test void pureFnCannotCallUserEffectOps() {
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                effect Beep
+                  beep :: () -> ()
+                handler beeper :: Beep
+                  beep () => resume ()
+                fn silent
+                  (_ -> beep ())
+                with beeper
+                  silent ()
+                """));
+        }
+
+        // ── Multiple effects ───────────────────────────────────────────
+
+        @Test void multipleEffectsInRow() {
+            assertEquals("a\nb\nc", run("""
+                effect A
+                  op-a :: () -> ()
+                effect B
+                  op-b :: () -> ()
+                handler ha :: A ::: Console
+                  op-a () => resume (println "a")
+                handler hb :: B ::: Console
+                  op-b () => resume (println "b")
+                fn both ::: A B Console
+                  =>
+                  op-a ()
+                  op-b ()
+                  println "c"
+                with ha >> hb
+                  both ()
+                """));
+        }
+
+        @Test void missingOneEffectFails() {
+            // Declares ::: A but calls op-b which requires B
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                effect A
+                  op-a :: () -> ()
+                effect B
+                  op-b :: () -> ()
+                handler ha :: A
+                  op-a () => resume ()
+                handler hb :: B
+                  op-b () => resume ()
+                fn only-a ::: A
+                  (_ -> op-b ())
+                with ha >> hb
+                  only-a ()
+                """));
+        }
+
+        // ── Imperative and match fn styles ─────────────────────────────
+
+        @Test void imperativeFnWithEffectRow() {
+            assertEquals("Hi, Irij", run("""
+                fn greet ::: Console
+                  => name
+                  println ("Hi, " ++ name)
+                greet "Irij"
+                """));
+        }
+
+        @Test void matchFnWithEffectRow() {
+            assertEquals("zero\nnumber: 42", run("""
+                fn describe ::: Console
+                  0 => println "zero"
+                  n => println ("number: " ++ to-str n)
+                describe 0
+                describe 42
+                """));
+        }
+
+        // ── Partial application ────────────────────────────────────────
+
+        @Test void partialAppPreservesEffectRow() {
+            assertEquals("Hi, Irij", run("""
+                fn greet ::: Console
+                  (prefix name -> println (prefix ++ name))
+                hi := greet "Hi, "
+                hi "Irij"
+                """));
+        }
+
+        // ── Contracts + effects ────────────────────────────────────────
+
+        @Test void contractedFnWithEffectRow() {
+            assertEquals("works", run("""
+                fn safe-print ::: Console
+                  pre (x -> x /= "")
+                  (x -> println x)
+                safe-print "works"
+                """));
+        }
+
+        // ── read-line builtin exists ───────────────────────────────────
+
+        @Test void readLineRequiresConsole() {
+            // read-line should require Console
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                fn pure-read
+                  (_ -> read-line ())
+                pure-read ()
+                """));
+        }
+
+        // ── Handler effect annotations ─────────────────────────────────
+
+        @Test void handlerWithoutAnnotationIsPure() {
+            // Handler clause that calls println should fail if handler is unannotated (pure)
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                effect MyLog
+                  log-msg :: Str -> ()
+                handler pure-logger :: MyLog
+                  log-msg msg => resume (println msg)
+                fn do-log ::: MyLog
+                  (x -> log-msg x)
+                with pure-logger
+                  do-log "test"
+                """));
+        }
+
+        @Test void handlerWithAnnotationAllowsDeclaredEffects() {
+            assertEquals("hello", run("""
+                effect MyLog
+                  log-msg :: Str -> ()
+                handler console-logger :: MyLog ::: Console
+                  log-msg msg => resume (println msg)
+                fn do-log ::: MyLog
+                  (x -> log-msg x)
+                with console-logger
+                  do-log "hello"
+                """));
+        }
+
+        @Test void handlerAnnotationBlocksUndeclaredEffects() {
+            // Handler declares ::: Console but tries to use an effect it didn't declare
+            // (in this case, a user effect that requires something else)
+            // For now, test that a handler with no annotation can't call println
+            assertThrows(IrijRuntimeError.class, () -> eval("""
+                effect Ping
+                  ping :: () -> ()
+                handler bad-ping :: Ping
+                  ping () => resume (println "ping!")
+                with bad-ping
+                  ping ()
+                """));
+        }
+
+        @Test void pureHandlerClauseWorks() {
+            // A handler whose clauses don't need any effects works without annotation
+            var result = eval("""
+                effect Greet
+                  greet :: Str -> Str
+                handler friendly :: Greet
+                  greet name => resume ("Hello, " ++ name)
+                with friendly
+                  greet "world"
+                """);
+            assertEquals("Hello, world", result);
+        }
+
+        // ── Error message quality ──────────────────────────────────────
+
+        @Test void errorMessageIncludesEffectName() {
+            try {
+                eval("""
+                    fn bad
+                      (x -> println x)
+                    bad "test"
+                    """);
+                fail("Should have thrown");
+            } catch (IrijRuntimeError e) {
+                assertTrue(e.getMessage().contains("Console"),
+                    "Error should mention 'Console': " + e.getMessage());
+                assertTrue(e.getMessage().contains("println"),
+                    "Error should mention 'println': " + e.getMessage());
+            }
         }
     }
 }

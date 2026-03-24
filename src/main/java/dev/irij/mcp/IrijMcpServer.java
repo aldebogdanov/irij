@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
 public final class IrijMcpServer {
 
     private static final String SERVER_NAME = "irij";
-    private static final String SERVER_VERSION = "0.1.0";
+    private static final String SERVER_VERSION = "0.1.1";
 
     private final Path projectRoot;
     private final Map<String, Session> sessions = new ConcurrentHashMap<>();

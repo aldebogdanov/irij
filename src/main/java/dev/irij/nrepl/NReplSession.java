@@ -145,7 +145,7 @@ public final class NReplSession {
                 "clone", Map.of(),
                 "close", Map.of()
         ));
-        resp.put("versions", Map.of("irij", "0.1.0-SNAPSHOT"));
+        resp.put("versions", Map.of("irij", "0.1.1"));
         resp.put("status", List.of("done"));
         return resp;
     }

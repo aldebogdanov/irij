@@ -25,21 +25,31 @@ public final class Builtins {
         env.define("true", Boolean.TRUE);
         env.define("false", Boolean.FALSE);
 
-        // ── I/O ─────────────────────────────────────────────────────────
-        env.define("print", new BuiltinFn("print", 1, args -> {
+        // ── I/O (requires Console effect) ──────────────────────────────
+        env.define("print", new BuiltinFn("print", 1, List.of("Console"), args -> {
             out.print(Values.toIrijString(args.get(0)));
             return Values.UNIT;
         }));
 
-        env.define("println", new BuiltinFn("println", 1, args -> {
+        env.define("println", new BuiltinFn("println", 1, List.of("Console"), args -> {
             out.println(Values.toIrijString(args.get(0)));
             return Values.UNIT;
         }));
 
-        env.define("dbg", new BuiltinFn("dbg", 1, args -> {
+        env.define("dbg", new BuiltinFn("dbg", 1, List.of("Console"), args -> {
             var v = args.get(0);
             out.println("[dbg] " + Values.typeName(v) + ": " + Values.toIrijString(v));
             return v;
+        }));
+
+        env.define("read-line", new BuiltinFn("read-line", 0, List.of("Console"), args -> {
+            try {
+                var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+                var line = reader.readLine();
+                return line != null ? line : Values.UNIT;
+            } catch (java.io.IOException e) {
+                throw new IrijRuntimeError("read-line: " + e.getMessage(), null);
+            }
         }));
 
         env.define("to-str", new BuiltinFn("to-str", 1, args -> {
