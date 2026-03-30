@@ -116,7 +116,7 @@ class ParserSmokeTest {
     @Nested class DataTypes {
         @Test void productType() {
             assertParses("""
-                type User
+                spec User
                   name :: Str
                   age :: Int
                 """);
@@ -124,7 +124,7 @@ class ParserSmokeTest {
 
         @Test void sumType() {
             assertParses("""
-                type Result a e
+                spec Result a e
                   Ok a
                   Err e
                 """);
@@ -132,7 +132,7 @@ class ParserSmokeTest {
 
         @Test void parameterizedType() {
             assertParses("""
-                type Tree a
+                spec Tree a
                   Leaf a
                   Node (Tree a) a (Tree a)
                 """);

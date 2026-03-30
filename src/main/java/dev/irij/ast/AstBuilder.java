@@ -43,7 +43,7 @@ public class AstBuilder {
         if (ctx.useDecl() != null) return visitUseDecl(ctx.useDecl());
         if (ctx.pubDecl() != null) return visitPubDecl(ctx.pubDecl());
         if (ctx.fnDecl() != null) return visitFnDecl(ctx.fnDecl(), false);
-        if (ctx.typeDecl() != null) return visitTypeDecl(ctx.typeDecl());
+        if (ctx.specDecl() != null) return visitSpecDecl(ctx.specDecl());
         if (ctx.newtypeDecl() != null) return visitNewtypeDecl(ctx.newtypeDecl());
         if (ctx.effectDecl() != null) return visitEffectDecl(ctx.effectDecl());
         if (ctx.handlerDecl() != null) return visitHandlerDecl(ctx.handlerDecl());
@@ -87,6 +87,9 @@ public class AstBuilder {
     private Decl visitPubDecl(PubDeclContext ctx) {
         var loc = loc(ctx);
         if (ctx.fnDecl() != null) return new Decl.PubDecl(visitFnDecl(ctx.fnDecl(), true), loc);
+        if (ctx.specDecl() != null) return new Decl.PubDecl(visitSpecDecl(ctx.specDecl()), loc);
+        if (ctx.effectDecl() != null) return new Decl.PubDecl(visitEffectDecl(ctx.effectDecl()), loc);
+        if (ctx.handlerDecl() != null) return new Decl.PubDecl(visitHandlerDecl(ctx.handlerDecl()), loc);
         if (ctx.useDecl() != null) return new Decl.PubDecl(visitUseDecl(ctx.useDecl()), loc);
         if (ctx.binding() != null) return new Decl.PubDecl(new Decl.BindingDecl(visitBinding(ctx.binding()), loc), loc);
         throw new IllegalStateException("Unknown pub declaration at " + loc);
@@ -101,13 +104,16 @@ public class AstBuilder {
         List<String> effectRow = null;
         if (ctx.effectAnnotation() != null) {
             effectRow = new ArrayList<>();
-            for (var tn : ctx.effectAnnotation().typeName()) {
+            for (var tn : ctx.effectAnnotation().upperName()) {
                 effectRow.add(tn.getText());
             }
         }
 
+        // Extract spec annotations from :: annotation: fn name :: Person Str
+        List<String> specAnnotations = extractSpecAnnotations(ctx.specAnnotation());
+
         if (ctx.fnBody() == null) {
-            return new Decl.FnDecl(name, isPub, effectRow, new Decl.FnBody.NoBody(),
+            return new Decl.FnDecl(name, isPub, effectRow, specAnnotations, new Decl.FnBody.NoBody(),
                 List.of(), List.of(), List.of(), List.of(), List.of(), loc(ctx));
         }
         var content = ctx.fnBody().fnBodyContent();
@@ -139,7 +145,44 @@ public class AstBuilder {
         }
 
         Decl.FnBody body = visitFnBody(content);
-        return new Decl.FnDecl(name, isPub, effectRow, body, pres, posts, ins, outs, fnLaws, loc(ctx));
+        return new Decl.FnDecl(name, isPub, effectRow, specAnnotations, body, pres, posts, ins, outs, fnLaws, loc(ctx));
+    }
+
+    /**
+     * Extract spec names from a spec annotation (:: specExpr).
+     * Each specAtom that is an UPPER_NAME becomes a spec name entry.
+     * UNDERSCORE (_) becomes null (wildcard/unspecified).
+     * IDENT (type variables) and other forms become null.
+     * Returns null if no annotation present.
+     */
+    private List<String> extractSpecAnnotations(SpecAnnotationContext ctx) {
+        if (ctx == null) return null;
+        var result = new ArrayList<String>();
+        extractSpecNames(ctx.specExpr(), result);
+        return result.isEmpty() ? null : result;
+    }
+
+    private void extractSpecNames(SpecExprContext ctx, List<String> names) {
+        if (ctx == null) return;
+        // specExpr : specApp ARROW specExpr | specApp
+        if (ctx.specApp() != null) {
+            for (var atom : ctx.specApp().specAtom()) {
+                if (atom.upperName() != null) {
+                    names.add(atom.upperName().UPPER_NAME().getText());
+                } else if (atom.UNDERSCORE() != null) {
+                    names.add(null); // wildcard
+                } else if (atom.IDENT() != null) {
+                    names.add(null); // type variable, not a concrete spec
+                } else if (atom.LPAREN() != null && atom.RPAREN() != null && atom.specExpr() == null) {
+                    names.add(null); // unit type ()
+                }
+                // Ignore grouped/collection types for now — handled in future phases
+            }
+        }
+        // Recurse into arrow right side
+        if (ctx.specExpr() != null) {
+            extractSpecNames(ctx.specExpr(), names);
+        }
     }
 
     private Decl.FnBody visitFnBody(IrijParser.FnBodyContentContext content) {
@@ -188,53 +231,53 @@ public class AstBuilder {
         return null;
     }
 
-    // ── type / newtype ──────────────────────────────────────────────────
+    // ── spec / newtype ────────────────────────────────────────────────
 
-    private Decl.TypeDecl visitTypeDecl(TypeDeclContext ctx) {
-        String name = ctx.typeName().TYPE_NAME().getText();
+    private Decl.SpecDecl visitSpecDecl(SpecDeclContext ctx) {
+        String name = ctx.upperName().UPPER_NAME().getText();
         var typeParams = new ArrayList<String>();
-        if (ctx.typeParams() != null) {
-            for (var id : ctx.typeParams().IDENT()) {
+        if (ctx.specParams() != null) {
+            for (var id : ctx.specParams().IDENT()) {
                 typeParams.add(id.getText());
             }
         }
-        var body = visitTypeBody(ctx.typeBody());
-        return new Decl.TypeDecl(name, typeParams, body, loc(ctx));
+        var body = visitSpecBody(ctx.specBody());
+        return new Decl.SpecDecl(name, typeParams, body, loc(ctx));
     }
 
-    private Decl.TypeBody visitTypeBody(TypeBodyContext ctx) {
-        // Check if it's variants (TYPE_NAME starts) or fields (IDENT :: starts)
-        if (!ctx.typeVariant().isEmpty()) {
+    private Decl.SpecBody visitSpecBody(SpecBodyContext ctx) {
+        // Check if it's variants (UPPER_NAME starts) or fields (IDENT :: starts)
+        if (!ctx.specVariant().isEmpty()) {
             var variants = new ArrayList<Decl.Variant>();
-            for (var v : ctx.typeVariant()) {
-                String name = v.TYPE_NAME().getText();
-                int arity = v.typeExpr().size();
+            for (var v : ctx.specVariant()) {
+                String name = v.UPPER_NAME().getText();
+                int arity = v.specExpr().size();
                 variants.add(new Decl.Variant(name, arity));
             }
-            return new Decl.TypeBody.SumType(variants);
+            return new Decl.SpecBody.SumSpec(variants);
         }
-        if (!ctx.typeField().isEmpty()) {
-            var fields = new ArrayList<Decl.Field>();
-            for (var f : ctx.typeField()) {
-                fields.add(new Decl.Field(f.IDENT().getText()));
+        if (!ctx.specField().isEmpty()) {
+            var fields = new ArrayList<Decl.SpecField>();
+            for (var f : ctx.specField()) {
+                fields.add(new Decl.SpecField(f.IDENT().getText()));
             }
-            return new Decl.TypeBody.ProductType(fields);
+            return new Decl.SpecBody.ProductSpec(fields);
         }
-        throw new IllegalStateException("Empty type body at " + loc(ctx));
+        throw new IllegalStateException("Empty spec body at " + loc(ctx));
     }
 
     private Decl visitNewtypeDecl(NewtypeDeclContext ctx) {
-        String name = ctx.typeName().TYPE_NAME().getText();
+        String name = ctx.upperName().UPPER_NAME().getText();
         return new Decl.NewtypeDecl(name, loc(ctx));
     }
 
     // ── effect / handler ────────────────────────────────────────────────
 
     private Decl visitEffectDecl(EffectDeclContext ctx) {
-        String name = ctx.typeName().TYPE_NAME().getText();
+        String name = ctx.upperName().UPPER_NAME().getText();
         var typeParams = new ArrayList<String>();
-        if (ctx.typeParams() != null) {
-            for (var id : ctx.typeParams().IDENT()) {
+        if (ctx.specParams() != null) {
+            for (var id : ctx.specParams().IDENT()) {
                 typeParams.add(id.getText());
             }
         }
@@ -249,13 +292,13 @@ public class AstBuilder {
 
     private Decl visitHandlerDecl(HandlerDeclContext ctx) {
         String name = ctx.fnName().IDENT().getText();
-        String effectName = ctx.typeName().TYPE_NAME().getText();
+        String effectName = ctx.upperName().UPPER_NAME().getText();
 
         // Extract required effects from optional effect annotation
         List<String> requiredEffects = null;
         if (ctx.effectAnnotation() != null) {
             requiredEffects = new ArrayList<>();
-            for (var tn : ctx.effectAnnotation().typeName()) {
+            for (var tn : ctx.effectAnnotation().upperName()) {
                 requiredEffects.add(tn.getText());
             }
         }
@@ -285,17 +328,17 @@ public class AstBuilder {
     }
 
     private Decl visitProtoDecl(ProtoDeclContext ctx) {
-        String name = ctx.typeName().TYPE_NAME().getText();
+        String name = ctx.upperName().UPPER_NAME().getText();
         var typeParams = new ArrayList<String>();
-        if (ctx.typeParams() != null) {
-            for (var tp : ctx.typeParams().IDENT()) {
+        if (ctx.specParams() != null) {
+            for (var tp : ctx.specParams().IDENT()) {
                 typeParams.add(tp.getText());
             }
         }
         var methods = new ArrayList<Decl.ProtoMethod>();
         var laws = new ArrayList<Decl.ProtoLaw>();
         for (var member : ctx.protoBody().protoMember()) {
-            if (member.IDENT() != null && member.typeExpr() != null) {
+            if (member.IDENT() != null && member.specExpr() != null) {
                 methods.add(new Decl.ProtoMethod(member.IDENT().getText()));
             } else if (member.LAW() != null) {
                 var forallVars = new ArrayList<String>();
@@ -314,8 +357,8 @@ public class AstBuilder {
     }
 
     private Decl visitImplDecl(ImplDeclContext ctx) {
-        String protoName = ctx.typeName(0).TYPE_NAME().getText();
-        String forType = ctx.typeName(1).TYPE_NAME().getText();
+        String protoName = ctx.upperName(0).UPPER_NAME().getText();
+        String forType = ctx.upperName(1).UPPER_NAME().getText();
         var bindings = new ArrayList<Decl.ImplBinding>();
         for (var member : ctx.implBody().implMember()) {
             bindings.add(new Decl.ImplBinding(
@@ -354,7 +397,18 @@ public class AstBuilder {
         var target = visitBindTarget(ctx.bindTarget());
         var loc = loc(ctx);
         if (ctx.BIND() != null) {
-            return new Stmt.Bind(target, visitExpr(ctx.expr()), loc);
+            String specAnn = null;
+            if (ctx.specSuffix() != null) {
+                // Extract the spec name from :: SpecName
+                var specExpr = ctx.specSuffix().specExpr();
+                if (specExpr != null && specExpr.specApp() != null) {
+                    var atoms = specExpr.specApp().specAtom();
+                    if (!atoms.isEmpty() && atoms.get(0).upperName() != null) {
+                        specAnn = atoms.get(0).upperName().UPPER_NAME().getText();
+                    }
+                }
+            }
+            return new Stmt.Bind(target, visitExpr(ctx.expr()), specAnn, loc);
         }
         if (ctx.MUT_BIND() != null) {
             return new Stmt.MutBind(target, visitExpr(ctx.expr()), loc);
@@ -643,14 +697,14 @@ public class AstBuilder {
     private Expr visitPostfixExpr(PostfixExprContext ctx) {
         Expr result = visitAtomExpr(ctx.atomExpr());
         // Dot access chain: walk children after atomExpr
-        // Grammar: atomExpr (DOT (IDENT | TYPE_NAME))* (MAP_AT ROLE_NAME)?
+        // Grammar: atomExpr (DOT (IDENT | UPPER_NAME))* (MAP_AT ROLE_NAME)?
         boolean afterDot = false;
         for (var child : ctx.children) {
             if (child instanceof TerminalNode tn) {
                 int type = tn.getSymbol().getType();
                 if (type == IrijParser.DOT) {
                     afterDot = true;
-                } else if (afterDot && (type == IrijParser.IDENT || type == IrijParser.TYPE_NAME)) {
+                } else if (afterDot && (type == IrijParser.IDENT || type == IrijParser.UPPER_NAME)) {
                     result = new Expr.DotAccess(result, tn.getText(), loc(ctx));
                     afterDot = false;
                 }
@@ -667,7 +721,7 @@ public class AstBuilder {
     private Expr visitAtomExpr(AtomExprContext ctx) {
         if (ctx.literal() != null) return visitLiteral(ctx.literal());
         if (ctx.IDENT() != null) return new Expr.Var(ctx.IDENT().getText(), loc(ctx));
-        if (ctx.TYPE_NAME() != null) return new Expr.TypeRef(ctx.TYPE_NAME().getText(), loc(ctx));
+        if (ctx.UPPER_NAME() != null) return new Expr.TypeRef(ctx.UPPER_NAME().getText(), loc(ctx));
         if (ctx.ROLE_NAME() != null) return new Expr.RoleRef(ctx.ROLE_NAME().getText(), loc(ctx));
         if (ctx.KEYWORD() != null) return visitKeyword(ctx.KEYWORD(), loc(ctx));
         if (ctx.UNDERSCORE() != null) return new Expr.Wildcard(loc(ctx));
@@ -972,9 +1026,9 @@ public class AstBuilder {
     private Pattern visitPattern(PatternContext ctx) {
         var loc = loc(ctx);
 
-        // Constructor pattern: TYPE_NAME patterns*
-        if (ctx.TYPE_NAME() != null) {
-            String name = ctx.TYPE_NAME().getText();
+        // Constructor pattern: UPPER_NAME patterns*
+        if (ctx.UPPER_NAME() != null) {
+            String name = ctx.UPPER_NAME().getText();
             var args = new ArrayList<Pattern>();
             for (var p : ctx.pattern()) {
                 args.add(visitPattern(p));

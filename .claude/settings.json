@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // .tool_response.filePath' | { read -r f; echo \"$f\" | grep -qE '\\.g4$' && echo '{\"systemMessage\":\"Grammar file changed -- run ./gradlew generateGrammarSource or ./gradlew test to regenerate parser.\"}' || true; }",
+            "statusMessage": "Checking for grammar changes..."
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -171,11 +171,11 @@ println ~ "tilde works: " ++ to-str 42
 ;; Interpreter.java: evalTypeDecl() creates Tagged constructors
 ;; matchPattern() handles constructor patterns
 
-type Shape
+spec Shape
   Circle Float
   Rect Float Float
 
-type Maybe a
+spec Maybe a
   Just a
   Nothing
 

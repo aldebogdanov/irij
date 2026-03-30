@@ -39,7 +39,7 @@ import java.util.Map;
 public class IrijRepl {
 
     private static final String PROMPT_PRIMARY    = "ℑ> ";
-    private static final String PROMPT_CONTINUE   = "  | ";
+    private static final String PROMPT_CONTINUE   = " | ";
     private static final String HISTORY_FILE      = System.getProperty("user.home") + "/.irij_history";
 
     private Interpreter interpreter;

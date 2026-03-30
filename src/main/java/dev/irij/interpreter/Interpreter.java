@@ -29,6 +29,9 @@ public final class Interpreter {
     // Protocol registry: proto name → descriptor (shared across all envs, thread-safe for spawn)
     private final Map<String, ProtocolDescriptor> protocols = new java.util.concurrent.ConcurrentHashMap<>();
 
+    // Spec registry: spec name → descriptor (shared, hot-reloadable via nREPL)
+    private final Map<String, Values.SpecDescriptor> specRegistry = new java.util.concurrent.ConcurrentHashMap<>();
+
     /** When true, automatically verify protocol laws on each `impl` declaration. */
     private boolean autoVerifyLaws = false;
 
@@ -538,9 +541,9 @@ public final class Interpreter {
                 defineInScope(env, fn.name(), value);
                 yield value;
             }
-            case Decl.TypeDecl td -> {
-                registerTypeConstructors(td, env);
-                yield "<type " + td.name() + ">";
+            case Decl.SpecDecl sd -> {
+                registerSpecConstructors(sd, env);
+                yield "<spec " + sd.name() + ">";
             }
             case Decl.NewtypeDecl nt -> {
                 var ctor = new Constructor(nt.name(), 1);
@@ -584,13 +587,14 @@ public final class Interpreter {
     private Object makeFnValue(Decl.FnDecl fn, Environment env) {
         // Unannotated fn = pure (empty effect row). Only anonymous lambdas get null (inherit context).
         var effectRow = fn.effectRow() != null ? fn.effectRow() : List.<String>of();
+        var specs = fn.specAnnotations();
         Object baseFn = switch (fn.body()) {
             case Decl.FnBody.LambdaBody lb ->
-                new Lambda(lb.params(), lb.restParam(), lb.body(), env, fn.name(), effectRow);
+                new Lambda(lb.params(), lb.restParam(), lb.body(), env, fn.name(), effectRow, specs);
             case Decl.FnBody.MatchArmsBody mab ->
-                new MatchFn(fn.name(), mab.arms(), env, effectRow);
+                new MatchFn(fn.name(), mab.arms(), env, effectRow, specs);
             case Decl.FnBody.ImperativeBody ib ->
-                new ImperativeFn(fn.name(), ib.params(), ib.restParam(), ib.stmts(), env, effectRow);
+                new ImperativeFn(fn.name(), ib.params(), ib.restParam(), ib.stmts(), env, effectRow, specs);
             case Decl.FnBody.NoBody() ->
                 Values.UNIT; // type-only declaration
         };
@@ -618,10 +622,15 @@ public final class Interpreter {
     }
 
     /** A match-arm function: tries each arm against the argument. */
-    record MatchFn(String name, List<Expr.MatchArm> arms, Environment closure, List<String> effectRow) {
-        /** Convenience constructor without effect row. */
+    record MatchFn(String name, List<Expr.MatchArm> arms, Environment closure,
+                   List<String> effectRow, List<String> specAnnotations) {
+        /** Convenience constructor without effect row or specs. */
         MatchFn(String name, List<Expr.MatchArm> arms, Environment closure) {
-            this(name, arms, closure, null);
+            this(name, arms, closure, null, null);
+        }
+        /** Convenience constructor without specs. */
+        MatchFn(String name, List<Expr.MatchArm> arms, Environment closure, List<String> effectRow) {
+            this(name, arms, closure, effectRow, null);
         }
         @Override
         public String toString() { return "<fn " + name + ">"; }
@@ -629,14 +638,19 @@ public final class Interpreter {
 
     /** An imperative-block function: binds params then executes statements. */
     record ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body,
-                        Environment closure, List<String> effectRow) {
-        /** Convenience constructor without rest param or effects. */
+                        Environment closure, List<String> effectRow, List<String> specAnnotations) {
+        /** Convenience constructor without rest param, effects, or specs. */
         ImperativeFn(String name, List<Pattern> params, List<Stmt> body, Environment closure) {
-            this(name, params, null, body, closure, null);
+            this(name, params, null, body, closure, null, null);
         }
-        /** Convenience constructor without effects. */
+        /** Convenience constructor without effects or specs. */
         ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body, Environment closure) {
-            this(name, params, restParam, body, closure, null);
+            this(name, params, restParam, body, closure, null, null);
+        }
+        /** Convenience constructor without specs. */
+        ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body,
+                     Environment closure, List<String> effectRow) {
+            this(name, params, restParam, body, closure, effectRow, null);
         }
 
         /** Whether this function accepts extra args via ...rest. */
@@ -665,25 +679,117 @@ public final class Interpreter {
     // Type Constructors
     // ═══════════════════════════════════════════════════════════════════
 
-    private void registerTypeConstructors(Decl.TypeDecl td, Environment env) {
-        switch (td.body()) {
-            case Decl.TypeBody.SumType st -> {
-                for (var variant : st.variants()) {
+    private void registerSpecConstructors(Decl.SpecDecl sd, Environment env) {
+        // Register spec descriptor for validation lookups
+        registerSpecDescriptor(sd);
+
+        switch (sd.body()) {
+            case Decl.SpecBody.SumSpec ss -> {
+                for (var variant : ss.variants()) {
                     if (variant.arity() == 0) {
-                        // Zero-arg constructor: a value, not a function
-                        defineInScope(env, variant.name(), new Tagged(variant.name(), List.of()));
+                        // Zero-arg constructor: a value, not a function — certified by spec
+                        defineInScope(env, variant.name(), new Tagged(variant.name(), List.of(), null, sd.name()));
                     } else {
-                        defineInScope(env, variant.name(), new Constructor(variant.name(), variant.arity()));
+                        defineInScope(env, variant.name(), new Constructor(variant.name(), variant.arity(), null, sd.name()));
                     }
                 }
             }
-            case Decl.TypeBody.ProductType pt -> {
-                // Product type: constructor takes all fields as positional args,
+            case Decl.SpecBody.ProductSpec ps -> {
+                // Product spec: constructor takes all fields as positional args,
                 // but also records field names for named access & destructuring
-                var fieldNames = pt.fields().stream().map(Decl.Field::name).toList();
-                defineInScope(env, td.name(), new Constructor(td.name(), fieldNames.size(), fieldNames));
+                var fieldNames = ps.fields().stream().map(Decl.SpecField::name).toList();
+                defineInScope(env, sd.name(), new Constructor(sd.name(), fieldNames.size(), fieldNames, sd.name()));
             }
         }
+    }
+
+    private void registerSpecDescriptor(Decl.SpecDecl sd) {
+        var descriptor = new Values.SpecDescriptor(sd.name(), sd.specParams(), sd.body());
+        specRegistry.put(sd.name(), descriptor);
+    }
+
+    // ── Spec validation ─────────────────────────────────────────────
+
+    /**
+     * Validate a value against a named spec. Returns the value with certification.
+     * If already certified for this spec, returns as-is (O(1) tag check).
+     * Otherwise, force-validates the value's structure.
+     */
+    private Object validateAgainstSpec(Object value, String specName, Node.SourceLoc loc) {
+        // O(1) tag check: already certified?
+        if (value instanceof Tagged t && specName.equals(t.specName())) {
+            return value;
+        }
+
+        var descriptor = specRegistry.get(specName);
+        if (descriptor == null) {
+            throw new IrijRuntimeError("Unknown spec: " + specName, loc);
+        }
+
+        return switch (descriptor.body()) {
+            case Decl.SpecBody.ProductSpec ps -> validateProduct(value, specName, ps, loc);
+            case Decl.SpecBody.SumSpec ss -> validateSum(value, specName, ss, loc);
+        };
+    }
+
+    private Object validateProduct(Object value, String specName,
+                                    Decl.SpecBody.ProductSpec ps, Node.SourceLoc loc) {
+        var requiredFields = ps.fields().stream().map(Decl.SpecField::name).toList();
+
+        // Accept Tagged with matching namedFields
+        if (value instanceof Tagged t && t.namedFields() != null) {
+            for (var field : requiredFields) {
+                if (!t.namedFields().containsKey(field)) {
+                    throw new IrijRuntimeError(
+                        "Spec validation failed: " + specName + " requires field '" + field + "'", loc);
+                }
+            }
+            // Re-certify with the spec name
+            return new Tagged(t.tag(), t.fields(), t.namedFields(), specName);
+        }
+
+        // Accept IrijMap (untagged data) — validate and certify
+        if (value instanceof Values.IrijMap m) {
+            for (var field : requiredFields) {
+                if (!m.entries().containsKey(field)) {
+                    throw new IrijRuntimeError(
+                        "Spec validation failed: " + specName + " requires field '" + field + "'", loc);
+                }
+            }
+            // Certify: convert map to Tagged
+            var named = new java.util.LinkedHashMap<>(m.entries());
+            var fields = requiredFields.stream().map(named::get).toList();
+            return new Tagged(specName, fields, named, specName);
+        }
+
+        throw new IrijRuntimeError(
+            "Spec validation failed: cannot validate " + Values.typeName(value)
+                + " as " + specName, loc);
+    }
+
+    private Object validateSum(Object value, String specName,
+                                Decl.SpecBody.SumSpec ss, Node.SourceLoc loc) {
+        if (!(value instanceof Tagged t)) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected " + specName + " variant, got "
+                    + Values.typeName(value), loc);
+        }
+        // Check that the tag matches one of the spec's variants
+        var validTags = ss.variants().stream().map(Decl.Variant::name).toList();
+        if (!validTags.contains(t.tag())) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: '" + t.tag() + "' is not a variant of " + specName
+                    + " (expected one of: " + validTags + ")", loc);
+        }
+        // Check arity
+        var variant = ss.variants().stream().filter(v -> v.name().equals(t.tag())).findFirst().get();
+        if (t.fields().size() != variant.arity()) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: " + t.tag() + " expects " + variant.arity()
+                    + " fields, got " + t.fields().size(), loc);
+        }
+        // Re-certify
+        return new Tagged(t.tag(), t.fields(), t.namedFields(), specName);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -733,12 +839,18 @@ public final class Interpreter {
         if (pubNames != null) {
             var name = extractDeclName(pd.inner());
             if (name != null) pubNames.add(name);
-            // For type declarations, also export constructor names
-            if (pd.inner() instanceof Decl.TypeDecl td) {
-                if (td.body() instanceof Decl.TypeBody.SumType sum) {
+            // For spec declarations, also export constructor names
+            if (pd.inner() instanceof Decl.SpecDecl sd) {
+                if (sd.body() instanceof Decl.SpecBody.SumSpec sum) {
                     for (var variant : sum.variants()) {
                         pubNames.add(variant.name());
                     }
+                }
+            }
+            // For effect declarations, also export op names
+            if (pd.inner() instanceof Decl.EffectDecl ed) {
+                for (var op : ed.ops()) {
+                    pubNames.add(op.name());
                 }
             }
         }
@@ -748,11 +860,13 @@ public final class Interpreter {
     /** Extract the primary name from a declaration node. */
     private String extractDeclName(Node node) {
         if (node instanceof Decl.FnDecl fn) return fn.name();
-        if (node instanceof Decl.TypeDecl td) return td.name();
+        if (node instanceof Decl.SpecDecl sd) return sd.name();
         if (node instanceof Decl.BindingDecl bd) {
             if (bd.stmt() instanceof Stmt.Bind b &&
                 b.target() instanceof Stmt.BindTarget.Simple s) return s.name();
         }
+        if (node instanceof Decl.EffectDecl ed) return ed.name();
+        if (node instanceof Decl.HandlerDecl hd) return hd.name();
         if (node instanceof Decl.UseDecl ud) {
             var parts = ud.qualifiedName().split("\\.");
             return parts[parts.length - 1];
@@ -1149,6 +1263,10 @@ public final class Interpreter {
 
     private void execBind(Stmt.Bind bind, Environment env) {
         var value = eval(bind.value(), env);
+        // Spec annotation: validate and certify if needed
+        if (bind.specAnnotation() != null) {
+            value = validateAgainstSpec(value, bind.specAnnotation(), bind.loc());
+        }
         switch (bind.target()) {
             case Stmt.BindTarget.Simple(var name) -> defineInScope(env, name, value);
             case Stmt.BindTarget.Destructure(var pat) -> {
@@ -1774,6 +1892,37 @@ public final class Interpreter {
             || value instanceof Tagged;
     }
 
+    /**
+     * Validate function arguments against spec annotations.
+     * specAnnotations: [Input1, Input2, ..., Output]. Last = output, rest = inputs.
+     * Entries may be null (wildcard _ or non-spec types).
+     * Only validates against specs that exist in the registry — unknown names are type hints only.
+     */
+    private List<Object> validateFnArgs(List<Object> args, List<String> specAnnotations,
+                                         String fnName, SourceLoc loc) {
+        if (specAnnotations == null || specAnnotations.size() < 2) return args;
+        // Input specs: all but last
+        int inputCount = specAnnotations.size() - 1;
+        var result = new ArrayList<>(args);
+        for (int i = 0; i < inputCount && i < result.size(); i++) {
+            var specName = specAnnotations.get(i);
+            if (specName != null && specRegistry.containsKey(specName)) {
+                result.set(i, validateAgainstSpec(result.get(i), specName, loc));
+            }
+        }
+        return result;
+    }
+
+    private Object validateFnReturn(Object result, List<String> specAnnotations,
+                                     String fnName, SourceLoc loc) {
+        if (specAnnotations == null || specAnnotations.isEmpty()) return result;
+        var outputSpec = specAnnotations.get(specAnnotations.size() - 1);
+        if (outputSpec != null && specRegistry.containsKey(outputSpec)) {
+            return validateAgainstSpec(result, outputSpec, loc);
+        }
+        return result;
+    }
+
     Object apply(Object fn, List<Object> args, SourceLoc loc) {
         return switch (fn) {
             case Lambda lam -> {
@@ -1781,17 +1930,19 @@ public final class Interpreter {
                 if (args.size() < lam.arity() && !lam.isVariadic()) {
                     yield new PartialApp(lam, List.copyOf(args));
                 }
+                // Validate input args against spec annotations
+                var validatedArgs = validateFnArgs(args, lam.specAnnotations(), lam.name(), loc);
                 var callEnv = lam.closure().child();
                 // Bind params via pattern matching
-                for (int i = 0; i < lam.params().size() && i < args.size(); i++) {
-                    if (!matchPattern(lam.params().get(i), args.get(i), callEnv)) {
+                for (int i = 0; i < lam.params().size() && i < validatedArgs.size(); i++) {
+                    if (!matchPattern(lam.params().get(i), validatedArgs.get(i), callEnv)) {
                         throw new IrijRuntimeError("Pattern match failed in function call", loc);
                     }
                 }
                 // Bind rest param if present
                 if (lam.restParam() != null) {
-                    var restArgs = args.size() > lam.params().size()
-                        ? args.subList(lam.params().size(), args.size())
+                    var restArgs = validatedArgs.size() > lam.params().size()
+                        ? validatedArgs.subList(lam.params().size(), validatedArgs.size())
                         : List.<Object>of();
                     callEnv.define(lam.restParam(), new IrijVector(restArgs));
                 }
@@ -1801,7 +1952,8 @@ public final class Interpreter {
                     AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
                 }
                 try {
-                    yield eval(lam.body(), callEnv);
+                    var result = eval(lam.body(), callEnv);
+                    yield validateFnReturn(result, lam.specAnnotations(), lam.name(), loc);
                 } finally {
                     if (effRow != null) {
                         AVAILABLE_EFFECTS.get().pop();
@@ -1813,13 +1965,15 @@ public final class Interpreter {
                 if (args.isEmpty()) {
                     throw new IrijRuntimeError("Match function requires at least one argument", loc);
                 }
+                // Validate input args against spec annotations
+                var validatedArgs = validateFnArgs(args, mf.specAnnotations(), mf.name(), loc);
                 // Push effect row context
                 var effRow = mf.effectRow();
                 if (effRow != null) {
                     AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
                 }
                 try {
-                    var scrutinee = args.get(0);
+                    var scrutinee = validatedArgs.get(0);
                     for (var arm : mf.arms()) {
                         var matchEnv = mf.closure().child();
                         if (matchPattern(arm.pattern(), scrutinee, matchEnv)) {
@@ -1827,7 +1981,8 @@ public final class Interpreter {
                                 var guardVal = eval(arm.guard(), matchEnv);
                                 if (!Values.isTruthy(guardVal)) continue;
                             }
-                            yield eval(arm.body(), matchEnv);
+                            var result = eval(arm.body(), matchEnv);
+                            yield validateFnReturn(result, mf.specAnnotations(), mf.name(), loc);
                         }
                     }
                     throw new IrijRuntimeError("Non-exhaustive match in function " + mf.name(), loc);
@@ -1838,17 +1993,19 @@ public final class Interpreter {
                 }
             }
             case ImperativeFn imf -> {
+                // Validate input args against spec annotations
+                var validatedArgs = validateFnArgs(args, imf.specAnnotations(), imf.name(), loc);
                 var callEnv = imf.closure().child();
                 // Bind params
-                for (int i = 0; i < imf.params().size() && i < args.size(); i++) {
-                    if (!matchPattern(imf.params().get(i), args.get(i), callEnv)) {
+                for (int i = 0; i < imf.params().size() && i < validatedArgs.size(); i++) {
+                    if (!matchPattern(imf.params().get(i), validatedArgs.get(i), callEnv)) {
                         throw new IrijRuntimeError("Pattern match failed in function call", loc);
                     }
                 }
                 // Bind rest param if present
                 if (imf.restParam() != null) {
-                    var restArgs = args.size() > imf.params().size()
-                        ? args.subList(imf.params().size(), args.size())
+                    var restArgs = validatedArgs.size() > imf.params().size()
+                        ? validatedArgs.subList(imf.params().size(), validatedArgs.size())
                         : List.<Object>of();
                     callEnv.define(imf.restParam(), new IrijVector(restArgs));
                 }
@@ -1858,8 +2015,8 @@ public final class Interpreter {
                     AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
                 }
                 try {
-                    // Execute body — returns last expression/match/if value
-                    yield execStmtListReturn(imf.body(), callEnv);
+                    var result = execStmtListReturn(imf.body(), callEnv);
+                    yield validateFnReturn(result, imf.specAnnotations(), imf.name(), loc);
                 } finally {
                     if (effRow != null) {
                         AVAILABLE_EFFECTS.get().pop();

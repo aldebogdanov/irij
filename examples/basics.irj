@@ -47,7 +47,7 @@ println label    ;; good
 
 ;; ── Data types (sum types) ────────────────────────────────────────────────
 
-type Shape
+spec Shape
   Circle Float
   Rect   Float Float
 
@@ -60,7 +60,7 @@ println (area (Rect 4.0 5.0)) ;; 20.0
 
 ;; ── Product type (record) ────────────────────────────────────────────────
 
-type Point
+spec Point
   x :: Float
   y :: Float
 

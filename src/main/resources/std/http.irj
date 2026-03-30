@@ -1,0 +1,42 @@
+mod std.http
+
+;; HTTP client effect module.
+;;
+;; Usage:
+;;   use std.http :open
+;;
+;;   fn fetch-users ::: Http
+;;     => base-url
+;;     resp := http-get (base-url ++ "/users")
+;;     json-parse resp.body
+;;
+;;   ;; Real HTTP:
+;;   with default-http
+;;     fetch-users "https://api.example.com"
+;;
+;;   ;; Mock in tests:
+;;   handler mock-http :: Http
+;;     http-get url => resume {status= 200 body= "[]" headers= {}}
+;;     http-post url body headers => resume {status= 201 body= "" headers= {}}
+;;
+;;   with mock-http
+;;     fetch-users "http://test"
+
+pub effect Http
+  http-get :: Str -> Map
+  http-post :: Str Str Map -> Map
+  http-put :: Str Str Map -> Map
+  http-delete :: Str -> Map
+  http-request :: Map -> Map
+
+pub handler default-http :: Http
+  http-get url =>
+    resume (_http-request {method= "GET" url= url})
+  http-post url body headers =>
+    resume (_http-request {method= "POST" url= url body= body headers= headers})
+  http-put url body headers =>
+    resume (_http-request {method= "PUT" url= url body= body headers= headers})
+  http-delete url =>
+    resume (_http-request {method= "DELETE" url= url})
+  http-request opts =>
+    resume (_http-request opts)

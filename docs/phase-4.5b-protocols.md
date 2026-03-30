@@ -127,7 +127,7 @@ process 5  ;; → 10
 ## Using with Data Types
 
 ```irj
-type Person
+spec Person
   name :: Str
   age :: Int
 

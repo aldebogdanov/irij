@@ -3,6 +3,7 @@ package dev.irij.interpreter;
 import dev.irij.ast.Node.SourceLoc;
 import dev.irij.interpreter.Values.*;
 
+import com.google.gson.*;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -492,6 +493,105 @@ public final class Builtins {
         env.define("now-ms", new BuiltinFn("now-ms", 0, args -> {
             return System.currentTimeMillis();
         }));
+
+        // ── JSON (pure transforms) ──────────────────────────────────────
+        env.define("json-parse", new BuiltinFn("json-parse", 1, args -> {
+            var str = asString(args.get(0), "json-parse");
+            try {
+                return jsonToIrij(JsonParser.parseString(str));
+            } catch (JsonSyntaxException e) {
+                throw new IrijRuntimeError("json-parse: " + e.getMessage());
+            }
+        }));
+
+        env.define("json-encode", new BuiltinFn("json-encode", 1, args -> {
+            return irijToJson(args.get(0)).toString();
+        }));
+
+        env.define("json-encode-pretty", new BuiltinFn("json-encode-pretty", 1, args -> {
+            var gson = new GsonBuilder().setPrettyPrinting().create();
+            return gson.toJson(irijToJson(args.get(0)));
+        }));
+
+        // ── Additional FS primitives ────────────────────────────────────
+        env.define("list-dir", new BuiltinFn("list-dir", 1, args -> {
+            var path = asString(args.get(0), "list-dir");
+            try (var stream = Files.list(Path.of(path))) {
+                return new IrijVector(stream.map(p -> (Object) p.getFileName().toString()).toList());
+            } catch (IOException e) {
+                throw new IrijRuntimeError("list-dir: " + e.getMessage());
+            }
+        }));
+
+        env.define("delete-file", new BuiltinFn("delete-file", 1, args -> {
+            var path = asString(args.get(0), "delete-file");
+            try { Files.deleteIfExists(Path.of(path)); }
+            catch (IOException e) {
+                throw new IrijRuntimeError("delete-file: " + e.getMessage());
+            }
+            return Values.UNIT;
+        }));
+
+        env.define("make-dir", new BuiltinFn("make-dir", 1, args -> {
+            var path = asString(args.get(0), "make-dir");
+            try { Files.createDirectories(Path.of(path)); }
+            catch (IOException e) {
+                throw new IrijRuntimeError("make-dir: " + e.getMessage());
+            }
+            return Values.UNIT;
+        }));
+
+        env.define("append-file", new BuiltinFn("append-file", 2, args -> {
+            var path = asString(args.get(0), "append-file");
+            var content = asString(args.get(1), "append-file");
+            try {
+                Files.writeString(Path.of(path), content,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND);
+            } catch (IOException e) {
+                throw new IrijRuntimeError("append-file: " + e.getMessage());
+            }
+            return Values.UNIT;
+        }));
+
+        // ── HTTP primitives ─────────────────────────────────────────────
+        env.define("_http-request", new BuiltinFn("_http-request", 1, args -> {
+            if (!(args.get(0) instanceof IrijMap opts))
+                throw new IrijRuntimeError("_http-request: expects Map argument");
+            var entries = opts.entries();
+            var url = entries.get("url");
+            if (!(url instanceof String urlStr))
+                throw new IrijRuntimeError("_http-request: missing or invalid 'url' field");
+            var method = entries.getOrDefault("method", "GET").toString();
+            var body = entries.get("body");
+            var headers = entries.get("headers");
+            try {
+                var client = java.net.http.HttpClient.newHttpClient();
+                var reqBuilder = java.net.http.HttpRequest.newBuilder(java.net.URI.create(urlStr));
+                if (headers instanceof IrijMap hm) {
+                    for (var e : hm.entries().entrySet()) {
+                        reqBuilder.header(e.getKey(), Values.toIrijString(e.getValue()));
+                    }
+                }
+                if (body instanceof String bodyStr) {
+                    reqBuilder.method(method, java.net.http.HttpRequest.BodyPublishers.ofString(bodyStr));
+                } else {
+                    reqBuilder.method(method, java.net.http.HttpRequest.BodyPublishers.noBody());
+                }
+                var resp = client.send(reqBuilder.build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+                var respHeaders = new LinkedHashMap<String, Object>();
+                resp.headers().map().forEach((k, v) ->
+                    respHeaders.put(k, v.size() == 1 ? v.get(0) : String.join(", ", v)));
+                var result = new LinkedHashMap<String, Object>();
+                result.put("status", (long) resp.statusCode());
+                result.put("body", resp.body());
+                result.put("headers", new IrijMap(respHeaders));
+                return new IrijMap(result);
+            } catch (Exception e) {
+                throw new IrijRuntimeError("_http-request: " + e.getMessage());
+            }
+        }));
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -504,6 +604,86 @@ public final class Builtins {
         if (value instanceof Double d) return (long)(d * 1000);
         throw new IrijRuntimeError(
             "Duration expects Int (milliseconds) or Float (seconds), got " + Values.typeName(value));
+    }
+
+    // ── JSON conversion helpers ────────────────────────────────────────
+
+    static Object jsonToIrij(JsonElement el) {
+        if (el == null || el.isJsonNull()) return Values.UNIT;
+        if (el.isJsonPrimitive()) {
+            var p = el.getAsJsonPrimitive();
+            if (p.isBoolean()) return p.getAsBoolean();
+            if (p.isString()) return p.getAsString();
+            if (p.isNumber()) {
+                // Try long first (exact integers)
+                try {
+                    long l = p.getAsLong();
+                    if (String.valueOf(l).equals(p.getAsString())
+                        || p.getAsBigDecimal().stripTrailingZeros().scale() <= 0) {
+                        return l;
+                    }
+                } catch (NumberFormatException ignored) {}
+                return p.getAsDouble();
+            }
+        }
+        if (el.isJsonArray()) {
+            var arr = el.getAsJsonArray();
+            var list = new ArrayList<Object>(arr.size());
+            for (var e : arr) list.add(jsonToIrij(e));
+            return new IrijVector(list);
+        }
+        if (el.isJsonObject()) {
+            var obj = el.getAsJsonObject();
+            var map = new LinkedHashMap<String, Object>();
+            for (var e : obj.entrySet()) map.put(e.getKey(), jsonToIrij(e.getValue()));
+            return new IrijMap(map);
+        }
+        return Values.UNIT;
+    }
+
+    static JsonElement irijToJson(Object value) {
+        if (value == null || value == Values.UNIT) return JsonNull.INSTANCE;
+        if (value instanceof String s) return new JsonPrimitive(s);
+        if (value instanceof Long l) return new JsonPrimitive(l);
+        if (value instanceof Double d) return new JsonPrimitive(d);
+        if (value instanceof Boolean b) return new JsonPrimitive(b);
+        if (value instanceof Keyword kw) return new JsonPrimitive(":" + kw.name());
+        if (value instanceof Rational r) return new JsonPrimitive(r.toDouble());
+        if (value instanceof IrijMap m) {
+            var obj = new JsonObject();
+            for (var e : m.entries().entrySet()) obj.add(e.getKey(), irijToJson(e.getValue()));
+            return obj;
+        }
+        if (value instanceof IrijVector v) {
+            var arr = new JsonArray();
+            for (var e : v.elements()) arr.add(irijToJson(e));
+            return arr;
+        }
+        if (value instanceof IrijTuple t) {
+            var arr = new JsonArray();
+            for (var e : t.elements()) arr.add(irijToJson(e));
+            return arr;
+        }
+        if (value instanceof IrijSet s) {
+            var arr = new JsonArray();
+            for (var e : s.elements()) arr.add(irijToJson(e));
+            return arr;
+        }
+        if (value instanceof Tagged tagged) {
+            var obj = new JsonObject();
+            obj.addProperty("_tag", tagged.tag());
+            if (tagged.namedFields() != null) {
+                for (var e : tagged.namedFields().entrySet())
+                    obj.add(e.getKey(), irijToJson(e.getValue()));
+            } else if (!tagged.fields().isEmpty()) {
+                var arr = new JsonArray();
+                for (var f : tagged.fields()) arr.add(irijToJson(f));
+                obj.add("_fields", arr);
+            }
+            return obj;
+        }
+        // Fallback: convert to string
+        return new JsonPrimitive(Values.toIrijString(value));
     }
 
     static long asLong(Object value, String context) {

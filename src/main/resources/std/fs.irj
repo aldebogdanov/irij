@@ -1,0 +1,48 @@
+mod std.fs
+
+;; File system effect module.
+;;
+;; Usage:
+;;   use std.fs :open
+;;
+;;   fn read-config ::: FileIO
+;;     => path
+;;     fs-read path
+;;
+;;   ;; Real I/O:
+;;   with default-fs
+;;     read-config "config.json"
+;;
+;;   ;; Mock in tests:
+;;   handler mock-fs :: FileIO
+;;     fs-read path => resume "{}"
+;;     fs-write path content => resume ()
+;;
+;;   with mock-fs
+;;     read-config "config.json"
+
+pub effect FileIO
+  fs-read :: Str -> Str
+  fs-write :: Str Str -> ()
+  fs-append :: Str Str -> ()
+  fs-exists? :: Str -> Bool
+  fs-list-dir :: Str -> Vec
+  fs-delete :: Str -> ()
+  fs-mkdir :: Str -> ()
+
+pub handler default-fs :: FileIO
+  fs-read path => resume (read-file path)
+  fs-write path content =>
+    write-file path content
+    resume ()
+  fs-append path content =>
+    append-file path content
+    resume ()
+  fs-exists? path => resume (file-exists? path)
+  fs-list-dir path => resume (list-dir path)
+  fs-delete path =>
+    delete-file path
+    resume ()
+  fs-mkdir path =>
+    make-dir path
+    resume ()

@@ -1,0 +1,56 @@
+use std.test :open
+
+;; Specs for tagged value tests
+spec Option a
+  Some a
+  None
+
+spec Person
+  name :: Str
+  age :: Int
+
+;; ── JSON parsing ──────────────────────────────────────────────────
+
+;; Helper: parse and extract field
+fn parse-field
+  (json field -> (json-parse json) |> get field)
+
+r1 := test "json-parse object name" (-> assert-eq (parse-field "{\"name\": \"Alice\", \"age\": 30}" "name") "Alice")
+r2 := test "json-parse object age" (-> assert-eq (parse-field "{\"name\": \"Alice\", \"age\": 30}" "age") 30)
+r3 := test "json-parse array" (-> assert-eq (json-parse "[1, 2, 3]") #[1 2 3])
+r4 := test "json-parse nested" (-> assert-eq (parse-field "{\"user\": {\"name\": \"Bob\"}}" "user" |> get "name") "Bob")
+r5 := test "json-parse true" (-> assert-eq (json-parse "true") true)
+r6 := test "json-parse false" (-> assert-eq (json-parse "false") false)
+r7 := test "json-parse null" (-> assert-eq (json-parse "null") ())
+r8 := test "json-parse int" (-> assert-eq (json-parse "42") 42)
+r9 := test "json-parse float" (-> assert-eq (json-parse "3.14") 3.14)
+r10 := test "json-parse string" (-> assert-eq (json-parse "\"hello\"") "hello")
+r11 := test "json-parse empty array" (-> assert-eq (json-parse "[]") #[])
+
+;; ── JSON encoding ─────────────────────────────────────────────────
+
+r12 := test "json-encode vector" (-> assert-eq (json-encode #[1 2 3]) "[1,2,3]")
+r13 := test "json-encode string" (-> assert-eq (json-encode "hello") "\"hello\"")
+r14 := test "json-encode true" (-> assert-eq (json-encode true) "true")
+r15 := test "json-encode false" (-> assert-eq (json-encode false) "false")
+r16 := test "json-encode null" (-> assert-eq (json-encode ()) "null")
+r17 := test "json-encode keyword" (-> assert-eq (json-encode :ok) "\":ok\"")
+
+;; ── Round-trips ───────────────────────────────────────────────────
+
+;; Encode then parse back, check field
+fn round-trip-field
+  (map field -> json-parse (json-encode map) |> get field)
+
+r18 := test "json round-trip x" (-> assert-eq (round-trip-field {x= 1 y= "two" z= true} "x") 1)
+r19 := test "json round-trip y" (-> assert-eq (round-trip-field {x= 1 y= "two" z= true} "y") "two")
+r20 := test "json round-trip z" (-> assert-eq (round-trip-field {x= 1 y= "two" z= true} "z") true)
+
+;; ── Tagged values ─────────────────────────────────────────────────
+
+r21 := test "json tagged sum" (-> assert-eq (json-parse (json-encode (Some 42)) |> get "_tag") "Some")
+r22 := test "json tagged product tag" (-> assert-eq (json-parse (json-encode (Person "Jo" 42)) |> get "_tag") "Person")
+r23 := test "json tagged product name" (-> assert-eq (json-parse (json-encode (Person "Jo" 42)) |> get "name") "Jo")
+r24 := test "json tagged product age" (-> assert-eq (json-parse (json-encode (Person "Jo" 42)) |> get "age") 42)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24]

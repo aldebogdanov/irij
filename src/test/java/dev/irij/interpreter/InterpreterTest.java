@@ -456,7 +456,7 @@ class InterpreterTest {
     class TypeDeclarations {
         @Test void sumType() {
             assertEquals("Some 42", run("""
-                type Option a
+                spec Option a
                   Some a
                   None
                 println (Some 42)"""));
@@ -464,7 +464,7 @@ class InterpreterTest {
 
         @Test void zeroArgConstructor() {
             assertEquals("None", run("""
-                type Option a
+                spec Option a
                   Some a
                   None
                 println None"""));
@@ -472,7 +472,7 @@ class InterpreterTest {
 
         @Test void patternMatchOnADT() {
             assertEquals("42", run("""
-                type Option a
+                spec Option a
                   Some a
                   None
                 match (Some 42)
@@ -482,7 +482,7 @@ class InterpreterTest {
 
         @Test void resultType() {
             assertEquals("ok: hello", run("""
-                type Result a e
+                spec Result a e
                   Ok a
                   Err e
                 match (Ok "hello")
@@ -492,7 +492,7 @@ class InterpreterTest {
 
         @Test void productType() {
             assertEquals("Person {name= Jo age= 42}", run("""
-                type Person
+                spec Person
                   name :: Str
                   age :: Int
                 println (Person "Jo" 42)"""));
@@ -500,7 +500,7 @@ class InterpreterTest {
 
         @Test void productTypeDotAccess() {
             assertEquals("Jo\n42", run("""
-                type Person
+                spec Person
                   name :: Str
                   age :: Int
                 p := Person "Jo" 42
@@ -510,11 +510,248 @@ class InterpreterTest {
 
         @Test void productTypePositionalMatch() {
             assertEquals("Jo 42", run("""
-                type Person
+                spec Person
                   name :: Str
                   age :: Int
                 match (Person "Jo" 42)
                   Person n a => println (n ++ " " ++ (to-str a))"""));
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Spec System (Phase 8a)
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class SpecSystem {
+        @Test void sumConstructorCertifiesWithSpecName() {
+            var result = eval("""
+                spec Shape
+                  Circle Float
+                  Rect Float Float
+                Circle 5.0""");
+            assertInstanceOf(Values.Tagged.class, result);
+            var tagged = (Values.Tagged) result;
+            assertEquals("Circle", tagged.tag());
+            assertEquals("Shape", tagged.specName());
+        }
+
+        @Test void zeroArgConstructorCertifiesWithSpecName() {
+            var result = eval("""
+                spec Option a
+                  Some a
+                  None
+                None""");
+            assertInstanceOf(Values.Tagged.class, result);
+            var tagged = (Values.Tagged) result;
+            assertEquals("None", tagged.tag());
+            assertEquals("Option", tagged.specName());
+        }
+
+        @Test void productConstructorCertifiesWithSpecName() {
+            var result = eval("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                Person "Alice" 30""");
+            assertInstanceOf(Values.Tagged.class, result);
+            var tagged = (Values.Tagged) result;
+            assertEquals("Person", tagged.tag());
+            assertEquals("Person", tagged.specName());
+            assertEquals("Alice", tagged.namedFields().get("name"));
+            assertEquals(30L, tagged.namedFields().get("age"));
+        }
+
+        @Test void parametricSpecCertification() {
+            var result = eval("""
+                spec Result ok err
+                  Ok ok
+                  Err err
+                Ok "hello\"""");
+            assertInstanceOf(Values.Tagged.class, result);
+            var tagged = (Values.Tagged) result;
+            assertEquals("Ok", tagged.tag());
+            assertEquals("Result", tagged.specName());
+        }
+
+        @Test void specRegistryHotReload() {
+            // Re-evaluating a spec updates the registry — important for nREPL
+            assertEquals("Alice\n30\nBob\n25\ntrue", run("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                p1 := Person "Alice" 30
+                println p1.name
+                println p1.age
+                spec Person
+                  name :: Str
+                  age :: Int
+                p2 := Person "Bob" 25
+                println p2.name
+                println p2.age
+                println (p2.age == 25)"""));
+        }
+
+        @Test void patternMatchingOnSpecVariants() {
+            assertEquals("78.53975\n12.0", run("""
+                spec Shape
+                  Circle Float
+                  Rect Float Float
+                fn area
+                  (Circle r) => 3.14159 * r * r
+                  (Rect w h) => w * h
+                println (area (Circle 5.0))
+                println (area (Rect 3.0 4.0))"""));
+        }
+
+        @Test void certifiedValuePassesBoundaryCheck() {
+            // Already certified → O(1) pass (no re-validation)
+            var result = eval("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                p := Person "Jo" 42
+                q := p :: Person
+                q""");
+            assertInstanceOf(Values.Tagged.class, result);
+            var tagged = (Values.Tagged) result;
+            assertEquals("Person", tagged.specName());
+        }
+
+        @Test void uncertifiedMapValidatedAtBinding() {
+            // Plain map gets validated and certified as Person
+            var result = eval("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                raw := {name= "Bob" age= 25}
+                p := raw :: Person
+                p""");
+            assertInstanceOf(Values.Tagged.class, result);
+            var tagged = (Values.Tagged) result;
+            assertEquals("Person", tagged.specName());
+            assertEquals("Bob", tagged.namedFields().get("name"));
+            assertEquals(25L, tagged.namedFields().get("age"));
+        }
+
+        @Test void validationRejectsMissingField() {
+            assertRuntimeError("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                raw := {name= "Bob"}
+                p := raw :: Person""");
+        }
+
+        @Test void validationRejectsWrongVariant() {
+            assertRuntimeError("""
+                spec Shape
+                  Circle Float
+                  Rect Float Float
+                spec Color
+                  Red
+                  Blue
+                c := Red
+                s := c :: Shape""");
+        }
+
+        @Test void validationRejectsNonTaggedForSum() {
+            assertRuntimeError("""
+                spec Shape
+                  Circle Float
+                  Rect Float Float
+                s := 42 :: Shape""");
+        }
+
+        @Test void unknownSpecAnnotationErrors() {
+            assertRuntimeError("""
+                x := 42 :: Nonexistent""");
+        }
+
+        @Test void fnBoundaryValidatesInput() {
+            // fn takes Person, validates untagged map arg
+            assertEquals("Alice", run("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn get-name :: Person Str
+                  (p -> p.name)
+                println (get-name {name= "Alice" age= 30})"""));
+        }
+
+        @Test void fnBoundaryRejectsInvalidInput() {
+            assertRuntimeError("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn get-name :: Person Str
+                  (p -> p.name)
+                get-name {name= "Alice"}""");
+        }
+
+        @Test void fnBoundaryCertifiedArgPassesO1() {
+            // Certified value passes boundary check in O(1)
+            assertEquals("Alice", run("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn get-name :: Person Str
+                  (p -> p.name)
+                p := Person "Alice" 30
+                println (get-name p)"""));
+        }
+
+        @Test void fnBoundaryValidatesReturnValue() {
+            // Return value validated against output spec
+            assertRuntimeError("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn make-person :: Str Person
+                  (name -> {name= name})
+                make-person "Alice\"""");
+        }
+
+        @Test void fnBoundaryWithMatchFn() {
+            assertEquals("circle\nrect", run("""
+                spec Shape
+                  Circle Float
+                  Rect Float Float
+                fn describe :: Shape Str
+                  (Circle _) => "circle"
+                  (Rect _ _) => "rect"
+                println (describe (Circle 5.0))
+                println (describe (Rect 3.0 4.0))"""));
+        }
+
+        @Test void fnBoundaryWithImperativeFn() {
+            assertEquals("Alice is 30", run("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn describe :: Person Str ::: Console
+                  => p
+                  println (p.name ++ " is " ++ (to-str p.age))
+                describe (Person "Alice" 30)"""));
+        }
+
+        @Test void fnBoundaryWithWildcard() {
+            // _ in spec annotation skips validation for that position
+            assertEquals("42", run("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn identity :: _ _
+                  (x -> x)
+                println (identity 42)"""));
+        }
+
+        @Test void primitiveTypeAnnotationNoOp() {
+            // Int, Str etc. are not in spec registry — no validation (type hints only)
+            assertEquals("7", run("""
+                fn add :: Int Int Int
+                  (x y -> x + y)
+                println (add 3 4)"""));
         }
     }
 
@@ -538,7 +775,7 @@ class InterpreterTest {
 
         @Test void productTypeDestructure() {
             assertEquals("Jo is 42", run("""
-                type Person
+                spec Person
                   name :: Str
                   age :: Int
                 {name= n age= a} := Person "Jo" 42
@@ -547,7 +784,7 @@ class InterpreterTest {
 
         @Test void productTypeMatchDestructure() {
             assertEquals("Jo", run("""
-                type Person
+                spec Person
                   name :: Str
                   age :: Int
                 fn get-name
@@ -1009,9 +1246,9 @@ class InterpreterTest {
 
         @Test void typeConstructorRedef() {
             assertEquals("New \"hello\"", run("""
-                type Old
+                spec Old
                   Old a
-                type New
+                spec New
                   New a
                 println (New "hello")"""));
         }
@@ -2109,7 +2346,7 @@ class InterpreterTest {
 
         @Test void protoWithTaggedType() {
             assertEquals("Point(1, 2)", run("""
-                type Point
+                spec Point
                   Point Int Int
 
                 proto Displayable a
@@ -2127,7 +2364,7 @@ class InterpreterTest {
 
         @Test void protoWithProductType() {
             assertEquals("Person: Alice age 30", run("""
-                type Person
+                spec Person
                   name :: Str
                   age :: Int
 
@@ -3408,6 +3645,109 @@ class InterpreterTest {
                 assertTrue(e.getMessage().contains("println"),
                     "Error should mention 'println': " + e.getMessage());
             }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // JSON
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class Json {
+        @Test void parseObject() {
+            assertEquals("{name= Alice age= 30}", run("""
+                println (json-parse "{\\"name\\": \\"Alice\\", \\"age\\": 30}")"""));
+        }
+
+        @Test void parseArray() {
+            assertEquals("#[1 2 3]", run("""
+                println (json-parse "[1, 2, 3]")"""));
+        }
+
+        @Test void parseBoolNull() {
+            assertEquals("true\n()", run("""
+                println (json-parse "true")
+                println (json-parse "null")"""));
+        }
+
+        @Test void parseNested() {
+            assertEquals("Alice", run("""
+                data := json-parse "{\\"user\\": {\\"name\\": \\"Alice\\"}}"
+                println data.user.name"""));
+        }
+
+        @Test void parseFloat() {
+            assertEquals("3.14", run("""
+                println (json-parse "3.14")"""));
+        }
+
+        @Test void encodeMap() {
+            var result = eval("""
+                json-encode {name= "Bob" age= 25}""");
+            assertTrue(result instanceof String);
+            var s = (String) result;
+            assertTrue(s.contains("\"name\""));
+            assertTrue(s.contains("\"Bob\""));
+            assertTrue(s.contains("\"age\""));
+            assertTrue(s.contains("25"));
+        }
+
+        @Test void encodeVector() {
+            assertEquals("[1,2,3]", eval("""
+                json-encode #[1 2 3]"""));
+        }
+
+        @Test void encodeString() {
+            assertEquals("\"hello\"", eval("""
+                json-encode "hello\""""));
+        }
+
+        @Test void encodeBooleans() {
+            assertEquals("true", eval("""
+                json-encode true"""));
+        }
+
+        @Test void encodeUnit() {
+            assertEquals("null", eval("""
+                json-encode ()"""));
+        }
+
+        @Test void encodeTaggedSum() {
+            var result = (String) eval("""
+                spec Shape
+                  Circle Float
+                json-encode (Circle 5.0)""");
+            assertTrue(result.contains("\"_tag\""));
+            assertTrue(result.contains("\"Circle\""));
+            assertTrue(result.contains("5.0"));
+        }
+
+        @Test void encodeTaggedProduct() {
+            var result = (String) eval("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                json-encode (Person "Jo" 42)""");
+            assertTrue(result.contains("\"_tag\""));
+            assertTrue(result.contains("\"Person\""));
+            assertTrue(result.contains("\"Jo\""));
+            assertTrue(result.contains("42"));
+        }
+
+        @Test void roundTrip() {
+            assertEquals("{name= Alice age= 30}", run("""
+                original := {name= "Alice" age= 30}
+                println (json-parse (json-encode original))"""));
+        }
+
+        @Test void parseInvalidThrows() {
+            assertRuntimeError("""
+                json-parse "not valid json{" """);
+        }
+
+        @Test void encodeKeyword() {
+            assertEquals("\":ok\"", eval("""
+                json-encode :ok"""));
         }
     }
 }

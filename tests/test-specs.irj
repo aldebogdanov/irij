@@ -1,0 +1,85 @@
+;; ── Spec System Tests ─────────────────────────────────────────────
+;; Phase 8a: spec replaces type
+
+use std.test :open
+
+;; ── Sum spec ─────────────────────────────────────────────────────
+spec Shape
+  Circle Float
+  Rect Float Float
+
+r1 := test "sum spec construction" (-> assert-eq (to-str (Circle 5.0)) "Circle 5.0")
+r2 := test "sum spec construction 2" (-> assert-eq (to-str (Rect 3.0 4.0)) "Rect 3.0 4.0")
+
+;; ── Zero-arg constructor ───────────────────────────────────────────
+spec Option a
+  Some a
+  None
+
+r3 := test "zero-arg constructor" (-> assert-eq (to-str None) "None")
+r4 := test "some constructor" (-> assert-eq (to-str (Some 42)) "Some 42")
+
+;; ── Pattern matching on spec variants ────────────────────────────
+fn area
+  Circle r => 3.14159 * r * r
+  Rect w h => w * h
+
+r5 := test "pattern match circle" (-> assert-eq (area (Circle 5.0)) 78.53975)
+r6 := test "pattern match rect" (-> assert-eq (area (Rect 3.0 4.0)) 12.0)
+
+;; ── Product spec ─────────────────────────────────────────────────
+spec Person
+  name :: Str
+  age  :: Int
+
+r7 := test "product spec name" (-> assert-eq (Person "Alice" 30).name "Alice")
+r8 := test "product spec age" (-> assert-eq (Person "Bob" 25).age 25)
+
+;; ── Parametric spec ──────────────────────────────────────────────
+spec Result ok err
+  Ok ok
+  Err err
+
+fn unwrap
+  Ok v => v
+  Err e => e
+
+r9 := test "parametric spec Ok" (-> assert-eq (unwrap (Ok "hello")) "hello")
+r10 := test "parametric spec Err" (-> assert-eq (unwrap (Err "fail")) "fail")
+
+;; ── Certified value passes boundary ────────────────────────────────
+r11 := test "certified value passes" (-> assert-eq (Person "Diana" 28).name "Diana")
+
+;; ── Function boundary validation ───────────────────────────────────
+fn get-name :: Person Str
+  (p -> p.name)
+
+r12 := test "fn boundary certified arg" (-> assert-eq (get-name (Person "Frank" 55)) "Frank")
+
+;; ── Match fn with spec annotation ────────────────────────────────
+fn describe :: Shape Str
+  Circle _ => "circle"
+  Rect _ _ => "rect"
+
+r13 := test "match fn spec annotation" (-> assert-eq (describe (Circle 1.0)) "circle")
+r14 := test "match fn spec annotation 2" (-> assert-eq (describe (Rect 1.0 2.0)) "rect")
+
+;; ── Destructuring on product spec ────────────────────────────────
+fn person-info
+  ({name= n age= a} -> n ++ " is " ++ (to-str a))
+
+r15 := test "destructuring spec product" (-> assert-eq (person-info (Person "Grace" 45)) "Grace is 45")
+
+;; ── Validation rejection tests ─────────────────────────────────────
+;; (Spec annotation :: inside thunks not yet supported in grammar,
+;;  tested via Java unit tests in InterpreterTest.java)
+
+;; ── Additional variant tests ───────────────────────────────────────
+spec Color
+  Red
+  Blue
+
+r16 := test "color spec" (-> assert-eq (to-str Red) "Red")
+r17 := test "color spec blue" (-> assert-eq (to-str Blue) "Blue")
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17]

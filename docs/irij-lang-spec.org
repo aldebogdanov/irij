@@ -45,7 +45,7 @@
    - *Pipeline is king:* left-to-right data flow via pipe operator =|>=,
      mirroring how both humans and LLMs read sequentially.
    - *Keywords are short words, not digraphs.* A small set of reserved
-     words (=fn=, =do=, =if=, =else=, =match=, =type=, =newtype=,
+     words (=fn=, =do=, =if=, =else=, =match=, =spec=, =newtype=,
      =mod=, =use=, =pub=, =with=, =scope=, =effect=, =role=, =cap=,
      =handler=, =impl=, =proto=, =pre=, =post=, =law=, =contract=,
      =select=, =enclave=, =forall=, =par-each=, =on-failure=) are
@@ -335,11 +335,11 @@
    print x          ;; read: just use the name
    #+end_example
 
-** 2.2 Data Types & Records
+** 2.2 Schemas & Records
 
    #+begin_example
-   ;; product type (record) — fields declared with ::
-   type User
+   ;; product spec (record) — fields declared with ::
+   spec User
      name :: Str
      age  :: Int
      role :: Role
@@ -351,13 +351,13 @@
    u.name   ;; → "Jo"
    u.age    ;; → 30
 
-   ;; sum type (tagged union)
-   type Result a e
+   ;; sum spec (tagged union)
+   spec Result a e
      Ok  a
      Err e
 
-   ;; parameterized type
-   type Tree a
+   ;; parametric spec
+   spec Tree a
      Leaf a
      Node (Tree a) a (Tree a)
 
@@ -379,9 +379,9 @@
 
    ;; destructuring in bindings — works on both anonymous records and product types
    {name= n age= a} := get-user id          ;; anonymous record
-   {name= n age= a} := User "Jo" 30 :admin  ;; product type (same syntax)
+   {name= n age= a} := User "Jo" 30 :admin  ;; product spec (same syntax)
 
-   ;; product type patterns — named (partial) or positional (all fields)
+   ;; product spec patterns — named (partial) or positional (all fields)
    match user
      {name= "Jo"}  => println "found Jo"  ;; named: match any subset of fields
      {name= n}     => println n            ;; named: bind field to variable
@@ -474,7 +474,7 @@
 
    The effect declaration =::: E1 E2= after the type signature lists which
    effects the function may perform. No annotation means *pure*. =::= is
-   for data types (input/output schemas), =:::= is for effects.
+   for data types (input/output specs), =:::= is for effects.
 
 ** 3.2 Effect Handlers
 
@@ -873,18 +873,18 @@
 
 ** 6.2 Level 1 — Schemas (Runtime-Validated Specs)
 
-   Irij uses a Malli/spec-inspired schema system instead of Hindley-Milner
+   Irij uses a Malli/spec-inspired spec system instead of Hindley-Milner
    type inference. Schemas are data, serve multiple purposes (validation,
    generation, documentation, serialization), and compose like values.
 
    #+begin_example
-   ;; schema declaration — one definition gives validation + generation + docs
-   schema Person
+   ;; spec declaration — one definition gives validation + generation + docs
+   spec Person
      :name Str
      :age  (Int :min 0 :max 150)
      :role (Enum :admin :user :guest)
 
-   ;; schema annotations on functions (optional but recommended for pub API)
+   ;; spec annotations on functions (optional but recommended for pub API)
    fn process :: Data -> Result
      (data -> data |> transform |> validate |> save)
 
@@ -892,7 +892,7 @@
    fn transform :: Data -> _    ;; return shape unspecified
      (data -> ...)
 
-   ;; schemas power Arbitrary generation for law checking
+   ;; specs power Arbitrary generation for law checking
    fn sort
      law idempotent = forall (xs : #[Int]). sort (sort xs) == sort xs
      ...
@@ -977,10 +977,10 @@
 ** 6.5 Level 4 — Refinement Types
 
    #+begin_example
-   ;; refinement type (SMT-verified at compile time)
-   type Nat := {x :: Int | x >= 0}
-   type NonEmpty a := {xs :: #[a] | /# xs > 0}
-   type Percentage := {x :: Float | x >= 0.0 && x <= 100.0}
+   ;; refinement spec (SMT-verified at compile time)
+   spec Nat := {x :: Int | x >= 0}
+   spec NonEmpty a := {xs :: #[a] | /# xs > 0}
+   spec Percentage := {x :: Float | x >= 0.0 && x <= 100.0}
 
    ;; function with refinement
    fn head :: NonEmpty a -> a
@@ -1004,8 +1004,8 @@
      proof dimensions-match
      ...
 
-   ;; theorem as a type
-   type AppendAssoc a (xs ys zs :: #[a])
+   ;; theorem as a spec
+   spec AppendAssoc a (xs ys zs :: #[a])
      := append (append xs ys) zs == append xs (append ys zs)
    #+end_example
 
@@ -1482,7 +1482,7 @@
   ║  LOCATED        expr @$ROLE      val :: T @$ROLE            ║
   ║  CONTRACT       pre P  post Q    contract (in P) (out Q)   ║
   ║  LAW            law name = forall x. P x                    ║
-  ║  REFINEMENT     type T := {x :: U | pred x}                ║
+  ║  REFINEMENT     spec T := {x :: U | pred x}              ║
   ║  ARRAY OPS      @ map  /? filter  /! find  /+ /* /^ /$ /#  ║
   ║  COLLECTIONS    #[1 2]  #{:a}  #(1 2)  {k= v}              ║
   ║  PURE FN        fn f :: A -> B                              ║
@@ -1508,12 +1508,12 @@
   role $REPLICA
 
   ;; ── Data ──────────────────────────────────────────────
-  type Command
+  spec Command
     Get Str
     Put Str Str
     Del Str
 
-  type Reply
+  spec Reply
     Found Str
     NotFound
     Ok

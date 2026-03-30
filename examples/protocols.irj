@@ -51,7 +51,7 @@ println (combine 3 7)              ;; → 21
 println (combine #[1 2] #[3 4])   ;; → #[1 2 3 4]
 
 ;; ── With data types ─────────────────────────────────────
-type Point
+spec Point
   Point Int Int
 
 fn fmt-point

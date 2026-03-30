@@ -43,12 +43,13 @@ irij examples/walkthrough.irj # full language tour (all phases)
 ## Tests
 
 ```sh
-./gradlew test                # 529 Java unit tests
-irij test                     # 161 integration tests (tests/*.irj)
+./gradlew test                # 549 Java unit tests
+irij test                     # 178 integration tests (tests/*.irj)
 ```
 
 ## Language Features
 
+- **Specs** &mdash; `spec` declares structure with certification tags; runtime validation at boundaries
 - **Mandatory effect tracking** &mdash; `fn name ::: Console` declares effects; unannotated = pure
 - **Algebraic effects & handlers** &mdash; `effect`, `handler`, `with`, `resume`, `on-failure`
 - **Contracts** &mdash; `pre`, `post` (function-level), `in`, `out` (module-boundary with blame)
@@ -89,4 +90,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.1.1 &mdash; Phases 0-7a complete.
+0.1.1 &mdash; Phases 0-8a complete.

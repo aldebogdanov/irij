@@ -65,13 +65,22 @@ public final class Values {
     // ── Tagged value (ADT constructor) ──────────────────────────────────
 
     /**
-     * A tagged value (ADT variant or product type instance).
-     * Sum types use positional fields; product types also carry namedFields.
+     * A tagged value (ADT variant or product spec instance).
+     * Sum specs use positional fields; product specs also carry namedFields.
+     * specName is the certification tag — non-null means "validated by spec X".
      */
-    public record Tagged(String tag, List<Object> fields, Map<String, Object> namedFields) {
-        /** Convenience constructor for sum types (positional only). */
+    public record Tagged(String tag, List<Object> fields, Map<String, Object> namedFields, String specName) {
+        /** Convenience constructor for sum types (positional only, uncertified). */
         public Tagged(String tag, List<Object> fields) {
-            this(tag, fields, null);
+            this(tag, fields, null, null);
+        }
+        /** Convenience constructor for sum types (positional, with certification). */
+        public Tagged(String tag, List<Object> fields, String specName) {
+            this(tag, fields, null, specName);
+        }
+        /** Convenience constructor for product types (uncertified). */
+        public Tagged(String tag, List<Object> fields, Map<String, Object> namedFields) {
+            this(tag, fields, namedFields, null);
         }
 
         @Override
@@ -221,18 +230,24 @@ public final class Values {
     // ── Lambda (closure) ────────────────────────────────────────────────
 
     public record Lambda(List<Pattern> params, String restParam, Expr body,
-                         Environment closure, String name, List<String> effectRow) {
-        /** Anonymous lambda without rest param or effects. */
+                         Environment closure, String name, List<String> effectRow,
+                         List<String> specAnnotations) {
+        /** Anonymous lambda without rest param, effects, or specs. */
         public Lambda(List<Pattern> params, Expr body, Environment closure) {
-            this(params, null, body, closure, null, null);
+            this(params, null, body, closure, null, null, null);
         }
-        /** Named lambda without rest param or effects. */
+        /** Named lambda without rest param, effects, or specs. */
         public Lambda(List<Pattern> params, Expr body, Environment closure, String name) {
-            this(params, null, body, closure, name, null);
+            this(params, null, body, closure, name, null, null);
         }
-        /** Named lambda with rest param but no effects. */
+        /** Named lambda with rest param but no effects or specs. */
         public Lambda(List<Pattern> params, String restParam, Expr body, Environment closure, String name) {
-            this(params, restParam, body, closure, name, null);
+            this(params, restParam, body, closure, name, null, null);
+        }
+        /** Named lambda with effects but no specs. */
+        public Lambda(List<Pattern> params, String restParam, Expr body,
+                      Environment closure, String name, List<String> effectRow) {
+            this(params, restParam, body, closure, name, effectRow, null);
         }
 
         public int arity() {
@@ -290,31 +305,52 @@ public final class Values {
     // ── Type constructor function ───────────────────────────────────────
 
     /**
-     * Constructor function for ADT variants and product types.
-     * Sum type variants: fieldNames is null (positional).
-     * Product types: fieldNames maps positional args to named fields.
+     * Constructor function for ADT variants and product specs.
+     * Sum spec variants: fieldNames is null (positional).
+     * Product specs: fieldNames maps positional args to named fields.
+     * specName: certification tag set on created Tagged values.
      */
-    public record Constructor(String tag, int arity, List<String> fieldNames) {
-        /** Convenience constructor for sum type variants (positional only). */
+    public record Constructor(String tag, int arity, List<String> fieldNames, String specName) {
+        /** Convenience constructor for sum spec variants (positional only, no certification). */
         public Constructor(String tag, int arity) {
-            this(tag, arity, null);
+            this(tag, arity, null, null);
+        }
+
+        /** Convenience constructor for sum spec variants with certification. */
+        public Constructor(String tag, int arity, String specName) {
+            this(tag, arity, null, specName);
         }
 
         public Tagged apply(List<Object> args) {
             if (fieldNames != null) {
-                // Product type: build named field map
+                // Product spec: build named field map
                 var named = new java.util.LinkedHashMap<String, Object>();
                 for (int i = 0; i < fieldNames.size() && i < args.size(); i++) {
                     named.put(fieldNames.get(i), args.get(i));
                 }
-                return new Tagged(tag, List.copyOf(args), named);
+                return new Tagged(tag, List.copyOf(args), named, specName);
             }
-            return new Tagged(tag, List.copyOf(args));
+            return new Tagged(tag, List.copyOf(args), specName);
         }
 
         @Override
         public String toString() {
             return "<constructor " + tag + "/" + arity + ">";
+        }
+    }
+
+    // ── Spec system values ──────────────────────────────────────────────
+
+    /**
+     * Descriptor for a declared spec (e.g., {@code spec Person}).
+     * Stored in the spec registry for validation lookups.
+     * Hot-reloadable: re-evaluating a spec declaration updates the registry.
+     */
+    public record SpecDescriptor(String name, List<String> typeParams,
+                                   dev.irij.ast.Decl.SpecBody body) {
+        @Override
+        public String toString() {
+            return "<spec " + name + ">";
         }
     }
 

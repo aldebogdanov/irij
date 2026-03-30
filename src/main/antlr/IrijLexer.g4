@@ -11,7 +11,7 @@ DO          : 'do' ;
 IF          : 'if' ;
 ELSE        : 'else' ;
 MATCH       : 'match' ;
-TYPE        : 'type' ;
+SPEC        : 'spec' ;
 NEWTYPE     : 'newtype' ;
 MOD         : 'mod' ;
 USE         : 'use' ;
@@ -44,8 +44,8 @@ MUT_BIND    : ':!' ;       // mutable binding
 ARROW       : '->' ;       // function arrow
 FAT_ARROW   : '=>' ;       // match arm / imperative block
 ASSIGN      : '<-' ;       // mutation
-EFFECT_SEP  : ':::' ;      // effect separator (must precede TYPE_ANN for maximal munch)
-TYPE_ANN    : '::' ;       // type annotation
+EFFECT_SEP  : ':::' ;      // effect separator (must precede SPEC_ANN for maximal munch)
+SPEC_ANN    : '::' ;       // spec annotation
 
 // ── Pipeline & Composition ───────────────────────────────────────────
 PIPE        : '|>' ;       // pipe forward
@@ -68,7 +68,7 @@ GTE         : '>=' ;       // greater-or-equal
 // ── Boolean ──────────────────────────────────────────────────────────
 AND         : '&&' ;       // logical and
 OR          : '||' ;       // logical or
-BAR         : '|' ;        // guard separator, refinement type
+BAR         : '|' ;        // guard separator, refinement
 
 // ── Arithmetic & Misc Digraphs ───────────────────────────────────────
 POW         : '**' ;       // power
@@ -124,8 +124,8 @@ KEYWORD     : ':' [a-z] [a-z0-9_-]* ;   // :ok  :error  :pending
 ROLE_NAME   : '$' [A-Z] [A-Z0-9_-]* ;   // $BUYER  $DB-PRIMARY
 
 // ── Identifiers ──────────────────────────────────────────────────────
-// Type names: PascalCase (start with uppercase)
-TYPE_NAME   : [A-Z] [a-zA-Z0-9]* ;
+// Upper names: PascalCase (start with uppercase) — specs, effects, protocols, constructors
+UPPER_NAME  : [A-Z] [a-zA-Z0-9]* ;
 
 // Value names: kebab-case, may contain -> and ?, !
 // NOTE: must come after keywords to let keywords win

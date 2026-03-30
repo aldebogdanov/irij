@@ -79,7 +79,7 @@
 ;; ── Font-lock keywords ────────────────────────────────────────────────
 
 (defconst irij-keywords
-  '("fn" "do" "if" "else" "match" "type" "newtype"
+  '("fn" "do" "if" "else" "match" "spec" "newtype"
     "mod" "use" "pub" "with" "scope" "effect"
     "role" "cap" "handler" "impl" "proto"
     "pre" "post" "law" "contract" "select"
@@ -161,8 +161,8 @@
       ("\\${[^}]*}" . font-lock-preprocessor-face)
       ;; Function definitions — fn <name>
       ("\\bfn\\s-+\\([a-z][a-z0-9-]*\\)" 1 font-lock-function-name-face)
-      ;; Type definitions — type/newtype <Name>
-      ("\\b\\(?:type\\|newtype\\)\\s-+\\([A-Z][A-Za-z0-9]*\\)" 1 font-lock-type-face)
+      ;; Spec/type definitions — spec/newtype <Name>
+      ("\\b\\(?:spec\\|newtype\\)\\s-+\\([A-Z][A-Za-z0-9]*\\)" 1 font-lock-type-face)
       ;; Binding names — name :=   name :!
       ("\\([a-z][a-z0-9-]*\\)\\s-*:\\(?:=\\|!\\)" 1 font-lock-variable-name-face)
       ))
@@ -216,7 +216,7 @@ and decrease after a line that is less indented than its predecessor."
     "\\(?:"
     ;; fn / type / newtype declarations without inline body
     "\\bfn\\b.*[^=>]$"
-    "\\|\\btype\\b.*$"
+    "\\|\\bspec\\b.*$"
     "\\|\\bnewtype\\b.*$"
     ;; match / if / else / with / do end of line
     "\\|\\b\\(?:match\\|if\\|else\\|with\\|do\\|scope\\|handler\\|effect\\|impl\\|proto\\)\\b.*$"

@@ -15,7 +15,7 @@ topLevelDecl
     | useDecl
     | pubDecl
     | fnDecl
-    | typeDecl
+    | specDecl
     | newtypeDecl
     | effectDecl
     | handlerDecl
@@ -53,15 +53,15 @@ nameList
     ;
 
 nameListItem
-    : IDENT | TYPE_NAME
-    | FN | DO | IF | ELSE | MATCH | TYPE | NEWTYPE | MOD | USE | PUB
+    : IDENT | UPPER_NAME
+    | FN | DO | IF | ELSE | MATCH | SPEC | NEWTYPE | MOD | USE | PUB
     | WITH | SCOPE | EFFECT | ROLE | CAP | HANDLER | IMPL | PROTO
     | PRE | POST | LAW | CONTRACT | SELECT | ENCLAVE | FORALL
     | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF
     ;
 
 pubDecl
-    : PUB (fnDecl | useDecl | binding)
+    : PUB (fnDecl | specDecl | effectDecl | handlerDecl | useDecl | binding)
     ;
 
 roleDecl
@@ -71,11 +71,11 @@ roleDecl
 // ── fn ───────────────────────────────────────────────────────────────
 
 fnDecl
-    : FN fnName typeAnnotation? effectAnnotation? fnBody?
+    : FN fnName specAnnotation? effectAnnotation? fnBody?
     ;
 
 effectAnnotation
-    : EFFECT_SEP typeName+
+    : EFFECT_SEP upperName+
     ;
 
 fnName
@@ -133,41 +133,41 @@ contractClause
     | LAW IDENT EQUALS forallBinders? expr NEWLINE
     ;
 
-// ── type / newtype ───────────────────────────────────────────────────
+// ── spec / newtype ──────────────────────────────────────────────────
 
-typeDecl
-    : TYPE typeName typeParams? NEWLINE INDENT typeBody NEWLINE* DEDENT
+specDecl
+    : SPEC upperName specParams? NEWLINE INDENT specBody NEWLINE* DEDENT
     ;
 
-typeName
-    : TYPE_NAME
+upperName
+    : UPPER_NAME
     ;
 
-typeParams
+specParams
     : IDENT+
     ;
 
-typeBody
-    : typeVariant (NEWLINE typeVariant)*      // sum type
-    | typeField (NEWLINE typeField)*          // product type (record)
+specBody
+    : specVariant (NEWLINE specVariant)*      // sum spec
+    | specField (NEWLINE specField)*          // product spec (record)
     ;
 
-typeVariant
-    : TYPE_NAME typeExpr*
+specVariant
+    : UPPER_NAME specExpr*
     ;
 
-typeField
-    : IDENT TYPE_ANN typeExpr
+specField
+    : IDENT SPEC_ANN specExpr
     ;
 
 newtypeDecl
-    : NEWTYPE typeName BIND typeExpr
+    : NEWTYPE upperName BIND specExpr
     ;
 
 // ── effect ───────────────────────────────────────────────────────────
 
 effectDecl
-    : EFFECT typeName typeParams? (NEWLINE INDENT effectBody NEWLINE* DEDENT)?
+    : EFFECT upperName specParams? (NEWLINE INDENT effectBody NEWLINE* DEDENT)?
     ;
 
 effectBody
@@ -175,13 +175,13 @@ effectBody
     ;
 
 effectOp
-    : IDENT TYPE_ANN typeExpr
+    : IDENT SPEC_ANN specExpr
     ;
 
 // ── handler ──────────────────────────────────────────────────────────
 
 handlerDecl
-    : HANDLER fnName TYPE_ANN typeName effectAnnotation? NEWLINE INDENT handlerBody NEWLINE* DEDENT
+    : HANDLER fnName SPEC_ANN upperName effectAnnotation? NEWLINE INDENT handlerBody NEWLINE* DEDENT
     ;
 
 handlerBody
@@ -196,13 +196,13 @@ handlerClause
 // ── cap ──────────────────────────────────────────────────────────────
 
 capDecl
-    : CAP typeName TYPE_ANN EFFECT (NEWLINE INDENT effectBody NEWLINE* DEDENT)?
+    : CAP upperName SPEC_ANN EFFECT (NEWLINE INDENT effectBody NEWLINE* DEDENT)?
     ;
 
 // ── proto ────────────────────────────────────────────────────────────
 
 protoDecl
-    : PROTO typeName typeParams? NEWLINE INDENT protoBody NEWLINE* DEDENT
+    : PROTO upperName specParams? NEWLINE INDENT protoBody NEWLINE* DEDENT
     ;
 
 protoBody
@@ -210,14 +210,14 @@ protoBody
     ;
 
 protoMember
-    : IDENT TYPE_ANN typeExpr                // method signature
+    : IDENT SPEC_ANN specExpr                // method signature
     | LAW IDENT EQUALS forallBinders? expr   // law
     ;
 
 // ── impl ─────────────────────────────────────────────────────────────
 
 implDecl
-    : IMPL typeName FOR typeName NEWLINE INDENT implBody NEWLINE* DEDENT
+    : IMPL upperName FOR upperName NEWLINE INDENT implBody NEWLINE* DEDENT
     ;
 
 implBody
@@ -244,33 +244,33 @@ forallBinders
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
-// Type Expressions
+// Spec Expressions
 // ═══════════════════════════════════════════════════════════════════════
 
-typeExpr
-    : typeApp ARROW typeExpr                  // A -> B
-    | typeApp
+specExpr
+    : specApp ARROW specExpr                  // A -> B
+    | specApp
     ;
 
-typeApp
-    : typeAtom+                               // Result a e  (type application)
+specApp
+    : specAtom+                               // Result a e  (spec application)
     ;
 
-typeAtom
-    : typeName                                // Int, Str, Result
-    | IDENT                                   // type variable: a, b
-    | UNDERSCORE                              // type hole: _
-    | LPAREN RPAREN                           // unit type: ()
-    | LPAREN typeExpr RPAREN                  // grouped: (A -> B)
-    | VEC_OPEN typeExpr RBRACKET              // #[a]
-    | SET_OPEN typeExpr RBRACE                // #{a}
-    | TUPLE_OPEN typeExpr typeExpr* RPAREN    // #(a b)
+specAtom
+    : upperName                               // Int, Str, Result
+    | IDENT                                   // spec variable: a, b
+    | UNDERSCORE                              // spec hole: _
+    | LPAREN RPAREN                           // unit: ()
+    | LPAREN specExpr RPAREN                  // grouped: (A -> B)
+    | VEC_OPEN specExpr RBRACKET              // #[a]
+    | SET_OPEN specExpr RBRACE                // #{a}
+    | TUPLE_OPEN specExpr specExpr* RPAREN    // #(a b)
     | LBRACE refinementBody RBRACE            // {x :: Int | x >= 0}
-    | typeAtom MAP_AT ROLE_NAME               // located: T @$ROLE
+    | specAtom MAP_AT ROLE_NAME               // located: T @$ROLE
     ;
 
 refinementBody
-    : IDENT TYPE_ANN typeExpr BAR expr
+    : IDENT SPEC_ANN specExpr BAR expr
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -294,9 +294,9 @@ stmt
     ;
 
 binding
-    : bindTarget BIND expr typeAnnotationSuffix?    // x := 42  or  x := 42 :: Int
-    | bindTarget MUT_BIND expr typeAnnotationSuffix? // x :! 0
-    | bindTarget ASSIGN expr                         // x <- x + 1
+    : bindTarget BIND expr specSuffix?        // x := 42  or  x := 42 :: Spec
+    | bindTarget MUT_BIND expr specSuffix?    // x :! 0
+    | bindTarget ASSIGN expr                  // x <- x + 1
     ;
 
 bindTarget
@@ -306,12 +306,12 @@ bindTarget
     | tuplePattern
     ;
 
-typeAnnotationSuffix
-    : TYPE_ANN typeExpr
+specSuffix
+    : SPEC_ANN specExpr
     ;
 
-typeAnnotation
-    : TYPE_ANN typeExpr
+specAnnotation
+    : SPEC_ANN specExpr
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -414,7 +414,7 @@ appExpr
 
 // Postfix: dot access, located-at
 postfixExpr
-    : atomExpr (DOT (IDENT | TYPE_NAME))* (MAP_AT ROLE_NAME)?
+    : atomExpr (DOT (IDENT | UPPER_NAME))* (MAP_AT ROLE_NAME)?
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -424,7 +424,7 @@ postfixExpr
 atomExpr
     : literal
     | IDENT
-    | TYPE_NAME
+    | UPPER_NAME
     | ROLE_NAME
     | KEYWORD
     | UNDERSCORE
@@ -587,7 +587,7 @@ parEachExpr
 // ═══════════════════════════════════════════════════════════════════════
 
 pattern
-    : TYPE_NAME pattern*                       // Constructor Pat1 Pat2
+    : UPPER_NAME pattern*                      // Constructor Pat1 Pat2
     | KEYWORD pattern?                         // :ok value
     | IDENT                                    // variable binding
     | UNDERSCORE                               // wildcard _
@@ -634,10 +634,10 @@ literal
     ;
 
 qualifiedName
-    : (IDENT | TYPE_NAME) (DOT (IDENT | TYPE_NAME))*
+    : (IDENT | UPPER_NAME) (DOT (IDENT | UPPER_NAME))*
     ;
 
 anyId
     : IDENT
-    | TYPE_NAME
+    | UPPER_NAME
     ;

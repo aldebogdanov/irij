@@ -10,8 +10,13 @@ public sealed interface Stmt extends Node {
     /** An expression used as a statement. */
     record ExprStmt(Expr expr, SourceLoc loc) implements Stmt {}
 
-    /** Immutable binding: x := expr  or  {pat} := expr. */
-    record Bind(BindTarget target, Expr value, SourceLoc loc) implements Stmt {}
+    /** Immutable binding: x := expr  or  {pat} := expr.  Optional spec annotation: x := expr :: Spec. */
+    record Bind(BindTarget target, Expr value, String specAnnotation, SourceLoc loc) implements Stmt {
+        /** Convenience constructor without spec annotation. */
+        public Bind(BindTarget target, Expr value, SourceLoc loc) {
+            this(target, value, null, loc);
+        }
+    }
 
     /** Mutable binding: x :! expr. */
     record MutBind(BindTarget target, Expr value, SourceLoc loc) implements Stmt {}

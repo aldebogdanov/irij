@@ -7,37 +7,40 @@ import java.util.List;
  */
 public sealed interface Decl extends Node {
 
-    /** Function declaration: fn name :: Type ::: Effects  body. */
-    record FnDecl(String name, boolean isPub, List<String> effectRow, FnBody body,
+    /** Function declaration: fn name :: Spec1 Spec2 ::: Effects  body.
+     *  specAnnotations: list of spec names from :: annotation. Last = output, rest = inputs.
+     *  Entries may be null (for _ wildcard or non-spec types like primitives). */
+    record FnDecl(String name, boolean isPub, List<String> effectRow, List<String> specAnnotations,
+                  FnBody body,
                   List<Expr> preConditions, List<Expr> postConditions,
                   List<Expr> inContracts, List<Expr> outContracts,
                   List<FnLaw> fnLaws,
                   SourceLoc loc) implements Decl {
-        /** Convenience constructor for functions without contracts or effects. */
+        /** Convenience constructor for functions without contracts, effects, or specs. */
         public FnDecl(String name, boolean isPub, FnBody body, SourceLoc loc) {
-            this(name, isPub, null, body, List.of(), List.of(), List.of(), List.of(), List.of(), loc);
+            this(name, isPub, null, null, body, List.of(), List.of(), List.of(), List.of(), List.of(), loc);
         }
         /** Convenience constructor for pre/post only (backward compat). */
         public FnDecl(String name, boolean isPub, FnBody body,
                       List<Expr> preConditions, List<Expr> postConditions,
                       SourceLoc loc) {
-            this(name, isPub, null, body, preConditions, postConditions, List.of(), List.of(), List.of(), loc);
+            this(name, isPub, null, null, body, preConditions, postConditions, List.of(), List.of(), List.of(), loc);
         }
-        /** Convenience constructor with all contracts but no effects. */
+        /** Convenience constructor with all contracts but no effects or specs. */
         public FnDecl(String name, boolean isPub, FnBody body,
                       List<Expr> preConditions, List<Expr> postConditions,
                       List<Expr> inContracts, List<Expr> outContracts,
                       List<FnLaw> fnLaws,
                       SourceLoc loc) {
-            this(name, isPub, null, body, preConditions, postConditions, inContracts, outContracts, fnLaws, loc);
+            this(name, isPub, null, null, body, preConditions, postConditions, inContracts, outContracts, fnLaws, loc);
         }
     }
 
     /** A law declared inside a function body. */
     record FnLaw(String name, List<String> forallVars, Expr body) {}
 
-    /** Type declaration: type Name params  variants|fields. */
-    record TypeDecl(String name, List<String> typeParams, TypeBody body, SourceLoc loc) implements Decl {}
+    /** Spec declaration: spec Name params  variants|fields. */
+    record SpecDecl(String name, List<String> specParams, SpecBody body, SourceLoc loc) implements Decl {}
 
     /** Newtype declaration: newtype Name := Type. */
     record NewtypeDecl(String name, SourceLoc loc) implements Decl {}
@@ -119,18 +122,18 @@ public sealed interface Decl extends Node {
         record NoBody() implements FnBody {}
     }
 
-    // ── Type Body ───────────────────────────────────────────────────────
+    // ── Spec Body ────────────────────────────────────────────────────────
 
-    sealed interface TypeBody {
-        /** Sum type: variants with constructors. */
-        record SumType(List<Variant> variants) implements TypeBody {}
+    sealed interface SpecBody {
+        /** Sum spec: variants with constructors. */
+        record SumSpec(List<Variant> variants) implements SpecBody {}
 
-        /** Product type: named fields. */
-        record ProductType(List<Field> fields) implements TypeBody {}
+        /** Product spec: named fields. */
+        record ProductSpec(List<SpecField> fields) implements SpecBody {}
     }
 
     record Variant(String name, int arity) {}
-    record Field(String name) {}
+    record SpecField(String name) {}
 
     // ── Effect / Handler helpers ─────────────────────────────────────────
 

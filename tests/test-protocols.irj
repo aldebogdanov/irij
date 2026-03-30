@@ -53,7 +53,7 @@ r9 := test "impl with (++) on Vector" (-> assert-eq #[1 2 3 4] (combine #[1 2] #
 
 ;; ── Custom data type impls ─────────────────────────────
 
-type Point
+spec Point
   Point Int Int
 
 proto Describable a

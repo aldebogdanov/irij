@@ -18,7 +18,7 @@ Source of truth: `docs/irij-lang-spec.org`
   - [x] Session management (`clone` op, auto-connect from `.nrepl-port`)
   - [x] `irij-nrepl-connect` — auto-reads `.nrepl-port` or prompts for port
   - [x] `irij-nrepl-eval-last-sexp` (`C-x C-e`, `C-c C-e`)
-  - [x] `irij-nrepl-eval-defun` — top-level `fn`/`type`/binding (`C-c C-d`)
+  - [x] `irij-nrepl-eval-defun` — top-level `fn`/`spec`/binding (`C-c C-d`)
   - [x] `irij-nrepl-eval-buffer` (`C-c C-k`)
   - [x] `irij-nrepl-eval-region` (`C-c M-r`)
   - [x] Result display: value in minibuffer + `*irij-nrepl*` output buffer
@@ -39,10 +39,10 @@ Everything starts from the spec. No interpreter logic yet, just parsing.
   - [x] Semicolons inside parenthesized expressions only
   - [x] `\` line continuation
   - [x] Comments: `;;` to end of line
-  - [x] Reserved words: `fn`, `do`, `if`, `else`, `match`, `type`, `newtype`, `mod`, `use`, `pub`, `with`, `scope`, `effect`, `role`, `cap`, `handler`, `impl`, `proto`, `pre`, `post`, `law`, `contract`, `select`, `enclave`, `forall`, `par-each`, `on-failure`
+  - [x] Reserved words: `fn`, `do`, `if`, `else`, `match`, `spec`, `newtype`, `mod`, `use`, `pub`, `with`, `scope`, `effect`, `role`, `cap`, `handler`, `impl`, `proto`, `pre`, `post`, `law`, `contract`, `select`, `enclave`, `forall`, `par-each`, `on-failure`
 
 - [x] **Parser (ANTLR4)** — `src/main/antlr/IrijParser.g4`
-  - [x] Top-level declarations: `fn`, `type`, `newtype`, `effect`, `handler`, `cap`, `proto`, `impl`, `role`, `mod`, `use`, `pub`, `match`, `if`, `with`, `scope`
+  - [x] Top-level declarations: `fn`, `spec`, `newtype`, `effect`, `handler`, `cap`, `proto`, `impl`, `role`, `mod`, `use`, `pub`, `match`, `if`, `with`, `scope`
   - [x] Three fn body forms (disambiguation by first token after INDENT):
     - `(` → lambda: `(x y -> expr)`
     - `pattern =>` → match arm(s)
@@ -96,7 +96,7 @@ Minimal working language: bindings, functions, pattern matching, data types.
   - [x] `if`/`else` (block and inline), `match` statement and expression
   - [x] Match as expression: `x := match foo ...` (usable on RHS of bindings)
   - [x] Pipeline `|>` `<|`, composition `>>` `<<`
-  - [x] Data types: `type` with variants (Tagged), `newtype`
+  - [x] Data types: `spec` with variants (Tagged), `newtype`
   - [x] Destructuring in bindings and patterns
   - [x] Spread `...` in vector patterns
   - [x] Guards in match arms
@@ -162,7 +162,7 @@ Hot redefinition, nREPL server, environment inspection.
   - [x] `VarCell` cell type for top-level rebindable bindings (Clojure-style Var)
   - [x] `defineVar(name, value)` — in-place update if VarCell exists
   - [x] `Interpreter.defineInScope()` — routes to `defineVar` at global scope
-  - [x] Top-level `fn`, `type`, `:=` use VarCell; builtins remain ImmutableCell
+  - [x] Top-level `fn`, `spec`, `:=` use VarCell; builtins remain ImmutableCell
   - [x] `<-` assignment still rejects VarCell (immutable semantics preserved)
 - [x] **nREPL server** — `src/main/java/dev/irij/nrepl/`
   - [x] `Bencode.java` — bencode encoder/decoder (nREPL wire format)
@@ -408,21 +408,34 @@ Inspired by Clojure's Missionary library (tasks as values, structured cancellati
 
 ---
 
-## Phase 8 — Schemas (Malli-like)
+## Phase 8 — Specs (Malli-like)
 
-Built-in runtime schema system. Replaces HM type inference. Powers validation, Arbitrary generation, docs, serialization.
+Built-in runtime spec system. Replaces HM type inference. Powers validation, Arbitrary generation, docs, serialization.
 
-- [ ] `schema Name` declarations — schema as data
-- [ ] Primitive schemas: `Str`, `Int`, `Float`, `Bool`, `Keyword`
-- [ ] Composite schemas: `(Vec Schema)`, `(Map KeySchema ValSchema)`, `(Tuple S1 S2)`
-- [ ] Constraint schemas: `(Int :min 0 :max 150)`, `(Str :min-len 1)`
-- [ ] `Enum` schemas: `(Enum :admin :user :guest)`
-- [ ] `validate` / `validate!` builtins — runtime schema checking
-- [ ] Schema-powered `Arbitrary` generation — replaces manual `generateRandomValue()`
-- [ ] Schema annotations on `fn` — `fn name :: InputSchema OutputSchema ::: Effects`
-- [ ] Schema syntax design for partial annotations (input-only, output-only)
-- [ ] Integration with law verification — schemas generate typed random values
-- [ ] `pub fn` convention: schema annotations recommended (lint/warn)
+### Phase 8a — Spec Declarations & Validation ✅
+
+- [x] `spec Name` declarations — spec as data (sum and product forms)
+- [x] Spec constructors — validate and certify (tag) values at construction
+- [x] Certified value model — O(1) tag check at function boundaries
+- [x] Product validation — checks all required fields present (Tagged or IrijMap)
+- [x] Sum validation — checks tag matches a variant + correct arity
+- [x] Binding validation — `x := expr :: Spec` validates expr against Spec
+- [x] Function boundary validation — `fn f :: Person Str` validates input/output
+- [x] `pub spec` supported (grammar + AstBuilder + Interpreter export)
+- [x] Spec annotations on `fn` — `fn name :: InputSpec OutputSpec ::: Effects`
+- [x] Spec syntax design for partial annotations (`_` for unspecified positions)
+- [x] Parametric specs — `spec Maybe a; Just a; Nothing`
+- [x] Constrained fields — `age :: (Int :min 0 :max 150)` validated at construction
+
+### Phase 8b+ — Remaining
+
+- [ ] Primitive specs: `Str`, `Int`, `Float`, `Bool`, `Keyword`
+- [ ] Composite specs: `(Vec Spec)`, `(Map KeySpec ValSpec)`, `(Tuple S1 S2)`
+- [ ] `Enum` specs: `(Enum :admin :user :guest)`
+- [ ] `validate` / `validate!` builtins — runtime spec checking
+- [ ] Spec-powered `Arbitrary` generation — replaces manual `generateRandomValue()`
+- [ ] Integration with law verification — specs generate typed random values
+- [ ] `pub fn` convention: spec annotations recommended (lint/warn)
 
 ---
 
@@ -436,15 +449,33 @@ Built-in runtime schema system. Replaces HM type inference. Powers validation, A
 
 ---
 
-## Phase 10 — I/O Effects
+## Phase 10 — I/O Effects ✅
 
 Effect-based I/O operations, mockable via handlers in tests.
 
-- [ ] **HTTP server/client** — `::: Http` effect
-- [ ] **JSON** serialization/deserialization (schema-driven)
-- [ ] **TOML** — config file support
-- [ ] **TOON** (Token-Oriented Object Notation) — token-efficient format for AI contexts
-- [ ] **File I/O** — `::: FileIO` effect (read/write/list files)
+- [x] **JSON** — `json-parse`, `json-encode`, `json-encode-pretty` builtins (pure transforms, no effect)
+  - JSON ↔ Irij: objects→IrijMap, arrays→IrijVector, numbers→Long/Double, booleans, null→unit
+  - Tagged values serialize with `_tag` key (sum: `_fields` array, product: named fields)
+  - Keyword values serialize as `":name"` strings
+  - 15 Java unit tests + 24 integration tests
+- [x] **File I/O** — `std.fs` module with `FileIO` effect
+  - Ops: `fs-read`, `fs-write`, `fs-append`, `fs-exists?`, `fs-list-dir`, `fs-delete`, `fs-mkdir`
+  - `default-fs` handler wraps real filesystem builtins
+  - Fully mockable: `handler mock-fs :: FileIO` for tests
+  - Additional raw builtins: `list-dir`, `delete-file`, `make-dir`, `append-file`
+  - 7 integration tests (5 mock + 2 real FS)
+- [x] **HTTP client** — `std.http` module with `Http` effect
+  - Ops: `http-get`, `http-post`, `http-put`, `http-delete`, `http-request`
+  - `default-http` handler wraps `_http-request` builtin (java.net.http.HttpClient)
+  - Response format: `{status= 200 body= "..." headers= {...}}`
+  - Fully mockable: `handler mock-http :: Http` for tests
+  - 9 integration tests (all mock-based)
+- [x] **`pub effect` / `pub handler`** — grammar + AstBuilder + Interpreter support
+  - `pub effect` exports effect name + all op names
+  - `pub handler` exports handler name
+- [ ] **TOML** — config file support (deferred)
+- [ ] **TOON** — token-efficient format for AI contexts (deferred)
+- [ ] **HTTP server** — `::: Serve` effect (deferred)
 
 ---
 
@@ -457,15 +488,23 @@ Effect-based I/O operations, mockable via handlers in tests.
 
 ---
 
-## Phase 12 — Irij Package Registry
+## Phase 12 — Irij Package Registry & nREPL Playground
 
-First real-world application written in Irij. Dogfoods Phases 8–11.
+First real-world applications written in Irij. Dogfood Phases 8–11.
 
+### 12a — Package Registry
 - [ ] HTTP server serving registry API
 - [ ] Package upload/download
-- [ ] Schema-validated package metadata
+- [ ] Spec-validated package metadata
 - [ ] Git-based package storage
 - [ ] Search and discovery
+
+### 12b — nREPL Playground
+- [ ] Web-based Irij playground (browser → server → nREPL)
+- [ ] Sandboxed evaluation (restricted effects, timeouts)
+- [ ] Shareable code snippets (permalink with encoded source)
+- [ ] Example gallery (curated .irj examples)
+- [ ] Syntax-highlighted editor (CodeMirror/Monaco with irij-mode grammar)
 
 ---
 
