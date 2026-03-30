@@ -71,6 +71,7 @@ public final class Interpreter {
             case MatchFn mf -> mf.effectRow();
             case ImperativeFn imf -> imf.effectRow();
             case ContractedFn cf -> getEffectRow(cf.fn());
+            case SpecContractFn scf -> getEffectRow(scf.fn());
             default -> null;
         };
     }
@@ -310,6 +311,31 @@ public final class Interpreter {
             }
             throw new IrijRuntimeError("verify-laws: expected a protocol or fn name, got " + Values.typeName(target), null);
         }));
+
+        // ── validate — check value against spec name, return Ok/Err ────
+        globalEnv.define("validate", new BuiltinFn("validate", 2, args -> {
+            var specName = args.get(0);
+            var value = args.get(1);
+            if (!(specName instanceof String name)) {
+                throw new IrijRuntimeError("validate: first argument must be a spec name (string)", null);
+            }
+            try {
+                var result = validateByName(value, name, SourceLoc.UNKNOWN);
+                return new Tagged("Ok", List.of(result));
+            } catch (IrijRuntimeError e) {
+                return new Tagged("Err", List.of(e.getMessage()));
+            }
+        }));
+
+        // ── validate! — check value against spec name, return or throw ──
+        globalEnv.define("validate!", new BuiltinFn("validate!", 2, args -> {
+            var specName = args.get(0);
+            var value = args.get(1);
+            if (!(specName instanceof String name)) {
+                throw new IrijRuntimeError("validate!: first argument must be a spec name (string)", null);
+            }
+            return validateByName(value, name, SourceLoc.UNKNOWN);
+        }));
     }
 
     /** Registry of fn-level laws, populated during fn declaration. */
@@ -340,12 +366,16 @@ public final class Interpreter {
         };
     }
 
-    /** Generate random values of a specific type (for typed protocol impls). */
+    /** Generate random values of a specific type (for typed protocol impls).
+     *  Now spec-aware: if the type name matches a user-declared spec, generates
+     *  valid instances of that spec (random variant for sum, random fields for product). */
     private Object generateRandomForType(String typeName) {
         return switch (typeName) {
             case "Int" -> (long) (lawRandom.nextInt(201) - 100);
             case "Float" -> lawRandom.nextDouble() * 200.0 - 100.0;
             case "Bool" -> lawRandom.nextBoolean();
+            case "Keyword" -> new Keyword(List.of("ok", "err", "foo", "bar", "baz")
+                .get(lawRandom.nextInt(5)));
             case "Str" -> {
                 int len = lawRandom.nextInt(10);
                 var sb = new StringBuilder(len);
@@ -358,7 +388,44 @@ public final class Interpreter {
                 for (int i = 0; i < len; i++) elems.add((long) lawRandom.nextInt(21) - 10);
                 yield new IrijVector(elems);
             }
-            default -> generateRandomValue();
+            default -> {
+                // Check if it's a user-declared spec — generate a random valid instance
+                var descriptor = specRegistry.get(typeName);
+                if (descriptor != null) {
+                    yield generateRandomForSpec(descriptor);
+                }
+                yield generateRandomValue();
+            }
+        };
+    }
+
+    /**
+     * Generate a random valid instance of a user-declared spec.
+     * Sum specs: pick a random variant, generate random fields.
+     * Product specs: generate random values for all fields.
+     */
+    private Object generateRandomForSpec(Values.SpecDescriptor spec) {
+        return switch (spec.body()) {
+            case Decl.SpecBody.SumSpec ss -> {
+                // Pick a random variant
+                var variant = ss.variants().get(lawRandom.nextInt(ss.variants().size()));
+                var fields = new ArrayList<Object>();
+                for (int i = 0; i < variant.arity(); i++) {
+                    fields.add(generateRandomValue());
+                }
+                yield new Tagged(variant.name(), fields, null, spec.name());
+            }
+            case Decl.SpecBody.ProductSpec ps -> {
+                // Generate random values for all fields
+                var fields = new ArrayList<Object>();
+                var named = new java.util.LinkedHashMap<String, Object>();
+                for (var field : ps.fields()) {
+                    var val = generateRandomValue();
+                    fields.add(val);
+                    named.put(field.name(), val);
+                }
+                yield new Tagged(spec.name(), fields, named, spec.name());
+            }
         };
     }
 
@@ -623,7 +690,7 @@ public final class Interpreter {
 
     /** A match-arm function: tries each arm against the argument. */
     record MatchFn(String name, List<Expr.MatchArm> arms, Environment closure,
-                   List<String> effectRow, List<String> specAnnotations) {
+                   List<String> effectRow, List<SpecExpr> specAnnotations) {
         /** Convenience constructor without effect row or specs. */
         MatchFn(String name, List<Expr.MatchArm> arms, Environment closure) {
             this(name, arms, closure, null, null);
@@ -638,7 +705,7 @@ public final class Interpreter {
 
     /** An imperative-block function: binds params then executes statements. */
     record ImperativeFn(String name, List<Pattern> params, String restParam, List<Stmt> body,
-                        Environment closure, List<String> effectRow, List<String> specAnnotations) {
+                        Environment closure, List<String> effectRow, List<SpecExpr> specAnnotations) {
         /** Convenience constructor without rest param, effects, or specs. */
         ImperativeFn(String name, List<Pattern> params, List<Stmt> body, Environment closure) {
             this(name, params, null, body, closure, null, null);
@@ -669,6 +736,19 @@ public final class Interpreter {
                      String name, SourceLoc loc) {
             this(fn, pres, posts, List.of(), List.of(), name, null, loc);
         }
+        @Override
+        public String toString() {
+            return fn.toString();
+        }
+    }
+
+    /**
+     * A function wrapped with spec-based validation from an arrow spec.
+     * When called, validates each argument against the corresponding input spec,
+     * calls the underlying function, then validates the result against the output spec.
+     * Created when a function argument is annotated with a concrete arrow spec like (Int -> Str).
+     */
+    record SpecContractFn(Object fn, SpecExpr.Arrow arrowSpec, SourceLoc loc) {
         @Override
         public String toString() {
             return fn.toString();
@@ -790,6 +870,268 @@ public final class Interpreter {
         }
         // Re-certify
         return new Tagged(t.tag(), t.fields(), t.namedFields(), specName);
+    }
+
+    /**
+     * Validate a value against a spec by name (string). Used by validate/validate! builtins.
+     * Handles both primitive specs and user-declared specs.
+     */
+    private Object validateByName(Object value, String name, Node.SourceLoc loc) {
+        return validateAgainstSpecExpr(value, new SpecExpr.Name(name), loc);
+    }
+
+    // ── SpecExpr-based validation (Phase 8b) ──────────────────────────
+
+    /** Primitive spec names → Values.typeName() mapping. */
+    private static final Set<String> PRIMITIVE_SPEC_NAMES = Set.of(
+        "Int", "Str", "Float", "Bool", "Keyword", "Unit", "Rational"
+    );
+
+    /**
+     * Validate a value against a SpecExpr.
+     * Dispatches on the SpecExpr variant:
+     *   Name → primitive check or registry lookup
+     *   Wildcard/Var → pass through (no validation)
+     *   App → composite validation (Vec Int, Map Str Int, Fn 2)
+     *   Arrow → wrap function in validating contract
+     *   Enum → keyword membership check
+     *   VecSpec/SetSpec/TupleSpec → element-wise validation
+     */
+    private Object validateAgainstSpecExpr(Object value, SpecExpr spec, Node.SourceLoc loc) {
+        if (spec == null) return value;
+        return switch (spec) {
+            case SpecExpr.Wildcard w -> value;
+            case SpecExpr.Var v -> value;  // Type variable — documentation only, no validation
+            case SpecExpr.Unit u -> {
+                if (value == Values.UNIT || value == null) yield value;
+                throw new IrijRuntimeError(
+                    "Spec validation failed: expected Unit, got " + Values.typeName(value), loc);
+            }
+            case SpecExpr.Name n -> validateNamedSpec(value, n.name(), loc);
+            case SpecExpr.App a -> validateAppSpec(value, a, loc);
+            case SpecExpr.Arrow a -> validateArrowSpec(value, a, loc);
+            case SpecExpr.Enum e -> validateEnumSpec(value, e, loc);
+            case SpecExpr.VecSpec v -> validateVecSpec(value, v, loc);
+            case SpecExpr.SetSpec s -> validateSetSpec(value, s, loc);
+            case SpecExpr.TupleSpec t -> validateTupleSpec(value, t, loc);
+        };
+    }
+
+    /** Validate against a named spec — either a primitive or a user-declared spec. */
+    private Object validateNamedSpec(Object value, String name, Node.SourceLoc loc) {
+        // Check primitive specs first
+        if (PRIMITIVE_SPEC_NAMES.contains(name)) {
+            String actualType = Values.typeName(value);
+            // Map some type names: Vector→Vec etc. would need mapping
+            // But our primitives use the same names as typeName() returns
+            if (actualType.equals(name)) return value;
+            // Handle Int matching Long typeName
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected " + name + ", got " + actualType, loc);
+        }
+        // "Fn" without args — just check it's callable
+        if ("Fn".equals(name)) {
+            if (isCallable(value)) return value;
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Fn, got " + Values.typeName(value), loc);
+        }
+        // Collection type names without params — just check the type
+        if ("Vec".equals(name) || "Vector".equals(name)) {
+            if (value instanceof IrijVector) return value;
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Vec, got " + Values.typeName(value), loc);
+        }
+        if ("Map".equals(name)) {
+            if (value instanceof IrijMap) return value;
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Map, got " + Values.typeName(value), loc);
+        }
+        if ("Set".equals(name)) {
+            if (value instanceof IrijSet) return value;
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Set, got " + Values.typeName(value), loc);
+        }
+        if ("Tuple".equals(name)) {
+            if (value instanceof IrijTuple) return value;
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Tuple, got " + Values.typeName(value), loc);
+        }
+        // Fall back to user-declared spec in registry
+        if (specRegistry.containsKey(name)) {
+            return validateAgainstSpec(value, name, loc);
+        }
+        // Unknown spec name — error
+        throw new IrijRuntimeError("Unknown spec: " + name, loc);
+    }
+
+    /** Validate against App spec: Vec Int, Map Str Int, Fn 2, etc. */
+    private Object validateAppSpec(Object value, SpecExpr.App app, Node.SourceLoc loc) {
+        return switch (app.head()) {
+            case "Vec" -> {
+                if (!(value instanceof IrijVector vec)) {
+                    throw new IrijRuntimeError(
+                        "Spec validation failed: expected Vec, got " + Values.typeName(value), loc);
+                }
+                if (!app.args().isEmpty()) {
+                    var elemSpec = app.args().get(0);
+                    for (var elem : vec.elements()) {
+                        validateAgainstSpecExpr(elem, elemSpec, loc);
+                    }
+                }
+                yield value;
+            }
+            case "Set" -> {
+                if (!(value instanceof IrijSet set)) {
+                    throw new IrijRuntimeError(
+                        "Spec validation failed: expected Set, got " + Values.typeName(value), loc);
+                }
+                if (!app.args().isEmpty()) {
+                    var elemSpec = app.args().get(0);
+                    for (var elem : set.elements()) {
+                        validateAgainstSpecExpr(elem, elemSpec, loc);
+                    }
+                }
+                yield value;
+            }
+            case "Map" -> {
+                if (!(value instanceof IrijMap map)) {
+                    throw new IrijRuntimeError(
+                        "Spec validation failed: expected Map, got " + Values.typeName(value), loc);
+                }
+                if (app.args().size() >= 2) {
+                    var keySpec = app.args().get(0);
+                    var valSpec = app.args().get(1);
+                    for (var entry : map.entries().entrySet()) {
+                        validateAgainstSpecExpr(entry.getKey(), keySpec, loc);
+                        validateAgainstSpecExpr(entry.getValue(), valSpec, loc);
+                    }
+                }
+                yield value;
+            }
+            case "Tuple" -> {
+                if (!(value instanceof IrijTuple tup)) {
+                    throw new IrijRuntimeError(
+                        "Spec validation failed: expected Tuple, got " + Values.typeName(value), loc);
+                }
+                for (int i = 0; i < app.args().size() && i < tup.elements().length; i++) {
+                    validateAgainstSpecExpr(tup.elements()[i], app.args().get(i), loc);
+                }
+                yield value;
+            }
+            case "Fn" -> {
+                if (!isCallable(value)) {
+                    throw new IrijRuntimeError(
+                        "Spec validation failed: expected Fn, got " + Values.typeName(value), loc);
+                }
+                // Fn with arity check: (Fn 2) means arity=2
+                if (!app.args().isEmpty() && app.args().get(0) instanceof SpecExpr.Name n) {
+                    try {
+                        int expectedArity = Integer.parseInt(n.name());
+                        int actualArity = getCallableArity(value);
+                        if (actualArity >= 0 && actualArity != expectedArity) {
+                            throw new IrijRuntimeError(
+                                "Spec validation failed: expected Fn with arity " + expectedArity
+                                    + ", got arity " + actualArity, loc);
+                        }
+                    } catch (NumberFormatException ignored) {
+                        // Not a number — treat as documentation
+                    }
+                }
+                yield value;
+            }
+            default -> {
+                // User-declared parametric spec: Result Ok Err, Maybe a, etc.
+                // For user-declared specs, just validate the head spec name
+                if (specRegistry.containsKey(app.head())) {
+                    yield validateAgainstSpec(value, app.head(), loc);
+                }
+                // Unknown — no-op
+                yield value;
+            }
+        };
+    }
+
+    /** Get arity of a callable, or -1 if unknown. */
+    private int getCallableArity(Object value) {
+        return switch (value) {
+            case Lambda l -> l.arity();
+            case ImperativeFn imf -> imf.params().size();
+            case BuiltinFn bf -> bf.arity();
+            case Constructor c -> c.arity();
+            case ContractedFn cf -> getCallableArity(cf.fn());
+            case SpecContractFn scf -> getCallableArity(scf.fn());
+            default -> -1;
+        };
+    }
+
+    /** Validate a value is a function matching an arrow spec, wrap in contract. */
+    private Object validateArrowSpec(Object value, SpecExpr.Arrow arrow, Node.SourceLoc loc) {
+        if (!isCallable(value)) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected function " + arrow + ", got " + Values.typeName(value), loc);
+        }
+        // Only wrap with contract if the arrow is fully concrete (no type variables)
+        if (!arrow.isConcrete()) {
+            return value;  // Treat as documentation
+        }
+        // Build pre/post contract lambdas that validate the arrow's input/output specs
+        // We create a SpecContractFn wrapper that validates args and return value
+        return new SpecContractFn(value, arrow, loc);
+    }
+
+    /** Validate a keyword value against an Enum spec. */
+    private Object validateEnumSpec(Object value, SpecExpr.Enum enumSpec, Node.SourceLoc loc) {
+        if (!(value instanceof Keyword kw)) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Keyword (one of " + enumSpec.values() + "), got "
+                    + Values.typeName(value), loc);
+        }
+        if (!enumSpec.values().contains(kw.name())) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: :" + kw.name() + " is not in " + enumSpec, loc);
+        }
+        return value;
+    }
+
+    /** Validate a vector with element spec: #[Int]. */
+    private Object validateVecSpec(Object value, SpecExpr.VecSpec vecSpec, Node.SourceLoc loc) {
+        if (!(value instanceof IrijVector vec)) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Vec, got " + Values.typeName(value), loc);
+        }
+        for (var elem : vec.elements()) {
+            validateAgainstSpecExpr(elem, vecSpec.elemSpec(), loc);
+        }
+        return value;
+    }
+
+    /** Validate a set with element spec: #{Str}. */
+    private Object validateSetSpec(Object value, SpecExpr.SetSpec setSpec, Node.SourceLoc loc) {
+        if (!(value instanceof IrijSet set)) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Set, got " + Values.typeName(value), loc);
+        }
+        for (var elem : set.elements()) {
+            validateAgainstSpecExpr(elem, setSpec.elemSpec(), loc);
+        }
+        return value;
+    }
+
+    /** Validate a tuple with positional specs: #(Int Str). */
+    private Object validateTupleSpec(Object value, SpecExpr.TupleSpec tupleSpec, Node.SourceLoc loc) {
+        if (!(value instanceof IrijTuple tup)) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Tuple, got " + Values.typeName(value), loc);
+        }
+        if (tup.elements().length != tupleSpec.elemSpecs().size()) {
+            throw new IrijRuntimeError(
+                "Spec validation failed: expected Tuple with " + tupleSpec.elemSpecs().size()
+                    + " elements, got " + tup.elements().length, loc);
+        }
+        for (int i = 0; i < tupleSpec.elemSpecs().size(); i++) {
+            validateAgainstSpecExpr(tup.elements()[i], tupleSpec.elemSpecs().get(i), loc);
+        }
+        return value;
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1265,7 +1607,7 @@ public final class Interpreter {
         var value = eval(bind.value(), env);
         // Spec annotation: validate and certify if needed
         if (bind.specAnnotation() != null) {
-            value = validateAgainstSpec(value, bind.specAnnotation(), bind.loc());
+            value = validateAgainstSpecExpr(value, bind.specAnnotation(), bind.loc());
         }
         switch (bind.target()) {
             case Stmt.BindTarget.Simple(var name) -> defineInScope(env, name, value);
@@ -1889,38 +2231,33 @@ public final class Interpreter {
             || value instanceof PartialApp
             || value instanceof ComposedFn
             || value instanceof ContractedFn
+            || value instanceof SpecContractFn
             || value instanceof Tagged;
     }
 
     /**
      * Validate function arguments against spec annotations.
      * specAnnotations: [Input1, Input2, ..., Output]. Last = output, rest = inputs.
-     * Entries may be null (wildcard _ or non-spec types).
-     * Only validates against specs that exist in the registry — unknown names are type hints only.
+     * Wildcard and Var entries skip validation.
      */
-    private List<Object> validateFnArgs(List<Object> args, List<String> specAnnotations,
+    private List<Object> validateFnArgs(List<Object> args, List<SpecExpr> specAnnotations,
                                          String fnName, SourceLoc loc) {
         if (specAnnotations == null || specAnnotations.size() < 2) return args;
         // Input specs: all but last
         int inputCount = specAnnotations.size() - 1;
         var result = new ArrayList<>(args);
         for (int i = 0; i < inputCount && i < result.size(); i++) {
-            var specName = specAnnotations.get(i);
-            if (specName != null && specRegistry.containsKey(specName)) {
-                result.set(i, validateAgainstSpec(result.get(i), specName, loc));
-            }
+            var spec = specAnnotations.get(i);
+            result.set(i, validateAgainstSpecExpr(result.get(i), spec, loc));
         }
         return result;
     }
 
-    private Object validateFnReturn(Object result, List<String> specAnnotations,
+    private Object validateFnReturn(Object result, List<SpecExpr> specAnnotations,
                                      String fnName, SourceLoc loc) {
         if (specAnnotations == null || specAnnotations.isEmpty()) return result;
         var outputSpec = specAnnotations.get(specAnnotations.size() - 1);
-        if (outputSpec != null && specRegistry.containsKey(outputSpec)) {
-            return validateAgainstSpec(result, outputSpec, loc);
-        }
-        return result;
+        return validateAgainstSpecExpr(result, outputSpec, loc);
     }
 
     Object apply(Object fn, List<Object> args, SourceLoc loc) {
@@ -2094,6 +2431,18 @@ public final class Interpreter {
                     }
                 }
                 yield result;
+            }
+            case SpecContractFn scf -> {
+                // Validate each argument against the arrow's input specs
+                var validatedArgs = new ArrayList<>(args);
+                for (int i = 0; i < scf.arrowSpec().inputs().size() && i < validatedArgs.size(); i++) {
+                    validatedArgs.set(i, validateAgainstSpecExpr(
+                        validatedArgs.get(i), scf.arrowSpec().inputs().get(i), scf.loc()));
+                }
+                // Call the underlying function
+                var result = apply(scf.fn(), validatedArgs, loc);
+                // Validate the return value
+                yield validateAgainstSpecExpr(result, scf.arrowSpec().output(), scf.loc());
             }
             case Tagged t -> {
                 // Tagged value used as a function (zero-arg constructor called again)

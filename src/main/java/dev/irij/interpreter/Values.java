@@ -2,6 +2,7 @@ package dev.irij.interpreter;
 
 import dev.irij.ast.Expr;
 import dev.irij.ast.Pattern;
+import dev.irij.ast.SpecExpr;
 
 import java.util.*;
 import java.util.function.Function;
@@ -231,7 +232,7 @@ public final class Values {
 
     public record Lambda(List<Pattern> params, String restParam, Expr body,
                          Environment closure, String name, List<String> effectRow,
-                         List<String> specAnnotations) {
+                         List<SpecExpr> specAnnotations) {
         /** Anonymous lambda without rest param, effects, or specs. */
         public Lambda(List<Pattern> params, Expr body, Environment closure) {
             this(params, null, body, closure, null, null, null);
@@ -527,6 +528,7 @@ public final class Values {
         if (value instanceof Tagged t) return t.tag();
         if (value instanceof Lambda) return "Lambda";
         if (value instanceof Interpreter.ContractedFn cf) return Values.typeName(cf.fn());
+        if (value instanceof Interpreter.SpecContractFn scf) return Values.typeName(scf.fn());
         if (value instanceof BuiltinFn) return "BuiltinFn";
         if (value instanceof PartialApp) return "PartialApp";
         if (value instanceof ComposedFn) return "ComposedFn";

@@ -729,7 +729,7 @@ class InterpreterTest {
                 spec Person
                   name :: Str
                   age :: Int
-                fn describe :: Person Str ::: Console
+                fn describe :: Person _ ::: Console
                   => p
                   println (p.name ++ " is " ++ (to-str p.age))
                 describe (Person "Alice" 30)"""));
@@ -746,12 +746,314 @@ class InterpreterTest {
                 println (identity 42)"""));
         }
 
-        @Test void primitiveTypeAnnotationNoOp() {
-            // Int, Str etc. are not in spec registry — no validation (type hints only)
+        @Test void primitiveTypeAnnotationValidates() {
+            // Int, Str etc. are now validated as primitive specs
             assertEquals("7", run("""
                 fn add :: Int Int Int
                   (x y -> x + y)
                 println (add 3 4)"""));
+        }
+
+        @Test void primitiveSpecRejectsWrongType() {
+            assertRuntimeError("""
+                fn add :: Int Int Int
+                  (x y -> x + y)
+                add "hello" 4""");
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Phase 8b: Primitive, Composite, Arrow, Enum Specs
+    // ═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    class SpecPhase8b {
+
+        // ── Primitive specs ──────────────────────────────────────────────
+
+        @Test void primitiveInt() {
+            assertEquals("42", run("""
+                x := 42 :: Int
+                println x"""));
+        }
+
+        @Test void primitiveStr() {
+            assertEquals("hello", run("""
+                x := "hello" :: Str
+                println x"""));
+        }
+
+        @Test void primitiveFloat() {
+            assertEquals("3.14", run("""
+                x := 3.14 :: Float
+                println x"""));
+        }
+
+        @Test void primitiveBool() {
+            assertEquals("true", run("""
+                x := true :: Bool
+                println x"""));
+        }
+
+        @Test void primitiveKeyword() {
+            assertEquals(":ok", run("""
+                x := :ok :: Keyword
+                println x"""));
+        }
+
+        @Test void primitiveIntRejectsStr() {
+            assertRuntimeError("""
+                x := "hello" :: Int""");
+        }
+
+        @Test void primitiveStrRejectsInt() {
+            assertRuntimeError("""
+                x := 42 :: Str""");
+        }
+
+        @Test void primitiveFloatRejectsInt() {
+            assertRuntimeError("""
+                x := 42 :: Float""");
+        }
+
+        @Test void primitiveBoolRejectsStr() {
+            assertRuntimeError("""
+                x := "yes" :: Bool""");
+        }
+
+        // ── Fn spec ─────────────────────────────────────────────────────
+
+        @Test void fnSpecAcceptsCallable() {
+            assertEquals("4", run("""
+                fn apply-fn :: Fn Int Int
+                  (f x -> f x)
+                println (apply-fn (x -> x * 2) 2)"""));
+        }
+
+        @Test void fnSpecRejectsNonCallable() {
+            assertRuntimeError("""
+                fn apply-fn :: Fn Int Int
+                  (f x -> f x)
+                apply-fn 42 2""");
+        }
+
+        // ── Vec spec ────────────────────────────────────────────────────
+
+        @Test void vecSpecUnparameterized() {
+            assertEquals("#[1 2 3]", run("""
+                x := #[1 2 3] :: Vec
+                println x"""));
+        }
+
+        @Test void vecSpecRejectsNonVec() {
+            assertRuntimeError("""
+                x := 42 :: Vec""");
+        }
+
+        @Test void vecSpecParameterized() {
+            assertEquals("#[1 2 3]", run("""
+                fn ints :: #[Int] #[Int]
+                  (xs -> xs)
+                println (ints #[1 2 3])"""));
+        }
+
+        @Test void vecSpecRejectsWrongElementType() {
+            assertRuntimeError("""
+                fn ints :: #[Int] #[Int]
+                  (xs -> xs)
+                ints #[1 "two" 3]""");
+        }
+
+        @Test void vecAppStyleAlsoWorks() {
+            // (Vec Int) application style also supported
+            assertEquals("#[1 2 3]", run("""
+                fn ints :: (Vec Int) (Vec Int)
+                  (xs -> xs)
+                println (ints #[1 2 3])"""));
+        }
+
+        // ── Map spec ────────────────────────────────────────────────────
+
+        @Test void mapSpecUnparameterized() {
+            assertEquals("{name= Jo}", run("""
+                x := {name= "Jo"} :: Map
+                println x"""));
+        }
+
+        @Test void mapSpecRejectsNonMap() {
+            assertRuntimeError("""
+                x := 42 :: Map""");
+        }
+
+        // ── Tuple spec ──────────────────────────────────────────────────
+
+        @Test void tupleSpecLiteral() {
+            assertEquals("#(1 hello)", run("""
+                fn pair :: #(Int Str) #(Int Str)
+                  (t -> t)
+                println (pair #(1 "hello"))"""));
+        }
+
+        @Test void tupleSpecRejectsWrongArity() {
+            assertRuntimeError("""
+                fn pair :: #(Int Str) #(Int Str)
+                  (t -> t)
+                pair #(1 "hello" 3)""");
+        }
+
+        @Test void tupleSpecRejectsWrongElementType() {
+            assertRuntimeError("""
+                fn pair :: #(Int Str) #(Int Str)
+                  (t -> t)
+                pair #(1 2)""");
+        }
+
+        // ── Set spec ────────────────────────────────────────────────────
+
+        @Test void setSpecUnparameterized() {
+            assertEquals("true", run("""
+                x := #{1 2 3} :: Set
+                println (contains? x 1)"""));
+        }
+
+        @Test void setSpecRejectsNonSet() {
+            assertRuntimeError("""
+                x := #[1 2 3] :: Set""");
+        }
+
+        // ── Enum spec ───────────────────────────────────────────────────
+
+        @Test void enumSpecAcceptsValidKeyword() {
+            assertEquals(":admin", run("""
+                fn check-role :: (Enum admin user guest) (Enum admin user guest)
+                  (r -> r)
+                println (check-role :admin)"""));
+        }
+
+        @Test void enumSpecRejectsInvalidKeyword() {
+            assertRuntimeError("""
+                fn check-role :: (Enum admin user guest) (Enum admin user guest)
+                  (r -> r)
+                check-role :superadmin""");
+        }
+
+        @Test void enumSpecRejectsNonKeyword() {
+            assertRuntimeError("""
+                fn check-role :: (Enum admin user guest) (Enum admin user guest)
+                  (r -> r)
+                check-role "admin"
+                """);
+        }
+
+        // ── Arrow spec (concrete function wrapping) ─────────────────────
+
+        @Test void arrowSpecWrapsFunction() {
+            // (Int -> Int) wraps the passed function
+            assertEquals("6", run("""
+                fn apply-twice :: (Int -> Int) Int Int
+                  (f x -> f (f x))
+                println (apply-twice (x -> x + 2) 2)"""));
+        }
+
+        @Test void arrowSpecRejectsWrongReturn() {
+            assertRuntimeError("""
+                fn apply-fn :: (Int -> Int) Int Int
+                  (f x -> f x)
+                apply-fn (x -> to-str x) 42""");
+        }
+
+        @Test void arrowSpecRejectsWrongInput() {
+            assertRuntimeError("""
+                fn apply-fn :: (Int -> Int) Int Int
+                  (f x -> f x)
+                apply-fn (x -> length x) 42""");
+        }
+
+        @Test void arrowSpecNonConcreteIsDocOnly() {
+            // (a -> b) with type variables is documentation only — no wrapping
+            assertEquals(":hello", run("""
+                fn apply-fn :: _ _ _
+                  (f x -> f x)
+                println (apply-fn (x -> to-str x) :hello)"""));
+        }
+
+        // ── Unit spec ───────────────────────────────────────────────────
+
+        @Test void unitSpec() {
+            assertEquals("ok", run("""
+                fn side-effect :: Int () ::: Console
+                  (x -> println "ok")
+                side-effect 42"""));
+        }
+
+        @Test void unitSpecRejectsNonUnit() {
+            assertRuntimeError("""
+                fn must-return-unit :: Int ()
+                  (x -> x)
+                must-return-unit 42""");
+        }
+
+        // ── validate / validate! builtins ───────────────────────────────
+
+        @Test void validateReturnsOk() {
+            assertEquals("Ok 42", run("""
+                result := validate "Int" 42
+                println result"""));
+        }
+
+        @Test void validateReturnsErr() {
+            assertEquals("true", run("""
+                result := validate "Int" "hello"
+                match result
+                  Err _ => println "true"
+                  _ => println "false"
+                """));
+        }
+
+        @Test void validateBangReturns() {
+            assertEquals("42", run("""
+                x := validate! "Int" 42
+                println x"""));
+        }
+
+        @Test void validateBangThrows() {
+            assertRuntimeError("""
+                validate! "Int" "hello"
+                """);
+        }
+
+        @Test void validateUserSpec() {
+            assertEquals("true", run("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                result := validate "Person" (Person "Jo" 30)
+                match result
+                  Ok _ => println "true"
+                  _ => println "false"
+                """));
+        }
+
+        // ── Mixed: fn with primitive + user spec ────────────────────────
+
+        @Test void fnMixedPrimitiveAndUserSpec() {
+            assertEquals("Jo", run("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn get-name :: Person Str
+                  (p -> p.name)
+                println (get-name (Person "Jo" 30))"""));
+        }
+
+        @Test void fnMixedRejectsPrimitiveViolation() {
+            assertRuntimeError("""
+                spec Person
+                  name :: Str
+                  age :: Int
+                fn get-name :: Person Str
+                  (p -> p.age)
+                get-name (Person "Jo" 30)""");
         }
     }
 

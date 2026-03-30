@@ -8,9 +8,9 @@ import java.util.List;
 public sealed interface Decl extends Node {
 
     /** Function declaration: fn name :: Spec1 Spec2 ::: Effects  body.
-     *  specAnnotations: list of spec names from :: annotation. Last = output, rest = inputs.
-     *  Entries may be null (for _ wildcard or non-spec types like primitives). */
-    record FnDecl(String name, boolean isPub, List<String> effectRow, List<String> specAnnotations,
+     *  specAnnotations: list of SpecExpr from :: annotation. Last = output, rest = inputs.
+     *  Entries may be Wildcard or Var (no validation for those). */
+    record FnDecl(String name, boolean isPub, List<String> effectRow, List<SpecExpr> specAnnotations,
                   FnBody body,
                   List<Expr> preConditions, List<Expr> postConditions,
                   List<Expr> inContracts, List<Expr> outContracts,

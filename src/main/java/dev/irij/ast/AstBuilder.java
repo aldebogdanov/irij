@@ -110,7 +110,7 @@ public class AstBuilder {
         }
 
         // Extract spec annotations from :: annotation: fn name :: Person Str
-        List<String> specAnnotations = extractSpecAnnotations(ctx.specAnnotation());
+        List<SpecExpr> specAnnotations = extractSpecAnnotations(ctx.specAnnotation());
 
         if (ctx.fnBody() == null) {
             return new Decl.FnDecl(name, isPub, effectRow, specAnnotations, new Decl.FnBody.NoBody(),
@@ -149,40 +149,186 @@ public class AstBuilder {
     }
 
     /**
-     * Extract spec names from a spec annotation (:: specExpr).
-     * Each specAtom that is an UPPER_NAME becomes a spec name entry.
-     * UNDERSCORE (_) becomes null (wildcard/unspecified).
-     * IDENT (type variables) and other forms become null.
+     * Extract spec annotations as a flat list of SpecExpr for fn signatures.
+     * For fn annotations, we flatten top-level specApp atoms into individual entries:
+     *   {@code :: Person Str} → [Name("Person"), Name("Str")]
+     * Arrow types within parens are kept as single Arrow entries:
+     *   {@code :: (Int -> Str) Vec} → [Arrow([Name("Int")], Name("Str")), Name("Vec")]
      * Returns null if no annotation present.
      */
-    private List<String> extractSpecAnnotations(SpecAnnotationContext ctx) {
+    private List<SpecExpr> extractSpecAnnotations(SpecAnnotationContext ctx) {
         if (ctx == null) return null;
-        var result = new ArrayList<String>();
-        extractSpecNames(ctx.specExpr(), result);
+        var result = new ArrayList<SpecExpr>();
+        flattenSpecExprForFn(ctx.specExpr(), result);
         return result.isEmpty() ? null : result;
     }
 
-    private void extractSpecNames(SpecExprContext ctx, List<String> names) {
+    /**
+     * Flatten a specExpr for function annotations: top-level atoms become
+     * individual entries, but grouped/collection/arrow forms are single entries.
+     *
+     * Top-level arrows are flattened: {@code :: Int -> Int -> Int} becomes
+     * [Name("Int"), Name("Int"), Name("Int")] for fn parameter/return specs.
+     * Arrows inside parens are preserved as Arrow specs: {@code :: (Int -> Int) Vec}
+     */
+    private void flattenSpecExprForFn(SpecExprContext ctx, List<SpecExpr> result) {
         if (ctx == null) return;
         // specExpr : specApp ARROW specExpr | specApp
-        if (ctx.specApp() != null) {
-            for (var atom : ctx.specApp().specAtom()) {
-                if (atom.upperName() != null) {
-                    names.add(atom.upperName().UPPER_NAME().getText());
-                } else if (atom.UNDERSCORE() != null) {
-                    names.add(null); // wildcard
-                } else if (atom.IDENT() != null) {
-                    names.add(null); // type variable, not a concrete spec
-                } else if (atom.LPAREN() != null && atom.RPAREN() != null && atom.specExpr() == null) {
-                    names.add(null); // unit type ()
+        if (ctx.ARROW() != null) {
+            // Top-level arrow in fn annotation: flatten into separate entries
+            // Int -> Int -> Int  ==>  [Int, Int, Int]
+            if (ctx.specApp() != null) {
+                for (var atom : ctx.specApp().specAtom()) {
+                    result.add(buildSpecAtom(atom));
                 }
-                // Ignore grouped/collection types for now — handled in future phases
+            }
+            // Recurse into right side of arrow
+            flattenSpecExprForFn(ctx.specExpr(), result);
+            return;
+        }
+        if (ctx.specApp() != null) {
+            var atoms = ctx.specApp().specAtom();
+            // In fn annotation context, multiple atoms are ALWAYS separate specs:
+            //   fn f :: Person Str  →  [Name("Person"), Name("Str")]
+            //   fn f :: Fn Int Int  →  [Name("Fn"), Name("Int"), Name("Int")]
+            // Composite specs must be parenthesized: fn f :: (Vec Int) (Vec Int)
+            for (var atom : atoms) {
+                result.add(buildSpecAtom(atom));
             }
         }
-        // Recurse into arrow right side
-        if (ctx.specExpr() != null) {
-            extractSpecNames(ctx.specExpr(), names);
+    }
+
+    /** Check if a name is a known composite spec that takes parameters. */
+    private boolean isCompositeSpecHead(String name) {
+        return name != null && switch (name) {
+            case "Vec", "Map", "Set", "Tuple", "Fn", "Enum" -> true;
+            default -> false;
+        };
+    }
+
+    /**
+     * Build a full SpecExpr from a specExpr grammar node (preserving structure).
+     * Used for nested specs (inside parens, collections, arrows).
+     */
+    private SpecExpr buildSpecExpr(SpecExprContext ctx) {
+        if (ctx == null) return new SpecExpr.Wildcard();
+        // specExpr : specApp ARROW specExpr | specApp
+        if (ctx.ARROW() != null) {
+            // Arrow type: flatten into inputs -> output
+            var inputs = new ArrayList<SpecExpr>();
+            // Left side is a specApp (could be multiple atoms)
+            if (ctx.specApp() != null) {
+                for (var atom : ctx.specApp().specAtom()) {
+                    inputs.add(buildSpecAtom(atom));
+                }
+            }
+            // Right side: if it's another arrow, recurse to get the chain
+            var right = buildSpecExpr(ctx.specExpr());
+            if (right instanceof SpecExpr.Arrow nested) {
+                // (A -> B -> C) = Arrow([A, B], C)
+                inputs.addAll(nested.inputs());
+                return new SpecExpr.Arrow(inputs, nested.output());
+            }
+            return new SpecExpr.Arrow(inputs, right);
         }
+        // specApp: specAtom+
+        return buildSpecApp(ctx.specApp());
+    }
+
+    /** Build a SpecExpr from a specApp (one or more atoms). */
+    private SpecExpr buildSpecApp(IrijParser.SpecAppContext ctx) {
+        if (ctx == null) return new SpecExpr.Wildcard();
+        var atoms = ctx.specAtom();
+        if (atoms.size() == 1) {
+            return buildSpecAtom(atoms.get(0));
+        }
+        // Multiple atoms: application
+        String head = atoms.get(0).upperName() != null
+            ? atoms.get(0).upperName().UPPER_NAME().getText() : null;
+        if ("Enum".equals(head)) {
+            var values = new ArrayList<String>();
+            for (int i = 1; i < atoms.size(); i++) {
+                if (atoms.get(i).IDENT() != null) values.add(atoms.get(i).IDENT().getText());
+                else if (atoms.get(i).upperName() != null) values.add(atoms.get(i).upperName().UPPER_NAME().getText());
+            }
+            return new SpecExpr.Enum(values);
+        }
+        if (isCompositeSpecHead(head)) {
+            var args = new ArrayList<SpecExpr>();
+            for (int i = 1; i < atoms.size(); i++) {
+                args.add(buildSpecAtom(atoms.get(i)));
+            }
+            return new SpecExpr.App(head, args);
+        }
+        // Generic application: Result Ok Err → App("Result", [Name("Ok"), Name("Err")])
+        if (head != null) {
+            var args = new ArrayList<SpecExpr>();
+            for (int i = 1; i < atoms.size(); i++) {
+                args.add(buildSpecAtom(atoms.get(i)));
+            }
+            return new SpecExpr.App(head, args);
+        }
+        // Fallback: just return first atom
+        return buildSpecAtom(atoms.get(0));
+    }
+
+    /** Build a SpecExpr from a single specAtom. */
+    private SpecExpr buildSpecAtom(IrijParser.SpecAtomContext atom) {
+        if (atom.upperName() != null) {
+            return new SpecExpr.Name(atom.upperName().UPPER_NAME().getText());
+        }
+        if (atom.UNDERSCORE() != null) {
+            return new SpecExpr.Wildcard();
+        }
+        if (atom.IDENT() != null) {
+            return new SpecExpr.Var(atom.IDENT().getText());
+        }
+        if (atom.LPAREN() != null && atom.RPAREN() != null) {
+            if (atom.specExpr() != null && !atom.specExpr().isEmpty()) {
+                // Grouped: (specExpr) — build the inner spec
+                return buildSpecExpr(atom.specExpr(0));
+            }
+            // Unit: ()
+            return new SpecExpr.Unit();
+        }
+        // #[specExpr] — vector spec
+        if (atom.VEC_OPEN() != null) {
+            return new SpecExpr.VecSpec(buildSpecExpr(atom.specExpr(0)));
+        }
+        // #{specExpr} — set spec
+        if (atom.SET_OPEN() != null) {
+            return new SpecExpr.SetSpec(buildSpecExpr(atom.specExpr(0)));
+        }
+        // #(specExpr specExpr*) — tuple spec
+        // Grammar: TUPLE_OPEN specExpr specExpr* RPAREN
+        // But specApp: specAtom+ means #(Int Str) is one specExpr with two atoms.
+        // We need to split the atoms into separate TupleSpec elements.
+        if (atom.TUPLE_OPEN() != null) {
+            var elems = new ArrayList<SpecExpr>();
+            for (var se : atom.specExpr()) {
+                // Check if this specExpr has multiple atoms in its specApp
+                if (se.ARROW() == null && se.specApp() != null && se.specApp().specAtom().size() > 1) {
+                    // Split atoms: #(Int Str) → [Name("Int"), Name("Str")]
+                    for (var a : se.specApp().specAtom()) {
+                        elems.add(buildSpecAtom(a));
+                    }
+                } else {
+                    elems.add(buildSpecExpr(se));
+                }
+            }
+            return new SpecExpr.TupleSpec(elems);
+        }
+        // Fallback: wildcard for unsupported forms (refinement, located)
+        return new SpecExpr.Wildcard();
+    }
+
+    /**
+     * Build a single SpecExpr from a binding's specSuffix (:: SpecExpr).
+     * Unlike fn annotations which are flat lists, binding annotations are a single spec.
+     */
+    SpecExpr buildBindingSpec(SpecSuffixContext ctx) {
+        if (ctx == null) return null;
+        return buildSpecExpr(ctx.specExpr());
     }
 
     private Decl.FnBody visitFnBody(IrijParser.FnBodyContentContext content) {
@@ -397,17 +543,7 @@ public class AstBuilder {
         var target = visitBindTarget(ctx.bindTarget());
         var loc = loc(ctx);
         if (ctx.BIND() != null) {
-            String specAnn = null;
-            if (ctx.specSuffix() != null) {
-                // Extract the spec name from :: SpecName
-                var specExpr = ctx.specSuffix().specExpr();
-                if (specExpr != null && specExpr.specApp() != null) {
-                    var atoms = specExpr.specApp().specAtom();
-                    if (!atoms.isEmpty() && atoms.get(0).upperName() != null) {
-                        specAnn = atoms.get(0).upperName().UPPER_NAME().getText();
-                    }
-                }
-            }
+            SpecExpr specAnn = buildBindingSpec(ctx.specSuffix());
             return new Stmt.Bind(target, visitExpr(ctx.expr()), specAnn, loc);
         }
         if (ctx.MUT_BIND() != null) {

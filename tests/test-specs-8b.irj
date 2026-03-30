@@ -1,0 +1,189 @@
+use std.test :open
+
+;; ═══════════════════════════════════════════════════════
+;; Phase 8b: Primitive, Composite, Arrow, Enum Specs
+;; ═══════════════════════════════════════════════════════
+
+;; ── Primitive spec bindings at top level ────────────────
+
+int-val := 42 :: Int
+str-val := "hello" :: Str
+float-val := 3.14 :: Float
+bool-val := true :: Bool
+kw-val := :ok :: Keyword
+
+r1 := test "primitive Int validates" (-> assert-eq 42 int-val)
+r2 := test "primitive Str validates" (-> assert-eq "hello" str-val)
+r3 := test "primitive Float validates" (-> assert-eq 3.14 float-val)
+r4 := test "primitive Bool validates" (-> assert-eq true bool-val)
+r5 := test "primitive Keyword validates" (-> assert-eq :ok kw-val)
+
+r6 := test "primitive Int rejects Str" (->
+  assert-throws (-> validate! "Int" "hello"))
+
+r7 := test "primitive Str rejects Int" (->
+  assert-throws (-> validate! "Str" 42))
+
+;; ── Vec spec ────────────────────────────────────────────
+
+fn identity-vec :: Vec Vec
+  (xs -> xs)
+
+r8 := test "Vec spec accepts vector" (->
+  assert-eq #[1 2 3] (identity-vec #[1 2 3]))
+
+r9 := test "Vec spec rejects non-vector" (->
+  assert-throws (-> identity-vec 42))
+
+fn identity-vec-int :: #[Int] #[Int]
+  (xs -> xs)
+
+r10 := test "#[Int] spec validates elements" (->
+  assert-eq #[1 2 3] (identity-vec-int #[1 2 3]))
+
+r11 := test "#[Int] spec rejects wrong element type" (->
+  assert-throws (-> identity-vec-int #["one" 2]))
+
+;; ── Tuple spec ──────────────────────────────────────────
+
+fn identity-tup :: #(Int Str) #(Int Str)
+  (t -> t)
+
+r12 := test "Tuple spec validates" (->
+  assert-eq #(1 "hello") (identity-tup #(1 "hello")))
+
+r13 := test "Tuple spec rejects wrong arity" (->
+  assert-throws (-> identity-tup #(1 "hello" 3)))
+
+r14 := test "Tuple spec rejects wrong element type" (->
+  assert-throws (-> identity-tup #(1 2)))
+
+;; ── Set spec ────────────────────────────────────────────
+
+set-val := #{1 2 3} :: Set
+
+r15 := test "Set spec accepts set" (->
+  assert-true (contains? set-val 1))
+
+r16 := test "Set spec rejects non-set" (->
+  assert-throws (-> validate! "Set" #[1 2 3]))
+
+;; ── Fn spec ─────────────────────────────────────────────
+
+fn apply-fn :: Fn Int Int
+  (f x -> f x)
+
+r17 := test "Fn spec accepts function" (->
+  assert-eq 4 (apply-fn (x -> x * 2) 2))
+
+r18 := test "Fn spec rejects non-function" (->
+  assert-throws (-> apply-fn 42 2))
+
+;; ── Enum spec ───────────────────────────────────────────
+
+fn check-role :: (Enum admin user guest) (Enum admin user guest)
+  (r -> r)
+
+r19 := test "Enum spec accepts valid keyword" (->
+  assert-eq :admin (check-role :admin))
+
+r20 := test "Enum spec rejects invalid keyword" (->
+  assert-throws (-> check-role :superadmin))
+
+r21 := test "Enum spec rejects non-keyword" (->
+  assert-throws (-> check-role "admin"))
+
+;; ── Arrow spec ──────────────────────────────────────────
+
+fn apply-twice :: (Int -> Int) Int Int
+  (f x -> f (f x))
+
+r22 := test "Arrow spec wraps function correctly" (->
+  assert-eq 6 (apply-twice (x -> x + 2) 2))
+
+r23 := test "Arrow spec rejects wrong return type" (->
+  assert-throws (-> apply-twice (x -> to-str x) 2))
+
+;; ── Unit spec ───────────────────────────────────────────
+
+fn must-unit :: Int ()
+  (x -> ())
+
+fn bad-unit :: Int ()
+  (x -> x)
+
+r24 := test "Unit spec accepts unit" (->
+  assert-eq () (must-unit 42))
+
+r25 := test "Unit spec rejects non-unit" (->
+  assert-throws (-> bad-unit 42))
+
+;; ── validate / validate! builtins ───────────────────────
+
+fn check-validate-ok
+  => x
+  result := validate "Int" 42
+  match result
+    Ok v => v == 42
+    _ => false
+
+fn check-validate-err
+  => x
+  result := validate "Int" "hello"
+  match result
+    Err _ => true
+    _ => false
+
+r26 := test "validate returns Ok on success" (->
+  assert-true (check-validate-ok ()))
+
+r27 := test "validate returns Err on failure" (->
+  assert-true (check-validate-err ()))
+
+r28 := test "validate! returns value on success" (->
+  assert-eq 42 (validate! "Int" 42))
+
+r29 := test "validate! throws on failure" (->
+  assert-throws (-> validate! "Int" "hello"))
+
+;; ── Mixed: fn with primitive + user spec ────────────────
+
+spec Person
+  name :: Str
+  age :: Int
+
+fn get-name :: Person Str
+  (p -> p.name)
+
+fn get-age-as-str :: Person Str
+  (p -> p.age)
+
+r30 := test "fn with user spec + primitive return validates" (->
+  assert-eq "Jo" (get-name (Person "Jo" 30)))
+
+r31 := test "fn with user spec + primitive return rejects wrong" (->
+  assert-throws (-> get-age-as-str (Person "Jo" 30)))
+
+;; ── #{Int} set with element spec ─────────────────────
+
+fn identity-set-int :: #{Int} #{Int}
+  (xs -> xs)
+
+r32 := test "#{Int} spec validates elements" (->
+  assert-true (contains? (identity-set-int #{1 2 3}) 1))
+
+r33 := test "#{Int} spec rejects wrong element type" (->
+  assert-throws (-> identity-set-int #{"one" "two"}))
+
+;; ── (Map Str Int) ────────────────────────────────────
+
+fn identity-map :: (Map Str Int) (Map Str Int)
+  (m -> m)
+
+r34 := test "Map Str Int spec validates" (->
+  assert-eq 30 (get "age" (identity-map {age= 30})))
+
+r35 := test "Map Str Int rejects wrong val type" (->
+  assert-throws (-> identity-map {name= "Jo"}))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35]

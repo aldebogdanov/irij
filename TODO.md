@@ -427,14 +427,29 @@ Built-in runtime spec system. Replaces HM type inference. Powers validation, Arb
 - [x] Parametric specs — `spec Maybe a; Just a; Nothing`
 - [x] Constrained fields — `age :: (Int :min 0 :max 150)` validated at construction
 
-### Phase 8b+ — Remaining
+### Phase 8b — Primitive, Composite & Runtime Specs ✅
 
-- [ ] Primitive specs: `Str`, `Int`, `Float`, `Bool`, `Keyword`
-- [ ] Composite specs: `(Vec Spec)`, `(Map KeySpec ValSpec)`, `(Tuple S1 S2)`
-- [ ] `Enum` specs: `(Enum :admin :user :guest)`
-- [ ] `validate` / `validate!` builtins — runtime spec checking
-- [ ] Spec-powered `Arbitrary` generation — replaces manual `generateRandomValue()`
-- [ ] Integration with law verification — specs generate typed random values
+Malli-style spec system — validates concrete shapes at runtime, no HM type inference.
+Design principle: collection literals mirror their spec syntax.
+
+- [x] **SpecExpr AST** — `SpecExpr.java` sealed interface: `Name`, `Wildcard`, `Var`, `Unit`, `App`, `Arrow`, `Enum`, `VecSpec`, `SetSpec`, `TupleSpec`
+- [x] **AstBuilder** — rich spec expression parsing from grammar; `flattenSpecExprForFn`, `buildSpecExpr`, `buildSpecAtom`
+- [x] **Primitive specs**: `Int`, `Str`, `Float`, `Bool`, `Keyword`, `Unit`, `Rational` — validated via `Values.typeName()` check
+- [x] **Composite specs** (literal style — mirrors collection literal syntax):
+  - `#[Int]` — vector with element spec (mirrors `#[1 2 3]`)
+  - `#{Str}` — set with element spec (mirrors `#{1 2}`)
+  - `#(Int Str)` — tuple with positional specs (mirrors `#(1 "hi")`)
+  - `(Map Str Int)` — map with key/val specs (application style, no literal analog)
+  - `(Vec Int)` — application style also works (both forms supported)
+- [x] **`Fn` spec**: `Fn` = any callable, `(Fn 2)` = callable with arity 2
+- [x] **`Enum` spec**: `(Enum admin user guest)` — keyword membership check
+- [x] **Arrow spec**: `(Int -> Str)` — wraps passed function in validating contract (SpecContractFn). Only concrete arrows (no type variables) get wrapped; non-concrete arrows are documentation only.
+- [x] **`validate`/`validate!` builtins**: `validate "Int" 42` → `Ok 42`; `validate! "Int" "hello"` → throws
+- [x] **Spec-aware Arbitrary generation**: `generateRandomForSpec()` creates valid random instances of user-declared specs (random variant for sum, random fields for product). Used by `verify-laws`.
+- [x] **Tests** — 604 Java tests (+40) + 253 integration tests (+35)
+
+### Phase 8c — Remaining
+
 - [ ] `pub fn` convention: spec annotations recommended (lint/warn)
 
 ---
