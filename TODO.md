@@ -448,9 +448,14 @@ Design principle: collection literals mirror their spec syntax.
 - [x] **Spec-aware Arbitrary generation**: `generateRandomForSpec()` creates valid random instances of user-declared specs (random variant for sum, random fields for product). Used by `verify-laws`.
 - [x] **Tests** — 604 Java tests (+40) + 253 integration tests (+35)
 
-### Phase 8c — Remaining
+### Phase 8c — Spec Lint Warnings ✅
 
-- [ ] `pub fn` convention: spec annotations recommended (lint/warn)
+- [x] `pub fn` convention: spec annotations recommended (lint/warn)
+  - `--spec-lint` CLI flag enables warnings during module loading
+  - `interpreter.setSpecLintEnabled(true)` API for programmatic use
+  - Warns on `pub fn` with no `::` spec annotations (effect-only `:::` still warns)
+  - Warning includes function name, module name, and source location
+  - 3 Java tests
 
 ---
 

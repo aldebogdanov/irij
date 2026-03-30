@@ -33,7 +33,7 @@ import java.util.stream.Collectors;
  */
 public final class IrijCli {
 
-    private static final String VERSION = "0.1.1";
+    private static final String VERSION = "0.2.0";
     private static final int DEFAULT_NREPL_PORT = 7888;
 
     public static void main(String[] args) throws Exception {
@@ -54,6 +54,7 @@ public final class IrijCli {
         boolean dumpAst      = false;
         boolean mcpServer    = false;
         boolean verifyLaws   = false;
+        boolean specLint     = false;
         int     nreplPort    = -1;
         String  filePath     = null;
 
@@ -64,6 +65,7 @@ public final class IrijCli {
                 case "--nrepl-server" -> nreplPort = DEFAULT_NREPL_PORT;
                 case "--mcp-server" -> mcpServer = true;
                 case "--verify-laws" -> verifyLaws = true;
+                case "--spec-lint"   -> specLint  = true;
                 case "--version", "-v" -> {
                     System.out.println("Irij ℑ  version " + VERSION);
                     return;
@@ -110,12 +112,12 @@ public final class IrijCli {
             System.exit(1);
         }
 
-        runFile(Path.of(filePath), parseOnly, dumpAst, verifyLaws);
+        runFile(Path.of(filePath), parseOnly, dumpAst, verifyLaws, specLint);
     }
 
     // ── File runner ──────────────────────────────────────────────────────
 
-    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean verifyLaws) throws IOException {
+    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean verifyLaws, boolean specLint) throws IOException {
         IrijParseDriver.ParseResult result;
         try {
             result = IrijParseDriver.parseFile(path);
@@ -151,6 +153,7 @@ public final class IrijCli {
             var interpreter = new Interpreter();
             interpreter.setSourcePath(path.toAbsolutePath().getParent());
             if (verifyLaws) interpreter.setAutoVerifyLaws(true);
+            if (specLint) interpreter.setSpecLintEnabled(true);
             interpreter.run(ast);
         } catch (IrijRuntimeError e) {
             System.err.println(path + ":" + e.getMessage());
@@ -326,6 +329,7 @@ public final class IrijCli {
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
               irij --verify-laws <file>  run file with automatic law verification on impl
+              irij --spec-lint <file>    warn on pub fn without spec annotations
               irij --mcp-server          start MCP server (stdio, for Claude Code)
               irij --nrepl-server        start nREPL server (port 7888)
               irij --nrepl-server=PORT   start nREPL server on PORT

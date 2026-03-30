@@ -35,7 +35,12 @@ public final class Interpreter {
     /** When true, automatically verify protocol laws on each `impl` declaration. */
     private boolean autoVerifyLaws = false;
 
+    /** When true, warn if pub fn lacks spec annotations (Phase 8c). */
+    private boolean specLintEnabled = false;
+
     public void setAutoVerifyLaws(boolean on) { this.autoVerifyLaws = on; }
+
+    public void setSpecLintEnabled(boolean on) { this.specLintEnabled = on; }
 
     // ── Effect row checking ─────────────────────────────────────────────
     // Stack tracks what effects are available in the current execution context.
@@ -1193,6 +1198,16 @@ public final class Interpreter {
             if (pd.inner() instanceof Decl.EffectDecl ed) {
                 for (var op : ed.ops()) {
                     pubNames.add(op.name());
+                }
+            }
+            // Phase 8c: warn if pub fn lacks spec annotations
+            if (specLintEnabled && pd.inner() instanceof Decl.FnDecl fn
+                    && !(fn.body() instanceof Decl.FnBody.NoBody)) {
+                var specs = fn.specAnnotations();
+                if (specs == null || specs.isEmpty()) {
+                    out.println("⚠ warning: pub fn '" + fn.name() + "' in module '"
+                        + currentModuleName + "' has no spec annotations"
+                        + (fn.loc() != null ? " (" + fn.loc() + ")" : ""));
                 }
             }
         }
