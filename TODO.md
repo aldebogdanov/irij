@@ -459,13 +459,26 @@ Design principle: collection literals mirror their spec syntax.
 
 ---
 
-## Phase 9 — Package Management (Git Deps)
+## Phase 9 — Package Management (Git Deps) ✅
 
-- [ ] `deps.irj` file format — git URLs + tags/commits + local paths
-- [ ] Dependency resolver — clone/cache repos
-- [ ] Load `pub` declarations from deps
-- [ ] Version pinning (tags, commits)
-- [ ] Local path deps for development
+- [x] **`deps.irj` file format** — `DepsFile.java` parser
+  - `dep name` blocks with indented properties
+  - `git "url"` + `tag "ref"` or `commit "sha"` for git deps
+  - `path "dir"` for local path deps
+  - Comments (`;;`) and blank lines supported
+  - Error reporting with line numbers
+- [x] **`DependencyResolver.java`** — git clone/cache + local path resolution
+  - Git deps cached at `~/.irij/deps/<name>/<ref>/`
+  - Shallow clone (`--depth 1 --branch`) for tags, full clone + checkout for commit hashes
+  - Local path deps resolve relative to project root
+- [x] **Module resolution extended** — `ModuleRegistry` priority:
+  1. Cache → 2. Factories → 3. Classpath (`std.*`) → 4. **Dep paths** → 5. File system
+  - Dep module lookup: `<dep>/src/<name>.irj`, `<dep>/<name>.irj`, `<dep>/mod.irj`
+  - Sub-module lookup: `<dep>/src/<rest>.irj`, `<dep>/<rest>.irj`
+- [x] **Auto-load deps.irj** — `Interpreter.loadDeps(projectRoot)` called in CLI before run
+- [x] **`irij install`** CLI command — fetches all deps, reports resolved paths
+- [x] **Tests** — 24 new (12 DepsFile parser + 3 DependencyResolver + 8 integration + 1 empty)
+  - Integration tests: local dep modules, sub-modules, open/selective imports, src/ convention, mod.irj fallback
 
 ---
 

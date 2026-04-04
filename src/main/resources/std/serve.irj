@@ -1,0 +1,48 @@
+mod std.serve
+
+;; HTTP server framework for Irij.
+
+pub effect Serve
+  serve :: Int Fn -> ()
+
+pub handler default-serve :: Serve ::: Console
+  serve port h =>
+    raw-http-serve port h
+    resume ()
+
+pub fn route :: Str Str Fn Map
+  (method path action ->
+    {method= method path= path action= action})
+
+pub fn router :: _ Fn ::: Console
+  (routes -> (req -> find-route routes req))
+
+fn match-route
+  (r req -> (r.method == req.method) && (r.path == req.path))
+
+fn apply-action
+  (r req -> r.action req)
+
+fn find-route ::: Console
+  (routes req -> if (empty? routes) ({status= 404 body= (default-404 req.path) headers= {}}) else (try-first (head routes) (tail routes) req))
+
+fn try-first ::: Console
+  (r rest req -> if (match-route r req) (apply-action r req) else (find-route rest req))
+
+pub fn html :: Str Map
+  (body -> {status= 200 body= body headers= {}})
+
+pub fn text-response :: Str Map
+  (body -> {status= 200 body= body headers= {}})
+
+pub fn json-response :: Str Map
+  (body -> {status= 200 body= body headers= {}})
+
+pub fn redirect :: Str Map
+  (url -> {status= 302 body= "" headers= {}})
+
+pub fn not-found :: Str Map
+  (body -> {status= 404 body= body headers= {}})
+
+fn default-404
+  (path -> "<!DOCTYPE html><html><head><title>404</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f0;color:#2d3748}h1{color:#e67e22}</style></head><body><div><h1>404</h1><p>Not found: " ++ path ++ "</p></div></body></html>")

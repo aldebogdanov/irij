@@ -555,13 +555,13 @@ public final class Builtins {
         }));
 
         // ── HTTP primitives ─────────────────────────────────────────────
-        env.define("_http-request", new BuiltinFn("_http-request", 1, args -> {
+        env.define("raw-http-request", new BuiltinFn("raw-http-request", 1, args -> {
             if (!(args.get(0) instanceof IrijMap opts))
-                throw new IrijRuntimeError("_http-request: expects Map argument");
+                throw new IrijRuntimeError("raw-http-request: expects Map argument");
             var entries = opts.entries();
             var url = entries.get("url");
             if (!(url instanceof String urlStr))
-                throw new IrijRuntimeError("_http-request: missing or invalid 'url' field");
+                throw new IrijRuntimeError("raw-http-request: missing or invalid 'url' field");
             var method = entries.getOrDefault("method", "GET").toString();
             var body = entries.get("body");
             var headers = entries.get("headers");
@@ -589,7 +589,7 @@ public final class Builtins {
                 result.put("headers", new IrijMap(respHeaders));
                 return new IrijMap(result);
             } catch (Exception e) {
-                throw new IrijRuntimeError("_http-request: " + e.getMessage());
+                throw new IrijRuntimeError("raw-http-request: " + e.getMessage());
             }
         }));
     }

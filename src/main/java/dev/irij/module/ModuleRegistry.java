@@ -40,6 +40,9 @@ public final class ModuleRegistry {
     private final ModuleLoader loader;
     private Path sourcePath;
 
+    /** Dependency search paths: dep name → source directory (from deps.irj). */
+    private final Map<String, Path> depPaths = new LinkedHashMap<>();
+
     public ModuleRegistry(ModuleLoader loader) {
         this.loader = loader;
     }
@@ -56,6 +59,11 @@ public final class ModuleRegistry {
 
     public Path getSourcePath() {
         return sourcePath;
+    }
+
+    /** Register a dependency search path (from deps.irj resolution). */
+    public void addDepPath(String depName, Path depSourceDir) {
+        depPaths.put(depName, depSourceDir);
     }
 
     /**
@@ -90,7 +98,14 @@ public final class ModuleRegistry {
                 return mod;
             }
 
-            // 4. File system
+            // 4. Dependency paths (from deps.irj)
+            mod = loadFromDeps(qualifiedName, loc);
+            if (mod != null) {
+                loaded.put(qualifiedName, mod);
+                return mod;
+            }
+
+            // 5. File system (relative to sourcePath)
             mod = loadFromFile(qualifiedName, loc);
             if (mod != null) {
                 loaded.put(qualifiedName, mod);
@@ -124,18 +139,55 @@ public final class ModuleRegistry {
         }
     }
 
-    private ModuleValue loadFromFile(String qualifiedName, SourceLoc loc) {
-        var relativePath = qualifiedName.replace('.', '/') + ".irj";
-        Path base = sourcePath != null ? sourcePath : Path.of(".");
-        Path file = base.resolve(relativePath);
+    private ModuleValue loadFromDeps(String qualifiedName, SourceLoc loc) {
+        // Try to resolve "depname.module.path" against registered dep paths.
+        // The first segment of the qualified name must match a dep name.
+        // e.g., "utils.helpers" → depPaths["utils"] / "helpers.irj"
+        // e.g., "utils" → depPaths["utils"] / look for "mod.irj" or single module
+        for (var entry : depPaths.entrySet()) {
+            var depName = entry.getKey();
+            var depDir = entry.getValue();
 
-        if (!Files.exists(file)) return null;
+            if (qualifiedName.equals(depName)) {
+                // Direct dep name: look for src/ or lib/ subdirs, then root
+                // Try <dep>/src/<depname>.irj, then <dep>/<depname>.irj, then <dep>/mod.irj
+                for (var candidate : List.of(
+                        depDir.resolve("src/" + depName + ".irj"),
+                        depDir.resolve(depName + ".irj"),
+                        depDir.resolve("mod.irj"))) {
+                    if (Files.exists(candidate)) {
+                        return loadFile(candidate, qualifiedName, loc);
+                    }
+                }
+            } else if (qualifiedName.startsWith(depName + ".")) {
+                // Sub-module within dep: "utils.helpers" → depDir/helpers.irj or depDir/src/helpers.irj
+                var rest = qualifiedName.substring(depName.length() + 1);
+                var relativePath = rest.replace('.', '/') + ".irj";
+                for (var base : List.of(depDir.resolve("src"), depDir)) {
+                    var candidate = base.resolve(relativePath);
+                    if (Files.exists(candidate)) {
+                        return loadFile(candidate, qualifiedName, loc);
+                    }
+                }
+            }
+        }
+        return null;
+    }
 
+    private ModuleValue loadFile(Path file, String qualifiedName, SourceLoc loc) {
         try {
             var source = Files.readString(file);
             return loader.load(source, qualifiedName, loc);
         } catch (IOException e) {
             throw new IrijRuntimeError("Error reading module file: " + file + ": " + e.getMessage(), loc);
         }
+    }
+
+    private ModuleValue loadFromFile(String qualifiedName, SourceLoc loc) {
+        var relativePath = qualifiedName.replace('.', '/') + ".irj";
+        Path base = sourcePath != null ? sourcePath : Path.of(".");
+        Path file = base.resolve(relativePath);
+        if (!Files.exists(file)) return null;
+        return loadFile(file, qualifiedName, loc);
     }
 }

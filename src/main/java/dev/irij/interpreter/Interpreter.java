@@ -4,6 +4,8 @@ import dev.irij.ast.*;
 import dev.irij.ast.Node.SourceLoc;
 import dev.irij.interpreter.Values.*;
 
+import dev.irij.module.DependencyResolver;
+import dev.irij.module.DepsFile;
 import dev.irij.module.ModuleRegistry;
 import dev.irij.module.StdModules;
 import dev.irij.parser.IrijParseDriver;
@@ -22,6 +24,9 @@ public final class Interpreter {
     private final PrintStream out;
     private final ModuleRegistry moduleRegistry;
 
+    // Source directory for static file serving
+    private Path sourcePath;
+
     // Module loading state
     private String currentModuleName;
     private Set<String> pubNames; // non-null only during module file loading
@@ -35,8 +40,8 @@ public final class Interpreter {
     /** When true, automatically verify protocol laws on each `impl` declaration. */
     private boolean autoVerifyLaws = false;
 
-    /** When true, warn if pub fn lacks spec annotations (Phase 8c). */
-    private boolean specLintEnabled = false;
+    /** When true, warn if pub fn lacks spec annotations (Phase 8c). On by default. */
+    private boolean specLintEnabled = true;
 
     public void setAutoVerifyLaws(boolean on) { this.autoVerifyLaws = on; }
 
@@ -341,6 +346,117 @@ public final class Interpreter {
             }
             return validateByName(value, name, SourceLoc.UNKNOWN);
         }));
+
+        // ── raw-http-serve — start an HTTP server ────────────────────────
+        // raw-http-serve port handler-fn
+        //   handler-fn receives: {method= path= headers= body= query=}
+        //   handler-fn returns:  {status= body= headers=} (or just {body=})
+        globalEnv.define("raw-http-serve", new BuiltinFn("raw-http-serve", 2, args -> {
+            if (!(args.get(0) instanceof Long port))
+                throw new IrijRuntimeError("raw-http-serve: port must be Int", null);
+            var handler = args.get(1);
+
+            try {
+                var server = com.sun.net.httpserver.HttpServer.create(
+                    new java.net.InetSocketAddress(port.intValue()), 0);
+
+                // Effect propagation for request handler threads
+                var parentEffects = AVAILABLE_EFFECTS.get().peek();
+                var parentStack = EffectSystem.STACK.get();
+
+                // Resolve static files relative to script directory
+                var scriptDir = sourcePath != null
+                    ? sourcePath.toAbsolutePath()
+                    : java.nio.file.Path.of("").toAbsolutePath();
+
+                server.createContext("/", exchange -> {
+                    AVAILABLE_EFFECTS.get().push(parentEffects);
+                    var fiberStack = EffectSystem.STACK.get();
+                    fiberStack.addAll(parentStack);
+                    try {
+                        // Try static file first
+                        var reqPath = exchange.getRequestURI().getPath();
+                        if (reqPath.length() > 1 && !reqPath.contains("..")) {
+                            var filePath = scriptDir.resolve(reqPath.substring(1)).normalize();
+                            if (filePath.startsWith(scriptDir) && java.nio.file.Files.isRegularFile(filePath)) {
+                                var fileBytes = java.nio.file.Files.readAllBytes(filePath);
+                                var mime = java.nio.file.Files.probeContentType(filePath);
+                                if (mime == null) mime = "application/octet-stream";
+                                exchange.getResponseHeaders().set("Content-Type", mime);
+                                exchange.sendResponseHeaders(200, fileBytes.length);
+                                try (var os = exchange.getResponseBody()) { os.write(fileBytes); }
+                                return;
+                            }
+                        }
+
+                        // Build request map
+                        var reqMap = new LinkedHashMap<String, Object>();
+                        reqMap.put("method", exchange.getRequestMethod());
+                        var uri = exchange.getRequestURI();
+                        reqMap.put("path", uri.getPath());
+                        reqMap.put("query", uri.getQuery() != null ? uri.getQuery() : "");
+                        var reqHeaders = new LinkedHashMap<String, Object>();
+                        exchange.getRequestHeaders().forEach((k, v) ->
+                            reqHeaders.put(k.toLowerCase(), v.size() == 1 ? v.get(0) : String.join(", ", v)));
+                        reqMap.put("headers", new IrijMap(reqHeaders));
+                        var bodyBytes = exchange.getRequestBody().readAllBytes();
+                        reqMap.put("body", new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8));
+                        var req = new IrijMap(reqMap);
+
+                        // Call Irij handler
+                        var resp = apply(handler, List.of(req), SourceLoc.UNKNOWN);
+
+                        // Extract response
+                        long status = 200;
+                        String respBody = "";
+                        Map<String, Object> respHeaders = Map.of();
+                        if (resp instanceof IrijMap rm) {
+                            var e = rm.entries();
+                            if (e.get("status") instanceof Long s) status = s;
+                            if (e.get("body") instanceof String b) respBody = b;
+                            if (e.get("headers") instanceof IrijMap hm) respHeaders = hm.entries();
+                        } else if (resp instanceof String s) {
+                            respBody = s;
+                        }
+
+                        // Set response headers
+                        for (var h : respHeaders.entrySet()) {
+                            exchange.getResponseHeaders().set(h.getKey(),
+                                Values.toIrijString(h.getValue()));
+                        }
+                        if (!respHeaders.containsKey("content-type")
+                                && !respHeaders.containsKey("Content-Type")) {
+                            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+                        }
+
+                        var respBytes = respBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        exchange.sendResponseHeaders((int) status, respBytes.length);
+                        try (var os = exchange.getResponseBody()) {
+                            os.write(respBytes);
+                        }
+                    } catch (Exception e) {
+                        try {
+                            var errMsg = "Internal Server Error: " + e.getMessage();
+                            var errBytes = errMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                            exchange.sendResponseHeaders(500, errBytes.length);
+                            try (var os = exchange.getResponseBody()) { os.write(errBytes); }
+                        } catch (Exception ignored) {}
+                    }
+                });
+
+                server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+                server.start();
+                out.println("Irij HTTP server listening on http://localhost:" + port);
+
+                // Block main thread until interrupted
+                try { Thread.currentThread().join(); }
+                catch (InterruptedException e) { server.stop(0); }
+
+                return Values.UNIT;
+            } catch (java.io.IOException e) {
+                throw new IrijRuntimeError("raw-http-serve: " + e.getMessage(), null);
+            }
+        }));
     }
 
     /** Registry of fn-level laws, populated during fn declaration. */
@@ -553,9 +669,33 @@ public final class Interpreter {
         this(System.out);
     }
 
-    /** Set the source root for file-based module resolution. */
+    /** Set the source root for file-based module resolution and static file serving. */
     public void setSourcePath(Path sourcePath) {
+        this.sourcePath = sourcePath;
         moduleRegistry.setSourcePath(sourcePath);
+    }
+
+    /**
+     * Load deps.irj from the given project root and register dependency paths.
+     * Call this after setSourcePath() and before run().
+     */
+    public void loadDeps(Path projectRoot) {
+        var depsFile = projectRoot.resolve("deps.irj");
+        try {
+            var deps = DepsFile.parse(depsFile);
+            if (deps.isEmpty()) return;
+            var resolver = new DependencyResolver(projectRoot, out);
+            var resolved = resolver.resolveAll(deps);
+            for (var entry : resolved.entrySet()) {
+                moduleRegistry.addDepPath(entry.getKey(), entry.getValue());
+            }
+        } catch (DepsFile.DepsParseError e) {
+            throw new IrijRuntimeError("Error in deps.irj: " + e.getMessage(),
+                Node.SourceLoc.UNKNOWN);
+        } catch (java.io.IOException e) {
+            throw new IrijRuntimeError("Error loading deps.irj: " + e.getMessage(),
+                Node.SourceLoc.UNKNOWN);
+        }
     }
 
     /** Get the module registry (for testing). */
@@ -1248,9 +1388,11 @@ public final class Interpreter {
         var moduleEnv = new Environment();
         Builtins.install(moduleEnv, out);
         // Install interpreter builtins (fold, spawn) in module env too
-        moduleEnv.define("fold", globalEnv.lookup("fold"));
-        moduleEnv.define("spawn", globalEnv.lookup("spawn"));
-        moduleEnv.define("try", globalEnv.lookup("try"));
+        // Forward interpreter-level builtins to module env
+        for (var name : List.of("fold", "spawn", "try", "raw-http-serve")) {
+            if (globalEnv.isDefined(name))
+                moduleEnv.define(name, globalEnv.lookup(name));
+        }
 
         // Track pub names
         var savedPubNames = this.pubNames;
@@ -1950,20 +2092,20 @@ public final class Interpreter {
     Object eval(Expr expr, Environment env) {
         return switch (expr) {
             // ── Literals ────────────────────────────────────────────────
-            case Expr.IntLit(var v, _) -> v;
-            case Expr.FloatLit(var v, _) -> v;
-            case Expr.RationalLit(var n, var d, _) -> new Rational(n, d);
-            case Expr.HexLit(var v, _) -> v;
-            case Expr.StrLit(var v, _) -> v;
-            case Expr.BoolLit(var v, _) -> v;
-            case Expr.KeywordLit(var name, _) -> new Keyword(name);
-            case Expr.UnitLit(_) -> Values.UNIT;
-            case Expr.Wildcard(_) -> Values.UNIT;
+            case Expr.IntLit(var v, var loc__) -> v;
+            case Expr.FloatLit(var v, var loc__) -> v;
+            case Expr.RationalLit(var n, var d, var loc__) -> new Rational(n, d);
+            case Expr.HexLit(var v, var loc__) -> v;
+            case Expr.StrLit(var v, var loc__) -> v;
+            case Expr.BoolLit(var v, var loc__) -> v;
+            case Expr.KeywordLit(var name, var loc__) -> new Keyword(name);
+            case Expr.UnitLit(var loc__) -> Values.UNIT;
+            case Expr.Wildcard(var loc__) -> Values.UNIT;
 
             // ── References ──────────────────────────────────────────────
             case Expr.Var(var name, var loc) -> env.lookup(name, loc);
             case Expr.TypeRef(var name, var loc) -> env.lookup(name, loc);
-            case Expr.RoleRef(var name, _) -> name; // just pass through as string
+            case Expr.RoleRef(var name, var loc__) -> name; // just pass through as string
 
             // ── Operators ───────────────────────────────────────────────
             case Expr.BinaryOp bo -> evalBinaryOp(bo, env);
@@ -2798,18 +2940,18 @@ public final class Interpreter {
      */
     boolean matchPattern(Pattern pat, Object value, Environment env) {
         return switch (pat) {
-            case Pattern.VarPat(var name, _) -> {
+            case Pattern.VarPat(var name, var loc__) -> {
                 env.define(name, value);
                 yield true;
             }
-            case Pattern.WildcardPat _ -> true;
-            case Pattern.UnitPat _ -> value == Values.UNIT;
-            case Pattern.LitPat(var litExpr, _) -> {
+            case Pattern.WildcardPat wp -> true;
+            case Pattern.UnitPat up -> value == Values.UNIT;
+            case Pattern.LitPat(var litExpr, var loc__) -> {
                 // Evaluate the literal and compare
                 var litVal = eval(litExpr, env);
                 yield equalityOp(litVal, value).equals(Boolean.TRUE);
             }
-            case Pattern.ConstructorPat(var name, var args, _) -> {
+            case Pattern.ConstructorPat(var name, var args, var loc__) -> {
                 if (!(value instanceof Tagged t)) yield false;
                 if (!t.tag().equals(name)) yield false;
                 if (args.size() != t.fields().size()) yield false;
@@ -2822,7 +2964,7 @@ public final class Interpreter {
                 }
                 yield allMatch;
             }
-            case Pattern.KeywordPat(var name, var arg, _) -> {
+            case Pattern.KeywordPat(var name, var arg, var loc__) -> {
                 if (value instanceof Keyword kw && kw.name().equals(name)) {
                     if (arg == null) yield true;
                     // keyword with value — shouldn't happen for bare keywords
@@ -2837,8 +2979,8 @@ public final class Interpreter {
                 }
                 yield false;
             }
-            case Pattern.GroupedPat(var inner, _) -> matchPattern(inner, value, env);
-            case Pattern.VectorPat(var elements, var spread, _) -> {
+            case Pattern.GroupedPat(var inner, var loc__) -> matchPattern(inner, value, env);
+            case Pattern.VectorPat(var elements, var spread, var loc__) -> {
                 List<Object> list;
                 if (value instanceof IrijVector vec) list = vec.elements();
                 else yield false;
@@ -2871,7 +3013,7 @@ public final class Interpreter {
                     yield allMatch;
                 }
             }
-            case Pattern.TuplePat(var elements, _) -> {
+            case Pattern.TuplePat(var elements, var loc__) -> {
                 if (!(value instanceof IrijTuple tuple)) yield false;
                 if (tuple.elements().length != elements.size()) yield false;
                 boolean allMatch = true;
@@ -2883,7 +3025,7 @@ public final class Interpreter {
                 }
                 yield allMatch;
             }
-            case Pattern.DestructurePat(var fields, _) -> {
+            case Pattern.DestructurePat(var fields, var loc__) -> {
                 // Destructure works on both IrijMap and Tagged with named fields
                 Map<String, Object> entries;
                 if (value instanceof IrijMap map) {
@@ -2904,7 +3046,7 @@ public final class Interpreter {
                 }
                 yield allMatch;
             }
-            case Pattern.SpreadPat(var name, _) -> {
+            case Pattern.SpreadPat(var name, var loc__) -> {
                 // Standalone spread — binds whatever is left
                 if (!name.equals("_")) env.define(name, value);
                 yield true;

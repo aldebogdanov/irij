@@ -8,8 +8,10 @@ version = "0.2.0"
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(21)
     }
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 repositories {
@@ -148,4 +150,9 @@ tasks.withType<JavaCompile>().configureEach {
     options.isIncremental = true
     // options.debugOptions.debugLevel = "source,lines,vars"
     options.compilerArgs.add("-g") // Forces all debug information
+    // No --enable-preview needed: unnamed patterns standard since JDK 22
+}
+
+tasks.test {
+    // no extra jvmArgs needed
 }

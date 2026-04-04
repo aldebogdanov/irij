@@ -49,12 +49,18 @@ public final class IrijCli {
             return;
         }
 
+        // ── install subcommand ──────────────────────────────────────────
+        if (args[0].equals("install")) {
+            runInstall();
+            return;
+        }
+
         // Walk flags
         boolean parseOnly    = false;
         boolean dumpAst      = false;
         boolean mcpServer    = false;
         boolean verifyLaws   = false;
-        boolean specLint     = false;
+        boolean noSpecLint   = false;
         int     nreplPort    = -1;
         String  filePath     = null;
 
@@ -65,7 +71,7 @@ public final class IrijCli {
                 case "--nrepl-server" -> nreplPort = DEFAULT_NREPL_PORT;
                 case "--mcp-server" -> mcpServer = true;
                 case "--verify-laws" -> verifyLaws = true;
-                case "--spec-lint"   -> specLint  = true;
+                case "--no-spec-lint" -> noSpecLint = true;
                 case "--version", "-v" -> {
                     System.out.println("Irij ℑ  version " + VERSION);
                     return;
@@ -112,12 +118,12 @@ public final class IrijCli {
             System.exit(1);
         }
 
-        runFile(Path.of(filePath), parseOnly, dumpAst, verifyLaws, specLint);
+        runFile(Path.of(filePath), parseOnly, dumpAst, verifyLaws, noSpecLint);
     }
 
     // ── File runner ──────────────────────────────────────────────────────
 
-    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean verifyLaws, boolean specLint) throws IOException {
+    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean verifyLaws, boolean noSpecLint) throws IOException {
         IrijParseDriver.ParseResult result;
         try {
             result = IrijParseDriver.parseFile(path);
@@ -151,9 +157,11 @@ public final class IrijCli {
 
         try {
             var interpreter = new Interpreter();
-            interpreter.setSourcePath(path.toAbsolutePath().getParent());
+            var projectRoot = path.toAbsolutePath().getParent();
+            interpreter.setSourcePath(projectRoot);
+            interpreter.loadDeps(projectRoot);
             if (verifyLaws) interpreter.setAutoVerifyLaws(true);
-            if (specLint) interpreter.setSpecLintEnabled(true);
+            if (noSpecLint) interpreter.setSpecLintEnabled(false);
             interpreter.run(ast);
         } catch (IrijRuntimeError e) {
             System.err.println(path + ":" + e.getMessage());
@@ -313,6 +321,43 @@ public final class IrijCli {
         System.exit((grandFail == 0 && crashCount == 0) ? 0 : 1);
     }
 
+    // ── Install ──────────────────────────────────────────────────────────
+
+    private static void runInstall() {
+        var projectRoot = Path.of(System.getProperty("user.dir"));
+        var depsFile = projectRoot.resolve("deps.irj");
+
+        if (!Files.exists(depsFile)) {
+            System.out.println("No deps.irj found in " + projectRoot);
+            return;
+        }
+
+        try {
+            var deps = dev.irij.module.DepsFile.parse(depsFile);
+            if (deps.isEmpty()) {
+                System.out.println("deps.irj is empty — no dependencies to install.");
+                return;
+            }
+
+            System.out.println("Installing " + deps.size() + " dependenc"
+                + (deps.size() == 1 ? "y" : "ies") + " ...");
+            var resolver = new dev.irij.module.DependencyResolver(projectRoot, System.out);
+            var resolved = resolver.resolveAll(deps);
+
+            System.out.println();
+            for (var entry : resolved.entrySet()) {
+                System.out.println("  " + entry.getKey() + " → " + entry.getValue());
+            }
+            System.out.println("\nDone.");
+        } catch (dev.irij.module.DepsFile.DepsParseError e) {
+            System.err.println("Error in deps.irj: " + e.getMessage());
+            System.exit(1);
+        } catch (IOException e) {
+            System.err.println("Error installing dependencies: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
     // ── Help ─────────────────────────────────────────────────────────────
 
     private static void printHelp() {
@@ -322,6 +367,7 @@ public final class IrijCli {
             Usage:
               irij                       start interactive REPL
               irij <file.irj>            run a source file
+              irij install               fetch dependencies from deps.irj
               irij test                  run all test-*.irj in ./tests/
               irij test <file.irj>       run a specific test file
               irij test <dir/>           run all test-*.irj in directory
@@ -329,7 +375,7 @@ public final class IrijCli {
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
               irij --verify-laws <file>  run file with automatic law verification on impl
-              irij --spec-lint <file>    warn on pub fn without spec annotations
+              irij --no-spec-lint <file> disable spec lint warnings (on by default)
               irij --mcp-server          start MCP server (stdio, for Claude Code)
               irij --nrepl-server        start nREPL server (port 7888)
               irij --nrepl-server=PORT   start nREPL server on PORT

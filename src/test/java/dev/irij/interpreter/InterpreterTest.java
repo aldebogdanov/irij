@@ -29,7 +29,9 @@ class InterpreterTest {
         assertFalse(parseResult.hasErrors(),
             () -> "Parse errors: " + parseResult.errors());
         var ast = new AstBuilder().build(parseResult.tree());
-        new Interpreter(out).run(ast);
+        var interp = new Interpreter(out);
+        interp.setSpecLintEnabled(false); // suppress warnings in general tests
+        interp.run(ast);
         return baos.toString().strip();
     }
 
@@ -4060,6 +4062,19 @@ class InterpreterTest {
     @Nested
     class SpecLint {
 
+        private String runWithoutLint(String source) {
+            var baos = new ByteArrayOutputStream();
+            var out = new PrintStream(baos);
+            var parseResult = IrijParseDriver.parse(source + "\n");
+            assertFalse(parseResult.hasErrors(),
+                () -> "Parse errors: " + parseResult.errors());
+            var ast = new AstBuilder().build(parseResult.tree());
+            var interp = new Interpreter(out);
+            interp.setSpecLintEnabled(false);
+            interp.run(ast);
+            return baos.toString().strip();
+        }
+
         private String runWithLint(String source) {
             var baos = new ByteArrayOutputStream();
             var out = new PrintStream(baos);
@@ -4068,6 +4083,7 @@ class InterpreterTest {
                 () -> "Parse errors: " + parseResult.errors());
             var ast = new AstBuilder().build(parseResult.tree());
             var interp = new Interpreter(out);
+            // specLintEnabled is true by default, but run() disables it — re-enable here
             interp.setSpecLintEnabled(true);
             interp.run(ast);
             return baos.toString().strip();
@@ -4078,19 +4094,16 @@ class InterpreterTest {
                 use std.math :open
                 println ~ sqrt 16
                 """);
-            // std.math has unannotated pub fns — warning should appear
             assertTrue(output.contains("⚠ warning: pub fn"),
                 "Expected spec lint warning, got: " + output);
             assertTrue(output.contains("std.math"),
                 "Warning should mention module name, got: " + output);
-            // The actual result should still be there
             assertTrue(output.contains("4.0"),
                 "Program output should still appear, got: " + output);
         }
 
         @Test void noWarningWhenLintDisabled() {
-            // Default run() does NOT enable lint
-            var output = run("""
+            var output = runWithoutLint("""
                 use std.math :open
                 println ~ sqrt 16
                 """);
@@ -4099,10 +4112,6 @@ class InterpreterTest {
         }
 
         @Test void noWarningForAnnotatedPubFn() {
-            // A pub fn WITH spec annotations should not warn.
-            // We can't easily load a custom module in unit tests,
-            // but we can verify the logic: std.test has `test ::: Console`
-            // which has effects but no specs — should still warn.
             var output = runWithLint("""
                 use std.test :open
                 println "ok"

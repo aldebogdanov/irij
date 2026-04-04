@@ -31,12 +31,12 @@ pub effect Http
 
 pub handler default-http :: Http
   http-get url =>
-    resume (_http-request {method= "GET" url= url})
+    resume (raw-http-request {method= "GET" url= url})
   http-post url body headers =>
-    resume (_http-request {method= "POST" url= url body= body headers= headers})
+    resume (raw-http-request {method= "POST" url= url body= body headers= headers})
   http-put url body headers =>
-    resume (_http-request {method= "PUT" url= url body= body headers= headers})
+    resume (raw-http-request {method= "PUT" url= url body= body headers= headers})
   http-delete url =>
-    resume (_http-request {method= "DELETE" url= url})
+    resume (raw-http-request {method= "DELETE" url= url})
   http-request opts =>
-    resume (_http-request opts)
+    resume (raw-http-request opts)

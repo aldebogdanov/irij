@@ -11,6 +11,12 @@ build/
 .project
 .classpath
 
+# IDE / local
+.claude/
+.mcp.json
+.dir-locals.el
+.emacs.desktop
+
 # OS
 .DS_Store
 Thumbs.db
