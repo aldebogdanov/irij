@@ -87,10 +87,31 @@ public final class Interpreter {
     }
 
     public Interpreter(PrintStream out) {
+        this(out, false);
+    }
+
+    public Interpreter(PrintStream out, boolean sandboxed) {
         this.out = out;
         this.globalEnv = new Environment();
-        Builtins.install(globalEnv, out);
+        if (sandboxed) {
+            Builtins.installSandboxed(globalEnv, out);
+        } else {
+            Builtins.install(globalEnv, out);
+        }
         installInterpreterBuiltins();
+        if (sandboxed) {
+            // Replace interpreter-level dangerous builtins with stubs
+            for (var name : List.of("raw-http-serve", "raw-db-transaction",
+                    "raw-sse-response", "raw-sse-send", "raw-sse-close", "raw-sse-closed?",
+                    "raw-session-create", "raw-session-eval", "raw-session-destroy", "raw-session-cleanup")) {
+                int arity = globalEnv.isDefined(name)
+                    ? (globalEnv.lookup(name) instanceof BuiltinFn fn ? fn.arity() : 1)
+                    : 1;
+                globalEnv.define(name, new BuiltinFn(name, arity, args -> {
+                    throw new IrijRuntimeError(name + ": not available in sandbox mode");
+                }));
+            }
+        }
         this.moduleRegistry = new ModuleRegistry(this::loadModuleSource);
         StdModules.registerAll(moduleRegistry, out);
     }
@@ -347,6 +368,83 @@ public final class Interpreter {
             return validateByName(value, name, SourceLoc.UNKNOWN);
         }));
 
+        // ── raw-db-transaction — run a thunk in a SQL transaction ───────
+        globalEnv.define("raw-db-transaction", new BuiltinFn("raw-db-transaction", 2, args -> {
+            var conn = Builtins.extractConnection(args.get(0), "raw-db-transaction");
+            var thunk = args.get(1);
+            try {
+                synchronized (conn) {
+                    conn.setAutoCommit(false);
+                    try {
+                        var result = apply(thunk, List.of(), null);
+                        conn.commit();
+                        conn.setAutoCommit(true);
+                        return result;
+                    } catch (Exception e) {
+                        conn.rollback();
+                        conn.setAutoCommit(true);
+                        throw e;
+                    }
+                }
+            } catch (IrijRuntimeError e) {
+                throw e;
+            } catch (java.sql.SQLException e) {
+                throw new IrijRuntimeError("raw-db-transaction: " + e.getMessage(), null);
+            }
+        }));
+
+        // ── raw-nrepl-eval-sandboxed — evaluate code in a sandboxed interpreter ──
+        // raw-nrepl-eval-sandboxed code timeout-ms
+        //   Returns: {value= stdout= error= ok=}
+        globalEnv.define("raw-nrepl-eval-sandboxed", new BuiltinFn("raw-nrepl-eval-sandboxed", 2, args -> {
+            var code = Builtins.asString(args.get(0), "raw-nrepl-eval-sandboxed");
+            var timeoutMs = Builtins.asLong(args.get(1), "raw-nrepl-eval-sandboxed");
+
+            var baos = new java.io.ByteArrayOutputStream();
+            var evalOut = new PrintStream(baos);
+            var sandboxedInterp = new Interpreter(evalOut, true);
+            sandboxedInterp.setSpecLintEnabled(false);
+
+            var resultMap = new LinkedHashMap<String, Object>();
+            var future = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                var parseResult = IrijParseDriver.parse(code + "\n");
+                if (parseResult.hasErrors()) {
+                    throw new IrijRuntimeError("Parse error: " + parseResult.errors());
+                }
+                var ast = new AstBuilder().build(parseResult.tree());
+                return sandboxedInterp.run(ast);
+            });
+
+            try {
+                var value = future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                resultMap.put("value", Values.toIrijString(value));
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", Values.UNIT);
+                resultMap.put("ok", Boolean.TRUE);
+            } catch (java.util.concurrent.TimeoutException e) {
+                future.cancel(true);
+                resultMap.put("value", Values.UNIT);
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", "Evaluation timed out (" + timeoutMs + "ms)");
+                resultMap.put("ok", Boolean.FALSE);
+            } catch (java.util.concurrent.ExecutionException e) {
+                var cause = e.getCause();
+                var errorMsg = cause != null ? cause.getMessage() : e.getMessage();
+                resultMap.put("value", Values.UNIT);
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", errorMsg != null ? errorMsg : "Unknown error");
+                resultMap.put("ok", Boolean.FALSE);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                resultMap.put("value", Values.UNIT);
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", "Evaluation interrupted");
+                resultMap.put("ok", Boolean.FALSE);
+            }
+
+            return new IrijMap(resultMap);
+        }));
+
         // ── raw-http-serve — start an HTTP server ────────────────────────
         // raw-http-serve port handler-fn
         //   handler-fn receives: {method= path= headers= body= query=}
@@ -403,8 +501,29 @@ public final class Interpreter {
                         reqMap.put("body", new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8));
                         var req = new IrijMap(reqMap);
 
+                        // Inject the raw exchange into the request map so SSE can use it
+                        reqMap.put("__exchange", exchange);
+                        req = new IrijMap(reqMap);
+
                         // Call Irij handler
                         var resp = apply(handler, List.of(req), SourceLoc.UNKNOWN);
+
+                        // If handler returned an SseWriter, the stream is being
+                        // managed by user code — do NOT close the exchange here.
+                        if (resp instanceof SseWriter) {
+                            // SSE stream — handler is responsible for the lifecycle.
+                            // Block this handler thread until the SSE writer is closed
+                            // so the HTTP exchange stays alive.
+                            var sse = (SseWriter) resp;
+                            while (!sse.isClosed()) {
+                                try { Thread.sleep(500); }
+                                catch (InterruptedException ie) {
+                                    sse.close();
+                                    break;
+                                }
+                            }
+                            return; // exchange already closed by SseWriter
+                        }
 
                         // Extract response
                         long status = 200;
@@ -456,6 +575,161 @@ public final class Interpreter {
             } catch (java.io.IOException e) {
                 throw new IrijRuntimeError("raw-http-serve: " + e.getMessage(), null);
             }
+        }));
+
+        // ── raw-sse-response — upgrade an HTTP exchange to SSE stream ────
+        // raw-sse-response request
+        //   Sets SSE headers and returns an SseWriter for streaming events.
+        //   The request map must contain the __exchange key (injected by raw-http-serve).
+        globalEnv.define("raw-sse-response", new BuiltinFn("raw-sse-response", 1, args -> {
+            if (!(args.get(0) instanceof IrijMap reqMap))
+                throw new IrijRuntimeError("raw-sse-response: expected request map", null);
+            var exchange = reqMap.entries().get("__exchange");
+            if (!(exchange instanceof com.sun.net.httpserver.HttpExchange httpExchange))
+                throw new IrijRuntimeError("raw-sse-response: no __exchange in request (only works inside raw-http-serve handler)", null);
+            try {
+                httpExchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                httpExchange.getResponseHeaders().set("Cache-Control", "no-cache");
+                httpExchange.getResponseHeaders().set("Connection", "keep-alive");
+                httpExchange.getResponseHeaders().set("X-Accel-Buffering", "no");
+                // 0 = chunked transfer encoding
+                httpExchange.sendResponseHeaders(200, 0);
+                var os = httpExchange.getResponseBody();
+                return new SseWriter(httpExchange, os);
+            } catch (java.io.IOException e) {
+                throw new IrijRuntimeError("raw-sse-response: " + e.getMessage(), null);
+            }
+        }));
+
+        // ── raw-sse-send — write an SSE event ────────────────────────────
+        // raw-sse-send sse-writer event-type data-string
+        globalEnv.define("raw-sse-send", new BuiltinFn("raw-sse-send", 3, args -> {
+            if (!(args.get(0) instanceof SseWriter sse))
+                throw new IrijRuntimeError("raw-sse-send: first arg must be SseWriter", null);
+            var eventType = Builtins.asString(args.get(1), "raw-sse-send");
+            var data = Builtins.asString(args.get(2), "raw-sse-send");
+            try {
+                sse.send(eventType, data);
+            } catch (java.io.IOException e) {
+                throw new IrijRuntimeError("raw-sse-send: " + e.getMessage(), null);
+            }
+            return Values.UNIT;
+        }));
+
+        // ── raw-sse-close — close an SSE stream ─────────────────────────
+        // raw-sse-close sse-writer
+        globalEnv.define("raw-sse-close", new BuiltinFn("raw-sse-close", 1, args -> {
+            if (!(args.get(0) instanceof SseWriter sse))
+                throw new IrijRuntimeError("raw-sse-close: first arg must be SseWriter", null);
+            sse.close();
+            return Values.UNIT;
+        }));
+
+        // ── raw-sse-closed? — check if SSE stream is closed ─────────────
+        globalEnv.define("raw-sse-closed?", new BuiltinFn("raw-sse-closed?", 1, args -> {
+            if (!(args.get(0) instanceof SseWriter sse))
+                throw new IrijRuntimeError("raw-sse-closed?: first arg must be SseWriter", null);
+            return sse.isClosed();
+        }));
+
+        // ══════════════════════════════════════════════════════════════════
+        // Session manager — persistent sandboxed interpreters by UUID
+        // ══════════════════════════════════════════════════════════════════
+
+        var sessions = new java.util.concurrent.ConcurrentHashMap<String, Object[]>();
+        // sessions: UUID -> [Interpreter, PrintStream, ByteArrayOutputStream, lastAccessMs]
+
+        // ── raw-session-create — create a new sandboxed interpreter session
+        globalEnv.define("raw-session-create", new BuiltinFn("raw-session-create", 1, args -> {
+            var id = java.util.UUID.randomUUID().toString();
+            var baos = new java.io.ByteArrayOutputStream();
+            var sessionOut = new PrintStream(baos);
+            var interp = new Interpreter(sessionOut, true);
+            interp.setSpecLintEnabled(false);
+            sessions.put(id, new Object[]{ interp, sessionOut, baos, System.currentTimeMillis() });
+            return id;
+        }));
+
+        // ── raw-session-eval — evaluate code in an existing session
+        // raw-session-eval session-id code timeout-ms
+        //   Returns: {value= stdout= error= ok=}
+        globalEnv.define("raw-session-eval", new BuiltinFn("raw-session-eval", 3, args -> {
+            var sessionId = Builtins.asString(args.get(0), "raw-session-eval");
+            var code = Builtins.asString(args.get(1), "raw-session-eval");
+            var timeoutMs = Builtins.asLong(args.get(2), "raw-session-eval");
+
+            var session = sessions.get(sessionId);
+            if (session == null)
+                throw new IrijRuntimeError("raw-session-eval: no session with id " + sessionId, null);
+
+            var interp = (Interpreter) session[0];
+            var baos = (java.io.ByteArrayOutputStream) session[2];
+            session[3] = System.currentTimeMillis(); // touch
+
+            // Clear stdout buffer before eval
+            baos.reset();
+
+            var resultMap = new LinkedHashMap<String, Object>();
+            var future = java.util.concurrent.CompletableFuture.supplyAsync(() -> {
+                var parseResult = IrijParseDriver.parse(code + "\n");
+                if (parseResult.hasErrors()) {
+                    throw new IrijRuntimeError("Parse error: " + parseResult.errors());
+                }
+                var ast = new AstBuilder().build(parseResult.tree());
+                return interp.run(ast);
+            });
+
+            try {
+                var value = future.get(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS);
+                resultMap.put("value", Values.toIrijString(value));
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", Values.UNIT);
+                resultMap.put("ok", Boolean.TRUE);
+            } catch (java.util.concurrent.TimeoutException e) {
+                future.cancel(true);
+                resultMap.put("value", Values.UNIT);
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", "Evaluation timed out (" + timeoutMs + "ms)");
+                resultMap.put("ok", Boolean.FALSE);
+            } catch (java.util.concurrent.ExecutionException e) {
+                var cause = e.getCause();
+                var errorMsg = cause != null ? cause.getMessage() : e.getMessage();
+                resultMap.put("value", Values.UNIT);
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", errorMsg != null ? errorMsg : "Unknown error");
+                resultMap.put("ok", Boolean.FALSE);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                resultMap.put("value", Values.UNIT);
+                resultMap.put("stdout", baos.toString());
+                resultMap.put("error", "Evaluation interrupted");
+                resultMap.put("ok", Boolean.FALSE);
+            }
+
+            return new IrijMap(resultMap);
+        }));
+
+        // ── raw-session-destroy — destroy a session
+        globalEnv.define("raw-session-destroy", new BuiltinFn("raw-session-destroy", 1, args -> {
+            var sessionId = Builtins.asString(args.get(0), "raw-session-destroy");
+            sessions.remove(sessionId);
+            return Values.UNIT;
+        }));
+
+        // ── raw-session-cleanup — remove sessions idle for > N ms
+        globalEnv.define("raw-session-cleanup", new BuiltinFn("raw-session-cleanup", 1, args -> {
+            var maxIdleMs = Builtins.asLong(args.get(0), "raw-session-cleanup");
+            var now = System.currentTimeMillis();
+            var removed = new java.util.concurrent.atomic.AtomicLong(0);
+            sessions.entrySet().removeIf(e -> {
+                var lastAccess = (long) ((Object[]) e.getValue())[3];
+                if (now - lastAccess > maxIdleMs) {
+                    removed.incrementAndGet();
+                    return true;
+                }
+                return false;
+            });
+            return removed.get();
         }));
     }
 
@@ -1389,7 +1663,11 @@ public final class Interpreter {
         Builtins.install(moduleEnv, out);
         // Install interpreter builtins (fold, spawn) in module env too
         // Forward interpreter-level builtins to module env
-        for (var name : List.of("fold", "spawn", "try", "raw-http-serve")) {
+        for (var name : List.of("fold", "spawn", "try", "raw-http-serve",
+                "raw-db-open", "raw-db-query", "raw-db-exec", "raw-db-close", "raw-db-transaction",
+                "raw-nrepl-eval-sandboxed",
+                "raw-sse-response", "raw-sse-send", "raw-sse-close", "raw-sse-closed?",
+                "raw-session-create", "raw-session-eval", "raw-session-destroy", "raw-session-cleanup")) {
             if (globalEnv.isDefined(name))
                 moduleEnv.define(name, globalEnv.lookup(name));
         }

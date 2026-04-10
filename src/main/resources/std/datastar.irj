@@ -1,0 +1,58 @@
+mod std.datastar
+
+;; Datastar SDK for Irij
+;; Server-side helpers for the Datastar hypermedia framework.
+;; Datastar uses Server-Sent Events (SSE) with two event types:
+;;   datastar-patch-elements — morph HTML into the DOM
+;;   datastar-patch-signals  — merge JSON into reactive signals
+
+;; ── SSE lifecycle ───────────────────────────────────────────────────
+
+pub fn ds-sse
+  (request -> raw-sse-response request)
+
+pub fn ds-done
+  (sse -> raw-sse-close sse)
+
+pub fn ds-closed?
+  (sse -> raw-sse-closed? sse)
+
+;; ── Datastar events ─────────────────────────────────────────────────
+
+pub fn ds-patch
+  (sse selector html -> raw-sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode outer\nelements " ++ html))
+
+pub fn ds-patch-mode
+  (sse selector mode html -> raw-sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode " ++ mode ++ "\nelements " ++ html))
+
+pub fn ds-signals
+  (sse json -> raw-sse-send sse "datastar-patch-signals" ("signals " ++ json))
+
+pub fn ds-script
+  (sse js -> raw-sse-send sse "datastar-patch-elements" ("mode append\nselector body\nelements <script data-ds-autoremove>" ++ js ++ "</script>"))
+
+;; ── Signal reading ──────────────────────────────────────────────────
+
+fn ds-is-get
+  (request -> request.method == "GET")
+
+pub fn ds-read-signals
+  => request
+  if (ds-is-get request) (ds-parse-query-signals request.query) else (json-parse request.body)
+
+fn ds-has-prefix
+  (prefix s -> starts-with? s prefix)
+
+fn ds-parse-query-signals
+  => query
+  result := try (-> json-parse (url-decode (ds-extract-param query "datastar")))
+  match result
+    Ok v => v
+    Err _ => {}
+
+fn ds-extract-param
+  => query name
+  prefix := name ++ "="
+  parts := split "&" query
+  found := parts |> /? (ds-has-prefix prefix)
+  if (empty? found) ("") else (substring (head found) (length prefix) (length (head found)))

@@ -172,6 +172,50 @@ public final class Values {
         }
     }
 
+    /**
+     * SSE (Server-Sent Events) writer — wraps an HTTP exchange for streaming.
+     * The exchange is kept open; calling send() writes SSE-formatted events.
+     */
+    public static final class SseWriter {
+        private final java.io.OutputStream outputStream;
+        private final com.sun.net.httpserver.HttpExchange exchange;
+        private volatile boolean closed = false;
+
+        public SseWriter(com.sun.net.httpserver.HttpExchange exchange, java.io.OutputStream os) {
+            this.exchange = exchange;
+            this.outputStream = os;
+        }
+
+        /** Send a single SSE event with optional event type and multi-line data. */
+        public synchronized void send(String eventType, String data) throws java.io.IOException {
+            if (closed) throw new java.io.IOException("SSE stream closed");
+            var sb = new StringBuilder();
+            if (eventType != null && !eventType.isEmpty()) {
+                sb.append("event: ").append(eventType).append('\n');
+            }
+            // Each line of data gets its own "data: " prefix
+            for (var line : data.split("\n", -1)) {
+                sb.append("data: ").append(line).append('\n');
+            }
+            sb.append('\n'); // blank line terminates event
+            outputStream.write(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            outputStream.flush();
+        }
+
+        public synchronized void close() {
+            if (!closed) {
+                closed = true;
+                try { outputStream.close(); } catch (Exception ignored) {}
+                try { exchange.close(); } catch (Exception ignored) {}
+            }
+        }
+
+        public boolean isClosed() { return closed; }
+
+        @Override
+        public String toString() { return "<SseWriter>"; }
+    }
+
     public record IrijTuple(Object[] elements) {
         @Override
         public boolean equals(Object o) {

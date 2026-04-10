@@ -1,0 +1,161 @@
+use std.test :open
+use std.db :open
+
+;; ── Raw builtins ─────────────────────────────────────────────────
+
+fn test-raw-open
+  _ =>
+    conn := raw-db-open ":memory:"
+    result := type-of conn
+    raw-db-close conn
+    result
+
+test "raw-db-open returns DbConn" (-> assert-eq "DbConn" (test-raw-open ()))
+
+fn test-raw-roundtrip
+  _ =>
+    conn := raw-db-open ":memory:"
+    raw-db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)" #[]
+    raw-db-exec conn "INSERT INTO t (name) VALUES (?)" #["Alice"]
+    raw-db-exec conn "INSERT INTO t (name) VALUES (?)" #["Bob"]
+    rows := raw-db-query conn "SELECT * FROM t ORDER BY id" #[]
+    assert-eq 2 (length rows)
+    assert-eq "Alice" (head rows).name
+    assert-eq "Bob" (head (tail rows)).name
+    raw-db-close conn
+
+test "raw-db-exec + raw-db-query round-trip" (-> test-raw-roundtrip ())
+
+fn test-raw-affected
+  _ =>
+    conn := raw-db-open ":memory:"
+    raw-db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)" #[]
+    raw-db-exec conn "INSERT INTO t (v) VALUES (?)" #["a"]
+    raw-db-exec conn "INSERT INTO t (v) VALUES (?)" #["b"]
+    raw-db-exec conn "INSERT INTO t (v) VALUES (?)" #["c"]
+    n := raw-db-exec conn "DELETE FROM t WHERE id > ?" #[1]
+    raw-db-close conn
+    n
+
+test "raw-db-exec returns affected count" (-> assert-eq 2 (test-raw-affected ()))
+
+fn test-raw-types
+  _ =>
+    conn := raw-db-open ":memory:"
+    raw-db-exec conn "CREATE TABLE t (i INTEGER, r REAL, s TEXT)" #[]
+    raw-db-exec conn "INSERT INTO t VALUES (?, ?, ?)" #[42 3.14 "hello"]
+    rows := raw-db-query conn "SELECT * FROM t" #[]
+    row := head rows
+    assert-eq "Int" (type-of row.i)
+    assert-eq "Float" (type-of row.r)
+    assert-eq "Str" (type-of row.s)
+    assert-eq 42 row.i
+    raw-db-close conn
+
+test "query returns correct types" (-> test-raw-types ())
+
+fn test-raw-null
+  _ =>
+    conn := raw-db-open ":memory:"
+    raw-db-exec conn "CREATE TABLE t (a TEXT, b TEXT)" #[]
+    raw-db-exec conn "INSERT INTO t VALUES (?, ?)" #["x" ()]
+    rows := raw-db-query conn "SELECT * FROM t" #[]
+    row := head rows
+    assert-eq "x" row.a
+    assert-eq "Unit" (type-of row.b)
+    raw-db-close conn
+
+test "query with null values" (-> test-raw-null ())
+
+fn test-raw-tx-commit
+  _ =>
+    conn := raw-db-open ":memory:"
+    raw-db-exec conn "CREATE TABLE t (v TEXT)" #[]
+    raw-db-transaction conn (->
+      raw-db-exec conn "INSERT INTO t (v) VALUES (?)" #["inside-tx"])
+    rows := raw-db-query conn "SELECT * FROM t" #[]
+    assert-eq 1 (length rows)
+    assert-eq "inside-tx" (head rows).v
+    raw-db-close conn
+
+test "raw-db-transaction commits" (-> test-raw-tx-commit ())
+
+fn insert-and-fail
+  => conn
+  raw-db-exec conn "INSERT INTO t (v) VALUES (?)" #["should-rollback"]
+  error "boom"
+
+fn test-raw-tx-rollback
+  _ =>
+    conn := raw-db-open ":memory:"
+    raw-db-exec conn "CREATE TABLE t (v TEXT)" #[]
+    try (-> raw-db-transaction conn (-> insert-and-fail conn))
+    rows := raw-db-query conn "SELECT * FROM t" #[]
+    assert-eq 0 (length rows)
+    raw-db-close conn
+
+test "raw-db-transaction rolls back on error" (-> test-raw-tx-rollback ())
+
+;; ── std.db effect module ─────────────────────────────────────────
+
+fn test-db-open-close
+  _ =>
+    conn := db-open ":memory:"
+    result := type-of conn
+    db-close conn
+    result
+
+test "db-open and db-close" (-> assert-eq "DbConn" (test-db-open-close ()))
+
+fn test-std-db-default
+  _ =>
+    conn := db-open ":memory:"
+    with default-db
+      db-exec conn "CREATE TABLE items (id INTEGER PRIMARY KEY, name TEXT)" #[]
+      db-exec conn "INSERT INTO items (name) VALUES (?)" #["widget"]
+      items := db-query conn "SELECT * FROM items" #[]
+      assert-eq 1 (length items)
+      assert-eq "widget" (head items).name
+    db-close conn
+
+test "std.db with default-db handler" (-> test-std-db-default ())
+
+fn insert-two ::: Db
+  => conn
+  db-exec conn "INSERT INTO t (v) VALUES (?)" #["a"]
+  db-exec conn "INSERT INTO t (v) VALUES (?)" #["b"]
+
+fn test-std-db-tx
+  _ =>
+    conn := db-open ":memory:"
+    with default-db
+      db-exec conn "CREATE TABLE t (v TEXT)" #[]
+      db-transaction conn (-> insert-two conn)
+      rows := db-query conn "SELECT * FROM t ORDER BY v" #[]
+      assert-eq 2 (length rows)
+    db-close conn
+
+test "std.db transaction" (-> test-std-db-tx ())
+
+;; ── Mock handler ─────────────────────────────────────────────────
+
+handler mock-db :: Db
+  db-query conn sql params =>
+    resume #[{name= "mock-alice" age= 99}]
+  db-exec conn sql params =>
+    resume 0
+  db-transaction conn thunk =>
+    resume (thunk ())
+
+fn fetch-users ::: Db
+  (conn -> db-query conn "SELECT * FROM users" #[])
+
+fn test-mock-db
+  _ =>
+    with mock-db
+      users := fetch-users "fake-conn"
+      assert-eq 1 (length users)
+      assert-eq "mock-alice" (head users).name
+      assert-eq 99 (head users).age
+
+test "mock Db handler" (-> test-mock-db ())

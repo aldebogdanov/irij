@@ -1,0 +1,51 @@
+mod std.db
+
+;; Database effect module (SQLite).
+;;
+;; Usage:
+;;   use std.db :open
+;;
+;;   conn := db-open "myapp.db"      ;; or ":memory:" for in-memory
+;;
+;;   with default-db
+;;     db-exec conn "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INT)" #[]
+;;     db-exec conn "INSERT INTO users (name, age) VALUES (?, ?)" #["Alice" 30]
+;;     users := db-query conn "SELECT * FROM users WHERE age > ?" #[21]
+;;     ;; users = #[{id= 1 name= "Alice" age= 30}]
+;;
+;;     ;; Transactions: auto-commit on success, rollback on error
+;;     db-transaction conn (->
+;;       db-exec conn "UPDATE accounts SET balance = balance - 100 WHERE id = ?" #[1]
+;;       db-exec conn "UPDATE accounts SET balance = balance + 100 WHERE id = ?" #[2])
+;;
+;;   db-close conn
+;;
+;;   ;; Mock in tests:
+;;   handler mock-db :: Db
+;;     db-query conn sql params => resume #[{name= "test"}]
+;;     db-exec conn sql params => resume 0
+;;     db-transaction conn thunk => resume (thunk ())
+
+pub effect Db
+  db-query :: _ Str _ -> _
+  db-exec :: _ Str _ -> Int
+  db-transaction :: _ Fn -> _
+
+pub fn db-open :: Str _
+  (path -> raw-db-open path)
+
+pub fn db-close :: _ ()
+  (conn -> raw-db-close conn)
+
+fn db-tx-wrapper
+  => thunk
+  with default-db
+    thunk ()
+
+pub handler default-db :: Db
+  db-query conn sql params =>
+    resume (raw-db-query conn sql params)
+  db-exec conn sql params =>
+    resume (raw-db-exec conn sql params)
+  db-transaction conn thunk =>
+    resume (raw-db-transaction conn (-> db-tx-wrapper thunk))

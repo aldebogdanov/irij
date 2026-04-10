@@ -20,6 +20,31 @@ public final class Builtins {
 
     private Builtins() {}
 
+    /** Forbidden builtins in sandbox mode — I/O, file, DB, HTTP. */
+    private static final List<String> SANDBOX_FORBIDDEN = List.of(
+        "read-file", "write-file", "delete-file", "append-file",
+        "make-dir", "list-dir", "file-exists?",
+        "raw-http-request", "raw-http-serve",
+        "raw-db-open", "raw-db-query", "raw-db-exec", "raw-db-close", "raw-db-transaction"
+    );
+
+    /**
+     * Install sandboxed builtins — all standard builtins, but I/O, file, DB,
+     * and HTTP operations are replaced with error stubs.
+     */
+    public static void installSandboxed(Environment env, PrintStream out) {
+        install(env, out);
+        for (var name : SANDBOX_FORBIDDEN) {
+            String msg = name + ": not available in sandbox mode";
+            int arity = env.isDefined(name)
+                ? (env.lookup(name) instanceof BuiltinFn fn ? fn.arity() : 1)
+                : 1;
+            env.define(name, new BuiltinFn(name, arity, args -> {
+                throw new IrijRuntimeError(msg);
+            }));
+        }
+    }
+
     /** Install all builtins into the given environment. */
     public static void install(Environment env, PrintStream out) {
         // Boolean constants
@@ -360,6 +385,20 @@ public final class Builtins {
             return str.replace(from, to);
         }));
 
+        env.define("time-ms", new BuiltinFn("time-ms", 1, args -> {
+            return System.currentTimeMillis();
+        }));
+
+        env.define("url-encode", new BuiltinFn("url-encode", 1, args -> {
+            return java.net.URLEncoder.encode(asString(args.get(0), "url-encode"),
+                java.nio.charset.StandardCharsets.UTF_8);
+        }));
+
+        env.define("url-decode", new BuiltinFn("url-decode", 1, args -> {
+            return java.net.URLDecoder.decode(asString(args.get(0), "url-decode"),
+                java.nio.charset.StandardCharsets.UTF_8);
+        }));
+
         env.define("substring", new BuiltinFn("substring", 3, args -> {
             var str = asString(args.get(0), "substring");
             int start = (int) asLong(args.get(1), "substring");
@@ -554,6 +593,78 @@ public final class Builtins {
             return Values.UNIT;
         }));
 
+        // ── Database primitives (SQLite) ──────────────────────────────────
+
+        env.define("raw-db-open", new BuiltinFn("raw-db-open", 1, args -> {
+            var path = asString(args.get(0), "raw-db-open");
+            try {
+                var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + path);
+                // Enable WAL mode for concurrent read support
+                try (var stmt = conn.createStatement()) {
+                    stmt.execute("PRAGMA journal_mode=WAL");
+                }
+                return new Tagged("DbConn", List.of(conn));
+            } catch (java.sql.SQLException e) {
+                throw new IrijRuntimeError("raw-db-open: " + e.getMessage());
+            }
+        }));
+
+        env.define("raw-db-query", new BuiltinFn("raw-db-query", 3, args -> {
+            var conn = extractConnection(args.get(0), "raw-db-query");
+            var sql = asString(args.get(1), "raw-db-query");
+            var params = extractParams(args.get(2), "raw-db-query");
+            try {
+                synchronized (conn) {
+                    var ps = conn.prepareStatement(sql);
+                    bindParams(ps, params);
+                    var rs = ps.executeQuery();
+                    var meta = rs.getMetaData();
+                    int cols = meta.getColumnCount();
+                    var rows = new ArrayList<Object>();
+                    while (rs.next()) {
+                        var row = new LinkedHashMap<String, Object>();
+                        for (int i = 1; i <= cols; i++) {
+                            var colName = meta.getColumnLabel(i);
+                            row.put(colName, sqlToIrij(rs, i, meta.getColumnType(i)));
+                        }
+                        rows.add(new IrijMap(row));
+                    }
+                    rs.close();
+                    ps.close();
+                    return new IrijVector(rows);
+                }
+            } catch (java.sql.SQLException e) {
+                throw new IrijRuntimeError("raw-db-query: " + e.getMessage());
+            }
+        }));
+
+        env.define("raw-db-exec", new BuiltinFn("raw-db-exec", 3, args -> {
+            var conn = extractConnection(args.get(0), "raw-db-exec");
+            var sql = asString(args.get(1), "raw-db-exec");
+            var params = extractParams(args.get(2), "raw-db-exec");
+            try {
+                synchronized (conn) {
+                    var ps = conn.prepareStatement(sql);
+                    bindParams(ps, params);
+                    long affected = ps.executeUpdate();
+                    ps.close();
+                    return affected;
+                }
+            } catch (java.sql.SQLException e) {
+                throw new IrijRuntimeError("raw-db-exec: " + e.getMessage());
+            }
+        }));
+
+        env.define("raw-db-close", new BuiltinFn("raw-db-close", 1, args -> {
+            var conn = extractConnection(args.get(0), "raw-db-close");
+            try {
+                conn.close();
+            } catch (java.sql.SQLException e) {
+                throw new IrijRuntimeError("raw-db-close: " + e.getMessage());
+            }
+            return Values.UNIT;
+        }));
+
         // ── HTTP primitives ─────────────────────────────────────────────
         env.define("raw-http-request", new BuiltinFn("raw-http-request", 1, args -> {
             if (!(args.get(0) instanceof IrijMap opts))
@@ -684,6 +795,59 @@ public final class Builtins {
         }
         // Fallback: convert to string
         return new JsonPrimitive(Values.toIrijString(value));
+    }
+
+    // ── Database helpers ──────────────────────────────────────────────
+
+    /** Extract the java.sql.Connection from a Tagged("DbConn", ...) value. */
+    static java.sql.Connection extractConnection(Object value, String context) {
+        if (value instanceof Tagged t && "DbConn".equals(t.tag()) && !t.fields().isEmpty()
+                && t.fields().get(0) instanceof java.sql.Connection c) {
+            return c;
+        }
+        throw new IrijRuntimeError(context + ": first argument must be a database connection (from db-open)");
+    }
+
+    /** Extract parameter list from an IrijVector. */
+    static List<Object> extractParams(Object value, String context) {
+        if (value instanceof IrijVector v) return v.elements();
+        throw new IrijRuntimeError(context + ": params must be a vector #[...]");
+    }
+
+    /** Bind Irij values to a PreparedStatement. */
+    static void bindParams(java.sql.PreparedStatement ps, List<Object> params) throws java.sql.SQLException {
+        for (int i = 0; i < params.size(); i++) {
+            var p = params.get(i);
+            if (p instanceof Long l)        ps.setLong(i + 1, l);
+            else if (p instanceof Double d) ps.setDouble(i + 1, d);
+            else if (p instanceof String s) ps.setString(i + 1, s);
+            else if (p instanceof Boolean b) ps.setBoolean(i + 1, b);
+            else if (p == Values.UNIT)      ps.setNull(i + 1, java.sql.Types.NULL);
+            else ps.setString(i + 1, Values.toIrijString(p));
+        }
+    }
+
+    /** Convert a SQL column value to an Irij value. */
+    static Object sqlToIrij(java.sql.ResultSet rs, int col, int sqlType) throws java.sql.SQLException {
+        var val = rs.getObject(col);
+        if (val == null) return Values.UNIT;
+        return switch (sqlType) {
+            case java.sql.Types.INTEGER, java.sql.Types.BIGINT, java.sql.Types.SMALLINT, java.sql.Types.TINYINT ->
+                rs.getLong(col);
+            case java.sql.Types.REAL, java.sql.Types.FLOAT, java.sql.Types.DOUBLE, java.sql.Types.DECIMAL,
+                 java.sql.Types.NUMERIC ->
+                rs.getDouble(col);
+            case java.sql.Types.BOOLEAN -> rs.getBoolean(col);
+            case java.sql.Types.BLOB -> {
+                var bytes = rs.getBytes(col);
+                yield java.util.Base64.getEncoder().encodeToString(bytes);
+            }
+            default -> {
+                // TEXT, VARCHAR, and anything else → String
+                var s = rs.getString(col);
+                yield s != null ? s : Values.UNIT;
+            }
+        };
     }
 
     static long asLong(Object value, String context) {

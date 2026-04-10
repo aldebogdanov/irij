@@ -25,6 +25,7 @@ dependencies {
     implementation("org.antlr:antlr4-runtime:4.13.2")
     implementation("org.jline:jline:3.26.3")
     implementation("com.google.code.gson:gson:2.11.0")
+    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

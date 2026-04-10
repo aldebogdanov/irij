@@ -512,12 +512,16 @@ Effect-based I/O operations, mockable via handlers in tests.
 
 ---
 
-## Phase 11 — Database
+## Phase 11 — Database ✅
 
-- [ ] Database effect — `::: Db` effect
-- [ ] SQL query builder or raw queries
-- [ ] Connection pooling
-- [ ] Transaction support via effect handlers
+- [x] SQLite via sqlite-jdbc (embedded, zero-config)
+- [x] Raw builtins: `raw-db-open`, `raw-db-query`, `raw-db-exec`, `raw-db-close`, `raw-db-transaction`
+- [x] `std.db` module with `Db` effect, `default-db` handler, `db-open`/`db-close` convenience fns
+- [x] Parameter binding (Int, Float, Str, Unit/null)
+- [x] Transaction support: auto-commit on success, rollback on error
+- [x] Mockable via custom handlers (test without real DB)
+- [x] Java tests (12) + integration tests (11)
+- [ ] JDBC / HikariCP / PostgreSQL — deferred until after JVM interop phase
 
 ---
 
@@ -532,12 +536,16 @@ First real-world applications written in Irij. Dogfood Phases 8–11.
 - [ ] Git-based package storage
 - [ ] Search and discovery
 
-### 12b — nREPL Playground
-- [ ] Web-based Irij playground (browser → server → nREPL)
-- [ ] Sandboxed evaluation (restricted effects, timeouts)
-- [ ] Shareable code snippets (permalink with encoded source)
-- [ ] Example gallery (curated .irj examples)
-- [ ] Syntax-highlighted editor (CodeMirror/Monaco with irij-mode grammar)
+### 12b — nREPL Playground ✅
+- [x] Sandboxed interpreter (`Builtins.installSandboxed()`) — blocks file, DB, HTTP ops
+- [x] `raw-nrepl-eval-sandboxed` builtin — fresh sandboxed interpreter per eval, with timeout
+- [x] Web frontend (`playground/index.html`) — CodeMirror 5 editor, dark theme
+- [x] Playground server (`playground/server.irj`) — POST `/eval`, GET `/api/examples`
+- [x] Shareable code snippets (base64-encoded URL fragment)
+- [x] Example gallery (Hello World, Fibonacci, Pattern Matching, Collections, Algebraic Effects, Specs)
+- [x] Java tests (13) for sandbox + eval builtin
+- [ ] Syntax highlighting (CodeMirror Irij mode) — deferred
+- [ ] Persistent sessions (nREPL session reuse across evals) — deferred
 
 ---
 
