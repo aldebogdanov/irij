@@ -43,6 +43,9 @@ public final class ModuleRegistry {
     /** Dependency search paths: dep name → source directory (from deps.irj). */
     private final Map<String, Path> depPaths = new LinkedHashMap<>();
 
+    /** When true, also search __irij_deps/ and __irij_app/ on classpath. */
+    private boolean bundledMode = false;
+
     public ModuleRegistry(ModuleLoader loader) {
         this.loader = loader;
     }
@@ -64,6 +67,11 @@ public final class ModuleRegistry {
     /** Register a dependency search path (from deps.irj resolution). */
     public void addDepPath(String depName, Path depSourceDir) {
         depPaths.put(depName, depSourceDir);
+    }
+
+    /** Enable bundled JAR mode: search __irij_deps/ and __irij_app/ on classpath. */
+    public void setBundledMode(boolean bundled) {
+        this.bundledMode = bundled;
     }
 
     /**
@@ -98,14 +106,29 @@ public final class ModuleRegistry {
                 return mod;
             }
 
-            // 4. Dependency paths (from deps.irj)
+            // 4. Bundled deps (__irij_deps/ on classpath, from irij build)
+            if (bundledMode) {
+                mod = loadFromBundledDeps(qualifiedName, loc);
+                if (mod != null) {
+                    loaded.put(qualifiedName, mod);
+                    return mod;
+                }
+                // Also check __irij_app/ for local modules
+                mod = loadFromBundledApp(qualifiedName, loc);
+                if (mod != null) {
+                    loaded.put(qualifiedName, mod);
+                    return mod;
+                }
+            }
+
+            // 5. Dependency paths (from deps.irj)
             mod = loadFromDeps(qualifiedName, loc);
             if (mod != null) {
                 loaded.put(qualifiedName, mod);
                 return mod;
             }
 
-            // 5. File system (relative to sourcePath)
+            // 6. File system (relative to sourcePath)
             mod = loadFromFile(qualifiedName, loc);
             if (mod != null) {
                 loaded.put(qualifiedName, mod);
@@ -136,6 +159,58 @@ public final class ModuleRegistry {
             return loader.load(source, qualifiedName, loc);
         } catch (IOException e) {
             throw new IrijRuntimeError("Error reading module resource: " + qualifiedName + ": " + e.getMessage(), loc);
+        }
+    }
+
+    private ModuleValue loadFromBundledDeps(String qualifiedName, SourceLoc loc) {
+        // Try to resolve "depname.module" → __irij_deps/depname/module.irj
+        // Or "depname" → __irij_deps/depname/depname.irj, then mod.irj
+        var parts = qualifiedName.split("\\.", 2);
+        var depName = parts[0];
+        var cl = getClass().getClassLoader();
+
+        if (parts.length == 1) {
+            // Direct dep name
+            for (var candidate : List.of(depName + ".irj", "mod.irj")) {
+                var resource = "__irij_deps/" + depName + "/" + candidate;
+                var is = cl.getResourceAsStream(resource);
+                if (is != null) {
+                    try (is) {
+                        var source = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                        return loader.load(source, qualifiedName, loc);
+                    } catch (IOException e) {
+                        throw new IrijRuntimeError("Error reading bundled dep: " + resource, loc);
+                    }
+                }
+            }
+        } else {
+            // Sub-module: "depname.sub.module" → __irij_deps/depname/sub/module.irj
+            var rest = parts[1].replace('.', '/') + ".irj";
+            for (var base : List.of("", "src/")) {
+                var resource = "__irij_deps/" + depName + "/" + base + rest;
+                var is = cl.getResourceAsStream(resource);
+                if (is != null) {
+                    try (is) {
+                        var source = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                        return loader.load(source, qualifiedName, loc);
+                    } catch (IOException e) {
+                        throw new IrijRuntimeError("Error reading bundled dep: " + resource, loc);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    private ModuleValue loadFromBundledApp(String qualifiedName, SourceLoc loc) {
+        var resourcePath = "__irij_app/" + qualifiedName.replace('.', '/') + ".irj";
+        var is = getClass().getClassLoader().getResourceAsStream(resourcePath);
+        if (is == null) return null;
+        try (is) {
+            var source = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            return loader.load(source, qualifiedName, loc);
+        } catch (IOException e) {
+            throw new IrijRuntimeError("Error reading bundled module: " + resourcePath, loc);
         }
     }
 

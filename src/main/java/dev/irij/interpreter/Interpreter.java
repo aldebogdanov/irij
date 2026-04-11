@@ -27,6 +27,9 @@ public final class Interpreter {
     // Source directory for static file serving
     private Path sourcePath;
 
+    // Bundled JAR mode: load deps/resources from classpath
+    private boolean bundledMode = false;
+
     // Module loading state
     private String currentModuleName;
     private Set<String> pubNames; // non-null only during module file loading
@@ -466,6 +469,7 @@ public final class Interpreter {
                 var scriptDir = sourcePath != null
                     ? sourcePath.toAbsolutePath()
                     : java.nio.file.Path.of("").toAbsolutePath();
+                final boolean isBundled = bundledMode;
 
                 server.createContext("/", exchange -> {
                     AVAILABLE_EFFECTS.get().push(parentEffects);
@@ -475,6 +479,34 @@ public final class Interpreter {
                         // Try static file first
                         var reqPath = exchange.getRequestURI().getPath();
                         if (reqPath.length() > 1 && !reqPath.contains("..")) {
+                            // In bundled mode, check __irij_resources/ on classpath first
+                            if (isBundled) {
+                                var resourcePath = "__irij_resources/" + reqPath.substring(1);
+                                var resStream = getClass().getClassLoader().getResourceAsStream(resourcePath);
+                                if (resStream != null) {
+                                    try (resStream) {
+                                        var fileBytes = resStream.readAllBytes();
+                                        var mime = guessMimeType(reqPath);
+                                        exchange.getResponseHeaders().set("Content-Type", mime);
+                                        exchange.sendResponseHeaders(200, fileBytes.length);
+                                        try (var os = exchange.getResponseBody()) { os.write(fileBytes); }
+                                        return;
+                                    }
+                                }
+                                // Also check __irij_app/ for co-located static files
+                                var appPath = "__irij_app/" + reqPath.substring(1);
+                                var appStream = getClass().getClassLoader().getResourceAsStream(appPath);
+                                if (appStream != null) {
+                                    try (appStream) {
+                                        var fileBytes = appStream.readAllBytes();
+                                        var mime = guessMimeType(reqPath);
+                                        exchange.getResponseHeaders().set("Content-Type", mime);
+                                        exchange.sendResponseHeaders(200, fileBytes.length);
+                                        try (var os = exchange.getResponseBody()) { os.write(fileBytes); }
+                                        return;
+                                    }
+                                }
+                            }
                             var filePath = scriptDir.resolve(reqPath.substring(1)).normalize();
                             if (filePath.startsWith(scriptDir) && java.nio.file.Files.isRegularFile(filePath)) {
                                 var fileBytes = java.nio.file.Files.readAllBytes(filePath);
@@ -554,6 +586,8 @@ public final class Interpreter {
                             os.write(respBytes);
                         }
                     } catch (Exception e) {
+                        System.err.println("HTTP 500 " + exchange.getRequestMethod() + " " + exchange.getRequestURI() + ": " + e.getMessage());
+                        e.printStackTrace(System.err);
                         try {
                             var errMsg = "Internal Server Error: " + e.getMessage();
                             var errBytes = errMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8);
@@ -947,6 +981,16 @@ public final class Interpreter {
     public void setSourcePath(Path sourcePath) {
         this.sourcePath = sourcePath;
         moduleRegistry.setSourcePath(sourcePath);
+    }
+
+    /**
+     * Enable bundled JAR mode. In this mode, deps and resources are loaded
+     * from the classpath (__irij_deps/, __irij_resources/, __irij_app/) instead
+     * of the file system.
+     */
+    public void setBundledMode(boolean bundled) {
+        this.bundledMode = bundled;
+        moduleRegistry.setBundledMode(bundled);
     }
 
     /**
@@ -2590,6 +2634,25 @@ public final class Interpreter {
             msg += ". Hint: to pass a negative number, use parentheses: f (-" + Values.toIrijString(right) + ")";
         }
         throw new IrijRuntimeError(msg, loc);
+    }
+
+    /** Guess MIME type from path extension (for bundled mode where probeContentType isn't available). */
+    private static String guessMimeType(String path) {
+        if (path.endsWith(".html") || path.endsWith(".htm")) return "text/html; charset=utf-8";
+        if (path.endsWith(".css"))  return "text/css; charset=utf-8";
+        if (path.endsWith(".js"))   return "application/javascript; charset=utf-8";
+        if (path.endsWith(".json")) return "application/json; charset=utf-8";
+        if (path.endsWith(".png"))  return "image/png";
+        if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+        if (path.endsWith(".gif"))  return "image/gif";
+        if (path.endsWith(".svg"))  return "image/svg+xml";
+        if (path.endsWith(".ico"))  return "image/x-icon";
+        if (path.endsWith(".woff2")) return "font/woff2";
+        if (path.endsWith(".woff")) return "font/woff";
+        if (path.endsWith(".ttf"))  return "font/ttf";
+        if (path.endsWith(".txt"))  return "text/plain; charset=utf-8";
+        if (path.endsWith(".xml"))  return "application/xml";
+        return "application/octet-stream";
     }
 
     private Object divOp(Object left, Object right, SourceLoc loc) {

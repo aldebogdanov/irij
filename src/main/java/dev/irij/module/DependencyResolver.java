@@ -53,6 +53,12 @@ public final class DependencyResolver {
     }
 
     private Path resolveGit(String name, DepSource.GitDep git) throws IOException {
+        // Check project-local .irij/deps/ first (supports pre-resolved deps in build envs)
+        var localDepDir = projectRoot.resolve(".irij/deps").resolve(name).resolve(sanitizeRef(git.ref()));
+        if (Files.isDirectory(localDepDir)) {
+            return localDepDir;
+        }
+
         var depDir = CACHE_DIR.resolve(name).resolve(sanitizeRef(git.ref()));
 
         if (Files.isDirectory(depDir)) {

@@ -38,6 +38,12 @@ public final class IrijCli {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
+            // Check if running from a bundled JAR (irij build output)
+            String bundledEntry = getBundledEntryPoint();
+            if (bundledEntry != null) {
+                runBundled(bundledEntry);
+                return;
+            }
             launchRepl();
             return;
         }
@@ -52,6 +58,12 @@ public final class IrijCli {
         // ── install subcommand ──────────────────────────────────────────
         if (args[0].equals("install")) {
             runInstall();
+            return;
+        }
+
+        // ── build subcommand ────────────────────────────────────────────
+        if (args[0].equals("build")) {
+            BuildCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
             return;
         }
 
@@ -358,6 +370,68 @@ public final class IrijCli {
         }
     }
 
+    // ── Bundled JAR runner ────────────────────────────────────────────────
+
+    /** Check if this JAR has a bundled entry point (built with irij build). */
+    private static String getBundledEntryPoint() {
+        try {
+            var url = IrijCli.class.getProtectionDomain().getCodeSource().getLocation();
+            if (url != null) {
+                var jarPath = Path.of(url.toURI());
+                if (java.nio.file.Files.isRegularFile(jarPath) && jarPath.toString().endsWith(".jar")) {
+                    try (var jf = new java.util.jar.JarFile(jarPath.toFile())) {
+                        var manifest = jf.getManifest();
+                        if (manifest != null) {
+                            return manifest.getMainAttributes().getValue("Irij-Entry-Point");
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
+    }
+
+    /** Run a bundled application from inside the JAR. */
+    private static void runBundled(String entryPoint) {
+        var cl = IrijCli.class.getClassLoader();
+
+        // Load entry point source from __irij_app/
+        String source;
+        try (var is = cl.getResourceAsStream("__irij_app/" + entryPoint)) {
+            if (is == null) {
+                System.err.println("Bundled entry point not found: __irij_app/" + entryPoint);
+                System.exit(1);
+                return;
+            }
+            source = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IOException e) {
+            System.err.println("Error reading bundled entry: " + e.getMessage());
+            System.exit(1);
+            return;
+        }
+
+        // Parse
+        var result = IrijParseDriver.parse(source);
+        if (result.hasErrors()) {
+            for (var err : result.errors()) {
+                System.err.println(entryPoint + ":" + err);
+            }
+            System.exit(1);
+            return;
+        }
+
+        var ast = new AstBuilder().build(result.tree());
+
+        try {
+            var interpreter = new Interpreter();
+            interpreter.setBundledMode(true);
+            interpreter.run(ast);
+        } catch (IrijRuntimeError e) {
+            System.err.println(entryPoint + ":" + e.getMessage());
+            System.exit(1);
+        }
+    }
+
     // ── Help ─────────────────────────────────────────────────────────────
 
     private static void printHelp() {
@@ -367,6 +441,9 @@ public final class IrijCli {
             Usage:
               irij                       start interactive REPL
               irij <file.irj>            run a source file
+              irij build                 package app into self-contained JAR
+              irij build <file.irj>      build with explicit entry point
+              irij build -o out.jar      build with custom output path
               irij install               fetch dependencies from deps.irj
               irij test                  run all test-*.irj in ./tests/
               irij test <file.irj>       run a specific test file
