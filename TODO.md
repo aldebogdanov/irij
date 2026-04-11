@@ -564,6 +564,13 @@ First real-world applications written in Irij. Dogfood Phases 8–11.
 
 ---
 
+## Known Issues / Bugs
+
+- [ ] **Parser line numbers are wrong** — ANTLR error messages report incorrect line/column numbers (off by ~74 lines in one observed case). Discovered when `server.irj:285:11` error was actually in `parse-query` at line 358. The token stream's line tracking drifts from the actual file, possibly due to implicit continuation, module concatenation, or INDENT/DEDENT token injection. Needs investigation in `IrijLexer.g4` / `IrijParseDriver`.
+- [ ] **Multi-arg chained lambdas not supported** — `(acc -> pair -> body)` fails to parse. The grammar's `lambdaExpr` rule is `LPAREN lambdaParams ARROW exprSeq RPAREN` where `lambdaParams` is `pattern*`, so `(a b -> body)` works (multi-param), but curried `(a -> b -> body)` requires explicit nesting: `(a -> (b -> body))`. Consider whether the grammar should support `->` chaining or if explicit nesting is the intended design.
+
+---
+
 ## Principles
 
 1. **Spec is the source of truth.** Every feature implemented must match `docs/irij-lang-spec.org` exactly.

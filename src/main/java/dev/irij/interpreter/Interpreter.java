@@ -106,7 +106,8 @@ public final class Interpreter {
             // Replace interpreter-level dangerous builtins with stubs
             for (var name : List.of("raw-http-serve", "raw-db-transaction",
                     "raw-sse-response", "raw-sse-send", "raw-sse-close", "raw-sse-closed?",
-                    "raw-session-create", "raw-session-eval", "raw-session-destroy", "raw-session-cleanup")) {
+                    "raw-session-create", "raw-session-eval", "raw-session-destroy", "raw-session-cleanup",
+                    "raw-session-subscribe", "raw-session-unsubscribe")) {
                 int arity = globalEnv.isDefined(name)
                     ? (globalEnv.lookup(name) instanceof BuiltinFn fn ? fn.arity() : 1)
                     : 1;
@@ -671,16 +672,36 @@ public final class Interpreter {
         // ══════════════════════════════════════════════════════════════════
 
         var sessions = new java.util.concurrent.ConcurrentHashMap<String, Object[]>();
-        // sessions: UUID -> [Interpreter, PrintStream, ByteArrayOutputStream, lastAccessMs]
+        // sessions: UUID -> [Interpreter, PrintStream, ByteArrayOutputStream, lastAccessMs, SseWriter?]
 
         // ── raw-session-create — create a new sandboxed interpreter session
         globalEnv.define("raw-session-create", new BuiltinFn("raw-session-create", 1, args -> {
             var id = java.util.UUID.randomUUID().toString();
             var baos = new java.io.ByteArrayOutputStream();
-            var sessionOut = new PrintStream(baos);
+            // SseWriter holder — when set, output also streams via SSE
+            final SseWriter[] sseHolder = { null };
+            var sessionOut = new PrintStream(new java.io.OutputStream() {
+                @Override public void write(int b) throws java.io.IOException {
+                    baos.write(b);
+                }
+                @Override public void write(byte[] buf, int off, int len) throws java.io.IOException {
+                    baos.write(buf, off, len);
+                    // Forward to SSE if subscribed
+                    var sse = sseHolder[0];
+                    if (sse != null && !sse.isClosed()) {
+                        // Send complete lines to SSE
+                        var text = new String(buf, off, len, java.nio.charset.StandardCharsets.UTF_8);
+                        try { sse.send("message", "{\"type\":\"stdout\",\"text\":" + jsonEscape(text) + "}"); }
+                        catch (Exception ignored) { sseHolder[0] = null; }
+                    }
+                }
+                @Override public void flush() throws java.io.IOException {
+                    baos.flush();
+                }
+            }, true);
             var interp = new Interpreter(sessionOut, true);
             interp.setSpecLintEnabled(false);
-            sessions.put(id, new Object[]{ interp, sessionOut, baos, System.currentTimeMillis() });
+            sessions.put(id, new Object[]{ interp, sessionOut, baos, System.currentTimeMillis(), sseHolder });
             return id;
         }));
 
@@ -747,6 +768,33 @@ public final class Interpreter {
         globalEnv.define("raw-session-destroy", new BuiltinFn("raw-session-destroy", 1, args -> {
             var sessionId = Builtins.asString(args.get(0), "raw-session-destroy");
             sessions.remove(sessionId);
+            return Values.UNIT;
+        }));
+
+        // ── raw-session-subscribe — connect SSE writer to session output stream
+        // raw-session-subscribe session-id sse-writer
+        globalEnv.define("raw-session-subscribe", new BuiltinFn("raw-session-subscribe", 2, args -> {
+            var sessionId = Builtins.asString(args.get(0), "raw-session-subscribe");
+            if (!(args.get(1) instanceof SseWriter sse))
+                throw new IrijRuntimeError("raw-session-subscribe: second arg must be SseWriter", null);
+            var session = sessions.get(sessionId);
+            if (session == null)
+                throw new IrijRuntimeError("raw-session-subscribe: no session with id " + sessionId, null);
+            @SuppressWarnings("unchecked")
+            var sseHolder = (SseWriter[]) session[4];
+            sseHolder[0] = sse;
+            return Values.UNIT;
+        }));
+
+        // ── raw-session-unsubscribe — disconnect SSE writer from session
+        globalEnv.define("raw-session-unsubscribe", new BuiltinFn("raw-session-unsubscribe", 1, args -> {
+            var sessionId = Builtins.asString(args.get(0), "raw-session-unsubscribe");
+            var session = sessions.get(sessionId);
+            if (session != null) {
+                @SuppressWarnings("unchecked")
+                var sseHolder = (SseWriter[]) session[4];
+                sseHolder[0] = null;
+            }
             return Values.UNIT;
         }));
 
@@ -1711,7 +1759,8 @@ public final class Interpreter {
                 "raw-db-open", "raw-db-query", "raw-db-exec", "raw-db-close", "raw-db-transaction",
                 "raw-nrepl-eval-sandboxed",
                 "raw-sse-response", "raw-sse-send", "raw-sse-close", "raw-sse-closed?",
-                "raw-session-create", "raw-session-eval", "raw-session-destroy", "raw-session-cleanup")) {
+                "raw-session-create", "raw-session-eval", "raw-session-destroy", "raw-session-cleanup",
+                "raw-session-subscribe", "raw-session-unsubscribe")) {
             if (globalEnv.isDefined(name))
                 moduleEnv.define(name, globalEnv.lookup(name));
         }
@@ -2637,6 +2686,23 @@ public final class Interpreter {
     }
 
     /** Guess MIME type from path extension (for bundled mode where probeContentType isn't available). */
+    /** Escape a string for JSON embedding. */
+    private static String jsonEscape(String s) {
+        var sb = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"'  -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default   -> sb.append(c);
+            }
+        }
+        return sb.append("\"").toString();
+    }
+
     private static String guessMimeType(String path) {
         if (path.endsWith(".html") || path.endsWith(".htm")) return "text/html; charset=utf-8";
         if (path.endsWith(".css"))  return "text/css; charset=utf-8";
