@@ -2,24 +2,24 @@ mod std.collection
 
 ;; Collection combinators built on existing builtins.
 
-pub fn zip
+pub fn zip :: Vec Vec Vec
   => v1 v2
   n := min (length v1) (length v2)
   to-vec ~ (0 ..< n) |> @ (i -> #((nth i v1) (nth i v2)))
 
-pub fn zip-with
+pub fn zip-with :: Fn Vec Vec Vec
   => f v1 v2
   n := min (length v1) (length v2)
   to-vec ~ (0 ..< n) |> @ (i -> f (nth i v1) (nth i v2))
 
-pub fn enumerate
+pub fn enumerate :: Vec Vec
   => vec
   to-vec ~ (0 ..< length vec) |> @ (i -> #(i (nth i vec)))
 
-pub fn flatten
+pub fn flatten :: Vec Vec
   (vec -> fold (acc x -> acc ++ x) #[] vec)
 
-pub fn distinct
+pub fn distinct :: Vec Vec
   (vec -> fold (acc x -> if (contains? acc x) acc else (acc ++ #[x])) #[] vec)
 
 ;; Helper for frequencies
@@ -32,77 +32,77 @@ fn freq-step
   else
     assoc m k (c + 1)
 
-pub fn frequencies
+pub fn frequencies :: Vec Map
   (vec -> fold freq-step {} vec)
 
-pub fn partition
+pub fn partition :: Int Vec Vec
   => n vec
   total := length vec
   chunks := div (total + n - 1) n
   to-vec ~ (0 ..< chunks) |> @ (i -> take n (drop (i * n) vec))
 
-pub fn group-by
+pub fn group-by :: Fn Vec Map
   => f vec
   fold (m x -> if (get (to-str (f x)) m == ()) (assoc m (to-str (f x)) #[x]) else (assoc m (to-str (f x)) ((get (to-str (f x)) m) ++ #[x]))) {} vec
 
-pub fn sort-by
+pub fn sort-by :: Fn Vec Vec
   => f vec
   pairs := to-vec ~ vec |> @ (x -> #((f x) x))
   sorted := sort pairs
   to-vec ~ sorted |> @ (p -> nth 1 p)
 
-pub fn map-vals
+pub fn map-vals :: Fn Map Map
   => f m
   fold (acc k -> assoc acc k (f (get k m))) {} (keys m)
 
-pub fn filter-vals
+pub fn filter-vals :: Fn Map Map
   => pred m
   fold (acc k -> if (pred (get k m)) (assoc acc k (get k m)) else acc) {} (keys m)
 
-pub fn map-keys
+pub fn map-keys :: Fn Map Map
   => f m
   fold (acc k -> assoc acc (to-str (f k)) (get k m)) {} (keys m)
 
-pub fn each
+pub fn each :: Fn Vec ()
   => f vec
   fold (_ x -> f x) () vec
   ()
 
-pub fn find-index
+pub fn find-index :: Fn Vec Int
   => pred vec
   n := length vec
   fold (acc i -> if (acc /= (0 - 1)) acc else (if (pred (nth i vec)) i else (0 - 1))) (0 - 1) (0 ..< n)
 
-pub fn all?
+pub fn all? :: Fn Vec Bool
   (pred vec -> fold (acc x -> acc && (pred x)) true vec)
 
-pub fn any?
+pub fn any? :: Fn Vec Bool
   (pred vec -> fold (acc x -> acc || (pred x)) false vec)
 
-pub fn none?
+pub fn none? :: Fn Vec Bool
   (pred vec -> not ~ any? pred vec)
 
-pub fn flat-map
+pub fn flat-map :: Fn Vec Vec
   (f vec -> flatten ~ vec |> @ f)
 
-pub fn sum
+pub fn sum :: Vec _
   (vec -> /+ vec)
 
-pub fn product
+pub fn product :: Vec _
   (vec -> /* vec)
 
-pub fn count-by
+pub fn count-by :: Fn Vec Int
   => pred vec
   filtered := /? pred
   length (filtered vec)
 
-pub fn interleave
+pub fn interleave :: Vec Vec Vec
   => v1 v2
   n := min (length v1) (length v2)
   result := to-vec ~ (0 ..< n) |> @ (i -> #[(nth i v1) (nth i v2)])
   flatten result
 
-pub fn take-while
+pub fn take-while :: Fn Vec Vec
   => pred vec
   idx := find-index (x -> not (pred x)) vec
   if (idx == (0 - 1))
@@ -110,7 +110,7 @@ pub fn take-while
   else
     take idx vec
 
-pub fn window
+pub fn window :: Int Vec Vec
   => n vec
   total := length vec
   if (n > total)

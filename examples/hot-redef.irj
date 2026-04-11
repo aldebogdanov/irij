@@ -24,7 +24,7 @@
 
 fn greet
   => name
-  println ~ "Hola, " ++ name ++ "!"
+  println ~ "Hello, " ++ name ++ "!"
 
 fn run-loop
   => n

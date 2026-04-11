@@ -2,29 +2,29 @@ mod std.func
 
 ;; Function combinators.
 
-pub fn flip
+pub fn flip :: Fn _ _ _
   (f a b -> f b a)
 
-pub fn compose
+pub fn compose :: Fn Fn _ _
   (f g x -> f (g x))
 
-pub fn pipe
+pub fn pipe :: Fn Fn _ _
   (f g x -> g (f x))
 
-pub fn apply-to
+pub fn apply-to :: _ Fn _
   (x f -> f x)
 
-pub fn on
+pub fn on :: Fn Fn _ _ _
   (f g a b -> f (g a) (g b))
 
-pub fn juxt
+pub fn juxt :: Fn Fn _ Tuple
   (f g x -> #((f x) (g x)))
 
-pub fn complement
+pub fn complement :: Fn _ Bool
   (pred x -> not (pred x))
 
-pub fn constantly
+pub fn constantly :: _ _ _
   (x _ -> x)
 
-pub fn times
+pub fn times :: Int Fn ()
   (n f -> fold (_ i -> f ()) () (0 ..< n))

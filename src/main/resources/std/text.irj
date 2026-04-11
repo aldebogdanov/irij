@@ -2,28 +2,28 @@ mod std.text
 
 ;; Text utilities built on top of string builtins.
 
-pub fn chars
+pub fn chars :: Str Vec
   (s -> split s "")
 
-pub fn words
+pub fn words :: Str Vec
   (s -> split s " ")
 
-pub fn lines
+pub fn lines :: Str Vec
   (s -> split s "\n")
 
-pub fn unwords
+pub fn unwords :: Vec Str
   (v -> join " " v)
 
-pub fn unlines
+pub fn unlines :: Vec Str
   (v -> join "\n" v)
 
-pub fn blank?
+pub fn blank? :: Str Bool
   (s -> trim s == "")
 
-pub fn contains-substr?
+pub fn contains-substr? :: Str Str Bool
   (s sub -> index-of s sub /= -1)
 
-pub fn pad-left
+pub fn pad-left :: Int Str Str Str
   => n ch s
   deficit := n - length s
   if (deficit > 0)
@@ -31,7 +31,7 @@ pub fn pad-left
   else
     s
 
-pub fn pad-right
+pub fn pad-right :: Int Str Str Str
   => n ch s
   deficit := n - length s
   if (deficit > 0)
@@ -39,6 +39,6 @@ pub fn pad-right
   else
     s
 
-pub fn repeat
+pub fn repeat :: Int Str Str
   => n s
   join "" ((0 ..< n) |> @ (_ -> s))

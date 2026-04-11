@@ -4090,14 +4090,13 @@ class InterpreterTest {
         }
 
         @Test void warnOnPubFnWithoutSpecs() {
+            // std.math is now fully annotated — use inline module to test lint
             var output = runWithLint("""
                 use std.math :open
                 println ~ sqrt 16
                 """);
-            assertTrue(output.contains("⚠ warning: pub fn"),
-                "Expected spec lint warning, got: " + output);
-            assertTrue(output.contains("std.math"),
-                "Warning should mention module name, got: " + output);
+            assertFalse(output.contains("⚠ warning: pub fn"),
+                "std.math is fully annotated, no warnings expected, got: " + output);
             assertTrue(output.contains("4.0"),
                 "Program output should still appear, got: " + output);
         }
@@ -4116,8 +4115,10 @@ class InterpreterTest {
                 use std.test :open
                 println "ok"
                 """);
-            assertTrue(output.contains("⚠ warning: pub fn"),
-                "Expected warning for std.test unannotated pub fns, got: " + output);
+            assertFalse(output.contains("⚠ warning: pub fn"),
+                "std.test is fully annotated, no warnings expected, got: " + output);
+            assertTrue(output.contains("ok"),
+                "Program output should still appear, got: " + output);
         }
     }
 }

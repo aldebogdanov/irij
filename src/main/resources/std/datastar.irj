@@ -8,27 +8,27 @@ mod std.datastar
 
 ;; ── SSE lifecycle ───────────────────────────────────────────────────
 
-pub fn ds-sse
+pub fn ds-sse :: Map _
   (request -> raw-sse-response request)
 
-pub fn ds-done
+pub fn ds-done :: _ ()
   (sse -> raw-sse-close sse)
 
-pub fn ds-closed?
+pub fn ds-closed? :: _ Bool
   (sse -> raw-sse-closed? sse)
 
 ;; ── Datastar events ─────────────────────────────────────────────────
 
-pub fn ds-patch
+pub fn ds-patch :: _ Str Str ()
   (sse selector html -> raw-sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode outer\nelements " ++ html))
 
-pub fn ds-patch-mode
+pub fn ds-patch-mode :: _ Str Str Str ()
   (sse selector mode html -> raw-sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode " ++ mode ++ "\nelements " ++ html))
 
-pub fn ds-signals
+pub fn ds-signals :: _ Str ()
   (sse json -> raw-sse-send sse "datastar-patch-signals" ("signals " ++ json))
 
-pub fn ds-script
+pub fn ds-script :: _ Str ()
   (sse js -> raw-sse-send sse "datastar-patch-elements" ("mode append\nselector body\nelements <script data-ds-autoremove>" ++ js ++ "</script>"))
 
 ;; ── Signal reading ──────────────────────────────────────────────────
@@ -36,7 +36,7 @@ pub fn ds-script
 fn ds-is-get
   (request -> request.method == "GET")
 
-pub fn ds-read-signals
+pub fn ds-read-signals :: Map _
   => request
   if (ds-is-get request) (ds-parse-query-signals request.query) else (json-parse request.body)
 
@@ -53,6 +53,6 @@ fn ds-parse-query-signals
 fn ds-extract-param
   => query name
   prefix := name ++ "="
-  parts := split "&" query
+  parts := split query "&"
   found := parts |> /? (ds-has-prefix prefix)
   if (empty? found) ("") else (substring (head found) (length prefix) (length (head found)))

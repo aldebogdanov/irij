@@ -22,37 +22,37 @@ pub random-int := random-int
 pub random-float := random-float
 
 ;; Derived utilities
-pub fn clamp
+pub fn clamp :: _ _ _ _
   (lo hi x -> min hi (max lo x))
 
-pub fn lerp
+pub fn lerp :: _ _ _ _
   (a b t -> a + (b - a) * t)
 
-pub fn square
+pub fn square :: _ _
   (x -> x * x)
 
-pub fn cube
+pub fn cube :: _ _
   (x -> x * x * x)
 
-pub fn sign
+pub fn sign :: _ Int
   => x
   if (x > 0) 1 else (if (x < 0) (0 - 1) else 0)
 
-pub fn even?
+pub fn even? :: Int Bool
   (n -> n % 2 == 0)
 
-pub fn odd?
+pub fn odd? :: Int Bool
   (n -> n % 2 /= 0)
 
-pub fn gcd
+pub fn gcd :: Int Int Int
   => a b
   if (b == 0) (abs a) else (gcd b (a % b))
 
-pub fn lcm
+pub fn lcm :: Int Int Int
   (a b -> div (abs (a * b)) (gcd a b))
 
-pub fn sum-of
+pub fn sum-of :: Vec _
   (vec -> /+ vec)
 
-pub fn product-of
+pub fn product-of :: Vec _
   (vec -> /* vec)

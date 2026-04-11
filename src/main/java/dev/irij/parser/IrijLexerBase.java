@@ -243,6 +243,9 @@ public abstract class IrijLexerBase extends Lexer {
                     // Blank line — skip and retry.
                     if (ch == '\r') { input.consume(); if (input.LA(1) == '\n') input.consume(); }
                     else input.consume();
+                    // Update lexer line tracking so subsequent tokens get correct positions.
+                    setLine(getLine() + 1);
+                    setCharPositionInLine(0);
                     break; // restart indent measurement for the next line
                 } else if (ch == IntStream.EOF) {
                     return -1;
@@ -259,6 +262,8 @@ public abstract class IrijLexerBase extends Lexer {
             }
 
             if (seenNonWs) {
+                // Update char position so subsequent tokens get correct column.
+                setCharPositionInLine(spaces);
                 return spaces;
             }
             // If we looped (blank line), continue to next line.

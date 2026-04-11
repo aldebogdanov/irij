@@ -3,11 +3,11 @@ mod std.convert
 ;; Conversion utilities built on top of builtins.
 ;; Builtins used: parse-int, parse-float, to-str, split
 
-pub fn to-int
+pub fn to-int :: _ Int
   (val -> parse-int (to-str val))
 
-pub fn to-float
+pub fn to-float :: _ Float
   (val -> parse-float (to-str val))
 
-pub fn digits
+pub fn digits :: Str Vec
   (s -> (split s "") |> @ parse-int)

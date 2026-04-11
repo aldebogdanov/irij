@@ -504,6 +504,9 @@ public final class Builtins {
         env.define("read-file", new BuiltinFn("read-file", 1, args -> {
             var path = asString(args.get(0), "read-file");
             try { return Files.readString(Path.of(path)); }
+            catch (java.nio.file.NoSuchFileException e) {
+                throw new IrijRuntimeError("read-file: file not found: " + path);
+            }
             catch (IOException e) {
                 throw new IrijRuntimeError("read-file: " + e.getMessage());
             }

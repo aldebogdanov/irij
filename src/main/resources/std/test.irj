@@ -11,35 +11,35 @@ mod std.test
 
 ;; ── Assertions ──────────────────────────────────────
 
-pub fn assert-eq
+pub fn assert-eq :: _ _ ()
   => expected actual
   if (expected /= actual)
     error ~ "Expected " ++ (to-str expected) ++ " but got " ++ (to-str actual)
   else
     ()
 
-pub fn assert-neq
+pub fn assert-neq :: _ _ ()
   => a b
   if (a == b)
     error ~ "Expected values to differ, but both are " ++ (to-str a)
   else
     ()
 
-pub fn assert-true
+pub fn assert-true :: Bool ()
   => val
   if (not val)
     error "Expected true but got false"
   else
     ()
 
-pub fn assert-false
+pub fn assert-false :: Bool ()
   => val
   if val
     error "Expected false but got true"
   else
     ()
 
-pub fn assert-throws
+pub fn assert-throws :: Fn ()
   => thunk
   result := try thunk
   match result
@@ -49,7 +49,7 @@ pub fn assert-throws
 ;; ── Test runner ─────────────────────────────────────
 
 ;; Run a single test. Returns #(:pass name) or #(:fail name).
-pub fn test ::: Console
+pub fn test :: Str Fn Tuple ::: Console
   => name thunk
   result := try thunk
   match result
@@ -62,7 +62,7 @@ pub fn test ::: Console
 
 ;; Summarize test results. Takes a vector of test results from `test`.
 ;; Returns the number of failures (0 = success).
-pub fn summarize ::: Console
+pub fn summarize :: Vec Int ::: Console
   => results
   total := length results
   pass-results := /? (r -> nth 0 r == :pass)
