@@ -2583,8 +2583,13 @@ public final class Interpreter {
         if (left instanceof Long la && right instanceof Long lb) {
             return longOp.apply(la, lb);
         }
-        throw new IrijRuntimeError(
-            "Cannot apply arithmetic to " + Values.typeName(left) + " and " + Values.typeName(right), loc);
+        String msg = "Cannot apply arithmetic to " + Values.typeName(left) + " and " + Values.typeName(right);
+        if (left instanceof MatchFn || left instanceof Values.BuiltinFn
+            || left instanceof ContractedFn || left instanceof SpecContractFn
+            || left instanceof Values.ComposedFn) {
+            msg += ". Hint: to pass a negative number, use parentheses: f (-" + Values.toIrijString(right) + ")";
+        }
+        throw new IrijRuntimeError(msg, loc);
     }
 
     private Object divOp(Object left, Object right, SourceLoc loc) {
