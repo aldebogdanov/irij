@@ -1029,6 +1029,8 @@ public final class Interpreter {
     public void setSourcePath(Path sourcePath) {
         this.sourcePath = sourcePath;
         moduleRegistry.setSourcePath(sourcePath);
+        // Make source dir available to file I/O builtins for relative path resolution.
+        Builtins.setSourceDir(sourcePath);
     }
 
     /**
