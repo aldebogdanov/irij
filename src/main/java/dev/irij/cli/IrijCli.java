@@ -68,8 +68,14 @@ public final class IrijCli {
         }
 
         // ── install subcommand ──────────────────────────────────────────
-        if (args[0].equals("install")) {
+        if (args[0].equals("install") || args[0].equals("seed")) {
             runInstall();
+            return;
+        }
+
+        // ── publish subcommand ─────────────────────────────────────────
+        if (args[0].equals("publish") || args[0].equals("sow")) {
+            runPublish();
             return;
         }
 
@@ -359,12 +365,12 @@ public final class IrijCli {
         try {
             var deps = dev.irij.module.ProjectFile.parseDeps(tomlFile);
             if (deps.isEmpty()) {
-                System.out.println("irij.toml has no dependencies to install.");
+                System.out.println("irij.toml has no seeds to install.");
                 return;
             }
 
-            System.out.println("Installing " + deps.size() + " dependenc"
-                + (deps.size() == 1 ? "y" : "ies") + " ...");
+            System.out.println("Installing " + deps.size() + " seed"
+                + (deps.size() == 1 ? "" : "s") + " ...");
             var resolver = new dev.irij.module.DependencyResolver(projectRoot, System.out);
             var resolved = resolver.resolveAll(deps);
 
@@ -377,9 +383,137 @@ public final class IrijCli {
             System.err.println("Error in irij.toml: " + e.getMessage());
             System.exit(1);
         } catch (IOException e) {
-            System.err.println("Error installing dependencies: " + e.getMessage());
+            System.err.println("Error installing seeds: " + e.getMessage());
             System.exit(1);
         }
+    }
+
+    // ── Publish ─────────────────────────────────────────────────────────
+
+    private static void runPublish() {
+        var projectRoot = Path.of(System.getProperty("user.dir"));
+        var tomlFile = projectRoot.resolve("irij.toml");
+
+        if (!Files.exists(tomlFile)) {
+            System.err.println("No irij.toml found. Cannot publish without project metadata.");
+            System.exit(1);
+            return;
+        }
+
+        try {
+            var result = dev.irij.module.ProjectFile.parseFile(tomlFile);
+            var meta = result.meta();
+
+            // Validate required fields
+            if (meta == null || meta.name().isBlank() || meta.version().isBlank()
+                    || meta.author().isBlank() || meta.description().isBlank()) {
+                System.err.println("Error: irij.toml [project] must have name, version, author, and description.");
+                System.exit(1);
+                return;
+            }
+
+            // Reject path deps
+            for (var dep : result.deps()) {
+                if (dep.source() instanceof dev.irij.module.ProjectFile.DepSource.PathDep) {
+                    System.err.println("Error: cannot publish with path seed '" + dep.name()
+                        + "'. Convert to registry or git seed first.");
+                    System.exit(1);
+                    return;
+                }
+            }
+
+            // Collect .irj files + README + irij.toml
+            var filesToBundle = new ArrayList<Path>();
+            filesToBundle.add(tomlFile);
+            try (var stream = Files.walk(projectRoot, 5)) {
+                stream.filter(p -> Files.isRegularFile(p)
+                        && !p.startsWith(projectRoot.resolve(".git"))
+                        && !p.startsWith(projectRoot.resolve("build"))
+                        && !p.startsWith(projectRoot.resolve(".irij"))
+                        && (p.toString().endsWith(".irj")
+                            || p.getFileName().toString().equalsIgnoreCase("README.md")
+                            || p.getFileName().toString().equalsIgnoreCase("README")))
+                    .forEach(filesToBundle::add);
+            }
+
+            // Build tarball
+            var tarball = Files.createTempFile("irij-publish-", ".tar.gz");
+            try {
+                var tarArgs = new ArrayList<String>();
+                tarArgs.add("tar");
+                tarArgs.add("czf");
+                tarArgs.add(tarball.toString());
+                tarArgs.add("-C");
+                tarArgs.add(projectRoot.toString());
+                for (var f : filesToBundle) {
+                    tarArgs.add(projectRoot.relativize(f).toString());
+                }
+                var pb = new ProcessBuilder(tarArgs)
+                    .redirectErrorStream(true);
+                var proc = pb.start();
+                try (var is = proc.getInputStream()) { is.readAllBytes(); }
+                if (proc.waitFor() != 0) {
+                    System.err.println("Error creating tarball.");
+                    System.exit(1);
+                    return;
+                }
+
+                // Upload to registry
+                var registryUrl = System.getenv().getOrDefault("IRIJ_REGISTRY", "https://irij.online");
+                var url = registryUrl + "/api/seeds/publish";
+
+                System.out.println("Publishing " + meta.name() + " " + meta.version() + " ...");
+
+                // Multipart upload: metadata JSON + tarball
+                var boundary = "----IrijPublish" + System.currentTimeMillis();
+                var metaJson = "{\"name\":" + jsonStr(meta.name())
+                    + ",\"version\":" + jsonStr(meta.version())
+                    + ",\"description\":" + jsonStr(meta.description())
+                    + ",\"author\":" + jsonStr(meta.author())
+                    + ",\"license\":" + jsonStr(meta.license()) + "}";
+
+                var bodyBaos = new ByteArrayOutputStream();
+                bodyBaos.write(("--" + boundary + "\r\n").getBytes());
+                bodyBaos.write("Content-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n".getBytes());
+                bodyBaos.write(metaJson.getBytes());
+                bodyBaos.write(("\r\n--" + boundary + "\r\n").getBytes());
+                bodyBaos.write(("Content-Disposition: form-data; name=\"tarball\"; filename=\""
+                    + meta.name() + "-" + meta.version() + ".tar.gz\"\r\n"
+                    + "Content-Type: application/gzip\r\n\r\n").getBytes());
+                bodyBaos.write(Files.readAllBytes(tarball));
+                bodyBaos.write(("\r\n--" + boundary + "--\r\n").getBytes());
+
+                var client = java.net.http.HttpClient.newHttpClient();
+                var request = java.net.http.HttpRequest.newBuilder()
+                    .uri(java.net.URI.create(url))
+                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(bodyBaos.toByteArray()))
+                    .build();
+
+                var response = client.send(request,
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+
+                if (response.statusCode() == 200 || response.statusCode() == 201) {
+                    System.out.println("Published " + meta.name() + " " + meta.version() + " ✓");
+                } else {
+                    System.err.println("Publish failed (HTTP " + response.statusCode() + "): " + response.body());
+                    System.exit(1);
+                }
+            } finally {
+                Files.deleteIfExists(tarball);
+            }
+        } catch (dev.irij.module.ProjectFile.ParseError e) {
+            System.err.println("Error in irij.toml: " + e.getMessage());
+            System.exit(1);
+        } catch (Exception e) {
+            System.err.println("Error publishing: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
+    private static String jsonStr(String s) {
+        if (s == null) return "\"\"";
+        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
     // ── Bundled JAR runner ────────────────────────────────────────────────
@@ -456,7 +590,8 @@ public final class IrijCli {
               irij build                 package app into self-contained JAR
               irij build <file.irj>      build with explicit entry point
               irij build -o out.jar      build with custom output path
-              irij install               fetch dependencies from irij.toml
+              irij install               fetch seeds from irij.toml (alias: seed)
+              irij publish               publish seed to registry (alias: sow)
               irij test                  run all test-*.irj in ./tests/
               irij test <file.irj>       run a specific test file
               irij test <dir/>           run all test-*.irj in directory

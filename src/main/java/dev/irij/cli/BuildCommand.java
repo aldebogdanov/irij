@@ -136,7 +136,7 @@ public final class BuildCommand {
             var deps = ProjectFile.parseDeps(tomlFile);
             if (deps.isEmpty()) return Map.of();
 
-            System.out.println("  deps:   " + deps.size());
+            System.out.println("  seeds:  " + deps.size());
             var resolver = new DependencyResolver(projectRoot, System.out);
             return resolver.resolveAll(deps);
         } catch (ProjectFile.ParseError e) {

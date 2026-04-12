@@ -74,7 +74,7 @@ class DependencyResolverTest {
             Files.createDirectories(libA);
             Files.writeString(libA.resolve("mod.irj"), "mod lib-a\npub fn a (-> :a)\n");
             Files.writeString(libA.resolve("irij.toml"), """
-                [deps.lib-b]
+                [seeds.lib-b]
                 path = "../lib-b"
                 """);
 
@@ -102,7 +102,7 @@ class DependencyResolverTest {
             Files.createDirectories(libA);
             Files.writeString(libA.resolve("mod.irj"), "mod lib-a\npub fn a (-> :a)\n");
             Files.writeString(libA.resolve("irij.toml"), """
-                [deps.lib-b]
+                [seeds.lib-b]
                 path = "../lib-b"
                 """);
 
@@ -131,7 +131,7 @@ class DependencyResolverTest {
             Files.createDirectories(libB);
             Files.writeString(libB.resolve("mod.irj"), "mod lib-b\npub fn b (-> :b)\n");
             Files.writeString(libB.resolve("irij.toml"), """
-                [deps.lib-c]
+                [seeds.lib-c]
                 path = "../lib-c"
                 """);
 
@@ -140,7 +140,7 @@ class DependencyResolverTest {
             Files.createDirectories(libA);
             Files.writeString(libA.resolve("mod.irj"), "mod lib-a\npub fn a (-> :a)\n");
             Files.writeString(libA.resolve("irij.toml"), """
-                [deps.lib-b]
+                [seeds.lib-b]
                 path = "../lib-b"
                 """);
 
@@ -164,7 +164,7 @@ class DependencyResolverTest {
             Files.createDirectories(libA);
             Files.writeString(libA.resolve("mod.irj"), "mod lib-a\n");
             Files.writeString(libA.resolve("irij.toml"), """
-                [deps.lib-b]
+                [seeds.lib-b]
                 path = "../lib-b"
                 """);
 
@@ -173,7 +173,7 @@ class DependencyResolverTest {
             Files.createDirectories(libB);
             Files.writeString(libB.resolve("mod.irj"), "mod lib-b\n");
             Files.writeString(libB.resolve("irij.toml"), """
-                [deps.lib-a]
+                [seeds.lib-a]
                 path = "../lib-a"
                 """);
 

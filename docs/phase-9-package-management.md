@@ -1,8 +1,14 @@
-# Phase 9 — Package Management (Git Deps)
+# Phase 9 — Package Management (Seeds)
 
 ## Overview
 
-Irij now supports external dependencies via `irij.toml` manifest files (TOML format). Dependencies can come from git repositories (pinned to tags or commits) or local filesystem paths (for development). The `irij.toml` file also holds optional project metadata for the package registry.
+Irij supports external dependencies ("seeds") via `irij.toml` manifest files (TOML format). Seeds can come from:
+
+- **Registry** — the Irij seed registry (version string shorthand)
+- **Git** — repositories pinned to tags or commits
+- **Path** — local filesystem paths (for development)
+
+The `irij.toml` file also holds optional project metadata for the seed registry. Resolution is recursive with cycle detection — transitive seeds are automatically resolved.
 
 ## irij.toml Format
 
@@ -16,56 +22,67 @@ description = "My Irij application"
 author = "user"
 license = "MIT"
 
-[deps.utils]
-git = "https://github.com/user/irij-utils.git"
-tag = "v0.1.0"
-
-[deps.http-extra]
-git = "https://github.com/user/irij-http.git"
-commit = "a7f3b2c1"
-
-[deps.local-lib]
-path = "../my-lib"
+[seeds]
+vrata = "0.1.1"                                                    # registry
+utils = { git = "https://github.com/user/irij-utils.git", tag = "v0.1.0" }  # git
+local-lib = { path = "../my-lib" }                                  # path
 ```
 
 ### Sections
 
 #### `[project]` (optional)
 
-Project metadata for the package registry.
+Project metadata for the seed registry.
 
 | Field | Description |
 |-------|-------------|
-| `name` | Package name |
+| `name` | Seed name |
 | `version` | Semver version string |
 | `description` | Short description |
 | `author` | Author name |
 | `license` | License identifier (e.g. "MIT") |
 
-#### `[deps.<name>]`
+#### `[seeds]`
 
-Each dependency is a TOML table under `[deps.<name>]`.
+Seeds support three formats:
 
-| Property | Description |
-|----------|-------------|
-| `git = "url"` | Git repository URL |
-| `tag = "ref"` | Git tag to checkout (use with `git`) |
-| `commit = "sha"` | Git commit hash to checkout (use with `git`) |
-| `path = "dir"` | Local filesystem path (relative to project root) |
+| Format | Example | Description |
+|--------|---------|-------------|
+| Registry shorthand | `vrata = "0.1.1"` | Download from seed registry |
+| Git inline table | `utils = { git = "...", tag = "v1.0" }` | Clone from git repo |
+| Path inline table | `dev = { path = "../lib" }` | Local filesystem (dev only) |
 
-A git dependency must have either `tag` or `commit`. A path dependency needs only `path`.
+Full table syntax also supported:
 
-## Installing Dependencies
-
-```bash
-irij install
+```toml
+[seeds.utils]
+git = "https://github.com/user/utils.git"
+tag = "v1.0"
 ```
 
-This fetches all git dependencies (if not already cached) and validates local paths. Git deps are cached at `~/.irij/deps/<name>/<ref>/` — subsequent runs are instant.
+Git seeds require `tag` or `commit`. Path seeds need only `path`.
 
-## Using Dependencies
+## Installing Seeds
 
-After deps are declared in `irij.toml`, use them like any module:
+```bash
+irij install    # or: irij seed
+```
+
+Fetches all seeds (if not already cached) and validates local paths. Git seeds cached at `~/.irij/seeds/<name>/<ref>/`. Registry seeds cached at `~/.irij/seeds/<name>/<version>/`.
+
+## Publishing Seeds
+
+```bash
+irij publish    # or: irij sow
+```
+
+Publishes current project to the seed registry. Requires all `[project]` fields (name, version, author, description). Rejects seeds with `path` dependencies.
+
+Override registry URL: `IRIJ_REGISTRY=https://custom.registry irij publish`
+
+## Using Seeds
+
+After seeds are declared in `irij.toml`, use them like any module:
 
 ```irj
 ;; Qualified import
@@ -79,30 +96,34 @@ println ~ helper-fn 42
 ;; Selective import
 use utils {helper-fn other-fn}
 
-;; Sub-module within a dependency
+;; Sub-module within a seed
 use utils.extra :open
 ```
 
-Dependencies are automatically loaded when running a file with `irij file.irj` — no separate install step needed (though `irij install` is useful for pre-fetching).
+Seeds are automatically loaded when running a file with `irij file.irj` — no separate install step needed (though `irij install` is useful for pre-fetching).
 
-## Module Resolution in Dependencies
+## Module Resolution in Seeds
 
-When you write `use depname`, the resolver looks for source files in this order:
+When you write `use seedname`, the resolver looks for source files in this order:
 
-1. `<dep-dir>/src/<depname>.irj`
-2. `<dep-dir>/<depname>.irj`
-3. `<dep-dir>/mod.irj`
+1. `<seed-dir>/src/<seedname>.irj`
+2. `<seed-dir>/<seedname>.irj`
+3. `<seed-dir>/mod.irj`
 
-For sub-modules like `use depname.sub.module`:
+For sub-modules like `use seedname.sub.module`:
 
-1. `<dep-dir>/src/sub/module.irj`
-2. `<dep-dir>/sub/module.irj`
+1. `<seed-dir>/src/sub/module.irj`
+2. `<seed-dir>/sub/module.irj`
 
-## Recommended Dep Layout
+## Transitive Seeds
+
+If a resolved seed has its own `irij.toml` with `[seeds]`, those are resolved recursively. Cycle detection prevents infinite loops. First declaration wins when the same seed appears at multiple levels.
+
+## Recommended Seed Layout
 
 ```
-my-dep/
-  irij.toml           ;; project metadata + transitive deps
+my-seed/
+  irij.toml           ;; project metadata + seeds
   mod.irj             ;; or <name>.irj — main module
   src/
     helpers.irj        ;; sub-module: use <name>.helpers
@@ -115,7 +136,7 @@ When resolving `use some.module`, the registry checks:
 1. **Cache** — already-loaded modules
 2. **Factories** — Java-implemented modules
 3. **Classpath** — `std/*.irj` (standard library)
-4. **Dep paths** — from `irij.toml`
+4. **Seed paths** — from `irij.toml [seeds]`
 5. **File system** — relative to current file's directory
 
 ## Implementation
@@ -123,13 +144,13 @@ When resolving `use some.module`, the registry checks:
 | File | Role |
 |------|------|
 | `ProjectFile.java` | Parser for `irij.toml` format (uses toml4j) |
-| `DependencyResolver.java` | Git clone/cache + local path resolution |
-| `ModuleRegistry.java` | Extended with dep path resolution (step 4) |
+| `DependencyResolver.java` | Registry download, git clone/cache, local path, transitive resolution |
+| `ModuleRegistry.java` | Extended with seed path resolution (step 4) |
 | `Interpreter.java` | `loadDeps(projectRoot)` method |
-| `IrijCli.java` | `irij install` command + auto-load in `runFile` |
+| `IrijCli.java` | `irij install`/`seed`, `irij publish`/`sow` commands |
 
 ## Tests
 
-- 12 `ProjectFile` parser tests (git+tag, git+commit, path, multiple, metadata, errors)
-- 3 `DependencyResolver` tests (local path resolution)
-- 8 integration tests (end-to-end: irij.toml → use module → run)
+- 17 `ProjectFile` parser tests (registry shorthand, inline tables, git, path, metadata, errors)
+- 8 `DependencyResolver` tests (local path, transitive, deep transitive, cycle detection)
+- 9 integration tests (end-to-end: irij.toml → use module → run, including transitive)

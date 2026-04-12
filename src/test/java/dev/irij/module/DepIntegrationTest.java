@@ -47,7 +47,7 @@ class DepIntegrationTest {
 
             // Create irij.toml
             Files.writeString(tmp.resolve("irij.toml"), """
-                [deps.mylib]
+                [seeds.mylib]
                 path = "mylib"
                 """);
 
@@ -69,7 +69,7 @@ class DepIntegrationTest {
                 """);
 
             Files.writeString(tmp.resolve("irij.toml"), """
-                [deps.utils]
+                [seeds.utils]
                 path = "utils"
                 """);
 
@@ -92,7 +92,7 @@ class DepIntegrationTest {
                 """);
 
             Files.writeString(tmp.resolve("irij.toml"), """
-                [deps.mathext]
+                [seeds.mathext]
                 path = "mathext"
                 """);
 
@@ -115,7 +115,7 @@ class DepIntegrationTest {
                 """);
 
             Files.writeString(tmp.resolve("irij.toml"), """
-                [deps.tools]
+                [seeds.tools]
                 path = "tools"
                 """);
 
@@ -146,7 +146,7 @@ class DepIntegrationTest {
                 "mod greeter\npub fn hi\n  (x -> \"hi \" ++ x)\n");
 
             Files.writeString(tmp.resolve("irij.toml"), """
-                [deps.greeter]
+                [seeds.greeter]
                 path = "greeter"
                 """);
 
@@ -168,7 +168,7 @@ class DepIntegrationTest {
                 """);
 
             Files.writeString(tmp.resolve("irij.toml"), """
-                [deps.fancy]
+                [seeds.fancy]
                 path = "fancy"
                 """);
 
@@ -199,13 +199,13 @@ class DepIntegrationTest {
                   (name -> base-greet name ++ "!")
                 """);
             Files.writeString(libMid.resolve("irij.toml"), """
-                [deps.lib-base]
+                [seeds.lib-base]
                 path = "../lib-base"
                 """);
 
             // Project depends on lib-mid only
             Files.writeString(tmp.resolve("irij.toml"), """
-                [deps.lib-mid]
+                [seeds.lib-mid]
                 path = "lib-mid"
                 """);
 

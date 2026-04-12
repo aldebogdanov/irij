@@ -7,7 +7,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Parser for {@code irij.toml} project manifest files.
@@ -21,31 +20,34 @@ import java.util.Map;
  * author = "user"
  * license = "MIT"
  *
- * [deps.vrata]
- * git = "https://github.com/aldebogdanov/vrata.git"
- * tag = "v0.1.1"
- *
- * [deps.local-lib]
- * path = "../my-lib"
+ * [seeds]
+ * vrata = "0.1.1"                                          # registry shorthand
+ * utils = { git = "https://github.com/user/utils.git", tag = "v1.0" }  # git inline
+ * local-lib = { path = "../my-lib" }                        # path inline
  * </pre>
  *
- * <p>Each dependency is a TOML table under {@code [deps.<name>]}.
- * Git dependencies require a {@code git} URL and either {@code tag} or {@code commit}.
- * Local dependencies use {@code path} (relative to project root).
+ * <p>Seeds (dependencies) support three source types:
+ * <ul>
+ *   <li><b>Registry</b> — bare string version: {@code vrata = "0.1.1"}</li>
+ *   <li><b>Git</b> — table with {@code git} URL and {@code tag} or {@code commit}</li>
+ *   <li><b>Path</b> — table with {@code path} (relative to project root, dev only)</li>
+ * </ul>
  *
- * <p>The {@code [project]} section is optional metadata for the package registry.
+ * <p>The {@code [project]} section is optional metadata for the seed registry.
  */
 public final class ProjectFile {
 
-    /** A single dependency declaration. */
+    /** A single seed (dependency) source. */
     public sealed interface DepSource {
-        /** Git repository dependency. */
+        /** Registry seed — resolved from the Irij seed registry. */
+        record RegistryDep(String version) implements DepSource {}
+        /** Git repository seed. */
         record GitDep(String url, String ref) implements DepSource {}
-        /** Local path dependency (for development). */
+        /** Local path seed (for development). */
         record PathDep(String path) implements DepSource {}
     }
 
-    /** A named dependency with its source. */
+    /** A named seed with its source. */
     public record Dependency(String name, DepSource source) {}
 
     /** Project metadata from [project] section. */
@@ -85,54 +87,62 @@ public final class ProjectFile {
             );
         }
 
-        // Parse [deps.*] sections
-        var deps = new ArrayList<Dependency>();
-        var depsTable = toml.getTable("deps");
-        if (depsTable != null) {
-            for (var entry : depsTable.entrySet()) {
-                var depName = entry.getKey();
-                if (!(entry.getValue() instanceof com.moandjiezana.toml.Toml depToml)) {
-                    // Try as a table from the map representation
-                    var depMap = depsTable.getTable(depName);
-                    if (depMap == null) {
-                        throw new ParseError("Dependency '" + depName + "' must be a TOML table");
+        // Parse [seeds] section
+        var seeds = new ArrayList<Dependency>();
+        var seedsTable = toml.getTable("seeds");
+        if (seedsTable != null) {
+            for (var entry : seedsTable.entrySet()) {
+                var seedName = entry.getKey();
+                var value = entry.getValue();
+
+                if (value instanceof String version) {
+                    // Registry shorthand: vrata = "0.1.1"
+                    seeds.add(new Dependency(seedName, new DepSource.RegistryDep(version)));
+                } else if (value instanceof com.moandjiezana.toml.Toml seedToml) {
+                    // Full table: [seeds.name] with git/path/version keys
+                    seeds.add(buildSeed(seedName, seedToml));
+                } else {
+                    // Inline table comes as HashMap from toml4j
+                    var seedSubTable = seedsTable.getTable(seedName);
+                    if (seedSubTable != null) {
+                        seeds.add(buildSeed(seedName, seedSubTable));
+                    } else {
+                        throw new ParseError("Seed '" + seedName
+                            + "' must be a version string or table");
                     }
-                    deps.add(buildDep(depName, depMap));
-                    continue;
                 }
-                deps.add(buildDepFromToml(depName, depToml));
             }
         }
 
-        return new ParseResult(meta, List.copyOf(deps));
+        return new ParseResult(meta, List.copyOf(seeds));
     }
 
-    /** Extract just the dependency list (convenience for loadDeps). */
+    /** Extract just the seed list (convenience for loadDeps). */
     public static List<Dependency> parseDeps(Path tomlFile) throws IOException {
         return parseFile(tomlFile).deps();
     }
 
-    private static Dependency buildDepFromToml(String name, Toml table) {
+    private static Dependency buildSeed(String name, Toml table) {
         var gitUrl = table.getString("git");
         var tag = table.getString("tag");
         var commit = table.getString("commit");
         var path = table.getString("path");
+        var version = table.getString("version");
 
         if (gitUrl != null) {
             var ref = tag != null ? tag : commit;
             if (ref == null) {
-                throw new ParseError("Git dependency '" + name + "' requires 'tag' or 'commit'");
+                throw new ParseError("Git seed '" + name + "' requires 'tag' or 'commit'");
             }
             return new Dependency(name, new DepSource.GitDep(gitUrl, ref));
         } else if (path != null) {
             return new Dependency(name, new DepSource.PathDep(path));
+        } else if (version != null) {
+            return new Dependency(name, new DepSource.RegistryDep(version));
         } else {
-            throw new ParseError("Dependency '" + name + "' must have 'git' or 'path'");
+            throw new ParseError("Seed '" + name
+                + "' must have 'git', 'path', or 'version'");
         }
-    }
-
-    private static Dependency buildDep(String name, Toml table) {
-        return buildDepFromToml(name, table);
     }
 
     /** Result of parsing irij.toml. */

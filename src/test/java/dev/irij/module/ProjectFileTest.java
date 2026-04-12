@@ -15,9 +15,9 @@ class ProjectFileTest {
     @Nested
     class Parsing {
 
-        @Test void parseGitDepWithTag() {
+        @Test void parseGitSeedWithTag() {
             var result = ProjectFile.parse("""
-                [deps.utils]
+                [seeds.utils]
                 git = "https://github.com/user/irij-utils.git"
                 tag = "v0.1.0"
                 """);
@@ -29,9 +29,9 @@ class ProjectFileTest {
             assertEquals("v0.1.0", git.ref());
         }
 
-        @Test void parseGitDepWithCommit() {
+        @Test void parseGitSeedWithCommit() {
             var result = ProjectFile.parse("""
-                [deps.mylib]
+                [seeds.mylib]
                 git = "https://github.com/user/mylib.git"
                 commit = "a7f3b2c1"
                 """);
@@ -40,9 +40,9 @@ class ProjectFileTest {
             assertEquals("a7f3b2c1", git.ref());
         }
 
-        @Test void parsePathDep() {
+        @Test void parsePathSeed() {
             var result = ProjectFile.parse("""
-                [deps.local-lib]
+                [seeds.local-lib]
                 path = "../my-lib"
                 """);
             assertEquals(1, result.deps().size());
@@ -52,17 +52,60 @@ class ProjectFileTest {
             assertEquals("../my-lib", pathDep.path());
         }
 
-        @Test void parseMultipleDeps() {
+        @Test void parseRegistryShorthand() {
             var result = ProjectFile.parse("""
-                # My project dependencies
-                [deps.utils]
+                [seeds]
+                vrata = "0.1.1"
+                utils = "1.0.0"
+                """);
+            assertEquals(2, result.deps().size());
+            var vrata = result.deps().stream()
+                .filter(d -> d.name().equals("vrata")).findFirst().orElseThrow();
+            assertInstanceOf(ProjectFile.DepSource.RegistryDep.class, vrata.source());
+            assertEquals("0.1.1", ((ProjectFile.DepSource.RegistryDep) vrata.source()).version());
+        }
+
+        @Test void parseInlineGitSeed() {
+            var result = ProjectFile.parse("""
+                [seeds]
+                router = { git = "https://github.com/user/router.git", tag = "v0.2.0" }
+                """);
+            assertEquals(1, result.deps().size());
+            assertInstanceOf(ProjectFile.DepSource.GitDep.class, result.deps().get(0).source());
+            var git = (ProjectFile.DepSource.GitDep) result.deps().get(0).source();
+            assertEquals("https://github.com/user/router.git", git.url());
+            assertEquals("v0.2.0", git.ref());
+        }
+
+        @Test void parseInlinePathSeed() {
+            var result = ProjectFile.parse("""
+                [seeds]
+                local-lib = { path = "../my-lib" }
+                """);
+            assertEquals(1, result.deps().size());
+            assertInstanceOf(ProjectFile.DepSource.PathDep.class, result.deps().get(0).source());
+        }
+
+        @Test void parseMixedSeeds() {
+            var result = ProjectFile.parse("""
+                [seeds]
+                vrata = "0.1.1"
+                router = { git = "https://github.com/user/router.git", tag = "v0.2.0" }
+                local-dev = { path = "../dev" }
+                """);
+            assertEquals(3, result.deps().size());
+        }
+
+        @Test void parseMultipleFullTableSeeds() {
+            var result = ProjectFile.parse("""
+                [seeds.utils]
                 git = "https://github.com/user/utils.git"
                 tag = "v1.0"
 
-                [deps.local]
+                [seeds.local]
                 path = "./libs/local"
 
-                [deps.other]
+                [seeds.other]
                 git = "https://github.com/user/other.git"
                 commit = "abc123"
                 """);
@@ -100,15 +143,14 @@ class ProjectFileTest {
             assertEquals("MIT", result.meta().license());
         }
 
-        @Test void parseProjectMetaWithDeps() {
+        @Test void parseProjectMetaWithSeeds() {
             var result = ProjectFile.parse("""
                 [project]
                 name = "my-app"
                 version = "0.1.0"
 
-                [deps.vrata]
-                git = "https://github.com/aldebogdanov/vrata.git"
-                tag = "v0.1.1"
+                [seeds]
+                vrata = "0.1.1"
                 """);
             assertNotNull(result.meta());
             assertEquals("my-app", result.meta().name());
@@ -119,7 +161,7 @@ class ProjectFileTest {
         @Test void errorMissingGitRef() {
             assertThrows(ProjectFile.ParseError.class, () ->
                 ProjectFile.parse("""
-                    [deps.broken]
+                    [seeds.broken]
                     git = "https://example.com/repo.git"
                     """));
         }
@@ -127,8 +169,18 @@ class ProjectFileTest {
         @Test void errorMissingSource() {
             assertThrows(ProjectFile.ParseError.class, () ->
                 ProjectFile.parse("""
-                    [deps.no-source]
+                    [seeds.no-source]
                     """));
+        }
+
+        @Test void registryVersionInTable() {
+            var result = ProjectFile.parse("""
+                [seeds.vrata]
+                version = "0.1.1"
+                """);
+            assertEquals(1, result.deps().size());
+            assertInstanceOf(ProjectFile.DepSource.RegistryDep.class, result.deps().get(0).source());
+            assertEquals("0.1.1", ((ProjectFile.DepSource.RegistryDep) result.deps().get(0).source()).version());
         }
     }
 
@@ -144,8 +196,8 @@ class ProjectFileTest {
         @Test void loadFromFile(@TempDir Path tmp) throws IOException {
             var tomlFile = tmp.resolve("irij.toml");
             Files.writeString(tomlFile, """
-                [deps.mylib]
-                path = "./lib"
+                [seeds]
+                mylib = { path = "./lib" }
                 """);
             var result = ProjectFile.parseFile(tomlFile);
             assertEquals(1, result.deps().size());

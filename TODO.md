@@ -459,25 +459,28 @@ Design principle: collection literals mirror their spec syntax.
 
 ---
 
-## Phase 9 — Package Management (Git Deps) ✅
+## Phase 9 — Package Management (Seeds) ✅
 
 - [x] **`irij.toml` manifest format** — `ProjectFile.java` parser (toml4j)
-  - TOML format: `[project]` metadata + `[deps.<name>]` dependency tables
-  - `git = "url"` + `tag = "ref"` or `commit = "sha"` for git deps
-  - `path = "dir"` for local path deps
+  - TOML format: `[project]` metadata + `[seeds]` section
+  - Registry shorthand: `vrata = "0.1.1"` (bare version string)
+  - Git inline: `utils = { git = "...", tag = "v1.0" }`
+  - Path inline: `dev = { path = "../lib" }`
+  - Full table syntax: `[seeds.name]` with git/path/version keys
   - Project metadata: name, version, description, author, license
-- [x] **`DependencyResolver.java`** — git clone/cache + local path resolution
-  - Git deps cached at `~/.irij/deps/<name>/<ref>/`
-  - Shallow clone (`--depth 1 --branch`) for tags, full clone + checkout for commit hashes
-  - Local path deps resolve relative to project root
+- [x] **`DependencyResolver.java`** — registry, git, path resolution with transitive support
+  - Registry seeds downloaded from irij.online, cached at `~/.irij/seeds/<name>/<version>/`
+  - Git seeds cached at `~/.irij/seeds/<name>/<ref>/`
+  - Transitive resolution: recursively resolves each seed's `irij.toml`
+  - Cycle detection prevents infinite loops
 - [x] **Module resolution extended** — `ModuleRegistry` priority:
-  1. Cache → 2. Factories → 3. Classpath (`std.*`) → 4. **Dep paths** → 5. File system
-  - Dep module lookup: `<dep>/src/<name>.irj`, `<dep>/<name>.irj`, `<dep>/mod.irj`
-  - Sub-module lookup: `<dep>/src/<rest>.irj`, `<dep>/<rest>.irj`
+  1. Cache → 2. Factories → 3. Classpath (`std.*`) → 4. **Seed paths** → 5. File system
 - [x] **Auto-load irij.toml** — `Interpreter.loadDeps(projectRoot)` called in CLI before run
-- [x] **`irij install`** CLI command — fetches all deps, reports resolved paths
-- [x] **Tests** — 23 new (12 ProjectFile parser + 3 DependencyResolver + 8 integration)
-  - Integration tests: local dep modules, sub-modules, open/selective imports, src/ convention, mod.irj fallback
+- [x] **`irij install`/`seed`** CLI command — fetches all seeds
+- [x] **`irij publish`/`sow`** CLI command — publishes to seed registry
+  - Validates required `[project]` fields, rejects path seeds
+  - Bundles .irj + README + irij.toml into tarball, POSTs to registry
+- [x] **Tests** — 34 new (17 ProjectFile + 8 DependencyResolver + 9 integration)
 
 ---
 

@@ -40,7 +40,7 @@ public final class ModuleRegistry {
     private final ModuleLoader loader;
     private Path sourcePath;
 
-    /** Dependency search paths: dep name → source directory (from irij.toml). */
+    /** Seed search paths: seed name → source directory (from irij.toml [seeds]). */
     private final Map<String, Path> depPaths = new LinkedHashMap<>();
 
     /** When true, also search __irij_deps/ and __irij_app/ on classpath. */
@@ -64,7 +64,7 @@ public final class ModuleRegistry {
         return sourcePath;
     }
 
-    /** Register a dependency search path (from irij.toml resolution). */
+    /** Register a seed search path (from irij.toml resolution). */
     public void addDepPath(String depName, Path depSourceDir) {
         depPaths.put(depName, depSourceDir);
     }
@@ -121,7 +121,7 @@ public final class ModuleRegistry {
                 }
             }
 
-            // 5. Dependency paths (from irij.toml)
+            // 5. Seed paths (from irij.toml [seeds])
             mod = loadFromDeps(qualifiedName, loc);
             if (mod != null) {
                 loaded.put(qualifiedName, mod);

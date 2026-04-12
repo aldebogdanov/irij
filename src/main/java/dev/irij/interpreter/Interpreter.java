@@ -1050,7 +1050,7 @@ public final class Interpreter {
     }
 
     /**
-     * Load irij.toml from the given project root and register dependency paths.
+     * Load seeds from irij.toml in the given project root and register their paths.
      * Call this after setSourcePath() and before run().
      */
     public void loadDeps(Path projectRoot) {
