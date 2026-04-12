@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.irij"
-version = "0.2.2"
+version = "0.2.3"
 
 java {
     toolchain {
@@ -65,6 +65,12 @@ sourceSets {
 
 tasks.compileJava {
     dependsOn(generateGrammarSource)
+}
+
+tasks.processResources {
+    filesMatching("irij-version.properties") {
+        expand("version" to project.version)
+    }
 }
 
 tasks.test {

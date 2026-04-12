@@ -34,8 +34,19 @@ import java.util.stream.Collectors;
  */
 public final class IrijCli {
 
-    private static final String VERSION = "0.2.0";
+    private static final String VERSION = loadVersion();
     private static final int DEFAULT_NREPL_PORT = 7888;
+
+    private static String loadVersion() {
+        try (var is = IrijCli.class.getResourceAsStream("/irij-version.properties")) {
+            if (is != null) {
+                var props = new java.util.Properties();
+                props.load(is);
+                return props.getProperty("version", "dev");
+            }
+        } catch (Exception ignored) {}
+        return "dev";
+    }
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {

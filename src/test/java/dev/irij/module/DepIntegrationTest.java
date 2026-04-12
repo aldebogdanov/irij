@@ -178,5 +178,42 @@ class DepIntegrationTest {
                 """);
             assertEquals("~hello~", output);
         }
+
+        @Test void useTransitiveDep(@TempDir Path tmp) throws IOException {
+            // lib-base — no deps
+            var libBase = tmp.resolve("lib-base");
+            Files.createDirectories(libBase);
+            Files.writeString(libBase.resolve("lib-base.irj"), """
+                mod lib-base
+                pub fn base-greet
+                  (name -> "hi " ++ name)
+                """);
+
+            // lib-mid depends on lib-base
+            var libMid = tmp.resolve("lib-mid");
+            Files.createDirectories(libMid);
+            Files.writeString(libMid.resolve("lib-mid.irj"), """
+                mod lib-mid
+                use lib-base :open
+                pub fn mid-greet
+                  (name -> base-greet name ++ "!")
+                """);
+            Files.writeString(libMid.resolve("irij.toml"), """
+                [deps.lib-base]
+                path = "../lib-base"
+                """);
+
+            // Project depends on lib-mid only
+            Files.writeString(tmp.resolve("irij.toml"), """
+                [deps.lib-mid]
+                path = "lib-mid"
+                """);
+
+            var output = runWithDeps(tmp, """
+                use lib-mid :open
+                println ~ mid-greet "world"
+                """);
+            assertEquals("hi world!", output);
+        }
     }
 }

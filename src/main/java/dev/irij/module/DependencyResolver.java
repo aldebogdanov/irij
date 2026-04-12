@@ -14,6 +14,9 @@ import java.util.*;
  * <p>Git dependencies are cloned/cached under {@code ~/.irij/deps/<name>/<ref>/}.
  * Local path dependencies resolve relative to the project root.
  *
+ * <p>Resolution is recursive: if a resolved dependency has its own {@code irij.toml},
+ * its transitive dependencies are resolved too (with cycle detection).
+ *
  * <p>After resolving, each dependency's source directory is registered as a module
  * search path in the {@link ModuleRegistry}.
  */
@@ -30,31 +33,68 @@ public final class DependencyResolver {
     }
 
     /**
-     * Resolve all dependencies and return their source paths.
+     * Resolve all dependencies (including transitive) and return their source paths.
      * Git deps are fetched if not already cached.
      *
      * @return map of dep name → resolved source directory path
      */
     public Map<String, Path> resolveAll(List<Dependency> deps) throws IOException {
         var resolved = new LinkedHashMap<String, Path>();
-        for (var dep : deps) {
-            var path = resolve(dep);
-            resolved.put(dep.name(), path);
-        }
+        var visiting = new HashSet<String>();
+        resolveRecursive(deps, projectRoot, resolved, visiting);
         return resolved;
     }
 
+    /**
+     * Recursively resolve deps. {@code resolved} accumulates all results,
+     * {@code visiting} tracks the current resolution stack for cycle detection.
+     */
+    private void resolveRecursive(List<Dependency> deps, Path contextRoot,
+                                   Map<String, Path> resolved, Set<String> visiting) throws IOException {
+        for (var dep : deps) {
+            var name = dep.name();
+
+            // Cycle detection — check before resolved (a dep in both sets = cycle)
+            if (visiting.contains(name)) {
+                throw new IOException("Circular dependency detected: " + name);
+            }
+
+            // Already resolved — skip (first declaration wins)
+            if (resolved.containsKey(name)) continue;
+
+            visiting.add(name);
+
+            var path = resolve(dep, contextRoot);
+            resolved.put(name, path);
+
+            // Check for transitive deps in resolved dep's irij.toml
+            var depToml = path.resolve("irij.toml");
+            if (Files.exists(depToml)) {
+                try {
+                    var transitiveDeps = ProjectFile.parseDeps(depToml);
+                    if (!transitiveDeps.isEmpty()) {
+                        resolveRecursive(transitiveDeps, path, resolved, visiting);
+                    }
+                } catch (ProjectFile.ParseError e) {
+                    throw new IOException("Error in " + name + "'s irij.toml: " + e.getMessage());
+                }
+            }
+
+            visiting.remove(name);
+        }
+    }
+
     /** Resolve a single dependency to a local path. */
-    private Path resolve(Dependency dep) throws IOException {
+    private Path resolve(Dependency dep, Path contextRoot) throws IOException {
         return switch (dep.source()) {
-            case DepSource.GitDep git -> resolveGit(dep.name(), git);
-            case DepSource.PathDep local -> resolveLocal(dep.name(), local);
+            case DepSource.GitDep git -> resolveGit(dep.name(), git, contextRoot);
+            case DepSource.PathDep local -> resolveLocal(dep.name(), local, contextRoot);
         };
     }
 
-    private Path resolveGit(String name, DepSource.GitDep git) throws IOException {
+    private Path resolveGit(String name, DepSource.GitDep git, Path contextRoot) throws IOException {
         // Check project-local .irij/deps/ first (supports pre-resolved deps in build envs)
-        var localDepDir = projectRoot.resolve(".irij/deps").resolve(name).resolve(sanitizeRef(git.ref()));
+        var localDepDir = contextRoot.resolve(".irij/deps").resolve(name).resolve(sanitizeRef(git.ref()));
         if (Files.isDirectory(localDepDir)) {
             return localDepDir;
         }
@@ -96,8 +136,8 @@ public final class DependencyResolver {
         return depDir;
     }
 
-    private Path resolveLocal(String name, DepSource.PathDep local) throws IOException {
-        var resolved = projectRoot.resolve(local.path()).normalize();
+    private Path resolveLocal(String name, DepSource.PathDep local, Path contextRoot) throws IOException {
+        var resolved = contextRoot.resolve(local.path()).normalize();
         if (!Files.isDirectory(resolved)) {
             throw new IOException("Local dependency '" + name + "' path not found: " + resolved);
         }
