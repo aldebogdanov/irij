@@ -24,8 +24,16 @@ public final class Interpreter {
     private final PrintStream out;
     private final ModuleRegistry moduleRegistry;
 
-    // Source directory for static file serving
+    // Source directory for static file serving and relative path resolution
     private Path sourcePath;
+
+    /** Resolve relative file paths against sourcePath. Shared by all threads using this interpreter. */
+    private final java.util.function.Function<String, Path> pathResolver = path -> {
+        var p = Path.of(path);
+        if (p.isAbsolute()) return p;
+        var dir = sourcePath;
+        return dir != null ? dir.toAbsolutePath().resolve(p) : p;
+    };
 
     // Bundled JAR mode: load deps/resources from classpath
     private boolean bundledMode = false;
@@ -99,7 +107,7 @@ public final class Interpreter {
         if (sandboxed) {
             Builtins.installSandboxed(globalEnv, out);
         } else {
-            Builtins.install(globalEnv, out);
+            Builtins.install(globalEnv, out, pathResolver);
         }
         installInterpreterBuiltins();
         if (sandboxed) {
@@ -1029,8 +1037,6 @@ public final class Interpreter {
     public void setSourcePath(Path sourcePath) {
         this.sourcePath = sourcePath;
         moduleRegistry.setSourcePath(sourcePath);
-        // Make source dir available to file I/O builtins for relative path resolution.
-        Builtins.setSourceDir(sourcePath);
     }
 
     /**
@@ -1754,7 +1760,7 @@ public final class Interpreter {
 
         // Execute in a fresh environment with builtins
         var moduleEnv = new Environment();
-        Builtins.install(moduleEnv, out);
+        Builtins.install(moduleEnv, out, pathResolver);
         // Install interpreter builtins (fold, spawn) in module env too
         // Forward interpreter-level builtins to module env
         for (var name : List.of("fold", "spawn", "try", "raw-http-serve",

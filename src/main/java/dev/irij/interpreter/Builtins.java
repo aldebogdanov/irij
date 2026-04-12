@@ -20,9 +20,6 @@ public final class Builtins {
 
     private Builtins() {}
 
-    /** Source directory for relative path resolution in file I/O builtins. */
-    private static volatile Path sourceDir;
-
     /** Forbidden builtins in sandbox mode — I/O, file, DB, HTTP. */
     private static final List<String> SANDBOX_FORBIDDEN = List.of(
         "read-file", "write-file", "delete-file", "append-file",
@@ -36,7 +33,7 @@ public final class Builtins {
      * and HTTP operations are replaced with error stubs.
      */
     public static void installSandboxed(Environment env, PrintStream out) {
-        install(env, out);
+        install(env, out, null);
         for (var name : SANDBOX_FORBIDDEN) {
             String msg = name + ": not available in sandbox mode";
             int arity = env.isDefined(name)
@@ -48,8 +45,9 @@ public final class Builtins {
         }
     }
 
-    /** Install all builtins into the given environment. */
-    public static void install(Environment env, PrintStream out) {
+    /** Install all builtins into the given environment.
+     *  @param pathResolver resolves relative file paths (null = use CWD) */
+    public static void install(Environment env, PrintStream out, java.util.function.Function<String, Path> pathResolver) {
         // Boolean constants
         env.define("true", Boolean.TRUE);
         env.define("false", Boolean.FALSE);
@@ -506,7 +504,7 @@ public final class Builtins {
         // ── IO primitives ──────────────────────────────────────────────
         env.define("read-file", new BuiltinFn("read-file", 1, args -> {
             var path = asString(args.get(0), "read-file");
-            var resolved = resolvePath(path);
+            var resolved = resolvePath(path, pathResolver);
             try { return Files.readString(resolved); }
             catch (java.nio.file.NoSuchFileException e) {
                 throw new IrijRuntimeError("read-file: file not found: " + resolved);
@@ -519,7 +517,7 @@ public final class Builtins {
         env.define("write-file", new BuiltinFn("write-file", 2, args -> {
             var path = asString(args.get(0), "write-file");
             var content = asString(args.get(1), "write-file");
-            try { Files.writeString(resolvePath(path), content); }
+            try { Files.writeString(resolvePath(path, pathResolver), content); }
             catch (IOException e) {
                 throw new IrijRuntimeError("write-file: " + e.getMessage());
             }
@@ -527,7 +525,7 @@ public final class Builtins {
         }));
 
         env.define("file-exists?", new BuiltinFn("file-exists?", 1, args -> {
-            return Files.exists(resolvePath(asString(args.get(0), "file-exists?")));
+            return Files.exists(resolvePath(asString(args.get(0), "file-exists?"), pathResolver));
         }));
 
         env.define("get-env", new BuiltinFn("get-env", 1, args -> {
@@ -562,7 +560,7 @@ public final class Builtins {
         // ── Additional FS primitives ────────────────────────────────────
         env.define("list-dir", new BuiltinFn("list-dir", 1, args -> {
             var path = asString(args.get(0), "list-dir");
-            try (var stream = Files.list(resolvePath(path))) {
+            try (var stream = Files.list(resolvePath(path, pathResolver))) {
                 return new IrijVector(stream.map(p -> (Object) p.getFileName().toString()).toList());
             } catch (IOException e) {
                 throw new IrijRuntimeError("list-dir: " + e.getMessage());
@@ -571,7 +569,7 @@ public final class Builtins {
 
         env.define("delete-file", new BuiltinFn("delete-file", 1, args -> {
             var path = asString(args.get(0), "delete-file");
-            try { Files.deleteIfExists(resolvePath(path)); }
+            try { Files.deleteIfExists(resolvePath(path, pathResolver)); }
             catch (IOException e) {
                 throw new IrijRuntimeError("delete-file: " + e.getMessage());
             }
@@ -580,7 +578,7 @@ public final class Builtins {
 
         env.define("make-dir", new BuiltinFn("make-dir", 1, args -> {
             var path = asString(args.get(0), "make-dir");
-            try { Files.createDirectories(resolvePath(path)); }
+            try { Files.createDirectories(resolvePath(path, pathResolver)); }
             catch (IOException e) {
                 throw new IrijRuntimeError("make-dir: " + e.getMessage());
             }
@@ -591,7 +589,7 @@ public final class Builtins {
             var path = asString(args.get(0), "append-file");
             var content = asString(args.get(1), "append-file");
             try {
-                Files.writeString(resolvePath(path), content,
+                Files.writeString(resolvePath(path, pathResolver), content,
                     java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.APPEND);
             } catch (IOException e) {
@@ -873,21 +871,13 @@ public final class Builtins {
         throw new IrijRuntimeError(context + " expects Str, got " + Values.typeName(value));
     }
 
-    /** Set the source directory for relative path resolution in file I/O builtins. */
-    public static void setSourceDir(Path dir) {
-        sourceDir = dir != null ? dir.toAbsolutePath() : null;
-    }
-
     /**
-     * Resolve a file path. If the path is relative and a source directory
-     * is available, resolve against it. Absolute paths are returned as-is.
+     * Resolve a file path using the given resolver function.
+     * If no resolver is provided, paths resolve against CWD (Path.of behavior).
      */
-    static Path resolvePath(String path) {
-        var p = Path.of(path);
-        if (p.isAbsolute()) return p;
-        var dir = sourceDir;
-        if (dir != null) return dir.resolve(p);
-        return p;
+    static Path resolvePath(String path, java.util.function.Function<String, Path> resolver) {
+        if (resolver != null) return resolver.apply(path);
+        return Path.of(path);
     }
 
     static int compare(Object a, Object b) {
