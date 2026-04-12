@@ -338,17 +338,17 @@ public final class IrijCli {
 
     private static void runInstall() {
         var projectRoot = Path.of(System.getProperty("user.dir"));
-        var depsFile = projectRoot.resolve("deps.irj");
+        var tomlFile = projectRoot.resolve("irij.toml");
 
-        if (!Files.exists(depsFile)) {
-            System.out.println("No deps.irj found in " + projectRoot);
+        if (!Files.exists(tomlFile)) {
+            System.out.println("No irij.toml found in " + projectRoot);
             return;
         }
 
         try {
-            var deps = dev.irij.module.DepsFile.parse(depsFile);
+            var deps = dev.irij.module.ProjectFile.parseDeps(tomlFile);
             if (deps.isEmpty()) {
-                System.out.println("deps.irj is empty — no dependencies to install.");
+                System.out.println("irij.toml has no dependencies to install.");
                 return;
             }
 
@@ -362,8 +362,8 @@ public final class IrijCli {
                 System.out.println("  " + entry.getKey() + " → " + entry.getValue());
             }
             System.out.println("\nDone.");
-        } catch (dev.irij.module.DepsFile.DepsParseError e) {
-            System.err.println("Error in deps.irj: " + e.getMessage());
+        } catch (dev.irij.module.ProjectFile.ParseError e) {
+            System.err.println("Error in irij.toml: " + e.getMessage());
             System.exit(1);
         } catch (IOException e) {
             System.err.println("Error installing dependencies: " + e.getMessage());
@@ -445,7 +445,7 @@ public final class IrijCli {
               irij build                 package app into self-contained JAR
               irij build <file.irj>      build with explicit entry point
               irij build -o out.jar      build with custom output path
-              irij install               fetch dependencies from deps.irj
+              irij install               fetch dependencies from irij.toml
               irij test                  run all test-*.irj in ./tests/
               irij test <file.irj>       run a specific test file
               irij test <dir/>           run all test-*.irj in directory

@@ -461,12 +461,11 @@ Design principle: collection literals mirror their spec syntax.
 
 ## Phase 9 — Package Management (Git Deps) ✅
 
-- [x] **`deps.irj` file format** — `DepsFile.java` parser
-  - `dep name` blocks with indented properties
-  - `git "url"` + `tag "ref"` or `commit "sha"` for git deps
-  - `path "dir"` for local path deps
-  - Comments (`;;`) and blank lines supported
-  - Error reporting with line numbers
+- [x] **`irij.toml` manifest format** — `ProjectFile.java` parser (toml4j)
+  - TOML format: `[project]` metadata + `[deps.<name>]` dependency tables
+  - `git = "url"` + `tag = "ref"` or `commit = "sha"` for git deps
+  - `path = "dir"` for local path deps
+  - Project metadata: name, version, description, author, license
 - [x] **`DependencyResolver.java`** — git clone/cache + local path resolution
   - Git deps cached at `~/.irij/deps/<name>/<ref>/`
   - Shallow clone (`--depth 1 --branch`) for tags, full clone + checkout for commit hashes
@@ -475,9 +474,9 @@ Design principle: collection literals mirror their spec syntax.
   1. Cache → 2. Factories → 3. Classpath (`std.*`) → 4. **Dep paths** → 5. File system
   - Dep module lookup: `<dep>/src/<name>.irj`, `<dep>/<name>.irj`, `<dep>/mod.irj`
   - Sub-module lookup: `<dep>/src/<rest>.irj`, `<dep>/<rest>.irj`
-- [x] **Auto-load deps.irj** — `Interpreter.loadDeps(projectRoot)` called in CLI before run
+- [x] **Auto-load irij.toml** — `Interpreter.loadDeps(projectRoot)` called in CLI before run
 - [x] **`irij install`** CLI command — fetches all deps, reports resolved paths
-- [x] **Tests** — 24 new (12 DepsFile parser + 3 DependencyResolver + 8 integration + 1 empty)
+- [x] **Tests** — 23 new (12 ProjectFile parser + 3 DependencyResolver + 8 integration)
   - Integration tests: local dep modules, sub-modules, open/selective imports, src/ convention, mod.irj fallback
 
 ---

@@ -26,6 +26,7 @@ dependencies {
     implementation("org.jline:jline:3.26.3")
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.xerial:sqlite-jdbc:3.47.1.0")
+    implementation("com.moandjiezana.toml:toml4j:0.7.2")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

@@ -1,6 +1,6 @@
 package dev.irij.cli;
 
-import dev.irij.module.DepsFile;
+import dev.irij.module.ProjectFile;
 import dev.irij.module.DependencyResolver;
 
 import java.io.*;
@@ -129,18 +129,18 @@ public final class BuildCommand {
     }
 
     private static Map<String, Path> resolveDeps(Path projectRoot) throws IOException {
-        Path depsFile = projectRoot.resolve("deps.irj");
-        if (!Files.exists(depsFile)) return Map.of();
+        Path tomlFile = projectRoot.resolve("irij.toml");
+        if (!Files.exists(tomlFile)) return Map.of();
 
         try {
-            var deps = DepsFile.parse(depsFile);
+            var deps = ProjectFile.parseDeps(tomlFile);
             if (deps.isEmpty()) return Map.of();
 
             System.out.println("  deps:   " + deps.size());
             var resolver = new DependencyResolver(projectRoot, System.out);
             return resolver.resolveAll(deps);
-        } catch (DepsFile.DepsParseError e) {
-            System.err.println("Error in deps.irj: " + e.getMessage());
+        } catch (ProjectFile.ParseError e) {
+            System.err.println("Error in irij.toml: " + e.getMessage());
             System.exit(1);
             return Map.of();
         }

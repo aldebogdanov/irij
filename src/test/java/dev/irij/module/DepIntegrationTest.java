@@ -45,10 +45,10 @@ class DepIntegrationTest {
                   (name -> "hello " ++ name)
                 """);
 
-            // Create deps.irj
-            Files.writeString(tmp.resolve("deps.irj"), """
-                dep mylib
-                  path "mylib"
+            // Create irij.toml
+            Files.writeString(tmp.resolve("irij.toml"), """
+                [deps.mylib]
+                path = "mylib"
                 """);
 
             var output = runWithDeps(tmp, """
@@ -68,9 +68,9 @@ class DepIntegrationTest {
                   (x -> x * 2)
                 """);
 
-            Files.writeString(tmp.resolve("deps.irj"), """
-                dep utils
-                  path "utils"
+            Files.writeString(tmp.resolve("irij.toml"), """
+                [deps.utils]
+                path = "utils"
                 """);
 
             var output = runWithDeps(tmp, """
@@ -91,9 +91,9 @@ class DepIntegrationTest {
                   (x -> x * x)
                 """);
 
-            Files.writeString(tmp.resolve("deps.irj"), """
-                dep mathext
-                  path "mathext"
+            Files.writeString(tmp.resolve("irij.toml"), """
+                [deps.mathext]
+                path = "mathext"
                 """);
 
             var output = runWithDeps(tmp, """
@@ -114,9 +114,9 @@ class DepIntegrationTest {
                   (x -> x + 2)
                 """);
 
-            Files.writeString(tmp.resolve("deps.irj"), """
-                dep tools
-                  path "tools"
+            Files.writeString(tmp.resolve("irij.toml"), """
+                [deps.tools]
+                path = "tools"
                 """);
 
             var output = runWithDeps(tmp, """
@@ -126,14 +126,14 @@ class DepIntegrationTest {
             assertEquals("10", output);
         }
 
-        @Test void noDepsFileIsOk(@TempDir Path tmp) {
-            // No deps.irj — should work fine, just no dep modules available
+        @Test void noTomlFileIsOk(@TempDir Path tmp) {
+            // No irij.toml — should work fine, just no dep modules available
             var output = runWithDeps(tmp, "println 42\n");
             assertEquals("42", output);
         }
 
-        @Test void emptyDepsFileIsOk(@TempDir Path tmp) throws IOException {
-            Files.writeString(tmp.resolve("deps.irj"), ";; no deps yet\n");
+        @Test void emptyTomlFileIsOk(@TempDir Path tmp) throws IOException {
+            Files.writeString(tmp.resolve("irij.toml"), "# no deps yet\n");
             var output = runWithDeps(tmp, "println 42\n");
             assertEquals("42", output);
         }
@@ -145,9 +145,9 @@ class DepIntegrationTest {
             Files.writeString(libDir.resolve("mod.irj"),
                 "mod greeter\npub fn hi\n  (x -> \"hi \" ++ x)\n");
 
-            Files.writeString(tmp.resolve("deps.irj"), """
-                dep greeter
-                  path "greeter"
+            Files.writeString(tmp.resolve("irij.toml"), """
+                [deps.greeter]
+                path = "greeter"
                 """);
 
             var output = runWithDeps(tmp, """
@@ -167,9 +167,9 @@ class DepIntegrationTest {
                   (s -> "~" ++ s ++ "~")
                 """);
 
-            Files.writeString(tmp.resolve("deps.irj"), """
-                dep fancy
-                  path "fancy"
+            Files.writeString(tmp.resolve("irij.toml"), """
+                [deps.fancy]
+                path = "fancy"
                 """);
 
             var output = runWithDeps(tmp, """

@@ -1,7 +1,7 @@
 package dev.irij.module;
 
-import dev.irij.module.DepsFile.Dependency;
-import dev.irij.module.DepsFile.DepSource;
+import dev.irij.module.ProjectFile.Dependency;
+import dev.irij.module.ProjectFile.DepSource;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -9,7 +9,7 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * Resolves and fetches dependencies declared in {@code deps.irj}.
+ * Resolves and fetches dependencies declared in {@code irij.toml}.
  *
  * <p>Git dependencies are cloned/cached under {@code ~/.irij/deps/<name>/<ref>/}.
  * Local path dependencies resolve relative to the project root.

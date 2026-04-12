@@ -24,7 +24,7 @@ class DependencyResolverTest {
             Files.createDirectories(libDir);
             Files.writeString(libDir.resolve("mod.irj"), "pub fn hello\n  (-> :hello)\n");
 
-            var dep = new DepsFile.Dependency("mylib", new DepsFile.DepSource.PathDep("mylib"));
+            var dep = new ProjectFile.Dependency("mylib", new ProjectFile.DepSource.PathDep("mylib"));
             var out = new PrintStream(new ByteArrayOutputStream());
             var resolver = new DependencyResolver(tmp, out);
             var resolved = resolver.resolveAll(List.of(dep));
@@ -35,7 +35,7 @@ class DependencyResolverTest {
         }
 
         @Test void localPathNotFound(@TempDir Path tmp) {
-            var dep = new DepsFile.Dependency("missing", new DepsFile.DepSource.PathDep("nonexistent"));
+            var dep = new ProjectFile.Dependency("missing", new ProjectFile.DepSource.PathDep("nonexistent"));
             var out = new PrintStream(new ByteArrayOutputStream());
             var resolver = new DependencyResolver(tmp, out);
             assertThrows(IOException.class, () -> resolver.resolveAll(List.of(dep)));
@@ -48,8 +48,8 @@ class DependencyResolverTest {
             Files.createDirectories(lib2);
 
             var deps = List.of(
-                new DepsFile.Dependency("lib1", new DepsFile.DepSource.PathDep("lib1")),
-                new DepsFile.Dependency("lib2", new DepsFile.DepSource.PathDep("lib2"))
+                new ProjectFile.Dependency("lib1", new ProjectFile.DepSource.PathDep("lib1")),
+                new ProjectFile.Dependency("lib2", new ProjectFile.DepSource.PathDep("lib2"))
             );
             var out = new PrintStream(new ByteArrayOutputStream());
             var resolver = new DependencyResolver(tmp, out);

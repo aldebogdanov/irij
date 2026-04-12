@@ -5,7 +5,7 @@ import dev.irij.ast.Node.SourceLoc;
 import dev.irij.interpreter.Values.*;
 
 import dev.irij.module.DependencyResolver;
-import dev.irij.module.DepsFile;
+import dev.irij.module.ProjectFile;
 import dev.irij.module.ModuleRegistry;
 import dev.irij.module.StdModules;
 import dev.irij.parser.IrijParseDriver;
@@ -1050,24 +1050,24 @@ public final class Interpreter {
     }
 
     /**
-     * Load deps.irj from the given project root and register dependency paths.
+     * Load irij.toml from the given project root and register dependency paths.
      * Call this after setSourcePath() and before run().
      */
     public void loadDeps(Path projectRoot) {
-        var depsFile = projectRoot.resolve("deps.irj");
+        var tomlFile = projectRoot.resolve("irij.toml");
         try {
-            var deps = DepsFile.parse(depsFile);
+            var deps = ProjectFile.parseDeps(tomlFile);
             if (deps.isEmpty()) return;
             var resolver = new DependencyResolver(projectRoot, out);
             var resolved = resolver.resolveAll(deps);
             for (var entry : resolved.entrySet()) {
                 moduleRegistry.addDepPath(entry.getKey(), entry.getValue());
             }
-        } catch (DepsFile.DepsParseError e) {
-            throw new IrijRuntimeError("Error in deps.irj: " + e.getMessage(),
+        } catch (ProjectFile.ParseError e) {
+            throw new IrijRuntimeError("Error in irij.toml: " + e.getMessage(),
                 Node.SourceLoc.UNKNOWN);
         } catch (java.io.IOException e) {
-            throw new IrijRuntimeError("Error loading deps.irj: " + e.getMessage(),
+            throw new IrijRuntimeError("Error loading irij.toml: " + e.getMessage(),
                 Node.SourceLoc.UNKNOWN);
         }
     }
