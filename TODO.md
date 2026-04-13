@@ -563,6 +563,7 @@ First real-world applications written in Irij. Dogfood Phases 8–11.
 - [ ] GraalVM Native Image
 - [ ] Channels: `send`, `recv`, `select`
 - [ ] LSP server
+- [ ] Dynamic/variable map keys in map literals (e.g. `{(expr)= val}`) — currently only bare identifiers; use `assoc` as workaround
 
 ---
 

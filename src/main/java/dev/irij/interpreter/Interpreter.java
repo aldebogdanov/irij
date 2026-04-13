@@ -540,6 +540,7 @@ public final class Interpreter {
                         reqMap.put("headers", new IrijMap(reqHeaders));
                         var bodyBytes = exchange.getRequestBody().readAllBytes();
                         reqMap.put("body", new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8));
+                        reqMap.put("__body_bytes", bodyBytes);
                         var req = new IrijMap(reqMap);
 
                         // Inject the raw exchange into the request map so SSE can use it
@@ -569,11 +570,13 @@ public final class Interpreter {
                         // Extract response
                         long status = 200;
                         String respBody = "";
+                        String filePath = null;
                         Map<String, Object> respHeaders = Map.of();
                         if (resp instanceof IrijMap rm) {
                             var e = rm.entries();
                             if (e.get("status") instanceof Long s) status = s;
                             if (e.get("body") instanceof String b) respBody = b;
+                            if (e.get("file") instanceof String f) filePath = f;
                             if (e.get("headers") instanceof IrijMap hm) respHeaders = hm.entries();
                         } else if (resp instanceof String s) {
                             respBody = s;
@@ -589,10 +592,19 @@ public final class Interpreter {
                             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
                         }
 
-                        var respBytes = respBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                        exchange.sendResponseHeaders((int) status, respBytes.length);
-                        try (var os = exchange.getResponseBody()) {
-                            os.write(respBytes);
+                        // If response has a "file" key, send binary file directly
+                        if (filePath != null) {
+                            var fileBytes = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(filePath));
+                            exchange.sendResponseHeaders((int) status, fileBytes.length);
+                            try (var os = exchange.getResponseBody()) {
+                                os.write(fileBytes);
+                            }
+                        } else {
+                            var respBytes = respBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                            exchange.sendResponseHeaders((int) status, respBytes.length);
+                            try (var os = exchange.getResponseBody()) {
+                                os.write(respBytes);
+                            }
                         }
                     } catch (Exception e) {
                         System.err.println("HTTP 500 " + exchange.getRequestMethod() + " " + exchange.getRequestURI() + ": " + e.getMessage());

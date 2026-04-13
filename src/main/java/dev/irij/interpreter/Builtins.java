@@ -25,7 +25,8 @@ public final class Builtins {
         "read-file", "write-file", "delete-file", "append-file",
         "make-dir", "list-dir", "file-exists?",
         "raw-http-request", "raw-http-serve",
-        "raw-db-open", "raw-db-query", "raw-db-exec", "raw-db-close", "raw-db-transaction"
+        "raw-db-open", "raw-db-query", "raw-db-exec", "raw-db-close", "raw-db-transaction",
+        "raw-multipart-field", "raw-multipart-save"
     );
 
     /**
@@ -708,6 +709,128 @@ public final class Builtins {
                 throw new IrijRuntimeError("raw-http-request: " + e.getMessage());
             }
         }));
+
+        // ── Multipart parsing ──────────────────────────────────────────────
+
+        // raw-multipart-field request "fieldname" -> String (text value of named part)
+        env.define("raw-multipart-field", new BuiltinFn("raw-multipart-field", 2, args -> {
+            if (!(args.get(0) instanceof IrijMap req))
+                throw new IrijRuntimeError("raw-multipart-field: expects request Map");
+            var fieldName = asString(args.get(1), "raw-multipart-field");
+            var bodyBytes = req.entries().get("__body_bytes");
+            if (!(bodyBytes instanceof byte[] bytes))
+                throw new IrijRuntimeError("raw-multipart-field: no raw body bytes in request");
+            var contentType = "";
+            var headers = req.entries().get("headers");
+            if (headers instanceof IrijMap hm) {
+                var ct = hm.entries().get("content-type");
+                if (ct instanceof String s) contentType = s;
+            }
+            var boundary = extractBoundary(contentType);
+            if (boundary == null)
+                throw new IrijRuntimeError("raw-multipart-field: no boundary in content-type");
+            return extractMultipartField(bytes, boundary, fieldName);
+        }));
+
+        // raw-multipart-save request "fieldname" "/path/to/file" -> String (saved path)
+        env.define("raw-multipart-save", new BuiltinFn("raw-multipart-save", 3, args -> {
+            if (!(args.get(0) instanceof IrijMap req))
+                throw new IrijRuntimeError("raw-multipart-save: expects request Map");
+            var fieldName = asString(args.get(1), "raw-multipart-save");
+            var savePath = asString(args.get(2), "raw-multipart-save");
+            var bodyBytes = req.entries().get("__body_bytes");
+            if (!(bodyBytes instanceof byte[] bytes))
+                throw new IrijRuntimeError("raw-multipart-save: no raw body bytes in request");
+            var contentType = "";
+            var headers = req.entries().get("headers");
+            if (headers instanceof IrijMap hm) {
+                var ct = hm.entries().get("content-type");
+                if (ct instanceof String s) contentType = s;
+            }
+            var boundary = extractBoundary(contentType);
+            if (boundary == null)
+                throw new IrijRuntimeError("raw-multipart-save: no boundary in content-type");
+            try {
+                saveMultipartFile(bytes, boundary, fieldName, savePath);
+                return savePath;
+            } catch (Exception e) {
+                throw new IrijRuntimeError("raw-multipart-save: " + e.getMessage());
+            }
+        }));
+    }
+
+    // ── Multipart helpers ──────────────────────────────────────────────
+
+    private static String extractBoundary(String contentType) {
+        if (contentType == null) return null;
+        for (var part : contentType.split(";")) {
+            var trimmed = part.trim();
+            if (trimmed.startsWith("boundary=")) {
+                return trimmed.substring("boundary=".length()).trim();
+            }
+        }
+        return null;
+    }
+
+    /** Find start/end byte offsets of a named multipart part's body. */
+    private static int[] findPartBody(byte[] data, String boundary, String fieldName) {
+        var delim = ("--" + boundary).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var namePattern = ("name=\"" + fieldName + "\"").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        var crlfcrlf = "\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+
+        int pos = 0;
+        while (pos < data.length) {
+            int delimPos = indexOf(data, delim, pos);
+            if (delimPos < 0) break;
+
+            // Check if this part contains the field name
+            int nextDelim = indexOf(data, delim, delimPos + delim.length);
+            if (nextDelim < 0) nextDelim = data.length;
+
+            int namePos = indexOf(data, namePattern, delimPos);
+            if (namePos >= 0 && namePos < nextDelim) {
+                // Found the right part — find body start (after \r\n\r\n)
+                int bodyStart = indexOf(data, crlfcrlf, delimPos);
+                if (bodyStart >= 0) {
+                    bodyStart += crlfcrlf.length;
+                    // Body ends at \r\n before next delimiter
+                    int bodyEnd = nextDelim - 2; // skip \r\n before delimiter
+                    if (bodyEnd > bodyStart) {
+                        return new int[]{bodyStart, bodyEnd};
+                    }
+                }
+            }
+            pos = delimPos + delim.length;
+        }
+        return null;
+    }
+
+    private static String extractMultipartField(byte[] data, String boundary, String fieldName) {
+        var range = findPartBody(data, boundary, fieldName);
+        if (range == null)
+            throw new IrijRuntimeError("raw-multipart-field: field '" + fieldName + "' not found");
+        return new String(data, range[0], range[1] - range[0], java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    private static void saveMultipartFile(byte[] data, String boundary, String fieldName, String path)
+            throws java.io.IOException {
+        var range = findPartBody(data, boundary, fieldName);
+        if (range == null)
+            throw new IrijRuntimeError("raw-multipart-save: field '" + fieldName + "' not found");
+        var target = java.nio.file.Path.of(path);
+        java.nio.file.Files.createDirectories(target.getParent());
+        java.nio.file.Files.write(target, java.util.Arrays.copyOfRange(data, range[0], range[1]));
+    }
+
+    private static int indexOf(byte[] haystack, byte[] needle, int from) {
+        outer:
+        for (int i = from; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
     }
 
     // ═══════════════════════════════════════════════════════════════════
