@@ -12,13 +12,20 @@ pub handler default-serve :: Serve ::: Console
 
 pub fn route :: Str Str Fn Map
   (method path action ->
-    {method= method path= path action= action})
+    {method= method path= path action= action prefix= false})
+
+pub fn route-prefix :: Str Str Fn Map
+  (method prefix action ->
+    {method= method path= prefix action= action prefix= true})
 
 pub fn router :: _ Fn ::: Console
   (routes -> (req -> find-route routes req))
 
 fn match-route
-  (r req -> (r.method == req.method) && (r.path == req.path))
+  (r req ->
+    if r.prefix
+      then (r.method == req.method) && (starts-with? req.path r.path)
+      else (r.method == req.method) && (r.path == req.path))
 
 fn apply-action
   (r req -> r.action req)
@@ -29,6 +36,16 @@ fn find-route ::: Console
 fn try-first ::: Console
   (r rest req -> if (match-route r req) (apply-action r req) else (find-route rest req))
 
+;; Extract path segments after a prefix.
+;; path-segments "/api/seeds/vrata/0.1.1" "/api/seeds" => ["vrata" "0.1.1"]
+pub fn path-segments :: Str Str Vec
+  (path prefix ->
+    let rest = substring path (length prefix) (length path)
+    let trimmed = if (starts-with? rest "/") then (substring rest 1 (length rest)) else rest
+    if (trimmed == "")
+      then #[]
+      else (split trimmed "/"))
+
 pub fn html :: Str Map
   (body -> {status= 200 body= body headers= {}})
 
@@ -36,7 +53,7 @@ pub fn text-response :: Str Map
   (body -> {status= 200 body= body headers= {}})
 
 pub fn json-response :: Str Map
-  (body -> {status= 200 body= body headers= {}})
+  (body -> {status= 200 body= body headers= {"content-type"= "application/json"}})
 
 pub fn redirect :: Str Map
   (url -> {status= 302 body= "" headers= {}})
