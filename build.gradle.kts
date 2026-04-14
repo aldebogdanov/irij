@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.irij"
-version = "0.2.5"
+version = "0.2.6"
 
 java {
     toolchain {
@@ -30,6 +30,7 @@ dependencies {
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("uk.org.webcompere:system-stubs-jupiter:2.1.8")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

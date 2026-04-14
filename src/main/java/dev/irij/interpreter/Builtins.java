@@ -757,6 +757,29 @@ public final class Builtins {
                 throw new IrijRuntimeError("raw-multipart-save: " + e.getMessage());
             }
         }));
+
+	// ── Miscelaneous Builtins ──────────────────────────────────────
+
+	env.define("env", new BuiltinFn("env", -1, args -> {
+            int argsCount = args.size();
+	    String envDefault = null;
+	    if (argsCount > 1) {
+	        envDefault = asString(args.get(argsCount - 1), "env");
+	    }
+	    int argNum = 0;
+	    String envValue = null;
+	    do {
+		var envName = asString(args.get(argNum), "env");
+	    	envValue = System.getenv(envName);
+	    } while (envValue == null && ++argNum < argsCount - 1);
+	    if (envValue != null) {
+		return envValue;
+	    }
+	    if (envDefault != null) {
+		return envDefault;
+	    }
+	    throw new IrijRuntimeError("env: environment variable does not exists and no default defined");
+	}));
     }
 
     // ── Multipart helpers ──────────────────────────────────────────────

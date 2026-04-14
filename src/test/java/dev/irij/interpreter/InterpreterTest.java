@@ -5,6 +5,10 @@ import dev.irij.ast.Decl;
 import dev.irij.parser.IrijParseDriver;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import uk.org.webcompere.systemstubs.jupiter.SystemStub;
+import uk.org.webcompere.systemstubs.jupiter.SystemStubsExtension;
+import uk.org.webcompere.systemstubs.environment.EnvironmentVariables;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -4119,6 +4123,55 @@ class InterpreterTest {
                 "std.test is fully annotated, no warnings expected, got: " + output);
             assertTrue(output.contains("ok"),
                 "Program output should still appear, got: " + output);
+        }
+    }
+
+    //═══════════════════════════════════════════════════════════════════
+    //Miscellaneous builtins
+    //═══════════════════════════════════════════════════════════════════
+
+    @Nested
+    @ExtendWith(SystemStubsExtension.class)
+    class MiscBuiltins {
+
+	@SystemStub
+        private EnvironmentVariables variables = new EnvironmentVariables("IRIJ_TEST_VAR_1", "var-1", "IRIJ_TEST_VAR_2", "var-2");
+
+	    
+        @Test void envOneArg1() {
+            assertEquals("var-1", run("print ~ env \"IRIJ_TEST_VAR_1\""));
+        }
+
+	@Test void envOneArg2() {
+            assertEquals("var-2", run("print ~ env \"IRIJ_TEST_VAR_2\""));
+        }
+
+	@Test void oneArgNotExists() {
+	    assertThrows(IrijRuntimeError.class, () -> run("print ~ env \"IRIJ_TEST_VAR_999\""));
+	}
+
+        @Test void envTwoArgsExists() {
+            assertEquals("var-1", run("print ~ env \"IRIJ_TEST_VAR_1\" \"default\""));
+        }
+
+        @Test void envTwoArgsNotExists() {
+            assertEquals("default", run("print ~ env \"IRIJ_TEST_VAR_999\" \"default\""));
+        }
+
+        @Test void envTwoArgsNotExistsExistsDefault() {
+            assertEquals("IRIJ_TEST_VAR_2", run("print ~ env \"IRIJ_TEST_VAR_999\" \"IRIJ_TEST_VAR_2\""));
+        }
+
+	@Test void envThreeArgsFirstExists() {
+            assertEquals("var-1", run("print ~ env \"IRIJ_TEST_VAR_1\" \"IRIJ_TEST_VAR_2\" \"default\""));
+        }
+
+	@Test void envThreeArgsSecondExists() {
+            assertEquals("var-2", run("print ~ env \"IRIJ_TEST_VAR_999\" \"IRIJ_TEST_VAR_2\" \"default\""));
+        }
+
+	@Test void envThreeArgsBothNotExists() {
+            assertEquals("default", run("print ~ env \"IRIJ_TEST_VAR_999\" \"IRIJ_TEST_VAR_999\" \"default\""));
         }
     }
 }

@@ -1,6 +1,6 @@
 # Irij Language
 
-## Build & Test
+## Build & Test. 
 - `./gradlew test` — Java tests
 - `irij test` — integration tests
 - `./gradlew shadowJar` — build fat JAR
