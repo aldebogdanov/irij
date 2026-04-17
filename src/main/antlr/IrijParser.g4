@@ -429,7 +429,10 @@ atomExpr
     | KEYWORD
     | UNDERSCORE
     | ifExpr
+    | ifStmt                                  // block-form if as expression
     | matchExpr
+    | withExpr                                // block-form with as expression
+    | scopeExpr                               // block-form scope as expression
     | lambdaExpr
     | operatorAsValue
     | unitExpr
@@ -514,6 +517,7 @@ mapEntryList
 mapEntry
     : SPREAD IDENT                            // {...record} spread
     | IDENT EQUALS expr                       // name= "jo"
+    | STRING EQUALS expr                      // "content-type"= "text/html"
     ;
 
 exprList

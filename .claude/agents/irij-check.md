@@ -55,6 +55,8 @@ You are a consistency auditor for the Irij programming language. Your job is to 
 - Search for outdated terms: `schema` (should be `spec`), `type_ann` (should be `spec_ann`), `TYPE_NAME` (should be `UPPER_NAME`)
 - Search across: Java source, test files, .irj files, docs, memory
 
+### 10. Any other bugs, mistakes, typos or unconsistency 
+
 ## Output format
 
 Report findings as a categorized list:

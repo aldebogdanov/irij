@@ -20,6 +20,6 @@
 - Static files go in `resources/` directory (bundled under `__irij_resources/` in JAR)
 
 ## Spec Reference
-- `docs/irij-lang-spec.org` is the source of truth
-- Always update `TODO.md` when steps are implemented
+- `docs/irij-lang-spec.org` is the source of truth, you can't change it except if developer asked of that explicitly
+- Always update `TODO.md`, `README.md`, examples and other related files when steps are implemented
 - Create docs in `./docs/` after each phase

@@ -128,7 +128,32 @@ public final class Interpreter {
         StdModules.registerAll(moduleRegistry, out);
     }
 
-    /** Builtins that need access to the interpreter's apply(). */
+    /**
+     * Builtins that live in Interpreter.java (not Builtins.java).
+     *
+     * <p>Split rationale:
+     * <ul>
+     *   <li>{@link Builtins} — pure / stateless functions (arithmetic,
+     *       strings, collections, json, etc.). They take {@code List<Object>}
+     *       and return {@code Object}, no interpreter coupling.
+     *   <li>Here — builtins that need interpreter internals:
+     *     <ul>
+     *       <li>invoke user code: {@code apply(fn, args)} for {@code spawn},
+     *           {@code try}, {@code fold}, {@code await}, {@code timeout},
+     *           {@code par}, {@code race}, {@code apply}, {@code verify-laws},
+     *           {@code validate}, {@code raw-http-serve} handler, SSE send,
+     *           {@code raw-db-transaction} thunk.
+     *       <li>read/push fiber state: {@link #AVAILABLE_EFFECTS},
+     *           {@link EffectSystem#STACK}.
+     *       <li>hold interpreter-lifetime resources: nREPL sessions.
+     *     </ul>
+     * </ul>
+     *
+     * <p>If a builtin can be written as {@code (List&lt;Object&gt;) ->
+     * Object} without referencing {@code this}, it belongs in
+     * {@link Builtins}. Otherwise it lives here so its lambda can capture
+     * {@code this}.
+     */
     private void installInterpreterBuiltins() {
         // ── spawn — run a thunk in a virtual thread ──────────────────
         globalEnv.define("spawn", new BuiltinFn("spawn", 1, args -> {
@@ -289,7 +314,7 @@ public final class Interpreter {
                 threads.add(t);
             }
 
-            // Wait for first success
+            // Wait for first success; interrupt losers the instant a winner appears.
             var result = new java.util.concurrent.CompletableFuture<Object>();
             var errors = java.util.Collections.synchronizedList(new java.util.ArrayList<Throwable>());
             for (int i = 0; i < futures.size(); i++) {
@@ -297,20 +322,21 @@ public final class Interpreter {
                     if (ex != null) {
                         errors.add(ex);
                         if (errors.size() == futures.size()) {
-                            // All failed — complete with first error
                             result.completeExceptionally(errors.get(0));
                         }
                     } else {
-                        result.complete(value);
+                        if (result.complete(value)) {
+                            // We are the winner — interrupt losers now.
+                            for (var t : threads) {
+                                if (t.isAlive()) t.interrupt();
+                            }
+                        }
                     }
                 });
             }
 
             try {
-                var winner = result.join();
-                // Cancel all threads (winners already done, harmless interrupt)
-                for (var t : threads) t.interrupt();
-                return winner;
+                return result.join();
             } catch (java.util.concurrent.CompletionException ce) {
                 for (var t : threads) t.interrupt();
                 if (ce.getCause() instanceof IrijRuntimeError ire) throw ire;
@@ -381,7 +407,7 @@ public final class Interpreter {
         }));
 
         // ── raw-db-transaction — run a thunk in a SQL transaction ───────
-        globalEnv.define("raw-db-transaction", new BuiltinFn("raw-db-transaction", 2, args -> {
+        globalEnv.define("raw-db-transaction", new BuiltinFn("raw-db-transaction", 2, List.of("Db"), args -> {
             var conn = Builtins.extractConnection(args.get(0), "raw-db-transaction");
             var thunk = args.get(1);
             try {
@@ -461,7 +487,7 @@ public final class Interpreter {
         // raw-http-serve port handler-fn
         //   handler-fn receives: {method= path= headers= body= query=}
         //   handler-fn returns:  {status= body= headers=} (or just {body=})
-        globalEnv.define("raw-http-serve", new BuiltinFn("raw-http-serve", 2, args -> {
+        globalEnv.define("raw-http-serve", new BuiltinFn("raw-http-serve", 2, List.of("Serve"), args -> {
             if (!(args.get(0) instanceof Long port))
                 throw new IrijRuntimeError("raw-http-serve: port must be Int", null);
             var handler = args.get(1);
@@ -516,6 +542,18 @@ public final class Interpreter {
                                     }
                                 }
                             }
+                            // Local mode: probe scriptDir/resources/ first (matches bundled layout)
+                            var resourcesPath = scriptDir.resolve("resources").resolve(reqPath.substring(1)).normalize();
+                            var resourcesRoot = scriptDir.resolve("resources").normalize();
+                            if (resourcesPath.startsWith(resourcesRoot) && java.nio.file.Files.isRegularFile(resourcesPath)) {
+                                var fileBytes = java.nio.file.Files.readAllBytes(resourcesPath);
+                                var mime = java.nio.file.Files.probeContentType(resourcesPath);
+                                if (mime == null) mime = "application/octet-stream";
+                                exchange.getResponseHeaders().set("Content-Type", mime);
+                                exchange.sendResponseHeaders(200, fileBytes.length);
+                                try (var os = exchange.getResponseBody()) { os.write(fileBytes); }
+                                return;
+                            }
                             var filePath = scriptDir.resolve(reqPath.substring(1)).normalize();
                             if (filePath.startsWith(scriptDir) && java.nio.file.Files.isRegularFile(filePath)) {
                                 var fileBytes = java.nio.file.Files.readAllBytes(filePath);
@@ -533,7 +571,9 @@ public final class Interpreter {
                         reqMap.put("method", exchange.getRequestMethod());
                         var uri = exchange.getRequestURI();
                         reqMap.put("path", uri.getPath());
-                        reqMap.put("query", uri.getQuery() != null ? uri.getQuery() : "");
+                        var rawQuery = uri.getQuery() != null ? uri.getQuery() : "";
+                        reqMap.put("query", rawQuery);
+                        reqMap.put("params", new IrijMap(parseQueryParams(rawQuery)));
                         var reqHeaders = new LinkedHashMap<String, Object>();
                         exchange.getRequestHeaders().forEach((k, v) ->
                             reqHeaders.put(k.toLowerCase(), v.size() == 1 ? v.get(0) : String.join(", ", v)));
@@ -600,8 +640,10 @@ public final class Interpreter {
                                 os.write(fileBytes);
                             }
                         } else {
-                            var respBytes = respBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-                            exchange.sendResponseHeaders((int) status, respBytes.length);
+			    var respBytes = respBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		            if (respBytes.length > 0) { // TODO: Hack for SSE. Need to discuss...
+			        exchange.sendResponseHeaders((int) status, respBytes.length);
+			    }
                             try (var os = exchange.getResponseBody()) {
                                 os.write(respBytes);
                             }
@@ -636,7 +678,7 @@ public final class Interpreter {
         // raw-sse-response request
         //   Sets SSE headers and returns an SseWriter for streaming events.
         //   The request map must contain the __exchange key (injected by raw-http-serve).
-        globalEnv.define("raw-sse-response", new BuiltinFn("raw-sse-response", 1, args -> {
+        globalEnv.define("raw-sse-response", new BuiltinFn("raw-sse-response", 1, List.of("Serve"), args -> {
             if (!(args.get(0) instanceof IrijMap reqMap))
                 throw new IrijRuntimeError("raw-sse-response: expected request map", null);
             var exchange = reqMap.entries().get("__exchange");
@@ -658,7 +700,7 @@ public final class Interpreter {
 
         // ── raw-sse-send — write an SSE event ────────────────────────────
         // raw-sse-send sse-writer event-type data-string
-        globalEnv.define("raw-sse-send", new BuiltinFn("raw-sse-send", 3, args -> {
+        globalEnv.define("raw-sse-send", new BuiltinFn("raw-sse-send", 3, List.of("Serve"), args -> {
             if (!(args.get(0) instanceof SseWriter sse))
                 throw new IrijRuntimeError("raw-sse-send: first arg must be SseWriter", null);
             var eventType = Builtins.asString(args.get(1), "raw-sse-send");
@@ -673,7 +715,7 @@ public final class Interpreter {
 
         // ── raw-sse-close — close an SSE stream ─────────────────────────
         // raw-sse-close sse-writer
-        globalEnv.define("raw-sse-close", new BuiltinFn("raw-sse-close", 1, args -> {
+        globalEnv.define("raw-sse-close", new BuiltinFn("raw-sse-close", 1, List.of("Serve"), args -> {
             if (!(args.get(0) instanceof SseWriter sse))
                 throw new IrijRuntimeError("raw-sse-close: first arg must be SseWriter", null);
             sse.close();
@@ -681,7 +723,7 @@ public final class Interpreter {
         }));
 
         // ── raw-sse-closed? — check if SSE stream is closed ─────────────
-        globalEnv.define("raw-sse-closed?", new BuiltinFn("raw-sse-closed?", 1, args -> {
+        globalEnv.define("raw-sse-closed?", new BuiltinFn("raw-sse-closed?", 1, List.of("Serve"), args -> {
             if (!(args.get(0) instanceof SseWriter sse))
                 throw new IrijRuntimeError("raw-sse-closed?: first arg must be SseWriter", null);
             return sse.isClosed();
@@ -693,6 +735,23 @@ public final class Interpreter {
 
         var sessions = new java.util.concurrent.ConcurrentHashMap<String, Object[]>();
         // sessions: UUID -> [Interpreter, PrintStream, ByteArrayOutputStream, lastAccessMs, SseWriter?]
+
+        // Auto-evict sessions idle > SESSION_TTL_MS every SESSION_SWEEP_MS.
+        // Prevents memory leaks when callers forget raw-session-cleanup.
+        final long SESSION_TTL_MS   = Long.getLong("irij.session.ttl.ms",   30L * 60_000L); // 30 min
+        final long SESSION_SWEEP_MS = Long.getLong("irij.session.sweep.ms", 60_000L);       // 60 s
+        var sweeper = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+            var t = new Thread(r, "irij-session-sweeper");
+            t.setDaemon(true);
+            return t;
+        });
+        sweeper.scheduleAtFixedRate(() -> {
+            var now = System.currentTimeMillis();
+            sessions.entrySet().removeIf(e -> {
+                var lastAccess = (long) ((Object[]) e.getValue())[3];
+                return now - lastAccess > SESSION_TTL_MS;
+            });
+        }, SESSION_SWEEP_MS, SESSION_SWEEP_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
 
         // ── raw-session-create — create a new sandboxed interpreter session
         globalEnv.define("raw-session-create", new BuiltinFn("raw-session-create", 1, args -> {
@@ -1178,7 +1237,11 @@ public final class Interpreter {
             case Decl.ProtoDecl pd -> evalProtoDecl(pd, env);
             case Decl.ImplDecl id -> evalImplDecl(id, env);
             case Decl.RoleDecl rd -> Values.UNIT; // stub
-            case Decl.StubDecl sd -> Values.UNIT; // stub
+            case Decl.StubDecl sd -> {
+                out.println("[warn] " + sd.kind() + " '" + sd.name()
+                    + "' is a not-yet-implemented language feature; declaration ignored");
+                yield Values.UNIT;
+            }
         };
     }
 
@@ -2739,6 +2802,24 @@ public final class Interpreter {
         if (path.endsWith(".txt"))  return "text/plain; charset=utf-8";
         if (path.endsWith(".xml"))  return "application/xml";
         return "application/octet-stream";
+    }
+
+    private static LinkedHashMap<String, Object> parseQueryParams(String query) {
+        var result = new LinkedHashMap<String, Object>();
+        if (query == null || query.isEmpty()) return result;
+        for (var pair : query.split("&")) {
+            if (pair.isEmpty()) continue;
+            var eq = pair.indexOf('=');
+            String k, v;
+            if (eq < 0) { k = pair; v = ""; }
+            else { k = pair.substring(0, eq); v = pair.substring(eq + 1); }
+            try {
+                k = java.net.URLDecoder.decode(k, java.nio.charset.StandardCharsets.UTF_8);
+                v = java.net.URLDecoder.decode(v, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (Exception ignored) {}
+            result.put(k, v);
+        }
+        return result;
     }
 
     private Object divOp(Object left, Object right, SourceLoc loc) {

@@ -862,7 +862,19 @@ public class AstBuilder {
         if (ctx.KEYWORD() != null) return visitKeyword(ctx.KEYWORD(), loc(ctx));
         if (ctx.UNDERSCORE() != null) return new Expr.Wildcard(loc(ctx));
         if (ctx.ifExpr() != null) return visitIfExpr(ctx.ifExpr());
+        if (ctx.ifStmt() != null) {
+            var ifStmt = visitIfStmt(ctx.ifStmt());
+            return new Expr.Block(java.util.List.of(ifStmt), loc(ctx));
+        }
         if (ctx.matchExpr() != null) return visitMatchExpr(ctx.matchExpr());
+        if (ctx.withExpr() != null) {
+            var withStmt = visitWithExpr(ctx.withExpr());
+            return new Expr.Block(java.util.List.of(withStmt), loc(ctx));
+        }
+        if (ctx.scopeExpr() != null) {
+            var scopeStmt = visitScopeExpr(ctx.scopeExpr());
+            return new Expr.Block(java.util.List.of(scopeStmt), loc(ctx));
+        }
         if (ctx.lambdaExpr() != null) return visitLambdaExpr(ctx.lambdaExpr());
         if (ctx.operatorAsValue() != null) return visitOperatorAsValue(ctx.operatorAsValue());
         if (ctx.unitExpr() != null) return new Expr.UnitLit(loc(ctx));
@@ -1058,6 +1070,10 @@ public class AstBuilder {
             if (entry.SPREAD() != null) {
                 spreadBase = entry.IDENT().getText();
                 hasSpreadFirst = true;
+            } else if (entry.STRING() != null) {
+                var raw = entry.STRING().getText();
+                var key = unescapeString(raw.substring(1, raw.length() - 1));
+                entries.add(new Expr.MapEntry.Field(key, visitExpr(entry.expr())));
             } else {
                 entries.add(new Expr.MapEntry.Field(entry.IDENT().getText(), visitExpr(entry.expr())));
             }

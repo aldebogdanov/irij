@@ -40,6 +40,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class NReplServer {
 
     private final int port;
+    private final Path projectRoot;
     private final Map<String, NReplSession> sessions = new ConcurrentHashMap<>();
     private volatile boolean running;
     private ServerSocket serverSocket;
@@ -48,7 +49,12 @@ public final class NReplServer {
      * @param port TCP port to listen on. Use 0 for a random available port.
      */
     public NReplServer(int port) {
+        this(port, Path.of("").toAbsolutePath());
+    }
+
+    public NReplServer(int port, Path projectRoot) {
         this.port = port;
+        this.projectRoot = projectRoot;
     }
 
     /**
@@ -68,6 +74,11 @@ public final class NReplServer {
         }
 
         System.out.println("nREPL server started on port " + actualPort);
+        System.out.println("  Project root: " + projectRoot);
+        var tomlPath = projectRoot.resolve("irij.toml");
+        if (Files.exists(tomlPath)) {
+            System.out.println("  Seeds will be loaded from " + tomlPath);
+        }
         System.out.println("  Connect with: telnet localhost " + actualPort);
         System.out.println("  Or configure your editor to connect to port " + actualPort);
 
@@ -136,7 +147,7 @@ public final class NReplServer {
 
         // Clone: create a new session
         if ("clone".equals(op)) {
-            var newSession = new NReplSession();
+            var newSession = new NReplSession(projectRoot);
             sessions.put(newSession.id(), newSession);
             var resp = new LinkedHashMap<String, Object>();
             if (msgId != null) resp.put("id", msgId);
@@ -148,7 +159,7 @@ public final class NReplServer {
         // Find or auto-create session
         NReplSession session = sessionId != null ? sessions.get(sessionId) : null;
         if (session == null) {
-            session = new NReplSession();
+            session = new NReplSession(projectRoot);
             sessions.put(session.id(), session);
         }
 

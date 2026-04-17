@@ -108,7 +108,10 @@
     "sqrt" "floor" "ceil" "round" "sin" "cos" "tan" "log" "exp" "pow"
     "random-int" "random-float"
     "parse-int" "parse-float" "char-code" "from-char-code"
-    "read-file" "write-file" "file-exists?" "get-env" "now-ms")
+    "read-file" "write-file" "append-file" "delete-file" "list-dir" "make-dir"
+    "file-exists?" "get-env" "env" "now-ms" "read-line"
+    "json-parse" "json-stringify" "url-encode" "url-decode"
+    "validate" "validate!")
   "Built-in functions in Irij.")
 
 ;; Emacs 29+ introduced `font-lock-number-face'.  On older versions
@@ -189,25 +192,66 @@ and decrease after a line that is less indented than its predecessor."
       (goto-char (- (point-max) pos)))))
 
 (defun irij--compute-indent ()
-  "Return the column to indent the current line to."
+  "Return the column to indent the current line to.
+Rules, in order:
+  1. Blank line → column 0.
+  2. If this line starts with `else`/`else-if` → align with opener (dedent).
+  3. If the containing paren/bracket/brace on the previous line is still
+     open (unbalanced), indent one level beyond its opener column.
+  4. If the previous line opens a block (ends with `=>`, `->`, `:::`, or
+     begins a fn/match/if/with/handler head) → prev indent + offset.
+  5. Otherwise → same indent as previous non-blank line."
   (save-excursion
-    ;; Find the previous non-blank, non-comment line
     (beginning-of-line)
-    (let ((current-blank (looking-at "^[ \t]*$")))
-      (forward-line -1)
-      (while (and (not (bobp))
-                  (or (looking-at "^[ \t]*$")
-                      (looking-at "^[ \t]*;;")))
-        (forward-line -1))
-      (let* ((prev-indent (current-indentation))
-             (prev-line   (buffer-substring (line-beginning-position)
-                                            (line-end-position)))
-             ;; Does the previous line open a new block?
-             (opens-block (irij--line-opens-block prev-line)))
+    (let* ((current-line (buffer-substring (line-beginning-position)
+                                           (line-end-position)))
+           (current-blank (string-match-p "\\`[ \t]*\\'" current-line))
+           (starts-with-else
+            (string-match-p "\\`[ \t]*else\\b" current-line)))
+      (cond
+       (current-blank 0)
+       (t
+        (forward-line -1)
+        (while (and (not (bobp))
+                    (or (looking-at "^[ \t]*$")
+                        (looking-at "^[ \t]*;;")))
+          (forward-line -1))
+        (let* ((prev-indent (current-indentation))
+               (prev-line   (buffer-substring (line-beginning-position)
+                                              (line-end-position)))
+               (unbalanced-open (irij--unbalanced-open-col prev-line))
+               (opens-block (irij--line-opens-block prev-line)))
+          (cond
+           ;; `else` dedents one level from its current hypothetical indent
+           (starts-with-else
+            (max 0 (if opens-block prev-indent
+                     (- prev-indent irij-indent-offset))))
+           ;; Inside an open collection/paren: align to column after opener
+           (unbalanced-open (1+ unbalanced-open))
+           (opens-block (+ prev-indent irij-indent-offset))
+           (t prev-indent))))))))
+
+(defun irij--unbalanced-open-col (line)
+  "If LINE has an unclosed (/ [ / { (ignoring strings and comments),
+return the column of the rightmost such opener. Otherwise nil."
+  (let ((i 0) (len (length line))
+        (stack nil)
+        (in-str nil))
+    (while (< i len)
+      (let ((c (aref line i)))
         (cond
-         (current-blank 0)
-         (opens-block   (+ prev-indent irij-indent-offset))
-         (t             prev-indent))))))
+         ;; String handling (double-quote). Skip escapes.
+         (in-str
+          (cond ((eq c ?\\) (setq i (1+ i)))
+                ((eq c ?\") (setq in-str nil))))
+         ((eq c ?\") (setq in-str t))
+         ;; Line comment — stop scanning.
+         ((and (eq c ?\;) (< (1+ i) len) (eq (aref line (1+ i)) ?\;))
+          (setq i len))
+         ((memq c '(?\( ?\[ ?\{)) (push i stack))
+         ((memq c '(?\) ?\] ?\})) (pop stack)))
+        (setq i (1+ i))))
+    (car stack)))
 
 (defun irij--line-opens-block (line)
   "Return non-nil if LINE ends with a block-opening construct."

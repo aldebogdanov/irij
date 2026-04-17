@@ -29,7 +29,7 @@ pub effect Http
   http-delete :: Str -> Map
   http-request :: Map -> Map
 
-pub handler default-http :: Http
+pub handler default-http :: Http ::: Http
   http-get url =>
     resume (raw-http-request {method= "GET" url= url})
   http-post url body headers =>

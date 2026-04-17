@@ -114,7 +114,10 @@ TILDE       : '~' ;        // apply-to-rest: f ~ x + 1  ≡  f (x + 1)
 DOT         : '.' ;
 EQUALS      : '=' ;        // map field separator {name= "jo"}
 SEMICOLON   : ';' ;        // inline separator (only inside parens)
-BACKSLASH   : '\\' ;       // line continuation
+// Line continuation: `\` at end of a line consumes the backslash and the
+// following newline so the lexer never emits a NEWLINE for that line.
+LINE_CONT   : '\\' [ \t]* ('\r'? '\n' | '\r') -> skip ;
+BACKSLASH   : '\\' ;       // bare backslash (unused in grammar; reserved)
 UNDERSCORE  : '_' ;        // wildcard pattern
 
 // ── Keyword Atoms (Clojure-style) ────────────────────────────────────

@@ -20,6 +20,11 @@ public final class Builtins {
 
     private Builtins() {}
 
+    /** Single stdin reader shared across all read-line calls — re-wrapping
+     *  System.in per call would fragment the underlying buffer and drop input. */
+    private static final java.io.BufferedReader STDIN_READER =
+        new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+
     /** Forbidden builtins in sandbox mode — I/O, file, DB, HTTP. */
     private static final List<String> SANDBOX_FORBIDDEN = List.of(
         "read-file", "write-file", "delete-file", "append-file",
@@ -72,8 +77,7 @@ public final class Builtins {
 
         env.define("read-line", new BuiltinFn("read-line", 0, List.of("Console"), args -> {
             try {
-                var reader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
-                var line = reader.readLine();
+                var line = STDIN_READER.readLine();
                 return line != null ? line : Values.UNIT;
             } catch (java.io.IOException e) {
                 throw new IrijRuntimeError("read-line: " + e.getMessage(), null);
@@ -387,10 +391,6 @@ public final class Builtins {
             return str.replace(from, to);
         }));
 
-        env.define("time-ms", new BuiltinFn("time-ms", 1, args -> {
-            return System.currentTimeMillis();
-        }));
-
         env.define("url-encode", new BuiltinFn("url-encode", 1, args -> {
             return java.net.URLEncoder.encode(asString(args.get(0), "url-encode"),
                 java.nio.charset.StandardCharsets.UTF_8);
@@ -503,7 +503,7 @@ public final class Builtins {
         }));
 
         // ── IO primitives ──────────────────────────────────────────────
-        env.define("read-file", new BuiltinFn("read-file", 1, args -> {
+        env.define("read-file", new BuiltinFn("read-file", 1, List.of("FileIO"), args -> {
             var path = asString(args.get(0), "read-file");
             var resolved = resolvePath(path, pathResolver);
             try { return Files.readString(resolved); }
@@ -515,7 +515,7 @@ public final class Builtins {
             }
         }));
 
-        env.define("write-file", new BuiltinFn("write-file", 2, args -> {
+        env.define("write-file", new BuiltinFn("write-file", 2, List.of("FileIO"), args -> {
             var path = asString(args.get(0), "write-file");
             var content = asString(args.get(1), "write-file");
             try { Files.writeString(resolvePath(path, pathResolver), content); }
@@ -525,7 +525,7 @@ public final class Builtins {
             return Values.UNIT;
         }));
 
-        env.define("file-exists?", new BuiltinFn("file-exists?", 1, args -> {
+        env.define("file-exists?", new BuiltinFn("file-exists?", 1, List.of("FileIO"), args -> {
             return Files.exists(resolvePath(asString(args.get(0), "file-exists?"), pathResolver));
         }));
 
@@ -559,7 +559,7 @@ public final class Builtins {
         }));
 
         // ── Additional FS primitives ────────────────────────────────────
-        env.define("list-dir", new BuiltinFn("list-dir", 1, args -> {
+        env.define("list-dir", new BuiltinFn("list-dir", 1, List.of("FileIO"), args -> {
             var path = asString(args.get(0), "list-dir");
             try (var stream = Files.list(resolvePath(path, pathResolver))) {
                 return new IrijVector(stream.map(p -> (Object) p.getFileName().toString()).toList());
@@ -568,7 +568,7 @@ public final class Builtins {
             }
         }));
 
-        env.define("delete-file", new BuiltinFn("delete-file", 1, args -> {
+        env.define("delete-file", new BuiltinFn("delete-file", 1, List.of("FileIO"), args -> {
             var path = asString(args.get(0), "delete-file");
             try { Files.deleteIfExists(resolvePath(path, pathResolver)); }
             catch (IOException e) {
@@ -577,7 +577,7 @@ public final class Builtins {
             return Values.UNIT;
         }));
 
-        env.define("make-dir", new BuiltinFn("make-dir", 1, args -> {
+        env.define("make-dir", new BuiltinFn("make-dir", 1, List.of("FileIO"), args -> {
             var path = asString(args.get(0), "make-dir");
             try { Files.createDirectories(resolvePath(path, pathResolver)); }
             catch (IOException e) {
@@ -586,7 +586,7 @@ public final class Builtins {
             return Values.UNIT;
         }));
 
-        env.define("append-file", new BuiltinFn("append-file", 2, args -> {
+        env.define("append-file", new BuiltinFn("append-file", 2, List.of("FileIO"), args -> {
             var path = asString(args.get(0), "append-file");
             var content = asString(args.get(1), "append-file");
             try {
@@ -601,7 +601,7 @@ public final class Builtins {
 
         // ── Database primitives (SQLite) ──────────────────────────────────
 
-        env.define("raw-db-open", new BuiltinFn("raw-db-open", 1, args -> {
+        env.define("raw-db-open", new BuiltinFn("raw-db-open", 1, List.of("Db"), args -> {
             var path = asString(args.get(0), "raw-db-open");
             try {
                 var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + path);
@@ -615,7 +615,7 @@ public final class Builtins {
             }
         }));
 
-        env.define("raw-db-query", new BuiltinFn("raw-db-query", 3, args -> {
+        env.define("raw-db-query", new BuiltinFn("raw-db-query", 3, List.of("Db"), args -> {
             var conn = extractConnection(args.get(0), "raw-db-query");
             var sql = asString(args.get(1), "raw-db-query");
             var params = extractParams(args.get(2), "raw-db-query");
@@ -644,7 +644,7 @@ public final class Builtins {
             }
         }));
 
-        env.define("raw-db-exec", new BuiltinFn("raw-db-exec", 3, args -> {
+        env.define("raw-db-exec", new BuiltinFn("raw-db-exec", 3, List.of("Db"), args -> {
             var conn = extractConnection(args.get(0), "raw-db-exec");
             var sql = asString(args.get(1), "raw-db-exec");
             var params = extractParams(args.get(2), "raw-db-exec");
@@ -661,7 +661,7 @@ public final class Builtins {
             }
         }));
 
-        env.define("raw-db-close", new BuiltinFn("raw-db-close", 1, args -> {
+        env.define("raw-db-close", new BuiltinFn("raw-db-close", 1, List.of("Db"), args -> {
             var conn = extractConnection(args.get(0), "raw-db-close");
             try {
                 conn.close();
@@ -672,7 +672,7 @@ public final class Builtins {
         }));
 
         // ── HTTP primitives ─────────────────────────────────────────────
-        env.define("raw-http-request", new BuiltinFn("raw-http-request", 1, args -> {
+        env.define("raw-http-request", new BuiltinFn("raw-http-request", 1, List.of("Http"), args -> {
             if (!(args.get(0) instanceof IrijMap opts))
                 throw new IrijRuntimeError("raw-http-request: expects Map argument");
             var entries = opts.entries();
@@ -733,7 +733,7 @@ public final class Builtins {
         }));
 
         // raw-multipart-save request "fieldname" "/path/to/file" -> String (saved path)
-        env.define("raw-multipart-save", new BuiltinFn("raw-multipart-save", 3, args -> {
+        env.define("raw-multipart-save", new BuiltinFn("raw-multipart-save", 3, List.of("FileIO"), args -> {
             if (!(args.get(0) instanceof IrijMap req))
                 throw new IrijRuntimeError("raw-multipart-save: expects request Map");
             var fieldName = asString(args.get(1), "raw-multipart-save");

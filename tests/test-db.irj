@@ -3,7 +3,7 @@ use std.db :open
 
 ;; ── Raw builtins ─────────────────────────────────────────────────
 
-fn test-raw-open
+fn test-raw-open ::: Db
   _ =>
     conn := raw-db-open ":memory:"
     result := type-of conn
@@ -12,7 +12,7 @@ fn test-raw-open
 
 test "raw-db-open returns DbConn" (-> assert-eq "DbConn" (test-raw-open ()))
 
-fn test-raw-roundtrip
+fn test-raw-roundtrip ::: Db
   _ =>
     conn := raw-db-open ":memory:"
     raw-db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)" #[]
@@ -26,7 +26,7 @@ fn test-raw-roundtrip
 
 test "raw-db-exec + raw-db-query round-trip" (-> test-raw-roundtrip ())
 
-fn test-raw-affected
+fn test-raw-affected ::: Db
   _ =>
     conn := raw-db-open ":memory:"
     raw-db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)" #[]
@@ -39,7 +39,7 @@ fn test-raw-affected
 
 test "raw-db-exec returns affected count" (-> assert-eq 2 (test-raw-affected ()))
 
-fn test-raw-types
+fn test-raw-types ::: Db
   _ =>
     conn := raw-db-open ":memory:"
     raw-db-exec conn "CREATE TABLE t (i INTEGER, r REAL, s TEXT)" #[]
@@ -54,7 +54,7 @@ fn test-raw-types
 
 test "query returns correct types" (-> test-raw-types ())
 
-fn test-raw-null
+fn test-raw-null ::: Db
   _ =>
     conn := raw-db-open ":memory:"
     raw-db-exec conn "CREATE TABLE t (a TEXT, b TEXT)" #[]
@@ -67,7 +67,7 @@ fn test-raw-null
 
 test "query with null values" (-> test-raw-null ())
 
-fn test-raw-tx-commit
+fn test-raw-tx-commit ::: Db
   _ =>
     conn := raw-db-open ":memory:"
     raw-db-exec conn "CREATE TABLE t (v TEXT)" #[]
@@ -80,12 +80,12 @@ fn test-raw-tx-commit
 
 test "raw-db-transaction commits" (-> test-raw-tx-commit ())
 
-fn insert-and-fail
+fn insert-and-fail ::: Db
   => conn
   raw-db-exec conn "INSERT INTO t (v) VALUES (?)" #["should-rollback"]
   error "boom"
 
-fn test-raw-tx-rollback
+fn test-raw-tx-rollback ::: Db
   _ =>
     conn := raw-db-open ":memory:"
     raw-db-exec conn "CREATE TABLE t (v TEXT)" #[]
@@ -98,7 +98,7 @@ test "raw-db-transaction rolls back on error" (-> test-raw-tx-rollback ())
 
 ;; ── std.db effect module ─────────────────────────────────────────
 
-fn test-db-open-close
+fn test-db-open-close ::: Db
   _ =>
     conn := db-open ":memory:"
     result := type-of conn
@@ -107,7 +107,7 @@ fn test-db-open-close
 
 test "db-open and db-close" (-> assert-eq "DbConn" (test-db-open-close ()))
 
-fn test-std-db-default
+fn test-std-db-default ::: Db
   _ =>
     conn := db-open ":memory:"
     with default-db
@@ -125,7 +125,7 @@ fn insert-two ::: Db
   db-exec conn "INSERT INTO t (v) VALUES (?)" #["a"]
   db-exec conn "INSERT INTO t (v) VALUES (?)" #["b"]
 
-fn test-std-db-tx
+fn test-std-db-tx ::: Db
   _ =>
     conn := db-open ":memory:"
     with default-db

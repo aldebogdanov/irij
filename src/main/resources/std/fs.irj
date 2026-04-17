@@ -30,7 +30,7 @@ pub effect FileIO
   fs-delete :: Str -> ()
   fs-mkdir :: Str -> ()
 
-pub handler default-fs :: FileIO
+pub handler default-fs :: FileIO ::: FileIO
   fs-read path => resume (read-file path)
   fs-write path content =>
     write-file path content

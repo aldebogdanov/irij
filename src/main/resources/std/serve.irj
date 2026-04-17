@@ -5,7 +5,7 @@ mod std.serve
 pub effect Serve
   serve :: Int Fn -> ()
 
-pub handler default-serve :: Serve ::: Console
+pub handler default-serve :: Serve ::: Console Serve
   serve port h =>
     raw-http-serve port h
     resume ()
@@ -18,7 +18,7 @@ pub fn route-prefix :: Str Str Fn Map
   (method prefix action ->
     {method= method path= prefix action= action prefix= true})
 
-pub fn router :: _ Fn ::: Console
+pub fn router :: _ Fn
   (routes -> (req -> find-route routes req))
 
 fn match-route
@@ -43,16 +43,16 @@ pub fn path-segments :: Str Str Vec
   if (trimmed == "") (#[]) else (split trimmed "/")
 
 pub fn html :: Str Map
-  (body -> {status= 200 body= body headers= {}})
+  (body -> {status= 200 body= body headers= (assoc {} "content-type" "text/html; charset=utf-8")})
 
 pub fn text-response :: Str Map
-  (body -> {status= 200 body= body headers= {}})
+  (body -> {status= 200 body= body headers= (assoc {} "content-type" "text/plain; charset=utf-8")})
 
 pub fn json-response :: Str Map
   (body -> {status= 200 body= body headers= (assoc {} "content-type" "application/json")})
 
 pub fn redirect :: Str Map
-  (url -> {status= 302 body= "" headers= {}})
+  (url -> {status= 302 body= "" headers= (assoc {} "location" url)})
 
 pub fn not-found :: Str Map
   (body -> {status= 404 body= body headers= {}})

@@ -8,27 +8,27 @@ mod std.datastar
 
 ;; ── SSE lifecycle ───────────────────────────────────────────────────
 
-pub fn ds-sse :: Map _
+pub fn ds-sse :: Map _ ::: Serve
   (request -> raw-sse-response request)
 
-pub fn ds-done :: _ ()
+pub fn ds-done :: _ () ::: Serve
   (sse -> raw-sse-close sse)
 
-pub fn ds-closed? :: _ Bool
+pub fn ds-closed? :: _ Bool ::: Serve
   (sse -> raw-sse-closed? sse)
 
 ;; ── Datastar events ─────────────────────────────────────────────────
 
-pub fn ds-patch :: _ Str Str ()
+pub fn ds-patch :: _ Str Str () ::: Serve
   (sse selector html -> raw-sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode outer\nelements " ++ html))
 
-pub fn ds-patch-mode :: _ Str Str Str ()
+pub fn ds-patch-mode :: _ Str Str Str () ::: Serve
   (sse selector mode html -> raw-sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode " ++ mode ++ "\nelements " ++ html))
 
-pub fn ds-signals :: _ Str ()
+pub fn ds-signals :: _ Str () ::: Serve
   (sse json -> raw-sse-send sse "datastar-patch-signals" ("signals " ++ json))
 
-pub fn ds-script :: _ Str ()
+pub fn ds-script :: _ Str () ::: Serve
   (sse js -> raw-sse-send sse "datastar-patch-elements" ("mode append\nselector body\nelements <script data-ds-autoremove>" ++ js ++ "</script>"))
 
 ;; ── Signal reading ──────────────────────────────────────────────────

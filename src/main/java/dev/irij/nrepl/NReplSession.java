@@ -26,14 +26,24 @@ public final class NReplSession {
     private volatile boolean closed;
 
     public NReplSession() {
+        this(null);
+    }
+
+    public NReplSession(java.nio.file.Path projectRoot) {
         this.id = UUID.randomUUID().toString();
-        // Background output stream captures println from spawned threads
-        // between evaluations (when the per-eval capture is not active).
         this.backgroundOut = new BackgroundOutputStream();
         this.indirectOut = new IndirectOutputStream(backgroundOut);
         var printStream = new PrintStream(indirectOut, true);
         this.interpreter = new Interpreter(printStream);
         this.closed = false;
+        if (projectRoot != null) {
+            interpreter.setSourcePath(projectRoot);
+            try {
+                interpreter.loadDeps(projectRoot);
+            } catch (Exception e) {
+                printStream.println("Warning: failed to load seeds from irij.toml: " + e.getMessage());
+            }
+        }
     }
 
     public String id() {

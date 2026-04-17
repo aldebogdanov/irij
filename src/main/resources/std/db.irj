@@ -31,18 +31,18 @@ pub effect Db
   db-exec :: _ Str _ -> Int
   db-transaction :: _ Fn -> _
 
-pub fn db-open :: Str _
+pub fn db-open :: Str _ ::: Db
   (path -> raw-db-open path)
 
-pub fn db-close :: _ ()
+pub fn db-close :: _ () ::: Db
   (conn -> raw-db-close conn)
 
-fn db-tx-wrapper
+fn db-tx-wrapper ::: Db
   => thunk
   with default-db
     thunk ()
 
-pub handler default-db :: Db
+pub handler default-db :: Db ::: Db
   db-query conn sql params =>
     resume (raw-db-query conn sql params)
   db-exec conn sql params =>
