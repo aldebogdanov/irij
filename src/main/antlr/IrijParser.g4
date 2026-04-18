@@ -518,6 +518,7 @@ mapEntryList
 mapEntry
     : SPREAD IDENT                            // {...record} spread
     | IDENT EQUALS expr                       // name= "jo"
+    | ATTR_IDENT EQUALS expr                  // data-on:click= "..."
     | STRING EQUALS expr                      // "content-type"= "text/html"
     ;
 

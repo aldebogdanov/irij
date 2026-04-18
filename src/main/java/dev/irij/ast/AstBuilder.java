@@ -1086,6 +1086,8 @@ public class AstBuilder {
                 var raw = entry.STRING().getText();
                 var key = unescapeString(raw.substring(1, raw.length() - 1));
                 entries.add(new Expr.MapEntry.Field(key, visitExpr(entry.expr())));
+            } else if (entry.ATTR_IDENT() != null) {
+                entries.add(new Expr.MapEntry.Field(entry.ATTR_IDENT().getText(), visitExpr(entry.expr())));
             } else {
                 entries.add(new Expr.MapEntry.Field(entry.IDENT().getText(), visitExpr(entry.expr())));
             }

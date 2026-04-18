@@ -134,6 +134,12 @@ UPPER_NAME  : [A-Z] [a-zA-Z0-9]* ;
 // NOTE: must come after keywords to let keywords win
 IDENT       : [a-z] [a-z0-9]* ('-' [a-z0-9]+)* [?!]? ;
 
+// Attribute-style identifier with internal colons (for HTML/DOM map keys).
+// Only matches when there is at least one `:name` segment, so it never
+// conflicts with plain IDENT or with keywords (`:kw` starts with `:`).
+// Example: data-on:click, hx-on:htmx:after-request
+ATTR_IDENT  : [a-z] [a-z0-9]* ('-' [a-z0-9]+)* (':' [a-z] [a-z0-9]* ('-' [a-z0-9]+)*)+ ;
+
 // ── Numeric Literals ─────────────────────────────────────────────────
 HEX_LIT     : '0' [xX] [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? ;
 FLOAT_LIT   : [0-9] [0-9_]* '.' [0-9] [0-9_]* ;
