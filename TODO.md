@@ -508,6 +508,12 @@ Effect-based I/O operations, mockable via handlers in tests.
 - [x] **`pub effect` / `pub handler`** — grammar + AstBuilder + Interpreter support
   - `pub effect` exports effect name + all op names
   - `pub handler` exports handler name
+- [x] **Time/Random/Env** — `std.time`, `std.random`, `std.env` modules
+  - `Time`: `time-now`, `time-sleep` (wraps `now-ms`, `sleep` builtins, tagged `::: Time`)
+  - `Random`: `rand-int`, `rand-float` (wraps `random-int`, `random-float` builtins, tagged `::: Random`)
+  - `Env`: `env-var` (wraps `env` builtin, tagged `::: Env`)
+  - All fully mockable: `handler fixed-clock :: Time`, `handler fixed-random :: Random`, `handler mock-env :: Env`
+  - 8 integration tests (`tests/test-time-random-env.irj`)
 - [ ] **TOML** — config file support (deferred)
 - [ ] **TOON** — token-efficient format for AI contexts (deferred)
 - [ ] **HTTP server** — `::: Serve` effect (deferred)

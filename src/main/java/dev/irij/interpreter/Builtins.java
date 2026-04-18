@@ -89,7 +89,7 @@ public final class Builtins {
         }));
 
         // ── Concurrency primitives ─────────────────────────────────────
-        env.define("sleep", new BuiltinFn("sleep", 1, args -> {
+        env.define("sleep", new BuiltinFn("sleep", 1, List.of("Time"), args -> {
             var ms = args.get(0);
             long millis;
             if (ms instanceof Long l)  millis = l;                      // sleep 1000  → 1 second
@@ -465,12 +465,12 @@ public final class Builtins {
             return Math.pow(asDouble(args.get(0), "pow"), asDouble(args.get(1), "pow"));
         }));
 
-        env.define("random-int", new BuiltinFn("random-int", 1, args -> {
+        env.define("random-int", new BuiltinFn("random-int", 1, List.of("Random"), args -> {
             long bound = asLong(args.get(0), "random-int");
             return ThreadLocalRandom.current().nextLong(bound);
         }));
 
-        env.define("random-float", new BuiltinFn("random-float", 0, args -> {
+        env.define("random-float", new BuiltinFn("random-float", 0, List.of("Random"), args -> {
             return ThreadLocalRandom.current().nextDouble();
         }));
 
@@ -529,13 +529,13 @@ public final class Builtins {
             return Files.exists(resolvePath(asString(args.get(0), "file-exists?"), pathResolver));
         }));
 
-        env.define("get-env", new BuiltinFn("get-env", 1, args -> {
+        env.define("get-env", new BuiltinFn("get-env", 1, List.of("Env"), args -> {
             var name = asString(args.get(0), "get-env");
             var val = System.getenv(name);
             return val != null ? val : Values.UNIT;
         }));
 
-        env.define("now-ms", new BuiltinFn("now-ms", 0, args -> {
+        env.define("now-ms", new BuiltinFn("now-ms", 0, List.of("Time"), args -> {
             return System.currentTimeMillis();
         }));
 
@@ -758,28 +758,27 @@ public final class Builtins {
             }
         }));
 
-	// ── Miscelaneous Builtins ──────────────────────────────────────
-
-	env.define("env", new BuiltinFn("env", -1, args -> {
+        // ── Miscellaneous ──────────────────────────────────────────────
+        env.define("env", new BuiltinFn("env", -1, List.of("Env"), args -> {
             int argsCount = args.size();
-	    String envDefault = null;
-	    if (argsCount > 1) {
-	        envDefault = asString(args.get(argsCount - 1), "env");
-	    }
-	    int argNum = 0;
-	    String envValue = null;
-	    do {
-		var envName = asString(args.get(argNum), "env");
-	    	envValue = System.getenv(envName);
-	    } while (envValue == null && ++argNum < argsCount - 1);
-	    if (envValue != null) {
-		return envValue;
-	    }
-	    if (envDefault != null) {
-		return envDefault;
-	    }
-	    throw new IrijRuntimeError("env: environment variable does not exists and no default defined");
-	}));
+            String envDefault = null;
+            if (argsCount > 1) {
+                envDefault = asString(args.get(argsCount - 1), "env");
+            }
+            int argNum = 0;
+            String envValue = null;
+            do {
+                var envName = asString(args.get(argNum), "env");
+                envValue = System.getenv(envName);
+            } while (envValue == null && ++argNum < argsCount - 1);
+            if (envValue != null) {
+                return envValue;
+            }
+            if (envDefault != null) {
+                return envDefault;
+            }
+            throw new IrijRuntimeError("env: environment variable does not exists and no default defined");
+        }));
     }
 
     // ── Multipart helpers ──────────────────────────────────────────────

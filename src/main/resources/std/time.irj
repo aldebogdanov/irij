@@ -1,0 +1,34 @@
+mod std.time
+
+;; Time effect module.
+;;
+;; Usage:
+;;   use std.time :open
+;;
+;;   fn bench :: Fn Int ::: Time
+;;     => thunk
+;;     start := time-now
+;;     thunk ()
+;;     (time-now) - start
+;;
+;;   with default-time
+;;     bench (-> time-sleep 100)
+;;
+;;   ;; Mock in tests:
+;;   handler fixed-clock :: Time
+;;     time-now        => resume 1700000000000
+;;     time-sleep ms   => resume ()
+;;
+;;   with fixed-clock
+;;     bench (-> time-sleep 100)   ;; => 0
+
+pub effect Time
+  time-now :: Int
+  time-sleep :: Int -> ()
+
+pub handler default-time :: Time ::: Time
+  time-now =>
+    resume (now-ms ())
+  time-sleep ms =>
+    sleep ms
+    resume ()

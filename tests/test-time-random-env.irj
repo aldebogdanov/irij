@@ -1,0 +1,123 @@
+use std.test :open
+use std.time :open
+use std.random :open
+use std.env :open
+
+;; ── std.time ──────────────────────────────────────────────
+
+fn run-time-now ::: Time
+  _ =>
+    t := time-now ()
+    assert-true (t > 0)
+
+fn wrap-time-now ::: Time
+  _ =>
+    with default-time
+      run-time-now ()
+
+test "time-now returns positive" (-> wrap-time-now ())
+
+fn run-time-sleep ::: Time
+  _ =>
+    start := time-now ()
+    time-sleep 10
+    elapsed := time-now () - start
+    assert-true (elapsed >= 0)
+
+fn wrap-time-sleep ::: Time
+  _ =>
+    with default-time
+      run-time-sleep ()
+
+test "time-sleep does not error" (-> wrap-time-sleep ())
+
+handler fixed-clock :: Time
+  time-now       => resume 1700000000000
+  time-sleep ms  => resume ()
+
+fn run-time-mock ::: Time
+  _ =>
+    t1 := time-now ()
+    t2 := time-now ()
+    assert-eq 1700000000000 t1
+    assert-eq t1 t2
+
+fn wrap-time-mock ::: Time
+  _ =>
+    with fixed-clock
+      run-time-mock ()
+
+test "Time handler is mockable" (-> wrap-time-mock ())
+
+;; ── std.random ────────────────────────────────────────────
+
+fn run-rand-int ::: Random
+  _ =>
+    n := rand-int 100
+    assert-true (n >= 0)
+    assert-true (n < 100)
+
+fn wrap-rand-int ::: Random
+  _ =>
+    with default-random
+      run-rand-int ()
+
+test "rand-int stays in bound" (-> wrap-rand-int ())
+
+fn run-rand-float ::: Random
+  _ =>
+    f := rand-float ()
+    assert-true (f >= 0.0)
+    assert-true (f < 1.0)
+
+fn wrap-rand-float ::: Random
+  _ =>
+    with default-random
+      run-rand-float ()
+
+test "rand-float in [0,1)" (-> wrap-rand-float ())
+
+handler fixed-random :: Random
+  rand-int bound => resume 42
+  rand-float     => resume 0.5
+
+fn run-rand-mock ::: Random
+  _ =>
+    assert-eq 42 (rand-int 1000000)
+    assert-eq 0.5 (rand-float ())
+
+fn wrap-rand-mock ::: Random
+  _ =>
+    with fixed-random
+      run-rand-mock ()
+
+test "Random handler is mockable" (-> wrap-rand-mock ())
+
+;; ── std.env ───────────────────────────────────────────────
+
+fn run-env-default ::: Env
+  _ =>
+    v := env-var "IRIJ_DOES_NOT_EXIST_XYZ" "fallback"
+    assert-eq "fallback" v
+
+fn wrap-env-default ::: Env
+  _ =>
+    with default-env
+      run-env-default ()
+
+test "env-var returns default when unset" (-> wrap-env-default ())
+
+handler mock-env :: Env
+  env-var name default => resume ("mocked-" ++ name)
+
+fn run-env-mock ::: Env
+  _ =>
+    assert-eq "mocked-HOME" (env-var "HOME" "")
+    assert-eq "mocked-PATH" (env-var "PATH" "")
+
+fn wrap-env-mock ::: Env
+  _ =>
+    with mock-env
+      run-env-mock ()
+
+test "Env handler is mockable" (-> wrap-env-mock ())

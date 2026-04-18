@@ -1,0 +1,30 @@
+mod std.random
+
+;; Random effect module.
+;;
+;; Usage:
+;;   use std.random :open
+;;
+;;   fn roll-d6 :: Int ::: Random
+;;     (-> 1 + (rand-int 6))
+;;
+;;   with default-random
+;;     roll-d6 ()
+;;
+;;   ;; Mock in tests (seeded/deterministic):
+;;   handler fixed-random :: Random
+;;     rand-int bound   => resume 3
+;;     rand-float       => resume 0.5
+;;
+;;   with fixed-random
+;;     roll-d6 ()   ;; => 4
+
+pub effect Random
+  rand-int :: Int -> Int
+  rand-float :: Float
+
+pub handler default-random :: Random ::: Random
+  rand-int bound =>
+    resume (random-int bound)
+  rand-float =>
+    resume (random-float ())

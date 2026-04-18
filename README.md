@@ -44,7 +44,7 @@ irij examples/walkthrough.irj # full language tour (all phases)
 
 ```sh
 ./gradlew test                # 693 Java unit tests
-irij test                     # 264 integration tests (tests/*.irj)
+irij test                     # 272 integration tests (tests/*.irj)
 ```
 
 ## Language Features
@@ -90,4 +90,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.1.1 &mdash; Phases 0-8a complete.
+0.2.8 &mdash; Phases 0-12b complete.

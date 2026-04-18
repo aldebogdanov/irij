@@ -49,7 +49,7 @@ pub fn assert-throws :: Fn ()
 ;; ── Test runner ─────────────────────────────────────
 
 ;; Run a single test. Returns #(:pass name) or #(:fail name).
-pub fn test :: Str Fn Tuple ::: Console
+pub fn test :: Str Fn Tuple ::: Console Time Random Env FileIO Http Db Serve
   => name thunk
   result := try thunk
   match result
