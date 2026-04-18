@@ -27,6 +27,26 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 - **Inline `if`:** `if cond-atom then-atom else else-atom` — each part must be an atomic expression. For complex branches use the block-form (now usable as an expression: `x := if cond\n  a\nelse\n  b`).
 - **Block-form `with`, `scope`, `if`, `match`** are all valid in expression position (wrapped by the AST builder into an `Expr.Block`). E.g. `n := with default-fs\n  fs-read path` works.
 
+## Handlers
+
+- **Handlers are top-level declarations, not expressions.** `handler name :: Effect ... ` is a statement; there is no `handler :: Effect ...` value form. You cannot:
+  - bind a handler to a variable (`h := handler :: Greet ...` ⛔)
+  - define a handler inline inside `with` (`with (handler :: Greet ...)` ⛔)
+  - pass a handler as a function argument
+  - dispatch `with` on a dynamic name (`with (if debug? h1 h2)` ⛔)
+- **`with` requires a static handler name.** Branch at the statement level instead:
+  ```
+  if debug?
+    with debug-handler
+      app ()
+  else
+    with prod-handler
+      app ()
+  ```
+  Deferred design question: whether to introduce first-class handler values (would require a handler type, op-name reification, and bigger runtime changes). For now, duplicate the `with` block per branch.
+- **`with` is block-form only.** `with h (expr)` on a single line does NOT parse — the body must start on the next indented line (`with h\n  body`).
+- **Zero-arg effect ops require `()` at call site.** Bare `op-name` inside a function body returns the builtin value, not the invocation result. Write `op-name ()`. This is consistent with zero-arg builtins generally (`now-ms ()`, `rand-float ()`).
+
 ## Vectors and calls
 
 - **Infix operators inside `#[...]`:** `#[a ++ b]` fails. Wrap: `#[(a ++ b)]`.
