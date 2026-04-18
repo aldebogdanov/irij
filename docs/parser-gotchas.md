@@ -40,10 +40,10 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 
 ## Pipelines & seq-ops
 
-- **`@` (map) direct-form:** `@ (x -> x * x) #[1 2 3]` fails with a type error — the parser greedily takes the whole argument list as part of `@`'s `appExpr`, producing `(@ lambda)` partially applied, then tries to apply that to `#[1 2 3]`, which treats the lambda as a collection. Canonical forms that work:
+- **Seq-op direct-form:** `@ f xs`, `/? pred xs`, `@i f xs`, `/^ f xs` all parse as `(seq-op f) xs` (the first postfix becomes the seq-op's argument, subsequent postfixes apply to the resulting partial). Both pipe and direct forms work:
   ```
-  #[1 2 3] |> @ (x -> x * x)     ;; pipe form — preferred
-  @i (x -> x * x) #[1 2 3]        ;; indexed variant
+  #[1 2 3] |> @ (x -> x * x)     ;; pipe form
+  @ (x -> x * x) #[1 2 3]        ;; direct form — also works
   ```
 - **`-` in pipelines:** `-` is excluded from implicit-continuation parsing to avoid ambiguity with unary negation. You cannot pipe `|> -` or start a continuation line with `-`; wrap in parens or use `(-)` as a value.
 

@@ -396,9 +396,10 @@ unaryExpr
     ;
 
 // Sequence operators: /+ /* /# /& /| /? /! /^ /$ @ @i
-// Can appear with or without argument (standalone = used as function value)
+// Can appear standalone (as function value), with one arg (partial/unary),
+// or with multiple args (e.g. `@ f xs` = map f xs).
 seqOpExpr
-    : seqOp appExpr?
+    : seqOp postfixExpr*
     | appExpr
     ;
 

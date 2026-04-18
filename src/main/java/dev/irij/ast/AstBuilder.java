@@ -812,8 +812,20 @@ public class AstBuilder {
     private Expr visitSeqOpExpr(SeqOpExprContext ctx) {
         if (ctx.seqOp() != null) {
             String op = ctx.seqOp().getText();
-            Expr arg = ctx.appExpr() != null ? visitAppExpr(ctx.appExpr()) : null;
-            return new Expr.SeqOp(op, arg, loc(ctx));
+            var postfixes = ctx.postfixExpr();
+            if (postfixes.isEmpty()) {
+                return new Expr.SeqOp(op, null, loc(ctx));
+            }
+            // First postfix becomes the seqOp's argument; remaining postfixes
+            // are applied to the result (e.g. `@ f xs` -> App(SeqOp(@,f), [xs])).
+            Expr first = visitPostfixExpr(postfixes.get(0));
+            Expr seqOp = new Expr.SeqOp(op, first, loc(ctx));
+            if (postfixes.size() == 1) return seqOp;
+            var args = new ArrayList<Expr>();
+            for (int i = 1; i < postfixes.size(); i++) {
+                args.add(visitPostfixExpr(postfixes.get(i)));
+            }
+            return new Expr.App(seqOp, args, loc(ctx));
         }
         return visitAppExpr(ctx.appExpr());
     }

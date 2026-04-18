@@ -82,4 +82,11 @@ r30 := test "window too big" (-> assert-eq #[] (window 5 #[1 2 3]))
 
 r31 := test "group-by" (-> assert-eq 2 (length (keys (group-by (x -> x % 2) #[1 2 3 4 5]))))
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31]
+;; ── seqOp multi-arg form: `@ f xs` without pipeline ─────
+
+r32 := test "@ f xs maps directly"  (-> assert-eq #[1 4 9] (@ (x -> x * x) #[1 2 3]))
+r33 := test "/? pred xs filters"    (-> assert-eq #[2 4]   (/? (x -> x % 2 == 0) #[1 2 3 4]))
+r34 := test "/^ f xs reduces"       (-> assert-eq 6        (/^ (+) #[1 2 3]))
+r35 := test "seqOp still curries"   (-> assert-eq #[1 4 9] (#[1 2 3] |> @ (x -> x * x)))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35]
