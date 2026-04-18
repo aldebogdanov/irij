@@ -111,7 +111,11 @@
     "read-file" "write-file" "append-file" "delete-file" "list-dir" "make-dir"
     "file-exists?" "get-env" "env" "now-ms" "read-line"
     "json-parse" "json-stringify" "url-encode" "url-decode"
-    "validate" "validate!")
+    "validate" "validate!"
+    ;; std.time / std.random / std.env wrappers + handlers
+    "time-now" "time-sleep" "default-time" "fixed-clock"
+    "rand-int" "rand-float" "default-random" "fixed-random"
+    "env-var" "default-env" "mock-env")
   "Built-in functions in Irij.")
 
 ;; Emacs 29+ introduced `font-lock-number-face'.  On older versions
