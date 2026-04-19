@@ -1,6 +1,6 @@
 # Phase 14 — Bytecode Compiler (MVP spike)
 
-Status: **14b — in progress on `bytecode-mvp` branch.** 14a MVP + strings/collections/match + ADT constructor dispatch green.
+Status: **14c.1 — in progress on `bytecode-mvp` branch.** 14a MVP + 14b (patterns/ADTs/lambdas/protocols) + 14c.1 (exception-as-effect, abort-only + `on-failure`) green.
 
 Experimental ahead-of-time compiler that targets JVM bytecode directly (ASM 9.x),
 running alongside the interpreter — not replacing it. Shares AST and parser with
@@ -46,15 +46,27 @@ the tree-walking interpreter.
 - String/vector `++` concat, `to-str` builtin, `&&` / `||` short-circuit
 - `display` delegates to `Values.toIrijString` for interpreter parity
 
-## Not yet supported (14c+)
+## Scope of 14c.1 (implemented)
 
-- Algebraic effects, handlers, `with`, `resume`, `on-failure` (14c)
-- Concurrency, modules, Java interop (14d)
-- Protocols / `impl` dispatch
-- Effects (algebraic effects — 14c plans CPS/state-machine lowering)
-- Concurrency, handlers, `with`
-- Module system, imports
-- Java interop (`Class/method` and dot-access)
+- `effect Name  op :: …` — registers ops; compiled calls to op names lower to
+  `RuntimeSupport.perform(op, args)` which throws a typed `EffectException`
+- `handler H :: Effect  op pat… => body` — abort-only handlers (no `resume`)
+  compile to a private static `handler$H(EffectException)` that switches on
+  `op` and runs the matching clause body
+- `with H  body [on-failure block]` as Stmt — body wrapped in try/catch; the
+  effect catch calls the dispatcher; an unknown op rethrows so an outer `with`
+  can handle it; `on-failure` catches non-effect `RuntimeException` and binds
+  `error` to the message
+
+## Not yet supported (14c.2+)
+
+- `resume` (one-shot) — 14c.2 will reuse the interpreter's thread+channel
+  `EffectSystem` to drive the body on a worker thread
+- Handler state (`state :! init`, `state <- …`) — 14c.2
+- Handler composition `>>`, handler dot-access — 14c.2
+- Multi-shot `resume` (backtracking) — deferred (CPS skipped)
+- State-machine rewrite for perf — 14c.3 if/when perf matters
+- Concurrency, modules, Java interop — 14d
 
 Compile errors are explicit (`MVP: unsupported expression: …`) so the escape
 hatch is always the interpreter.

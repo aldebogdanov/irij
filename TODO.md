@@ -613,9 +613,18 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
   - [x] `proto`/`impl` method tables — type-tag dispatch via `typeTag(arg0)`
         + generated `impl$method$Type` static methods
 
-- [ ] **14c — Effects**
-  - [ ] Decide lowering: exception-as-effect vs CPS vs state-machine
-  - [ ] Handler frames, `with`, `resume`, `on-failure`
+- [~] **14c — Effects**
+  - [x] Decide lowering: exception-as-effect (14c.1) → thread+channel (14c.2) → state-machine (14c.3); skip CPS
+  - [x] **14c.1 — exception-as-effect, abort-only**
+    - [x] `effect`/op registry + `perform` call-site lowering (throws `EffectException`)
+    - [x] Abort-only `handler` dispatcher (rejects `resume`, state bindings, required effects, composition, dot-access)
+    - [x] `Stmt.With` try/catch + `on-failure` (`error` bound to message)
+    - [x] Unhandled ops rethrow to outer `with`
+    - [x] Golden parity tests: abort, no-trigger, on-failure
+  - [ ] **14c.2 — thread+channel (full `resume`)**
+        reuse interpreter's `EffectSystem` (SynchronousQueue + virtual thread) for
+        one-shot `resume`, handler state, composition `>>`, dot-access
+  - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
 
 - [ ] **14d — Concurrency, modules, Java interop**
 

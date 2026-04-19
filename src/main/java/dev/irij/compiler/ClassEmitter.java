@@ -44,6 +44,10 @@ final class ClassEmitter implements Opcodes {
     private final Map<String, Map<String, Expr.Lambda>> protoImpls = new HashMap<>();
     // method name → arity
     private final Map<String, Integer> protoArity = new HashMap<>();
+    // effect op name → effect name
+    private final Map<String, String> effectOps = new HashMap<>();
+    // handler name → decl (14c.1 abort-only)
+    private final Map<String, Decl.HandlerDecl> handlers = new HashMap<>();
     private ClassWriter classWriter;
     private int lambdaCounter = 0;
 
@@ -66,6 +70,15 @@ final class ClassEmitter implements Opcodes {
                 List<String> names = new ArrayList<>();
                 for (Decl.SpecField f : ps.fields()) names.add(f.name());
                 productFields.put(sd.name(), names);
+            }
+            if (inner instanceof Decl.EffectDecl ed) {
+                for (Decl.EffectOp op : ed.ops()) {
+                    effectOps.put(op.name(), ed.name());
+                }
+            }
+            if (inner instanceof Decl.HandlerDecl hd) {
+                validateHandler14c1(hd);
+                handlers.put(hd.name(), hd);
             }
             if (inner instanceof Decl.ImplDecl id) {
                 for (Decl.ImplBinding b : id.bindings()) {
@@ -94,6 +107,11 @@ final class ClassEmitter implements Opcodes {
                 emitImplMethod(method, impl.getKey(), impl.getValue(), cw);
             }
             emitProtoDispatcher(method, entry.getValue().keySet(), protoArity.get(method), cw);
+        }
+
+        // Pass 2c: emit handler dispatcher methods (14c.1).
+        for (Decl.HandlerDecl h : handlers.values()) {
+            emitHandlerDispatcher(h, cw);
         }
 
         // Pass 3: main method with all non-fn top-level decls.
@@ -174,6 +192,8 @@ final class ClassEmitter implements Opcodes {
                 Stmt last = stmts.get(stmts.size() - 1);
                 if (last instanceof Stmt.ExprStmt es) {
                     emitExpr(es.expr(), mv, locals);
+                } else if (last instanceof Stmt.With w) {
+                    emitWith(w, mv, locals);
                 } else {
                     emitStmt(last, mv, locals);
                     mv.visitInsn(ACONST_NULL);
@@ -186,6 +206,25 @@ final class ClassEmitter implements Opcodes {
 
         mv.visitMaxs(0, 0);
         mv.visitEnd();
+    }
+
+    private void emitBlock(Expr.Block blk, MethodVisitor mv, Locals outer) {
+        Locals inner = outer.childScope();
+        List<Stmt> stmts = blk.stmts();
+        if (stmts.isEmpty()) {
+            mv.visitInsn(ACONST_NULL);
+            return;
+        }
+        for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, inner);
+        Stmt last = stmts.get(stmts.size() - 1);
+        if (last instanceof Stmt.ExprStmt es) {
+            emitExpr(es.expr(), mv, inner);
+        } else if (last instanceof Stmt.With w) {
+            emitWith(w, mv, inner);
+        } else {
+            emitStmt(last, mv, inner);
+            mv.visitInsn(ACONST_NULL);
+        }
     }
 
     /** Mangle Irij kebab-case names to JVM-safe identifiers. */
@@ -203,6 +242,9 @@ final class ClassEmitter implements Opcodes {
             case Decl.SpecDecl __ -> { /* structural only; constructors resolved via TypeRef */ }
             case Decl.ProtoDecl __ -> { /* no runtime rep; methods go through dispatchers */ }
             case Decl.ImplDecl __ -> { /* bindings hoisted to static methods in pass 2b */ }
+            case Decl.EffectDecl __ -> { /* ops registered in pass 1 */ }
+            case Decl.HandlerDecl __ -> { /* dispatcher emitted in pass 2c */ }
+            case Decl.WithDecl wd -> emitStmt(wd.with(), mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported top-level decl: " + d.getClass().getSimpleName());
         }
@@ -216,6 +258,10 @@ final class ClassEmitter implements Opcodes {
             case Stmt.MatchStmt ms -> {
                 // Match as statement: emit as expression, discard result.
                 emitMatchExpr(new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc()), mv, locals);
+                mv.visitInsn(POP);
+            }
+            case Stmt.With w -> {
+                emitWith(w, mv, locals);
                 mv.visitInsn(POP);
             }
             default -> throw new IrijCompiler.CompileException(
@@ -308,6 +354,7 @@ final class ClassEmitter implements Opcodes {
             case Expr.App app -> emitApp(app, mv, locals);
             case Expr.MatchExpr me -> emitMatchExpr(me, mv, locals);
             case Expr.Lambda lam -> emitLambda(lam, mv, locals);
+            case Expr.Block blk -> emitBlock(blk, mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported expression: " + e.getClass().getSimpleName());
         }
@@ -460,6 +507,13 @@ final class ClassEmitter implements Opcodes {
                         "(Ljava/lang/Object;)Ljava/lang/String;", false);
                 return true;
             }
+            case "error" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "errorBuiltin",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
             default -> { return false; }
         }
     }
@@ -499,6 +553,221 @@ final class ClassEmitter implements Opcodes {
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
             mv.visitInsn(POP);
         }
+    }
+
+    // ── Effects / handlers (14c.1 abort-only) ──────────────────────────
+
+    private void validateHandler14c1(Decl.HandlerDecl h) {
+        if (!h.stateBindings().isEmpty()) {
+            throw new IrijCompiler.CompileException(
+                    "handler " + h.name() + ": state bindings require resume (14c.2, not yet implemented)");
+        }
+        if (h.requiredEffects() != null && !h.requiredEffects().isEmpty()) {
+            throw new IrijCompiler.CompileException(
+                    "handler " + h.name() + ": required effects (::: ...) need 14c.2");
+        }
+        for (Decl.HandlerClause c : h.clauses()) {
+            if (containsResume(c.body())) {
+                throw new IrijCompiler.CompileException(
+                        "handler " + h.name() + " clause " + c.opName()
+                                + ": `resume` requires 14c.2 (thread+channel lowering), not yet implemented");
+            }
+        }
+    }
+
+    private static boolean containsResume(Expr e) {
+        if (e == null) return false;
+        if (e instanceof Expr.Var v && v.name().equals("resume")) return true;
+        if (e instanceof Expr.App app) {
+            if (containsResume(app.fn())) return true;
+            for (Expr a : app.args()) if (containsResume(a)) return true;
+            return false;
+        }
+        if (e instanceof Expr.BinaryOp b) return containsResume(b.left()) || containsResume(b.right());
+        if (e instanceof Expr.UnaryOp u) return containsResume(u.operand());
+        if (e instanceof Expr.IfExpr ie)
+            return containsResume(ie.cond()) || containsResume(ie.thenBranch()) || containsResume(ie.elseBranch());
+        if (e instanceof Expr.Lambda lam) return containsResume(lam.body());
+        if (e instanceof Expr.MatchExpr me) {
+            if (containsResume(me.scrutinee())) return true;
+            for (Expr.MatchArm a : me.arms()) {
+                if (containsResume(a.guard())) return true;
+                if (containsResume(a.body())) return true;
+            }
+        }
+        return false;
+    }
+
+    private static String handlerDispatchName(String h) { return "handler$" + mangle(h); }
+
+    private void emitHandlerDispatcher(Decl.HandlerDecl h, ClassWriter cw) {
+        // Signature: (EffectException ex) -> Object
+        String effEx = "dev/irij/compiler/RuntimeSupport$EffectException";
+        MethodVisitor mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC,
+                handlerDispatchName(h.name()),
+                "(L" + effEx + ";)Ljava/lang/Object;",
+                null, null);
+        mv.visitCode();
+        int exSlot = 0;
+
+        // op = ex.op, args = ex.args (loaded per clause)
+        for (Decl.HandlerClause c : h.clauses()) {
+            Label next = new Label();
+            mv.visitVarInsn(ALOAD, exSlot);
+            mv.visitFieldInsn(GETFIELD, effEx, "op", "Ljava/lang/String;");
+            mv.visitLdcInsn(c.opName());
+            mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "equals",
+                    "(Ljava/lang/Object;)Z", false);
+            mv.visitJumpInsn(IFEQ, next);
+
+            // Bind clause params from ex.args[].
+            Locals locals = new Locals();
+            locals.allocate("$ex");       // slot 0 reserved for exSlot
+            // UnitPat params bind nothing (e.g. `explode () => ...` is zero args after unit-strip).
+            List<Pattern> params = c.params();
+            boolean singleUnit = params.size() == 1 && params.get(0) instanceof Pattern.UnitPat;
+            if (!singleUnit) {
+                for (int i = 0; i < params.size(); i++) {
+                    Pattern p = params.get(i);
+                    String pn = switch (p) {
+                        case Pattern.VarPat v -> v.name();
+                        case Pattern.WildcardPat __ -> "_";
+                        case Pattern.UnitPat __ -> "_";
+                        default -> throw new IrijCompiler.CompileException(
+                                "handler " + h.name() + " clause " + c.opName()
+                                        + ": only VarPat/WildcardPat/UnitPat params supported");
+                    };
+                    if (p instanceof Pattern.UnitPat) continue;
+                    int slot = locals.allocate(pn);
+                    mv.visitVarInsn(ALOAD, exSlot);
+                    mv.visitFieldInsn(GETFIELD, effEx, "args", "[Ljava/lang/Object;");
+                    pushIconst(mv, i);
+                    mv.visitInsn(AALOAD);
+                    mv.visitVarInsn(ASTORE, slot);
+                }
+            }
+
+            emitExpr(c.body(), mv, locals);
+            mv.visitInsn(ARETURN);
+
+            mv.visitLabel(next);
+        }
+
+        // No clause matched → rethrow the original EffectException so outer with can handle it.
+        mv.visitVarInsn(ALOAD, exSlot);
+        mv.visitInsn(ATHROW);
+
+        mv.visitMaxs(0, 0);
+        mv.visitEnd();
+    }
+
+    private void emitPerform(String opName, List<Expr> args, MethodVisitor mv, Locals locals) {
+        // `() -> ()` effects are called `op ()` — strip single unit arg.
+        if (args.size() == 1 && args.get(0) instanceof Expr.UnitLit) args = List.of();
+        mv.visitLdcInsn(opName);
+        pushObjectArray(args, mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "perform",
+                "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+    }
+
+    /**
+     * Emit `with handler body [on-failure block]` as an expression, leaving the
+     * block's result on the stack. 14c.1 semantics: abort-only (no resume).
+     */
+    private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
+        if (!(w.handler() instanceof Expr.Var hv)) {
+            throw new IrijCompiler.CompileException(
+                    "MVP with: handler must be a named handler reference");
+        }
+        Decl.HandlerDecl h = handlers.get(hv.name());
+        if (h == null) {
+            throw new IrijCompiler.CompileException(
+                    "MVP with: unknown handler " + hv.name());
+        }
+
+        String effEx = "dev/irij/compiler/RuntimeSupport$EffectException";
+        String runEx = "java/lang/RuntimeException";
+
+        int resultSlot = outer.allocateAnon();
+
+        Label bodyStart = new Label();
+        Label bodyEnd = new Label();
+        Label effCatch = new Label();
+        Label runCatch = new Label();
+        Label end = new Label();
+
+        // try { body } catch (EffectException) { dispatch } catch (RuntimeException) { on-failure }
+        mv.visitTryCatchBlock(bodyStart, bodyEnd, effCatch, effEx);
+        if (w.onFailure() != null && !w.onFailure().isEmpty()) {
+            mv.visitTryCatchBlock(bodyStart, bodyEnd, runCatch, runEx);
+            mv.visitTryCatchBlock(effCatch, end, runCatch, runEx);
+        }
+
+        // ── body ──
+        mv.visitLabel(bodyStart);
+        Locals bodyLocals = outer.childScope();
+        List<Stmt> body = w.body();
+        if (body.isEmpty()) {
+            mv.visitInsn(ACONST_NULL);
+        } else {
+            for (int i = 0; i < body.size() - 1; i++) emitStmt(body.get(i), mv, bodyLocals);
+            Stmt last = body.get(body.size() - 1);
+            if (last instanceof Stmt.ExprStmt es) {
+                emitExpr(es.expr(), mv, bodyLocals);
+            } else if (last instanceof Stmt.With nested) {
+                emitWith(nested, mv, bodyLocals);
+            } else {
+                emitStmt(last, mv, bodyLocals);
+                mv.visitInsn(ACONST_NULL);
+            }
+        }
+        mv.visitVarInsn(ASTORE, resultSlot);
+        mv.visitLabel(bodyEnd);
+        mv.visitJumpInsn(GOTO, end);
+
+        // ── catch EffectException ──
+        mv.visitLabel(effCatch);
+        int exSlot = outer.allocateAnon();
+        mv.visitVarInsn(ASTORE, exSlot);
+        mv.visitVarInsn(ALOAD, exSlot);
+        mv.visitMethodInsn(INVOKESTATIC, internalName, handlerDispatchName(h.name()),
+                "(L" + effEx + ";)Ljava/lang/Object;", false);
+        mv.visitVarInsn(ASTORE, resultSlot);
+
+        // ── catch RuntimeException (on-failure) ──
+        if (w.onFailure() != null && !w.onFailure().isEmpty()) {
+            mv.visitJumpInsn(GOTO, end);
+            mv.visitLabel(runCatch);
+            // If it's an EffectException (rethrown by our dispatcher for unknown op),
+            // let it propagate to an outer handler instead of swallowing in on-failure.
+            mv.visitInsn(DUP);
+            mv.visitTypeInsn(INSTANCEOF, effEx);
+            Label notEff = new Label();
+            mv.visitJumpInsn(IFEQ, notEff);
+            mv.visitInsn(ATHROW);
+            mv.visitLabel(notEff);
+            int teSlot = outer.allocateAnon();
+            mv.visitVarInsn(ASTORE, teSlot);
+            Locals ofLocals = outer.childScope();
+            int errorSlot = ofLocals.allocate("error");
+            mv.visitVarInsn(ALOAD, teSlot);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "errorMessage",
+                    "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
+            mv.visitVarInsn(ASTORE, errorSlot);
+            List<Stmt> of = w.onFailure();
+            for (int i = 0; i < of.size() - 1; i++) emitStmt(of.get(i), mv, ofLocals);
+            Stmt last = of.get(of.size() - 1);
+            if (last instanceof Stmt.ExprStmt es) {
+                emitExpr(es.expr(), mv, ofLocals);
+            } else {
+                emitStmt(last, mv, ofLocals);
+                mv.visitInsn(ACONST_NULL);
+            }
+            mv.visitVarInsn(ASTORE, resultSlot);
+        }
+
+        mv.visitLabel(end);
+        mv.visitVarInsn(ALOAD, resultSlot);
     }
 
     // ── Protocols / impls ───────────────────────────────────────────────
@@ -748,6 +1017,11 @@ final class ClassEmitter implements Opcodes {
         if (fnName != null) {
             // Built-in intercepts
             if (emitBuiltinApp(fnName, app.args(), mv, locals)) return;
+            // Effect op → perform (throws EffectException)
+            if (effectOps.containsKey(fnName)) {
+                emitPerform(fnName, app.args(), mv, locals);
+                return;
+            }
             // Constructor application (e.g. `Some x`) — Var with uppercase
             if (Character.isUpperCase(fnName.charAt(0))) {
                 emitConstructorApp(fnName, app.args(), mv, locals);

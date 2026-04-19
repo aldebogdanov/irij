@@ -268,6 +268,62 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void effectAbort() throws Exception {
+        assertSame("eff_abort", """
+            effect Fail
+              fail :: Str -> ()
+
+            handler catch-fail :: Fail
+              fail msg => "CAUGHT: " ++ msg
+
+            fn run
+              _ =>
+                with catch-fail
+                  fail "boom"
+                  "unreachable"
+
+            println (run ())
+            """);
+    }
+
+    @Test
+    void effectAbortNoTrigger() throws Exception {
+        // No op performed → body's last expression is the result.
+        assertSame("eff_noop", """
+            effect Fail
+              fail :: Str -> ()
+
+            handler catch-fail :: Fail
+              fail msg => "CAUGHT: " ++ msg
+
+            with catch-fail
+              x := 1 + 2
+              println ("ok=" ++ (to-str x))
+            """);
+    }
+
+    @Test
+    void effectOnFailure() throws Exception {
+        assertSame("eff_on_failure", """
+            effect Boom
+              explode :: () -> ()
+
+            handler bomb :: Boom
+              explode () => error "kaboom!"
+
+            fn run
+              _ =>
+                with bomb
+                  explode ()
+                  "never reached"
+                on-failure
+                  "recovered: " ++ error
+
+            println (run ())
+            """);
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """

@@ -238,4 +238,39 @@ public final class RuntimeSupport {
     public static IllegalStateException noImpl(String method, Object arg) {
         return new IllegalStateException("No impl of " + method + " for " + typeTag(arg));
     }
+
+    // ── Effects (14c.1: exception-as-effect, abort-only) ───────────────
+
+    /** Thrown by `perform op ...`; caught by the enclosing `with handler`. */
+    public static final class EffectException extends RuntimeException {
+        public final String op;
+        public final Object[] args;
+        public EffectException(String op, Object[] args) {
+            super("Unhandled effect op: " + op);
+            this.op = op;
+            this.args = args;
+        }
+    }
+
+    /** Emitted call-site for effect ops. Always throws. */
+    public static Object perform(String op, Object[] args) {
+        throw new EffectException(op, args);
+    }
+
+    /** `error "msg"` builtin — throws IrijRuntimeError, caught by `on-failure`. */
+    public static Object errorBuiltin(Object msg) {
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                msg == null ? "error" : dev.irij.interpreter.Values.toIrijString(msg));
+    }
+
+    /** Re-throw an EffectException whose op is not in the current handler. */
+    public static IllegalStateException noClause(String handler, String op) {
+        return new IllegalStateException("handler " + handler + " has no clause for op " + op);
+    }
+
+    /** Extract message for `on-failure` binding — never null. */
+    public static String errorMessage(Throwable t) {
+        String m = t.getMessage();
+        return m == null ? t.getClass().getSimpleName() : m;
+    }
 }
