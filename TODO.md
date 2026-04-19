@@ -576,6 +576,51 @@ Clojure-style `Class/member` access to the JVM. No imports, no type declarations
 
 ---
 
+## Phase 14 — Bytecode Compiler (experimental)
+
+AOT compiler to JVM bytecode via ASM 9.x. Runs alongside the interpreter.
+Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
+
+- [x] **14a — MVP spike**
+  - [x] ASM 9.7 dependency
+  - [x] `dev.irij.compiler` package (`IrijCompiler`, `ClassEmitter`, `RuntimeSupport`)
+  - [x] Literals (`Int`/`Float`/`Bool`/`Str`/`()`), `true`/`false` vars
+  - [x] Binary/unary ops with Long/Double dispatch (`RuntimeSupport`)
+  - [x] `:=` bindings (`Simple` targets), `if`/`else` (stmt + expr)
+  - [x] `fn` / `pub fn` decls → `INVOKESTATIC` methods (forward refs, recursion)
+  - [x] `print` / `println` built-ins → `RuntimeSupport` helpers
+  - [x] `irij compile file.irj [-o out.class|out.jar]` CLI
+  - [x] Self-contained runnable jar (bundles `RuntimeSupport`)
+  - [x] Unit + golden tests (`HelloWorldCompileTest`, `DualRuntimeGoldenTest`)
+  - [x] Example (`examples/compiled.irj`)
+
+- [~] **14b — Patterns, ADTs, protocols** (in progress)
+  - [x] `match` expressions (literal/var/wildcard/unit/keyword/grouped patterns)
+  - [x] `MatchArmsBody` fn form (arity-1 dispatch)
+  - [x] `ConstructorPat`, `VectorPat` (with spread), `TuplePat`, `DestructurePat` (map)
+  - [x] Constructor application via `Values.Tagged` (e.g. `Circle 3.0`)
+  - [x] `SpecDecl` no-op (constructors resolved via `TypeRef`)
+  - [x] Collection literals: `Vector`, `Tuple`, `Set`, `Map`
+  - [x] Keyword literals
+  - [x] Strings: `++` concat, `to-str`, `&&`/`||`
+  - [x] `display` delegates to `Values.toIrijString` (interp parity)
+  - [x] Destructuring binds (`:=` with record/vector/tuple/ctor pattern)
+  - [x] Product-spec `Tagged` with named fields (enables record destructure)
+  - [x] Self-contained jar bundles `dev.irij.*` runtime classes
+  - [x] Lambda values (first-class fns) via `IrijFn` + `invokedynamic`/`LambdaMetafactory`, with closure captures
+  - [x] Higher-order fns (pass lambdas as args, call locals as fns)
+  - [x] Rest params in lambdas (`...rest` → `IrijVector`)
+  - [x] `proto`/`impl` method tables — type-tag dispatch via `typeTag(arg0)`
+        + generated `impl$method$Type` static methods
+
+- [ ] **14c — Effects**
+  - [ ] Decide lowering: exception-as-effect vs CPS vs state-machine
+  - [ ] Handler frames, `with`, `resume`, `on-failure`
+
+- [ ] **14d — Concurrency, modules, Java interop**
+
+---
+
 ## Future / Deferred
 
 - [ ] Choreographic programming (located types, EPP, `~>`, `<~`, roles)

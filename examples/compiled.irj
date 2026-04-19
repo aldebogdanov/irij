@@ -1,0 +1,65 @@
+;; Experimental bytecode compiler demo (Phase 14a + 14b).
+;;
+;; Build a runnable jar:
+;;   irij compile examples/compiled.irj -o /tmp/compiled.jar
+;;   java -jar /tmp/compiled.jar
+;;
+;; Supported: literals, arithmetic, if, bindings, user fns
+;; (lambda / imperative / match-arms bodies), recursion, match expressions,
+;; ADT constructors, collection literals, record destructuring.
+;; Protocols, effects, modules, Java interop still need the interpreter.
+
+fn square
+  (n -> n * n)
+
+fn hypot2
+  (a b -> (square a) + (square b))
+
+fn fact
+  (n -> if (n <= 1) 1 else (n * (fact (n - 1))))
+
+fn fib
+  (n -> if (n < 2) n else ((fib (n - 1)) + (fib (n - 2))))
+
+println (square 7)             ;; 49
+println (hypot2 3 4)           ;; 25
+println (fact 10)              ;; 3628800
+println (fib 10)               ;; 55
+
+x := 5
+y := x * x
+println (if (y > 20) "big" else "small")
+
+;; ── Match expressions ────────────────────────────────────────────────────
+
+fn describe
+  0 => "zero"
+  1 => "one"
+  n => "many"
+
+println (describe 0)           ;; zero
+println (describe 1)           ;; one
+println (describe 42)          ;; many
+
+;; ── ADTs + constructor patterns ─────────────────────────────────────────
+
+spec Shape
+  Circle Float
+  Rect   Float Float
+
+fn area
+  Circle r => r * r * 3.14
+  Rect w h => w * h
+
+println (area (Circle 3.0))    ;; 28.26
+println (area (Rect 4.0 5.0))  ;; 20.0
+
+;; ── Record destructuring ────────────────────────────────────────────────
+
+spec Point
+  x :: Float
+  y :: Float
+
+p := Point 3.0 4.0
+{x= px y= py} := p
+println ("x=" ++ (to-str px) ++ " y=" ++ (to-str py))

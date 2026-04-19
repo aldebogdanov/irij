@@ -38,12 +38,13 @@ irij examples/basics.irj      # bindings, functions, patterns
 irij examples/collections.irj # vectors, maps, pipelines
 irij examples/effects.irj     # algebraic effects deep dive
 irij examples/walkthrough.irj # full language tour (all phases)
+irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
 ```
 
 ## Tests
 
 ```sh
-./gradlew test                # 716 Java unit tests
+./gradlew test                # 751 Java unit tests (incl. 35 bytecode-compiler tests)
 irij test                     # 299 integration tests (tests/*.irj)
 ```
 
@@ -59,6 +60,7 @@ irij test                     # 299 integration tests (tests/*.irj)
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)
+- **Bytecode compiler (experimental, 14a+14b)** &mdash; `irij compile file.irj -o out.jar` emits a runnable JVM jar (subset: literals, arith, `if`, `:=`, `fn`, `match`, pattern dispatch, collections, ADT constructors, first-class lambdas with captures, rest params, protocol dispatch; see `docs/phase-14-bytecode.md`)
 - **nREPL** &mdash; Emacs integration via `editors/emacs/irij-nrepl.el`
 
 ## Documentation
@@ -77,6 +79,7 @@ src/main/antlr/          # ANTLR4 grammar (IrijLexer.g4, IrijParser.g4)
 src/main/java/dev/irij/
   ast/                   # AST nodes, AstBuilder
   interpreter/           # Interpreter, Values, Environment, Builtins
+  compiler/              # Bytecode compiler (ASM, experimental — Phase 14a)
   parser/                # Parse driver, lexer base
   cli/                   # CLI entry point
   repl/                  # JLine REPL
