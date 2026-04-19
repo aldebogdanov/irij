@@ -1129,26 +1129,57 @@
 
 ** 9.1 Java Interop
 
+   *Implemented in v0.3.0 (Phase 13).* Clojure-style `Class/member` access
+   to the JVM. No `use` declarations for Java classes — every class is
+   reachable via reflection. java.lang.* auto-imported.
+
    #+begin_example
-   ;; calling Java methods
-   use java.util.ArrayList as JList
+   ;; Static methods + fields (java.lang auto-imported)
+   println (Math/abs (-7))            ;; 7
+   println (Math/PI)                  ;; 3.141...
+   println (System/getenv "HOME")
 
-   fn java-example :: () Int ::: JVM
-     =>
-     list := JList/new ()          ;; constructor
-     list |> JList/add "hello"     ;; instance method (void, side-effect)
-     list |> JList/size            ;; returns Int
+   ;; Fully-qualified classes
+   stamp := java.time.Instant/now ()
+   uuid  := java.util.UUID/randomUUID ()
 
-   ;; implementing Java interfaces
-   impl java.lang.Runnable for MyTask
-     run := (self -> process self.data)
+   ;; Instance methods via dot-access
+   println ("hello".toUpperCase ())   ;; "HELLO"
+   println ("  hi  ".trim ())         ;; "hi"
 
-   ;; Java annotations: the compiler infers @Override for impl methods
-   ;; automatically. Framework annotations (e.g., Spring, JPA) are
-   ;; specified via metadata blocks in the module header — this avoids
-   ;; polluting Irij syntax with Java-specific concerns. Details TBD
-   ;; in Phase 1 FFI design.
+   ;; Constructors
+   rnd := java.util.Random/new 42
+   println (rnd.nextInt 100)
+
+   ;; Every Java call requires the JVM effect
+   fn now-ms :: _ Int ::: JVM
+     _ => System/currentTimeMillis ()
    #+end_example
+
+   *Forms:*
+   - =Class/staticMethod= — callable dispatching on arg count + coercion
+   - =Class/STATIC_FIELD= — static field value
+   - =Class/new= — constructor (callable)
+   - =obj.instanceMethod= — bound instance method (via dot-access)
+   - =obj.field= — instance field value
+
+   *Coercion:* Irij primitives auto-convert to Java primitives and their
+   boxed equivalents. =IrijVector= ↔ =List=, =IrijMap= ↔ =Map=, arrays
+   round-trip. Opaque Java objects (=Random=, =Instant=, =StringBuilder=)
+   are returned unchanged; dot-access still works via reflection.
+
+   *Overload resolution* scores each candidate per-argument: exact type
+   match (=0=), near match (=Long → int= = 1), cross-family numeric
+   (=Long → double= = 5), =Object= fallback (=3=). Lowest total wins.
+
+   *Effect tracking:* every Java call is tagged with =JVM= and checked
+   at the enclosing function's =:::= row.
+
+   *Interface implementation* (=impl java.lang.Runnable for MyTask=) is
+   deferred; currently use =proxy= via reflection or a Java shim class.
+
+   See =docs/java-interop.md= for the full coercion table, gotchas, and
+   examples.
 
 ** 9.2 Platform Targets
 

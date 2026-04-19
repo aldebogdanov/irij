@@ -754,7 +754,7 @@ public final class Interpreter {
         }, SESSION_SWEEP_MS, SESSION_SWEEP_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
 
         // ── raw-session-create — create a new sandboxed interpreter session
-        globalEnv.define("raw-session-create", new BuiltinFn("raw-session-create", 1, args -> {
+        globalEnv.define("raw-session-create", new BuiltinFn("raw-session-create", 1, List.of("Session"), args -> {
             var id = java.util.UUID.randomUUID().toString();
             var baos = new java.io.ByteArrayOutputStream();
             // SseWriter holder — when set, output also streams via SSE
@@ -787,7 +787,7 @@ public final class Interpreter {
         // ── raw-session-eval — evaluate code in an existing session
         // raw-session-eval session-id code timeout-ms
         //   Returns: {value= stdout= error= ok=}
-        globalEnv.define("raw-session-eval", new BuiltinFn("raw-session-eval", 3, args -> {
+        globalEnv.define("raw-session-eval", new BuiltinFn("raw-session-eval", 3, List.of("Session"), args -> {
             var sessionId = Builtins.asString(args.get(0), "raw-session-eval");
             var code = Builtins.asString(args.get(1), "raw-session-eval");
             var timeoutMs = Builtins.asLong(args.get(2), "raw-session-eval");
@@ -844,7 +844,7 @@ public final class Interpreter {
         }));
 
         // ── raw-session-destroy — destroy a session
-        globalEnv.define("raw-session-destroy", new BuiltinFn("raw-session-destroy", 1, args -> {
+        globalEnv.define("raw-session-destroy", new BuiltinFn("raw-session-destroy", 1, List.of("Session"), args -> {
             var sessionId = Builtins.asString(args.get(0), "raw-session-destroy");
             sessions.remove(sessionId);
             return Values.UNIT;
@@ -852,7 +852,7 @@ public final class Interpreter {
 
         // ── raw-session-subscribe — connect SSE writer to session output stream
         // raw-session-subscribe session-id sse-writer
-        globalEnv.define("raw-session-subscribe", new BuiltinFn("raw-session-subscribe", 2, args -> {
+        globalEnv.define("raw-session-subscribe", new BuiltinFn("raw-session-subscribe", 2, List.of("Session"), args -> {
             var sessionId = Builtins.asString(args.get(0), "raw-session-subscribe");
             if (!(args.get(1) instanceof SseWriter sse))
                 throw new IrijRuntimeError("raw-session-subscribe: second arg must be SseWriter", null);
@@ -866,7 +866,7 @@ public final class Interpreter {
         }));
 
         // ── raw-session-unsubscribe — disconnect SSE writer from session
-        globalEnv.define("raw-session-unsubscribe", new BuiltinFn("raw-session-unsubscribe", 1, args -> {
+        globalEnv.define("raw-session-unsubscribe", new BuiltinFn("raw-session-unsubscribe", 1, List.of("Session"), args -> {
             var sessionId = Builtins.asString(args.get(0), "raw-session-unsubscribe");
             var session = sessions.get(sessionId);
             if (session != null) {
@@ -878,7 +878,7 @@ public final class Interpreter {
         }));
 
         // ── raw-session-cleanup — remove sessions idle for > N ms
-        globalEnv.define("raw-session-cleanup", new BuiltinFn("raw-session-cleanup", 1, args -> {
+        globalEnv.define("raw-session-cleanup", new BuiltinFn("raw-session-cleanup", 1, List.of("Session"), args -> {
             var maxIdleMs = Builtins.asLong(args.get(0), "raw-session-cleanup");
             var now = System.currentTimeMillis();
             var removed = new java.util.concurrent.atomic.AtomicLong(0);
@@ -2560,6 +2560,7 @@ public final class Interpreter {
             case Expr.Var(var name, var loc) -> env.lookup(name, loc);
             case Expr.TypeRef(var name, var loc) -> env.lookup(name, loc);
             case Expr.RoleRef(var name, var loc__) -> name; // just pass through as string
+            case Expr.JavaRef(var ref, var loc__) -> JavaInterop.resolveStaticRef(ref);
 
             // ── Operators ───────────────────────────────────────────────
             case Expr.BinaryOp bo -> evalBinaryOp(bo, env);
@@ -2664,6 +2665,10 @@ public final class Interpreter {
                         yield mod.exports().lookup(da.field());
                     }
                     throw new IrijRuntimeError("Module '" + mod.qualifiedName() + "' has no export '" + da.field() + "'", da.loc());
+                }
+                // Java interop fallthrough: instance method / field on an opaque Java object
+                if (target != null && !(target instanceof Values.BuiltinFn)) {
+                    yield JavaInterop.resolveInstanceRef(target, da.field());
                 }
                 throw new IrijRuntimeError("Cannot access field '" + da.field() + "' on " + Values.typeName(target), da.loc());
             }

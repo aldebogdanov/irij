@@ -29,6 +29,9 @@ public sealed interface Expr extends Node {
     /** Role name reference ($BUYER etc). */
     record RoleRef(String name, SourceLoc loc) implements Expr {}
 
+    /** Java interop reference: Class/member (e.g. System/getenv, java.time.Instant/now, Class/new). */
+    record JavaRef(String ref, SourceLoc loc) implements Expr {}
+
     // ── Operators ───────────────────────────────────────────────────────
 
     record BinaryOp(String op, Expr left, Expr right, SourceLoc loc) implements Expr {}

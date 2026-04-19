@@ -415,7 +415,7 @@ appExpr
 
 // Postfix: dot access, located-at
 postfixExpr
-    : atomExpr (DOT (IDENT | UPPER_NAME))* (MAP_AT ROLE_NAME)?
+    : atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT))* (MAP_AT ROLE_NAME)?
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -424,6 +424,7 @@ postfixExpr
 
 atomExpr
     : literal
+    | JAVA_REF                                // Java interop: Class/member
     | IDENT
     | UPPER_NAME
     | ROLE_NAME
@@ -536,7 +537,7 @@ doExpr
 
 ifStmt
     : IF expr NEWLINE INDENT stmtList NEWLINE* DEDENT
-      (NEWLINE? ELSE NEWLINE INDENT stmtList NEWLINE* DEDENT)?
+      (NEWLINE? ELSE (ifStmt | NEWLINE INDENT stmtList NEWLINE* DEDENT))?
     ;
 
 // ── match (as statement, block-level) ────────────────────────────────

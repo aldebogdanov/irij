@@ -95,4 +95,30 @@ attr-map := {data-on:click= "alert('hi')" hx-on:htmx:after-request= "log()"}
 r36 := test "attr ident key"      (-> assert-eq "alert('hi')" (get "data-on:click" attr-map))
 r37 := test "nested attr ident"   (-> assert-eq "log()" (get "hx-on:htmx:after-request" attr-map))
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37]
+;; ── else if chain ──────────────────────────────────────
+
+fn classify :: Int Str
+  n =>
+    if n < 0
+      "neg"
+    else if n == 0
+      "zero"
+    else if n < 10
+      "small"
+    else
+      "big"
+
+r38 := test "else if: first"    (-> assert-eq "neg"   (classify (-1)))
+r39 := test "else if: middle"   (-> assert-eq "zero"  (classify 0))
+r40 := test "else if: chained"  (-> assert-eq "small" (classify 5))
+r41 := test "else if: final"    (-> assert-eq "big"   (classify 100))
+
+;; ── toml-parse ──────────────────────────────────────
+
+toml-src := "[project]\nname = \"demo\"\nversion = \"1.2.3\"\n\n[deps]\nfoo = \"^0.1\"\n"
+cfg := toml-parse toml-src
+r42 := test "toml project.name"    (-> assert-eq "demo"  cfg.project.name)
+r43 := test "toml project.version" (-> assert-eq "1.2.3" cfg.project.version)
+r44 := test "toml deps.foo"        (-> assert-eq "^0.1"  cfg.deps.foo)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r38 r39 r40 r41 r42 r43 r44]

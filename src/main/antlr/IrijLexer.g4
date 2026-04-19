@@ -126,6 +126,17 @@ KEYWORD     : ':' [a-z] [a-z0-9_-]* ;   // :ok  :error  :pending
 // ── Role Names ───────────────────────────────────────────────────────
 ROLE_NAME   : '$' [A-Z] [A-Z0-9_-]* ;   // $BUYER  $DB-PRIMARY
 
+// ── Java Interop Reference (Clojure-style) ───────────────────────────
+// Class/member, java.pkg.Class/member, Class/new. Must precede UPPER_NAME/
+// IDENT so the longer match wins. Starts with a letter, contains `/`,
+// so it never collides with seq-ops (/?  /^  …) which start with `/`.
+JAVA_REF    : [A-Za-z_] [A-Za-z_0-9]* ('.' [A-Za-z_] [A-Za-z_0-9]*)* '/' [A-Za-z_] [A-Za-z_0-9]* ;
+
+// camelCase identifier — used for Java method names in dot-access
+// (e.g. `.toUpperCase`, `.getBytes`). Requires at least one uppercase letter
+// so it never shadows IDENT (which is lowercase-only).
+CAMEL_IDENT : [a-z] [a-z0-9]* [A-Z] [a-zA-Z0-9]* ;
+
 // ── Identifiers ──────────────────────────────────────────────────────
 // Upper names: PascalCase (start with uppercase) — specs, effects, protocols, constructors
 UPPER_NAME  : [A-Z] [a-zA-Z0-9]* ;

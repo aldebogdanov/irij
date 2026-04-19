@@ -43,8 +43,8 @@ irij examples/walkthrough.irj # full language tour (all phases)
 ## Tests
 
 ```sh
-./gradlew test                # 693 Java unit tests
-irij test                     # 278 integration tests (tests/*.irj)
+./gradlew test                # 716 Java unit tests
+irij test                     # 299 integration tests (tests/*.irj)
 ```
 
 ## Language Features
@@ -58,6 +58,7 @@ irij test                     # 278 integration tests (tests/*.irj)
 - **Structured concurrency** &mdash; `scope`, `fork`, `par`, `race`, `timeout`
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
+- **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)
 - **nREPL** &mdash; Emacs integration via `editors/emacs/irij-nrepl.el`
 
 ## Documentation
@@ -90,4 +91,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.2.8 &mdash; Phases 0-12b complete.
+0.3.0 &mdash; Phases 0-13 complete (Java interop).

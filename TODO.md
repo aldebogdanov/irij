@@ -537,12 +537,12 @@ Effect-based I/O operations, mockable via handlers in tests.
 
 First real-world applications written in Irij. Dogfood Phases 8–11.
 
-### 12a — Package Registry
-- [ ] HTTP server serving registry API
-- [ ] Package upload/download
-- [ ] Spec-validated package metadata
-- [ ] Git-based package storage
-- [ ] Search and discovery
+### 12a — Package Registry ✅
+- [x] HTTP server serving registry API (irij.online/seeds)
+- [x] Package upload/download (git-based seeds)
+- [x] Spec-validated package metadata
+- [x] Git-based package storage
+- [x] Search and discovery
 
 ### 12b — nREPL Playground ✅
 - [x] Sandboxed interpreter (`Builtins.installSandboxed()`) — blocks file, DB, HTTP ops
@@ -557,6 +557,25 @@ First real-world applications written in Irij. Dogfood Phases 8–11.
 
 ---
 
+## Phase 13 — Java Interop ✅
+
+Clojure-style `Class/member` access to the JVM. No imports, no type declarations — every Java class reachable via reflection.
+
+- [x] `JAVA_REF` lexer token (`Class/member`, `java.pkg.Class/member`, `Class/new`)
+- [x] `CAMEL_IDENT` lexer token for camelCase method names after DOT
+- [x] `Expr.JavaRef` AST node + AstBuilder
+- [x] `JavaInterop` resolver (class lookup, static/instance dispatch, overload scoring)
+- [x] Dot-access fallthrough to reflection for opaque Java receivers
+- [x] Argument coercion (Irij ↔ Java) with numeric family preference
+- [x] `JVM` effect tag on every Java call (threaded through BuiltinFn effect check)
+- [x] `java.lang.*` auto-import for unqualified class names
+- [x] Java unit tests (`JavaInteropTest`, 23 cases)
+- [x] Integration tests (`tests/test-jvm.irj`, 14 cases)
+- [x] Example (`examples/jvm-interop.irj`)
+- [x] Docs (`docs/java-interop.md`, parser-gotchas entry)
+
+---
+
 ## Future / Deferred
 
 - [ ] Choreographic programming (located types, EPP, `~>`, `<~`, roles)
@@ -565,7 +584,7 @@ First real-world applications written in Irij. Dogfood Phases 8–11.
 - [ ] Refinement types (L4) — SMT integration
 - [ ] Dependent types / proofs (L5)
 - [ ] Content-addressed code (hash-based identity)
-- [ ] JVM interop (`use java.*`, `JClass/method`)
+- [ ] JVM interop perf (`MethodHandle` cache, type hints `^String` / `^int`)
 - [ ] GraalVM Native Image
 - [ ] Channels: `send`, `recv`, `select`
 - [ ] LSP server

@@ -4,6 +4,7 @@ import dev.irij.ast.Node.SourceLoc;
 import dev.irij.interpreter.Values.*;
 
 import com.google.gson.*;
+import com.moandjiezana.toml.Toml;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -558,6 +559,15 @@ public final class Builtins {
             return gson.toJson(irijToJson(args.get(0)));
         }));
 
+        env.define("toml-parse", new BuiltinFn("toml-parse", 1, args -> {
+            var str = asString(args.get(0), "toml-parse");
+            try {
+                return tomlValueToIrij(new Toml().read(str).toMap());
+            } catch (IllegalStateException e) {
+                throw new IrijRuntimeError("toml-parse: " + e.getMessage());
+            }
+        }));
+
         // ── Additional FS primitives ────────────────────────────────────
         env.define("list-dir", new BuiltinFn("list-dir", 1, List.of("FileIO"), args -> {
             var path = asString(args.get(0), "list-dir");
@@ -868,6 +878,30 @@ public final class Builtins {
     }
 
     // ── JSON conversion helpers ────────────────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    static Object tomlValueToIrij(Object val) {
+        if (val == null) return Values.UNIT;
+        if (val instanceof String s) return s;
+        if (val instanceof Boolean b) return b;
+        if (val instanceof Long l) return l;
+        if (val instanceof Integer i) return (long) i;
+        if (val instanceof Double d) return d;
+        if (val instanceof Float f) return (double) f;
+        if (val instanceof java.util.Date date) return date.getTime();
+        if (val instanceof List<?> list) {
+            var out = new ArrayList<Object>(list.size());
+            for (var e : list) out.add(tomlValueToIrij(e));
+            return new IrijVector(out);
+        }
+        if (val instanceof Map<?, ?> m) {
+            var out = new LinkedHashMap<String, Object>();
+            for (var e : ((Map<String, Object>) m).entrySet())
+                out.put(e.getKey(), tomlValueToIrij(e.getValue()));
+            return new IrijMap(out);
+        }
+        return val.toString();
+    }
 
     static Object jsonToIrij(JsonElement el) {
         if (el == null || el.isJsonNull()) return Values.UNIT;

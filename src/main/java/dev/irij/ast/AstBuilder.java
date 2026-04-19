@@ -583,7 +583,15 @@ public class AstBuilder {
         var cond = visitExpr(ctx.expr());
         var stmtLists = ctx.stmtList();
         var thenBranch = visitStmtList(stmtLists.get(0));
-        var elseBranch = stmtLists.size() > 1 ? visitStmtList(stmtLists.get(1)) : List.<Stmt>of();
+        List<Stmt> elseBranch;
+        var nestedIfs = ctx.getRuleContexts(IfStmtContext.class);
+        if (!nestedIfs.isEmpty()) {
+            elseBranch = List.<Stmt>of(visitIfStmt(nestedIfs.get(0)));
+        } else if (stmtLists.size() > 1) {
+            elseBranch = visitStmtList(stmtLists.get(1));
+        } else {
+            elseBranch = List.<Stmt>of();
+        }
         return new Stmt.IfStmt(cond, thenBranch, elseBranch, loc(ctx));
     }
 
@@ -852,7 +860,7 @@ public class AstBuilder {
                 int type = tn.getSymbol().getType();
                 if (type == IrijParser.DOT) {
                     afterDot = true;
-                } else if (afterDot && (type == IrijParser.IDENT || type == IrijParser.UPPER_NAME)) {
+                } else if (afterDot && (type == IrijParser.IDENT || type == IrijParser.UPPER_NAME || type == IrijParser.CAMEL_IDENT)) {
                     result = new Expr.DotAccess(result, tn.getText(), loc(ctx));
                     afterDot = false;
                 }
@@ -868,6 +876,7 @@ public class AstBuilder {
 
     private Expr visitAtomExpr(AtomExprContext ctx) {
         if (ctx.literal() != null) return visitLiteral(ctx.literal());
+        if (ctx.JAVA_REF() != null) return new Expr.JavaRef(ctx.JAVA_REF().getText(), loc(ctx));
         if (ctx.IDENT() != null) return new Expr.Var(ctx.IDENT().getText(), loc(ctx));
         if (ctx.UPPER_NAME() != null) return new Expr.TypeRef(ctx.UPPER_NAME().getText(), loc(ctx));
         if (ctx.ROLE_NAME() != null) return new Expr.RoleRef(ctx.ROLE_NAME().getText(), loc(ctx));

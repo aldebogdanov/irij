@@ -1,0 +1,76 @@
+;; ═══════════════════════════════════════════════════════════════════
+;; Java interop — Clojure-style access to the JVM
+;; ═══════════════════════════════════════════════════════════════════
+;;
+;; Irij runs on the JVM. With Java interop (introduced in 0.3.0),
+;; every Java class is reachable via `Class/member` syntax.
+;;
+;; Forms:
+;;   Class/staticMethod     → callable (auto-coerces args)
+;;   Class/STATIC_FIELD     → field value
+;;   Class/new              → constructor
+;;   obj.instanceMethod     → bound method via dot-access
+;;   obj.field              → field value
+;;
+;; java.lang.* classes auto-resolve without a package prefix.
+;; Every JVM call is tagged with the ::: JVM effect.
+
+;; ── Static methods ──────────────────────────────────────────
+
+println (Math/abs (-7))              ;; 7
+println (Math/max 3 5)               ;; 5
+println (Math/pow 2.0 10.0)          ;; 1024.0
+println (System/getenv "HOME")       ;; /Users/you
+
+;; ── Static fields ───────────────────────────────────────────
+
+println (Math/PI)                    ;; 3.141592653589793
+println (Long/MAX_VALUE)             ;; 9223372036854775807
+
+;; ── Fully-qualified classes ─────────────────────────────────
+
+stamp := java.time.Instant/now ()
+println stamp                        ;; 2026-04-18T…Z
+
+uuid := (java.util.UUID/randomUUID ()).toString ()
+println uuid                         ;; 3fa85f64-5717-4562-b3fc-2c963f66afa6
+
+;; ── Instance methods via dot-access ─────────────────────────
+
+println ("hello".toUpperCase ())     ;; HELLO
+println ("  hi  ".trim ())           ;; hi
+println ("foo-bar".startsWith "foo") ;; true
+
+;; ── Constructors ────────────────────────────────────────────
+
+rnd := java.util.Random/new 42       ;; seeded for reproducibility
+println (rnd.nextInt 100)            ;; 63
+
+sb := java.lang.StringBuilder/new ()
+r1 := sb.append "Hello, "
+r2 := sb.append "world!"
+println (sb.toString ())             ;; Hello, world!
+
+;; ── Parsing / formatting ────────────────────────────────────
+
+println (java.lang.Long/parseLong "42")
+println (java.lang.Integer/toHexString 255)   ;; "ff"
+
+;; ── Chained calls need parens or |> ─────────────────────────
+
+trimmed := "  padded  ".trim ()
+println (trimmed.length ())          ;; 6
+
+;; Or via pipeline:
+println ("   x   " |> (s -> s.trim ()))
+
+;; ── Gotchas ─────────────────────────────────────────────────
+;;
+;;  • Every `obj.methodName ()` requires explicit `()` (zero args).
+;;  • Method overloads resolve by arity + arg type. When ambiguous,
+;;    Long → long is preferred over Long → double.
+;;  • java.util.List / java.util.Map / arrays returned from Java
+;;    auto-convert to IrijVector / IrijMap. Opaque objects (Random,
+;;    Instant, StringBuilder, …) round-trip unchanged.
+;;  • `foo/bar` without spaces is always interpreted as Class/member —
+;;    use `foo / bar` (with spaces) for division.

@@ -77,6 +77,13 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 - **`forall binders`** require `.`: `forall x y. P x y`.
 - **`|` (BAR)** is used for guards and refinement types — distinct from `||` (logical OR).
 
+## Java interop (0.3.0+)
+
+- **`foo/bar` (no spaces) is always a Java class reference.** The lexer's `JAVA_REF` token (alpha start, contains `/`, alpha continuation) outranks seq-ops and IDENT/SLASH/IDENT. For integer division write `a / b` with spaces, or `(/) a b`.
+- **`CAMEL_IDENT` only appears after `.`** — identifiers like `toUpperCase` lex as `CAMEL_IDENT` (at least one internal uppercase) and are grammar-restricted to dot-access positions. Bare `toUpperCase` used as a variable is a parse error.
+- **Chained instance method calls need parens or `|>`.** Grammar is `atomExpr (DOT field)*` — each postfix is a single dot-access chain, not an applied-call chain. Write `(("x".trim ()).length ())` or pipeline.
+- **`()` means zero args, including to Java.** `obj.m ()` calls the 0-arg overload, not the 1-arg `m(null)` variant. A lone UNIT arg is stripped by `JavaInterop.normalizeArgs` before reflection dispatch.
+
 ## Standard library arg order (not parser, but commonly confused)
 
 - `split string sep` (string first, separator second).
@@ -89,3 +96,4 @@ Previously listed gotchas that no longer apply:
 - ~~Multi-line `if` in lambda bodies~~ — block-form `if` is now an expression.
 - ~~String keys in map literals~~ — `{"content-type"= val}` parses.
 - ~~`with` / `scope` only at statement position~~ — now usable in expression position.
+- ~~`else if` chain requires nesting~~ — `else if cond` chains are supported natively (0.2.11+).
