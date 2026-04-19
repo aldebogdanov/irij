@@ -239,22 +239,27 @@ public final class RuntimeSupport {
         return new IllegalStateException("No impl of " + method + " for " + typeTag(arg));
     }
 
-    // ── Effects (14c.1: exception-as-effect, abort-only) ───────────────
+    // ── Effects (14c.2: thread+channel lowering; reuses EffectSystem) ──
 
-    /** Thrown by `perform op ...`; caught by the enclosing `with handler`. */
-    public static final class EffectException extends RuntimeException {
-        public final String op;
-        public final Object[] args;
-        public EffectException(String op, Object[] args) {
-            super("Unhandled effect op: " + op);
-            this.op = op;
-            this.args = args;
+    /**
+     * Compiled handler value: clause map from op-name to IrijFn.
+     * Each clause IrijFn is invoked with arg-array that ends with the resume
+     * IrijFn: {@code args..., resume}. Clause returns the value that should
+     * be the result of the enclosing `with` block.
+     */
+    public static final class CompiledHandler {
+        public final String name;
+        public final String effectName;
+        public final java.util.Map<String, IrijFn> clauses;
+        public CompiledHandler(String name, String effectName, java.util.Map<String, IrijFn> clauses) {
+            this.name = name; this.effectName = effectName; this.clauses = clauses;
         }
     }
 
-    /** Emitted call-site for effect ops. Always throws. */
-    public static Object perform(String op, Object[] args) {
-        throw new EffectException(op, args);
+    /** Emitted call-site for effect ops. Routes through EffectSystem.fireOp. */
+    public static Object perform(String effectName, String opName, Object[] args) {
+        return dev.irij.interpreter.EffectSystem.fireOp(
+                effectName, opName, java.util.Arrays.asList(args));
     }
 
     /** `error "msg"` builtin — throws IrijRuntimeError, caught by `on-failure`. */
@@ -263,14 +268,103 @@ public final class RuntimeSupport {
                 msg == null ? "error" : dev.irij.interpreter.Values.toIrijString(msg));
     }
 
-    /** Re-throw an EffectException whose op is not in the current handler. */
-    public static IllegalStateException noClause(String handler, String op) {
-        return new IllegalStateException("handler " + handler + " has no clause for op " + op);
-    }
-
     /** Extract message for `on-failure` binding — never null. */
     public static String errorMessage(Throwable t) {
         String m = t.getMessage();
         return m == null ? t.getClass().getSimpleName() : m;
+    }
+
+    /**
+     * Run body under a compiled handler: spawns a virtual thread for the body,
+     * drives the handler loop on the calling thread, supports one-shot resume.
+     */
+    public static Object runWith(Object handlerObj, IrijFn body) {
+        if (!(handlerObj instanceof CompiledHandler h)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "with requires a handler, got " + typeTag(handlerObj));
+        }
+        var opChannel = new java.util.concurrent.SynchronousQueue<
+                dev.irij.interpreter.EffectSystem.EffectMessage>();
+        var ctx = new dev.irij.interpreter.EffectSystem.HandlerContext(
+                h.effectName, h, opChannel);
+        var parentStack = new java.util.ArrayDeque<>(
+                dev.irij.interpreter.EffectSystem.STACK.get());
+
+        Thread bodyThread = Thread.startVirtualThread(() -> {
+            var bodyStack = dev.irij.interpreter.EffectSystem.STACK.get();
+            bodyStack.addAll(parentStack);
+            bodyStack.push(ctx);
+            try {
+                Object result = body.apply(new Object[0]);
+                opChannel.put(new dev.irij.interpreter.EffectSystem.EffectMessage.Done(result));
+            } catch (InterruptedException e) {
+                // aborted by handler (no resume)
+            } catch (Throwable t) {
+                try {
+                    opChannel.put(new dev.irij.interpreter.EffectSystem.EffectMessage.Err(t));
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        });
+
+        try {
+            return runHandlerLoop(h, opChannel);
+        } finally {
+            if (bodyThread.isAlive()) bodyThread.interrupt();
+        }
+    }
+
+    private static Object runHandlerLoop(
+            CompiledHandler h,
+            java.util.concurrent.SynchronousQueue<dev.irij.interpreter.EffectSystem.EffectMessage> opChannel) {
+        while (true) {
+            dev.irij.interpreter.EffectSystem.EffectMessage msg;
+            try { msg = opChannel.take(); }
+            catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new dev.irij.interpreter.IrijRuntimeError("Handler loop interrupted");
+            }
+            switch (msg) {
+                case dev.irij.interpreter.EffectSystem.EffectMessage.Done d -> {
+                    return d.value();
+                }
+                case dev.irij.interpreter.EffectSystem.EffectMessage.Err e -> {
+                    Throwable t = e.error();
+                    if (t instanceof dev.irij.interpreter.IrijRuntimeError ire) throw ire;
+                    if (t instanceof RuntimeException re) throw re;
+                    throw new dev.irij.interpreter.IrijRuntimeError(
+                            "Effect body error: " + t.getMessage());
+                }
+                case dev.irij.interpreter.EffectSystem.EffectMessage.Op op -> {
+                    IrijFn clause = h.clauses.get(op.opName());
+                    if (clause == null) {
+                        throw new dev.irij.interpreter.IrijRuntimeError(
+                                "Handler " + h.name + " has no clause for " + op.opName());
+                    }
+                    var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
+                    IrijFn resumeFn = (resumeArgs) -> {
+                        if (!resumed.compareAndSet(false, true)) {
+                            throw new dev.irij.interpreter.IrijRuntimeError(
+                                    "resume called twice (one-shot continuation)");
+                        }
+                        try {
+                            op.resumeChannel().put(resumeArgs.length > 0
+                                    ? resumeArgs[0]
+                                    : dev.irij.interpreter.Values.UNIT);
+                            return runHandlerLoop(h, opChannel);
+                        } catch (InterruptedException e2) {
+                            Thread.currentThread().interrupt();
+                            throw new dev.irij.interpreter.IrijRuntimeError(
+                                    "Interrupted during resume");
+                        }
+                    };
+                    Object[] clauseArgs = new Object[op.args().size() + 1];
+                    for (int i = 0; i < op.args().size(); i++) clauseArgs[i] = op.args().get(i);
+                    clauseArgs[op.args().size()] = resumeFn;
+                    return clause.apply(clauseArgs);
+                }
+            }
+        }
     }
 }

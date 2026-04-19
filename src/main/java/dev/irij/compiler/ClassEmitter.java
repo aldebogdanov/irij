@@ -77,7 +77,7 @@ final class ClassEmitter implements Opcodes {
                 }
             }
             if (inner instanceof Decl.HandlerDecl hd) {
-                validateHandler14c1(hd);
+                validateHandler14c2(hd);
                 handlers.put(hd.name(), hd);
             }
             if (inner instanceof Decl.ImplDecl id) {
@@ -109,9 +109,9 @@ final class ClassEmitter implements Opcodes {
             emitProtoDispatcher(method, entry.getValue().keySet(), protoArity.get(method), cw);
         }
 
-        // Pass 2c: emit handler dispatcher methods (14c.1).
+        // Pass 2c: emit handler builder methods (14c.2).
         for (Decl.HandlerDecl h : handlers.values()) {
-            emitHandlerDispatcher(h, cw);
+            emitHandlerBuilder(h, cw);
         }
 
         // Pass 3: main method with all non-fn top-level decls.
@@ -555,107 +555,82 @@ final class ClassEmitter implements Opcodes {
         }
     }
 
-    // ── Effects / handlers (14c.1 abort-only) ──────────────────────────
+    // ── Effects / handlers (14c.2 thread+channel, one-shot resume) ────
 
-    private void validateHandler14c1(Decl.HandlerDecl h) {
+    private void validateHandler14c2(Decl.HandlerDecl h) {
         if (!h.stateBindings().isEmpty()) {
             throw new IrijCompiler.CompileException(
-                    "handler " + h.name() + ": state bindings require resume (14c.2, not yet implemented)");
+                    "handler " + h.name() + ": mutable state not yet implemented in bytecode compiler (14c.2b)");
         }
         if (h.requiredEffects() != null && !h.requiredEffects().isEmpty()) {
             throw new IrijCompiler.CompileException(
-                    "handler " + h.name() + ": required effects (::: ...) need 14c.2");
-        }
-        for (Decl.HandlerClause c : h.clauses()) {
-            if (containsResume(c.body())) {
-                throw new IrijCompiler.CompileException(
-                        "handler " + h.name() + " clause " + c.opName()
-                                + ": `resume` requires 14c.2 (thread+channel lowering), not yet implemented");
-            }
+                    "handler " + h.name() + ": required effects (::: …) not yet implemented in bytecode compiler (14c.2b)");
         }
     }
 
-    private static boolean containsResume(Expr e) {
-        if (e == null) return false;
-        if (e instanceof Expr.Var v && v.name().equals("resume")) return true;
-        if (e instanceof Expr.App app) {
-            if (containsResume(app.fn())) return true;
-            for (Expr a : app.args()) if (containsResume(a)) return true;
-            return false;
-        }
-        if (e instanceof Expr.BinaryOp b) return containsResume(b.left()) || containsResume(b.right());
-        if (e instanceof Expr.UnaryOp u) return containsResume(u.operand());
-        if (e instanceof Expr.IfExpr ie)
-            return containsResume(ie.cond()) || containsResume(ie.thenBranch()) || containsResume(ie.elseBranch());
-        if (e instanceof Expr.Lambda lam) return containsResume(lam.body());
-        if (e instanceof Expr.MatchExpr me) {
-            if (containsResume(me.scrutinee())) return true;
-            for (Expr.MatchArm a : me.arms()) {
-                if (containsResume(a.guard())) return true;
-                if (containsResume(a.body())) return true;
-            }
-        }
-        return false;
-    }
+    private static final String COMP_HANDLER = "dev/irij/compiler/RuntimeSupport$CompiledHandler";
 
-    private static String handlerDispatchName(String h) { return "handler$" + mangle(h); }
+    private static String handlerBuildName(String h) { return "handler$" + mangle(h) + "$build"; }
 
-    private void emitHandlerDispatcher(Decl.HandlerDecl h, ClassWriter cw) {
-        // Signature: (EffectException ex) -> Object
-        String effEx = "dev/irij/compiler/RuntimeSupport$EffectException";
+    /** Emit a static `handler$name$build() -> CompiledHandler` method. */
+    private void emitHandlerBuilder(Decl.HandlerDecl h, ClassWriter cw) {
+        // Find effect name: handler's effectName field.
+        String effectName = h.effectName();
         MethodVisitor mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC,
-                handlerDispatchName(h.name()),
-                "(L" + effEx + ";)Ljava/lang/Object;",
+                handlerBuildName(h.name()),
+                "()L" + COMP_HANDLER + ";",
                 null, null);
         mv.visitCode();
-        int exSlot = 0;
 
-        // op = ex.op, args = ex.args (loaded per clause)
+        // Build LinkedHashMap<String, IrijFn> of clauses.
+        mv.visitTypeInsn(NEW, "java/util/LinkedHashMap");
+        mv.visitInsn(DUP);
+        mv.visitMethodInsn(INVOKESPECIAL, "java/util/LinkedHashMap", "<init>", "()V", false);
+        int mapSlot = 0;
+        mv.visitVarInsn(ASTORE, mapSlot);
+
+        Locals locals = new Locals();
+        locals.allocate("$map"); // slot 0
+
         for (Decl.HandlerClause c : h.clauses()) {
-            Label next = new Label();
-            mv.visitVarInsn(ALOAD, exSlot);
-            mv.visitFieldInsn(GETFIELD, effEx, "op", "Ljava/lang/String;");
+            mv.visitVarInsn(ALOAD, mapSlot);
             mv.visitLdcInsn(c.opName());
-            mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/String", "equals",
-                    "(Ljava/lang/Object;)Z", false);
-            mv.visitJumpInsn(IFEQ, next);
 
-            // Bind clause params from ex.args[].
-            Locals locals = new Locals();
-            locals.allocate("$ex");       // slot 0 reserved for exSlot
-            // UnitPat params bind nothing (e.g. `explode () => ...` is zero args after unit-strip).
+            // Build clause params: strip lone UnitPat, then append resume VarPat.
             List<Pattern> params = c.params();
             boolean singleUnit = params.size() == 1 && params.get(0) instanceof Pattern.UnitPat;
+            List<Pattern> clauseParams = new ArrayList<>();
             if (!singleUnit) {
-                for (int i = 0; i < params.size(); i++) {
-                    Pattern p = params.get(i);
-                    String pn = switch (p) {
-                        case Pattern.VarPat v -> v.name();
-                        case Pattern.WildcardPat __ -> "_";
-                        case Pattern.UnitPat __ -> "_";
-                        default -> throw new IrijCompiler.CompileException(
+                for (Pattern p : params) {
+                    if (p instanceof Pattern.UnitPat) continue;
+                    if (p instanceof Pattern.VarPat || p instanceof Pattern.WildcardPat) {
+                        clauseParams.add(p);
+                    } else {
+                        throw new IrijCompiler.CompileException(
                                 "handler " + h.name() + " clause " + c.opName()
                                         + ": only VarPat/WildcardPat/UnitPat params supported");
-                    };
-                    if (p instanceof Pattern.UnitPat) continue;
-                    int slot = locals.allocate(pn);
-                    mv.visitVarInsn(ALOAD, exSlot);
-                    mv.visitFieldInsn(GETFIELD, effEx, "args", "[Ljava/lang/Object;");
-                    pushIconst(mv, i);
-                    mv.visitInsn(AALOAD);
-                    mv.visitVarInsn(ASTORE, slot);
+                    }
                 }
             }
+            clauseParams.add(new Pattern.VarPat("resume", null));
 
-            emitExpr(c.body(), mv, locals);
-            mv.visitInsn(ARETURN);
+            Expr.Lambda clauseLam = new Expr.Lambda(clauseParams, null, c.body(), null);
+            emitLambda(clauseLam, mv, locals);
 
-            mv.visitLabel(next);
+            mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "put",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
+            mv.visitInsn(POP);
         }
 
-        // No clause matched → rethrow the original EffectException so outer with can handle it.
-        mv.visitVarInsn(ALOAD, exSlot);
-        mv.visitInsn(ATHROW);
+        // new CompiledHandler(name, effectName, map)
+        mv.visitTypeInsn(NEW, COMP_HANDLER);
+        mv.visitInsn(DUP);
+        mv.visitLdcInsn(h.name());
+        mv.visitLdcInsn(effectName);
+        mv.visitVarInsn(ALOAD, mapSlot);
+        mv.visitMethodInsn(INVOKESPECIAL, COMP_HANDLER, "<init>",
+                "(Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)V", false);
+        mv.visitInsn(ARETURN);
 
         mv.visitMaxs(0, 0);
         mv.visitEnd();
@@ -664,15 +639,18 @@ final class ClassEmitter implements Opcodes {
     private void emitPerform(String opName, List<Expr> args, MethodVisitor mv, Locals locals) {
         // `() -> ()` effects are called `op ()` — strip single unit arg.
         if (args.size() == 1 && args.get(0) instanceof Expr.UnitLit) args = List.of();
+        String effectName = effectOps.get(opName);
+        mv.visitLdcInsn(effectName);
         mv.visitLdcInsn(opName);
         pushObjectArray(args, mv, locals);
         mv.visitMethodInsn(INVOKESTATIC, RT, "perform",
-                "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+                "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false);
     }
 
     /**
      * Emit `with handler body [on-failure block]` as an expression, leaving the
-     * block's result on the stack. 14c.1 semantics: abort-only (no resume).
+     * block's result on the stack. 14c.2: body runs on a virtual thread under
+     * EffectSystem; handler clauses compiled as IrijFns receiving (args…, resume).
      */
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
         if (!(w.handler() instanceof Expr.Var hv)) {
@@ -685,67 +663,35 @@ final class ClassEmitter implements Opcodes {
                     "MVP with: unknown handler " + hv.name());
         }
 
-        String effEx = "dev/irij/compiler/RuntimeSupport$EffectException";
         String runEx = "java/lang/RuntimeException";
-
         int resultSlot = outer.allocateAnon();
 
-        Label bodyStart = new Label();
-        Label bodyEnd = new Label();
-        Label effCatch = new Label();
+        Label tryStart = new Label();
+        Label tryEnd = new Label();
         Label runCatch = new Label();
         Label end = new Label();
 
-        // try { body } catch (EffectException) { dispatch } catch (RuntimeException) { on-failure }
-        mv.visitTryCatchBlock(bodyStart, bodyEnd, effCatch, effEx);
         if (w.onFailure() != null && !w.onFailure().isEmpty()) {
-            mv.visitTryCatchBlock(bodyStart, bodyEnd, runCatch, runEx);
-            mv.visitTryCatchBlock(effCatch, end, runCatch, runEx);
+            mv.visitTryCatchBlock(tryStart, tryEnd, runCatch, runEx);
         }
 
-        // ── body ──
-        mv.visitLabel(bodyStart);
-        Locals bodyLocals = outer.childScope();
-        List<Stmt> body = w.body();
-        if (body.isEmpty()) {
-            mv.visitInsn(ACONST_NULL);
-        } else {
-            for (int i = 0; i < body.size() - 1; i++) emitStmt(body.get(i), mv, bodyLocals);
-            Stmt last = body.get(body.size() - 1);
-            if (last instanceof Stmt.ExprStmt es) {
-                emitExpr(es.expr(), mv, bodyLocals);
-            } else if (last instanceof Stmt.With nested) {
-                emitWith(nested, mv, bodyLocals);
-            } else {
-                emitStmt(last, mv, bodyLocals);
-                mv.visitInsn(ACONST_NULL);
-            }
-        }
+        mv.visitLabel(tryStart);
+        // handler$name$build() → CompiledHandler
+        mv.visitMethodInsn(INVOKESTATIC, internalName, handlerBuildName(h.name()),
+                "()L" + COMP_HANDLER + ";", false);
+        // Body: IrijFn of zero params — synthesize Expr.Lambda wrapping a Block.
+        Expr bodyExpr = new Expr.Block(w.body(), null);
+        Expr.Lambda bodyLam = new Expr.Lambda(List.of(), null, bodyExpr, null);
+        emitLambda(bodyLam, mv, outer);
+        // RuntimeSupport.runWith(CompiledHandler, IrijFn) → Object
+        mv.visitMethodInsn(INVOKESTATIC, RT, "runWith",
+                "(Ljava/lang/Object;L" + IRIJ_FN + ";)Ljava/lang/Object;", false);
         mv.visitVarInsn(ASTORE, resultSlot);
-        mv.visitLabel(bodyEnd);
+        mv.visitLabel(tryEnd);
         mv.visitJumpInsn(GOTO, end);
 
-        // ── catch EffectException ──
-        mv.visitLabel(effCatch);
-        int exSlot = outer.allocateAnon();
-        mv.visitVarInsn(ASTORE, exSlot);
-        mv.visitVarInsn(ALOAD, exSlot);
-        mv.visitMethodInsn(INVOKESTATIC, internalName, handlerDispatchName(h.name()),
-                "(L" + effEx + ";)Ljava/lang/Object;", false);
-        mv.visitVarInsn(ASTORE, resultSlot);
-
-        // ── catch RuntimeException (on-failure) ──
         if (w.onFailure() != null && !w.onFailure().isEmpty()) {
-            mv.visitJumpInsn(GOTO, end);
             mv.visitLabel(runCatch);
-            // If it's an EffectException (rethrown by our dispatcher for unknown op),
-            // let it propagate to an outer handler instead of swallowing in on-failure.
-            mv.visitInsn(DUP);
-            mv.visitTypeInsn(INSTANCEOF, effEx);
-            Label notEff = new Label();
-            mv.visitJumpInsn(IFEQ, notEff);
-            mv.visitInsn(ATHROW);
-            mv.visitLabel(notEff);
             int teSlot = outer.allocateAnon();
             mv.visitVarInsn(ASTORE, teSlot);
             Locals ofLocals = outer.childScope();

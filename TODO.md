@@ -621,9 +621,14 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
     - [x] `Stmt.With` try/catch + `on-failure` (`error` bound to message)
     - [x] Unhandled ops rethrow to outer `with`
     - [x] Golden parity tests: abort, no-trigger, on-failure
-  - [ ] **14c.2 — thread+channel (full `resume`)**
-        reuse interpreter's `EffectSystem` (SynchronousQueue + virtual thread) for
-        one-shot `resume`, handler state, composition `>>`, dot-access
+  - [~] **14c.2 — thread+channel (full `resume`)**
+    - [x] Reuse `EffectSystem.fireOp` + `HandlerContext` + `SynchronousQueue` on a virtual body thread
+    - [x] Each handler clause compiled as `IrijFn` (args…, resume) via invokedynamic
+    - [x] `runWith(handler, bodyFn)` runtime driver with handler loop + one-shot resume
+    - [x] Nested `with` via thread-local stack; `on-failure` via RuntimeException catch
+    - [x] Golden parity tests: resume, resume-unit, nested
+    - [ ] 14c.2b — handler mutable state (`state :! init`, `<-`) + dot-access
+    - [ ] 14c.2b — handler composition (`>>`)
   - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
 
 - [ ] **14d — Concurrency, modules, Java interop**

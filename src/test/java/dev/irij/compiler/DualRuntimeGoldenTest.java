@@ -303,6 +303,72 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void effectResume() throws Exception {
+        assertSame("eff_resume", """
+            effect Greet
+              greet :: Str -> Str
+
+            handler friendly :: Greet
+              greet name => resume ("Hello, " ++ name ++ "!")
+
+            fn run
+              _ =>
+                with friendly
+                  g := greet "World"
+                  g
+
+            println (run ())
+            """);
+    }
+
+    @Test
+    void effectResumeUnit() throws Exception {
+        assertSame("eff_resume_unit", """
+            effect Logger
+              log :: Str -> ()
+
+            handler quiet-log :: Logger
+              log msg => resume ()
+
+            fn run
+              _ =>
+                with quiet-log
+                  log "a"
+                  log "b"
+                  "done"
+
+            println (run ())
+            """);
+    }
+
+    @Test
+    void effectNested() throws Exception {
+        assertSame("eff_nested", """
+            effect Greet
+              greet :: Str -> Str
+
+            effect Logger
+              log :: Str -> ()
+
+            handler friendly :: Greet
+              greet name => resume ("Hello, " ++ name ++ "!")
+
+            handler quiet-log :: Logger
+              log msg => resume ()
+
+            fn run
+              _ =>
+                with quiet-log
+                  log "start"
+                  with friendly
+                    g := greet "Nested"
+                    g
+
+            println (run ())
+            """);
+    }
+
+    @Test
     void effectOnFailure() throws Exception {
         assertSame("eff_on_failure", """
             effect Boom

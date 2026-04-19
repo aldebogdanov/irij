@@ -1,6 +1,6 @@
 # Phase 14 — Bytecode Compiler (MVP spike)
 
-Status: **14c.1 — in progress on `bytecode-mvp` branch.** 14a MVP + 14b (patterns/ADTs/lambdas/protocols) + 14c.1 (exception-as-effect, abort-only + `on-failure`) green.
+Status: **14c.2 — in progress on `bytecode-mvp` branch.** 14a MVP + 14b (patterns/ADTs/lambdas/protocols) + 14c.2 (thread+channel effects with one-shot `resume`, `on-failure`, nested handlers) green.
 
 Experimental ahead-of-time compiler that targets JVM bytecode directly (ASM 9.x),
 running alongside the interpreter — not replacing it. Shares AST and parser with
@@ -46,24 +46,37 @@ the tree-walking interpreter.
 - String/vector `++` concat, `to-str` builtin, `&&` / `||` short-circuit
 - `display` delegates to `Values.toIrijString` for interpreter parity
 
-## Scope of 14c.1 (implemented)
+## Scope of 14c.2 (implemented)
 
-- `effect Name  op :: …` — registers ops; compiled calls to op names lower to
-  `RuntimeSupport.perform(op, args)` which throws a typed `EffectException`
-- `handler H :: Effect  op pat… => body` — abort-only handlers (no `resume`)
-  compile to a private static `handler$H(EffectException)` that switches on
-  `op` and runs the matching clause body
-- `with H  body [on-failure block]` as Stmt — body wrapped in try/catch; the
-  effect catch calls the dispatcher; an unknown op rethrows so an outer `with`
-  can handle it; `on-failure` catches non-effect `RuntimeException` and binds
-  `error` to the message
+Thread+channel lowering — reuses the interpreter's `EffectSystem` runtime so
+compiled programs share one-shot `resume` semantics with the interpreter.
 
-## Not yet supported (14c.2+)
+- `effect Name  op :: …` — registers ops in `effectOps: opName → effectName`;
+  compiled calls to op names lower to
+  `RuntimeSupport.perform(effectName, opName, args)` which routes through
+  `EffectSystem.fireOp` (blocks on a `SynchronousQueue` until resumed)
+- `handler H :: Effect  op pat… => body` — each clause compiled as an
+  `IrijFn` whose last param is the synthetic `resume` continuation; all
+  clauses collected into a `CompiledHandler { name, effectName, Map<String,IrijFn> }`
+  built by a static `handler$H$build()` method
+- `with H  body [on-failure block]` — body is compiled as a zero-arg
+  `IrijFn` thunk; `RuntimeSupport.runWith(handler, bodyFn)` spawns a virtual
+  thread for the body (pushing a `HandlerContext` onto `EffectSystem.STACK`)
+  and drives `runHandlerLoop` on the calling thread. Clause body invokes
+  `resume v` which unblocks the body's `SynchronousQueue` and recursively
+  re-enters the handler loop.
+- `on-failure` catches any non-effect `RuntimeException` from `runWith` and
+  binds `error` to its message
+- Nested `with` blocks compose naturally via the thread-local handler stack
 
-- `resume` (one-shot) — 14c.2 will reuse the interpreter's thread+channel
-  `EffectSystem` to drive the body on a worker thread
-- Handler state (`state :! init`, `state <- …`) — 14c.2
-- Handler composition `>>`, handler dot-access — 14c.2
+Abort semantics (no `resume`) still work — clause returns without unblocking
+the body channel, the `finally` block in `runWith` interrupts the body
+virtual thread, and the clause's return value becomes the `with` result.
+
+## Not yet supported (14c.2b+)
+
+- Handler state (`state :! init`, `state <- …`) and dot-access on handlers
+- Handler composition `>>`
 - Multi-shot `resume` (backtracking) — deferred (CPS skipped)
 - State-machine rewrite for perf — 14c.3 if/when perf matters
 - Concurrency, modules, Java interop — 14d
