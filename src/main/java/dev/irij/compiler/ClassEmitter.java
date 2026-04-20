@@ -268,6 +268,10 @@ final class ClassEmitter implements Opcodes {
             case Decl.EffectDecl __ -> { /* ops registered in pass 1 */ }
             case Decl.HandlerDecl hd -> emitHandlerStateInit(hd, mv, locals);
             case Decl.WithDecl wd -> emitStmt(wd.with(), mv, locals);
+            case Decl.ScopeDecl sd -> {
+                emitScope(sd.scope(), mv, locals);
+                mv.visitInsn(POP);
+            }
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported top-level decl: " + d.getClass().getSimpleName());
         }
@@ -288,6 +292,10 @@ final class ClassEmitter implements Opcodes {
                 mv.visitInsn(POP);
             }
             case Stmt.Assign a -> emitAssign(a, mv, locals);
+            case Stmt.Scope sc -> {
+                emitScope(sc, mv, locals);
+                mv.visitInsn(POP);
+            }
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported statement: " + s.getClass().getSimpleName());
         }
@@ -620,8 +628,106 @@ final class ClassEmitter implements Opcodes {
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
+            case "spawn" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "spawn",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "sleep" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "sleep",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "await" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "await",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "par" -> {
+                pushObjectArray(args, mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "par",
+                        "([Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "race" -> {
+                pushObjectArray(args, mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "race",
+                        "([Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "timeout" -> {
+                if (args.size() != 2) return false;
+                emitExpr(args.get(0), mv, locals);
+                emitExpr(args.get(1), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "timeout",
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "try" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "tryFn",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
             default -> { return false; }
         }
+    }
+
+    // ── Scope { fork ... } ─────────────────────────────────────────────
+
+    private static final String SCOPE_HANDLE =
+            "dev/irij/compiler/RuntimeSupport$CompiledScopeHandle";
+
+    /** Emit a scope block. Leaves the body result (after join) on the stack. */
+    private void emitScope(Stmt.Scope s, MethodVisitor mv, Locals outer) {
+        // new CompiledScopeHandle(modifier)
+        mv.visitTypeInsn(NEW, SCOPE_HANDLE);
+        mv.visitInsn(DUP);
+        if (s.modifier() == null) mv.visitInsn(ACONST_NULL);
+        else mv.visitLdcInsn(s.modifier());
+        mv.visitMethodInsn(INVOKESPECIAL, SCOPE_HANDLE, "<init>",
+                "(Ljava/lang/String;)V", false);
+
+        Locals inner = outer.childScope();
+        int handleSlot;
+        if (s.name() != null) {
+            handleSlot = inner.allocate(s.name());
+        } else {
+            handleSlot = inner.allocateAnon();
+        }
+        mv.visitVarInsn(ASTORE, handleSlot);
+
+        // Emit body statements. Last stmt's value is the body result.
+        List<Stmt> stmts = s.body();
+        if (stmts.isEmpty()) {
+            mv.visitFieldInsn(GETSTATIC, VALUES, "UNIT", OBJ_DESC);
+        } else {
+            for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, inner);
+            Stmt last = stmts.get(stmts.size() - 1);
+            if (last instanceof Stmt.ExprStmt es) {
+                emitExpr(es.expr(), mv, inner);
+            } else if (last instanceof Stmt.With w) {
+                emitWith(w, mv, inner);
+            } else {
+                emitStmt(last, mv, inner);
+                mv.visitFieldInsn(GETSTATIC, VALUES, "UNIT", OBJ_DESC);
+            }
+        }
+
+        // handle.joinByModifier(bodyResult)
+        int resultSlot = inner.allocateAnon();
+        mv.visitVarInsn(ASTORE, resultSlot);
+        mv.visitVarInsn(ALOAD, handleSlot);
+        mv.visitVarInsn(ALOAD, resultSlot);
+        mv.visitMethodInsn(INVOKEVIRTUAL, SCOPE_HANDLE, "joinByModifier",
+                "(Ljava/lang/Object;)Ljava/lang/Object;", false);
     }
 
     private void emitConstructorApp(String tag, List<Expr> args, MethodVisitor mv, Locals locals) {

@@ -582,6 +582,61 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void parCombiner() throws Exception {
+        assertSame("par_combiner", """
+            total := par (a b c -> a + b + c) (-> 10) (-> 20) (-> 30)
+            print total
+            """);
+    }
+
+    @Test
+    void raceFirstWins() throws Exception {
+        assertSame("race_first", """
+            winner := race (-> sleep 500; "slow") (-> "fast")
+            print winner
+            """);
+    }
+
+    @Test
+    void timeoutSuccess() throws Exception {
+        assertSame("timeout_ok", """
+            result := timeout 500 (-> sleep 1; "done")
+            print result
+            """);
+    }
+
+    @Test
+    void tryOkErr() throws Exception {
+        assertSame("try_ok_err", """
+            ok := try (-> 42)
+            err := try (-> error "boom")
+            println ok
+            println err
+            """);
+    }
+
+    @Test
+    void scopeJoinAll() throws Exception {
+        assertSame("scope_join", """
+            scope s
+              f1 := s.fork (-> sleep 1; 10)
+              f2 := s.fork (-> sleep 1; 20)
+              total := (await f1) + (await f2)
+              print total
+            """);
+    }
+
+    @Test
+    void scopeRaceFirstWins() throws Exception {
+        assertSame("scope_race", """
+            scope.race s
+              s.fork (-> sleep 500; "slow")
+              s.fork (-> "fast")
+            print "ok"
+            """);
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """

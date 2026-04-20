@@ -429,4 +429,259 @@ public final class RuntimeSupport {
             }
         }
     }
+
+    // ── Concurrency ─────────────────────────────────────────────────────
+
+    public static final class Fiber {
+        public final java.util.concurrent.CompletableFuture<Object> result;
+        public final Thread thread;
+        Fiber(java.util.concurrent.CompletableFuture<Object> result, Thread thread) {
+            this.result = result;
+            this.thread = thread;
+        }
+    }
+
+    /** Snapshot the current effect stack + push onto the child fiber's stack. */
+    private static void inheritEffectStack(java.util.Deque<
+            dev.irij.interpreter.EffectSystem.HandlerContext> parentStack) {
+        var fiberStack = dev.irij.interpreter.EffectSystem.STACK.get();
+        fiberStack.addAll(parentStack);
+    }
+
+    private static java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> snapStack() {
+        return new java.util.ArrayDeque<>(
+                dev.irij.interpreter.EffectSystem.STACK.get());
+    }
+
+    /** Spawn a virtual thread running the thunk (IrijFn or BuiltinFn). */
+    private static Fiber forkOne(Object thunk,
+            java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> parentStack) {
+        var future = new java.util.concurrent.CompletableFuture<Object>();
+        var t = Thread.startVirtualThread(() -> {
+            inheritEffectStack(parentStack);
+            try {
+                future.complete(callAny(thunk, new Object[0]));
+            } catch (Throwable ex) {
+                future.completeExceptionally(ex);
+            }
+        });
+        return new Fiber(future, t);
+    }
+
+    /** `spawn thunk` — fire-and-forget vthread, returns the Thread. */
+    public static Object spawn(Object thunk) {
+        var parentStack = snapStack();
+        return Thread.startVirtualThread(() -> {
+            inheritEffectStack(parentStack);
+            try { callAny(thunk, new Object[0]); }
+            catch (Throwable t) { System.err.println("[spawn] error: " + t.getMessage()); }
+        });
+    }
+
+    /** `sleep ms` — blocks the current thread. */
+    public static Object sleep(Object msArg) {
+        long ms = (msArg instanceof Long l) ? l
+                : (msArg instanceof Number n) ? n.longValue()
+                : 0L;
+        try { Thread.sleep(ms); }
+        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    /** `await fiber` — block until fiber completes. */
+    public static Object await(Object fiberArg) {
+        if (!(fiberArg instanceof Fiber f)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "await expects a Fiber, got " + typeTag(fiberArg));
+        }
+        try { return f.result.join(); }
+        catch (java.util.concurrent.CompletionException ce) {
+            throw runtimeFrom(ce.getCause(), "Fiber failed");
+        }
+    }
+
+    /** `par combiner thunk1 thunk2 ...` → combiner result1 result2 ... */
+    public static Object par(Object[] args) {
+        if (args.length < 2) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "par requires a combiner function and at least one thunk");
+        }
+        Object combiner = args[0];
+        int n = args.length - 1;
+        var parentStack = snapStack();
+        var fibers = new Fiber[n];
+        for (int i = 0; i < n; i++) fibers[i] = forkOne(args[i + 1], parentStack);
+        var results = new Object[n];
+        try {
+            for (int i = 0; i < n; i++) results[i] = fibers[i].result.join();
+        } catch (java.util.concurrent.CompletionException ce) {
+            for (var f : fibers) f.thread.interrupt();
+            throw runtimeFrom(ce.getCause(), "par failed");
+        }
+        return callAny(combiner, results);
+    }
+
+    /** `race thunk1 thunk2 ...` — first to succeed wins; others interrupted. */
+    public static Object race(Object[] args) {
+        if (args.length == 0) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "race requires at least one thunk");
+        }
+        var parentStack = snapStack();
+        var fibers = new Fiber[args.length];
+        for (int i = 0; i < args.length; i++) fibers[i] = forkOne(args[i], parentStack);
+
+        var winner = new java.util.concurrent.CompletableFuture<Object>();
+        var errors = java.util.Collections.synchronizedList(
+                new java.util.ArrayList<Throwable>());
+        for (Fiber f : fibers) {
+            f.result.whenComplete((v, ex) -> {
+                if (ex != null) {
+                    errors.add(ex);
+                    if (errors.size() == fibers.length) {
+                        winner.completeExceptionally(errors.get(0));
+                    }
+                } else if (winner.complete(v)) {
+                    for (Fiber other : fibers) {
+                        if (other.thread.isAlive()) other.thread.interrupt();
+                    }
+                }
+            });
+        }
+        try { return winner.join(); }
+        catch (java.util.concurrent.CompletionException ce) {
+            for (var f : fibers) f.thread.interrupt();
+            throw runtimeFrom(ce.getCause(), "race: all thunks failed");
+        }
+    }
+
+    /** `timeout ms thunk` — run thunk in vthread, interrupt after deadline. */
+    public static Object timeout(Object msArg, Object thunk) {
+        long ms = (msArg instanceof Long l) ? l
+                : (msArg instanceof Number n) ? n.longValue()
+                : 0L;
+        var parentStack = snapStack();
+        Fiber f = forkOne(thunk, parentStack);
+        try {
+            return f.result.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            f.thread.interrupt();
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "timeout: operation exceeded " + ms + "ms");
+        } catch (java.util.concurrent.ExecutionException e) {
+            throw runtimeFrom(e.getCause(), "timeout");
+        } catch (InterruptedException e) {
+            f.thread.interrupt();
+            Thread.currentThread().interrupt();
+            throw new dev.irij.interpreter.IrijRuntimeError("timeout: interrupted");
+        }
+    }
+
+    /** `try thunk` — return Ok(result) / Err(msg). */
+    public static Object tryFn(Object thunk) {
+        try {
+            Object r = callAny(thunk, new Object[0]);
+            return new dev.irij.interpreter.Values.Tagged("Ok", java.util.List.of(r));
+        } catch (dev.irij.interpreter.IrijRuntimeError ex) {
+            return new dev.irij.interpreter.Values.Tagged("Err",
+                    java.util.List.of(ex.getMessage() == null ? "" : ex.getMessage()));
+        }
+    }
+
+    private static dev.irij.interpreter.IrijRuntimeError runtimeFrom(Throwable cause, String prefix) {
+        if (cause instanceof dev.irij.interpreter.IrijRuntimeError ire) return ire;
+        String msg = cause == null ? prefix : (prefix + ": " + cause.getMessage());
+        return new dev.irij.interpreter.IrijRuntimeError(msg);
+    }
+
+    /**
+     * Compiled scope handle — bound to a name inside a `scope { ... }` block.
+     * `handle.fork thunk` spawns a fiber tied to this scope; join semantics
+     * run after the block body via {@link #joinByModifier}.
+     */
+    public static final class CompiledScopeHandle {
+        public final String modifier; // null | "race" | "supervised"
+        private final java.util.List<Fiber> fibers =
+                java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+        private final java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> parentStack;
+
+        public CompiledScopeHandle(String modifier) {
+            this.modifier = modifier;
+            this.parentStack = snapStack();
+        }
+
+        /** Reflection target for `handle.fork thunk`. */
+        public Object fork(Object thunk) {
+            Fiber f = forkOne(thunk, parentStack);
+            fibers.add(f);
+            return f;
+        }
+
+        public Object joinByModifier(Object bodyResult) {
+            if (modifier == null) return joinAll(bodyResult);
+            return switch (modifier) {
+                case "race" -> joinRace(bodyResult);
+                case "supervised" -> joinSupervised(bodyResult);
+                default -> throw new dev.irij.interpreter.IrijRuntimeError(
+                        "Unknown scope modifier: " + modifier);
+            };
+        }
+
+        public Object cancelAll() {
+            for (Fiber f : fibers) f.thread.interrupt();
+            for (Fiber f : fibers) { try { f.result.join(); } catch (Exception ignored) {} }
+            return dev.irij.interpreter.Values.UNIT;
+        }
+
+        private Object joinAll(Object bodyResult) {
+            dev.irij.interpreter.IrijRuntimeError firstErr = null;
+            for (Fiber f : fibers) {
+                try { f.result.join(); }
+                catch (java.util.concurrent.CompletionException ce) {
+                    if (firstErr == null) {
+                        for (Fiber g : fibers) g.thread.interrupt();
+                        firstErr = runtimeFrom(ce.getCause(), "Fiber failed");
+                    }
+                }
+            }
+            if (firstErr != null) throw firstErr;
+            return bodyResult;
+        }
+
+        private Object joinRace(Object bodyResult) {
+            if (fibers.isEmpty()) return bodyResult;
+            var winner = new java.util.concurrent.CompletableFuture<Object>();
+            var errors = java.util.Collections.synchronizedList(
+                    new java.util.ArrayList<Throwable>());
+            for (Fiber f : fibers) {
+                f.result.whenComplete((v, ex) -> {
+                    if (ex != null) {
+                        errors.add(ex);
+                        if (errors.size() == fibers.size()) {
+                            winner.completeExceptionally(errors.get(0));
+                        }
+                    } else if (winner.complete(v)) {
+                        for (Fiber g : fibers) {
+                            if (g.thread.isAlive()) g.thread.interrupt();
+                        }
+                    }
+                });
+            }
+            try { return winner.join(); }
+            catch (java.util.concurrent.CompletionException ce) {
+                for (Fiber g : fibers) g.thread.interrupt();
+                throw runtimeFrom(ce.getCause(), "scope.race: all fibers failed");
+            }
+        }
+
+        private Object joinSupervised(Object bodyResult) {
+            for (Fiber f : fibers) {
+                try { f.result.join(); }
+                catch (java.util.concurrent.CompletionException ignored) {
+                    // per-fiber isolation — siblings keep running
+                }
+            }
+            return bodyResult;
+        }
+    }
 }

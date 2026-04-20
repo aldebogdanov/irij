@@ -1,6 +1,6 @@
 # Phase 14 — Bytecode Compiler (MVP spike)
 
-Status: **14d (modules + Java interop) — in progress on `bytecode-mvp` branch.** 14a + 14b + 14c.2 + 14c.2b + 14d-modules + 14d-interop green; 14d concurrency (`scope`/`fork`/`par`/`race`/`timeout`) deferred (interpreter-coupled, needs design).
+Status: **14d complete on `bytecode-mvp` branch.** 14a + 14b + 14c.2 + 14c.2b + 14d-modules + 14d-interop + 14d-concurrency all green.
 
 Experimental ahead-of-time compiler that targets JVM bytecode directly (ASM 9.x),
 running alongside the interpreter — not replacing it. Shares AST and parser with
@@ -136,12 +136,35 @@ virtual thread, and the clause's return value becomes the `with` result.
   `IrijFn` values or interpreter `BuiltinFn` values, so interop callables are
   invokable from anywhere a first-class fn would be.
 
-## Not yet supported (14c.3+ / 14d+)
+## Scope of 14d — concurrency (implemented)
+
+- `spawn`, `sleep`, `await`, `par`, `race`, `timeout`, `try` — intercepted
+  in `emitBuiltinApp`, lowered to static methods on `RuntimeSupport`.
+  Thunks may be compiled `IrijFn` values or interpreter `BuiltinFn`s;
+  `callAny` unifies dispatch.
+- `scope name ...body`, `scope.race name ...body`, `scope.supervised name
+  ...body` — compiled natively:
+  - allocate `RuntimeSupport.CompiledScopeHandle(modifier)`,
+  - bind handle to the declared local name,
+  - emit body statements (last stmt's value = body result),
+  - finalise via `handle.joinByModifier(bodyResult)`.
+- `s.fork thunk` inside the scope: resolves through the generic dot-access
+  interop fallthrough — `JavaInterop.resolveInstanceRef` picks the public
+  `fork(Object)` method on `CompiledScopeHandle` via reflection. No
+  compiler-side special case needed.
+- Fibers inherit the enclosing effect stack snapshot at fork time
+  (`EffectSystem.STACK`), matching interpreter semantics so that effect
+  handlers installed outside the `scope` are visible inside forked
+  thunks.
+- Join semantics by modifier:
+  - `scope`   → join-all; first failure cancels siblings + propagates.
+  - `scope.race` → first success wins; others interrupted.
+  - `scope.supervised` → per-fiber isolation, no sibling cancellation.
+
+## Not yet supported
 
 - Multi-shot `resume` (backtracking) — deferred (CPS skipped)
 - State-machine rewrite for perf — 14c.3 if/when perf matters
-- Concurrency: `scope` / `fork` / `par` / `race` / `timeout` / `spawn` — 14d.2
-  (interpreter-coupled; needs compiler-side Fiber/ScopeHandle design)
 - Same-short-name collisions across multiple `use`s are not disambiguated
   (last `use` wins in the alias set)
 

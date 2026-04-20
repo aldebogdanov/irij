@@ -631,7 +631,7 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
     - [x] 14c.2b — handler composition (`>>`) as runtime value (CompiledComposedHandler), inline + local-bound
   - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
 
-- [~] **14d — Concurrency, modules, Java interop**
+- [x] **14d — Concurrency, modules, Java interop**
   - [x] Modules — compile-time source inlining via `ModuleInliner`:
         `mod`/`use` stripped, `pub` unwrapped, classpath + sourceRoot lookup,
         short-name alias rewrite in call + dot-access position
@@ -639,9 +639,11 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
         instance dot-access fallthrough via `javaInstanceRef`; shares
         `JavaInterop` with the interpreter (coercion/overload parity);
         `callAny` unifies IrijFn + BuiltinFn dispatch
-  - [ ] **14d.2 — Concurrency** (`scope`, `fork`, `par`, `race`, `timeout`,
-        `spawn`) — interpreter-coupled, needs Fiber/ScopeHandle design on
-        the compiler side
+  - [x] Concurrency — `spawn`/`sleep`/`await`/`par`/`race`/`timeout`/`try`
+        as `RuntimeSupport` statics; `scope`/`scope.race`/`scope.supervised`
+        via native `CompiledScopeHandle` (bound local, `s.fork thunk`
+        resolved through reflection interop fallthrough); fibers inherit
+        the enclosing `EffectSystem.STACK` snapshot at fork time
 
 ---
 
