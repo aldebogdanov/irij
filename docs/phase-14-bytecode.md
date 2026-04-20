@@ -90,9 +90,14 @@ virtual thread, and the clause's return value becomes the `with` result.
   named handler references (binding a composition to a local is not yet
   supported in the compiler — runtime ComposedHandler value is interpreter-only).
 
+- Required-effect rows on handlers (`handler h ::: E1 E2`) — accepted; the
+  compiled runtime dispatches via `EffectSystem.STACK`, so clause bodies that
+  perform outer effects resolve against the enclosing `with` stack. The
+  `::: …` annotation is not enforced at the bytecode layer (it is a
+  declaration-time concern handled elsewhere).
+
 ## Not yet supported (14c.3+)
 
-- Required-effect rows on handlers (`handler h ::: E1 E2`)
 - Handler compositions bound to a local (`x := h1 >> h2; with x …`) — needs
   runtime ComposedHandler value in the compiled runtime
 - Multi-shot `resume` (backtracking) — deferred (CPS skipped)

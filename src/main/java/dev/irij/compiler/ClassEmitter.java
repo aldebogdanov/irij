@@ -636,10 +636,9 @@ final class ClassEmitter implements Opcodes {
                         "handler " + h.name() + ": state binding must be `name :! init`");
             }
         }
-        if (h.requiredEffects() != null && !h.requiredEffects().isEmpty()) {
-            throw new IrijCompiler.CompileException(
-                    "handler " + h.name() + ": required effects (::: …) not yet implemented in bytecode compiler (14c.2b)");
-        }
+        // Required-effects (`::: E1 E2`) are informational at runtime: fireOp
+        // dispatches via the handler STACK, not AVAILABLE_EFFECTS. Clause bodies
+        // that perform outer effects resolve against the enclosing `with` stack.
     }
 
     private static String stateBindingName(String handlerName, Stmt sb) {

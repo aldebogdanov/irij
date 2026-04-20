@@ -464,6 +464,38 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void effectHandlerRequiredEffects() throws Exception {
+        // Inner handler declares `::: Logger`, meaning its clause performs
+        // Logger.log, which is dispatched by the outer quiet-log handler.
+        assertSame("eff_required", """
+            effect Logger
+              log :: Str -> ()
+
+            effect Counter
+              bump :: () -> Int
+
+            handler quiet-log :: Logger
+              log msg => resume ()
+
+            handler loud-counter :: Counter ::: Logger
+              state :! 0
+              bump () =>
+                state <- state + 1
+                log "bumped"
+                resume state
+
+            fn run
+              _ =>
+                with quiet-log >> loud-counter
+                  bump ()
+                  bump ()
+                  bump ()
+
+            println (run ())
+            """);
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """
