@@ -628,7 +628,7 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
     - [x] Nested `with` via thread-local stack; `on-failure` via RuntimeException catch
     - [x] Golden parity tests: resume, resume-unit, nested
     - [x] 14c.2b — handler mutable state (`state :! init`, `<-`) + dot-access (static-field lowering per handler decl)
-    - [ ] 14c.2b — handler composition (`>>`)
+    - [x] 14c.2b — handler composition (`>>`) inline in `with` (compile-time flatten to nested `with`)
   - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
 
 - [ ] **14d — Concurrency, modules, Java interop**

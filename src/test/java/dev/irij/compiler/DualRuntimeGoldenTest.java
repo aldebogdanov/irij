@@ -439,6 +439,31 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void effectHandlerComposition() throws Exception {
+        assertSame("eff_compose", """
+            effect Greet
+              greet :: Str -> Str
+
+            effect Logger
+              log :: Str -> ()
+
+            handler friendly :: Greet
+              greet name => resume ("Hi, " ++ name)
+
+            handler quiet-log :: Logger
+              log msg => resume ()
+
+            fn run
+              _ =>
+                with quiet-log >> friendly
+                  log "ignored"
+                  greet "World"
+
+            println (run ())
+            """);
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """

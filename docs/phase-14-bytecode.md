@@ -84,11 +84,17 @@ virtual thread, and the clause's return value becomes the `with` result.
   corresponding static field.
 - State persists across `with` invocations and survives virtual-thread
   body execution (static field is shared), matching the interpreter.
+- Inline handler composition `with h1 >> h2 body` — decomposed at compile
+  time to nested `with h1 (with h2 body)`; `on-failure` attaches only to the
+  outermost `with`, matching interpreter semantics. Compose operands must be
+  named handler references (binding a composition to a local is not yet
+  supported in the compiler — runtime ComposedHandler value is interpreter-only).
 
 ## Not yet supported (14c.3+)
 
-- Handler composition `>>`
 - Required-effect rows on handlers (`handler h ::: E1 E2`)
+- Handler compositions bound to a local (`x := h1 >> h2; with x …`) — needs
+  runtime ComposedHandler value in the compiled runtime
 - Multi-shot `resume` (backtracking) — deferred (CPS skipped)
 - State-machine rewrite for perf — 14c.3 if/when perf matters
 - Concurrency, modules, Java interop — 14d

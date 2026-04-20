@@ -727,6 +727,40 @@ final class ClassEmitter implements Opcodes {
         mv.visitEnd();
     }
 
+    private void flattenComposeHandlers(Expr e, List<String> out) {
+        if (e instanceof Expr.Compose c) {
+            flattenComposeHandlers(c.left(), out);
+            flattenComposeHandlers(c.right(), out);
+            return;
+        }
+        if (e instanceof Expr.Var v) {
+            if (!handlers.containsKey(v.name())) {
+                throw new IrijCompiler.CompileException(
+                        "MVP with-compose: unknown handler " + v.name());
+            }
+            out.add(v.name());
+            return;
+        }
+        throw new IrijCompiler.CompileException(
+                "MVP with-compose: operand must be a named handler reference");
+    }
+
+    private Stmt.With buildNestedWith(List<String> names, int idx,
+                                        List<Stmt> body, List<Stmt> onFailure,
+                                        dev.irij.ast.Node.SourceLoc loc) {
+        if (idx == names.size() - 1) {
+            return new Stmt.With(new Expr.Var(names.get(idx), null),
+                    body,
+                    idx == 0 ? onFailure : List.of(),
+                    loc);
+        }
+        Stmt.With inner = buildNestedWith(names, idx + 1, body, onFailure, loc);
+        return new Stmt.With(new Expr.Var(names.get(idx), null),
+                List.of(new Stmt.ExprStmt(new Expr.Block(List.of(inner), null), null)),
+                idx == 0 ? onFailure : List.of(),
+                loc);
+    }
+
     private void emitPerform(String opName, List<Expr> args, MethodVisitor mv, Locals locals) {
         // `() -> ()` effects are called `op ()` — strip single unit arg.
         if (args.size() == 1 && args.get(0) instanceof Expr.UnitLit) args = List.of();
@@ -744,6 +778,15 @@ final class ClassEmitter implements Opcodes {
      * EffectSystem; handler clauses compiled as IrijFns receiving (args…, resume).
      */
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
+        // Handler composition: `with h1 >> h2 body` ≡ nested `with h1 (with h2 body)`.
+        // on-failure attaches only to the outermost with.
+        if (w.handler() instanceof Expr.Compose) {
+            List<String> names = new ArrayList<>();
+            flattenComposeHandlers(w.handler(), names);
+            Stmt.With nested = buildNestedWith(names, 0, w.body(), w.onFailure(), w.loc());
+            emitWith(nested, mv, outer);
+            return;
+        }
         if (!(w.handler() instanceof Expr.Var hv)) {
             throw new IrijCompiler.CompileException(
                     "MVP with: handler must be a named handler reference");
