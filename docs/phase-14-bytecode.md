@@ -1,6 +1,6 @@
 # Phase 14 — Bytecode Compiler (MVP spike)
 
-Status: **14c.2 — in progress on `bytecode-mvp` branch.** 14a MVP + 14b (patterns/ADTs/lambdas/protocols) + 14c.2 (thread+channel effects with one-shot `resume`, `on-failure`, nested handlers) green.
+Status: **14c.2b — in progress on `phase-14c-2b` branch.** 14a + 14b + 14c.2 + 14c.2b (handler-local state + dot-access) green.
 
 Experimental ahead-of-time compiler that targets JVM bytecode directly (ASM 9.x),
 running alongside the interpreter — not replacing it. Shares AST and parser with
@@ -73,10 +73,22 @@ Abort semantics (no `resume`) still work — clause returns without unblocking
 the body channel, the `finally` block in `runWith` interrupts the body
 virtual thread, and the clause's return value becomes the `with` result.
 
-## Not yet supported (14c.2b+)
+## Scope of 14c.2b (implemented)
 
-- Handler state (`state :! init`, `state <- …`) and dot-access on handlers
+- `state :! init` state bindings in handlers — each compiled to a private static
+  Object field `handler$<h>$state$<var>` on the program class; initialised at the
+  handler decl's textual position in `main` via `PUTSTATIC`.
+- `state <- expr` assignments inside clause bodies — lowered to `PUTSTATIC`.
+- Free reads of the state name inside clause bodies — lowered to `GETSTATIC`.
+- `handler.state` dot-access anywhere — lowered to `GETSTATIC` on the
+  corresponding static field.
+- State persists across `with` invocations and survives virtual-thread
+  body execution (static field is shared), matching the interpreter.
+
+## Not yet supported (14c.3+)
+
 - Handler composition `>>`
+- Required-effect rows on handlers (`handler h ::: E1 E2`)
 - Multi-shot `resume` (backtracking) — deferred (CPS skipped)
 - State-machine rewrite for perf — 14c.3 if/when perf matters
 - Concurrency, modules, Java interop — 14d

@@ -390,6 +390,55 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void effectHandlerState() throws Exception {
+        assertSame("eff_state", """
+            effect Counter
+              bump :: () -> ()
+              get-count :: () -> Int
+
+            handler counting :: Counter
+              state :! 0
+              bump () =>
+                state <- state + 1
+                resume ()
+              get-count () => resume state
+
+            fn run
+              _ =>
+                with counting
+                  bump ()
+                  bump ()
+                  bump ()
+                  get-count ()
+
+            println (run ())
+            """);
+    }
+
+    @Test
+    void effectHandlerDotAccess() throws Exception {
+        assertSame("eff_dot", """
+            effect Counter
+              bump :: () -> ()
+
+            handler acc :: Counter
+              state :! 0
+              bump () =>
+                state <- state + 1
+                resume ()
+
+            fn run
+              _ =>
+                with acc
+                  bump ()
+                  bump ()
+                acc.state
+
+            println (run ())
+            """);
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """

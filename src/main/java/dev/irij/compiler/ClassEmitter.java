@@ -14,6 +14,7 @@ import org.objectweb.asm.Type;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,6 +49,10 @@ final class ClassEmitter implements Opcodes {
     private final Map<String, String> effectOps = new HashMap<>();
     // handler name → decl (14c.1 abort-only)
     private final Map<String, Decl.HandlerDecl> handlers = new HashMap<>();
+    // handlerName -> (stateVarName -> internal static field name)
+    private final Map<String, Map<String, String>> handlerStateFields = new HashMap<>();
+    // state field name -> JVM descriptor (always OBJ_DESC here)
+    private Map<String, String> currentStateFields = Map.of();
     private ClassWriter classWriter;
     private int lambdaCounter = 0;
 
@@ -79,6 +84,17 @@ final class ClassEmitter implements Opcodes {
             if (inner instanceof Decl.HandlerDecl hd) {
                 validateHandler14c2(hd);
                 handlers.put(hd.name(), hd);
+                if (!hd.stateBindings().isEmpty()) {
+                    Map<String, String> fields = new LinkedHashMap<>();
+                    for (Stmt sb : hd.stateBindings()) {
+                        String stateName = stateBindingName(hd.name(), sb);
+                        String fieldName = "handler$" + mangle(hd.name()) + "$state$" + mangle(stateName);
+                        fields.put(stateName, fieldName);
+                        cw.visitField(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                                fieldName, OBJ_DESC, null, null).visitEnd();
+                    }
+                    handlerStateFields.put(hd.name(), fields);
+                }
             }
             if (inner instanceof Decl.ImplDecl id) {
                 for (Decl.ImplBinding b : id.bindings()) {
@@ -243,7 +259,7 @@ final class ClassEmitter implements Opcodes {
             case Decl.ProtoDecl __ -> { /* no runtime rep; methods go through dispatchers */ }
             case Decl.ImplDecl __ -> { /* bindings hoisted to static methods in pass 2b */ }
             case Decl.EffectDecl __ -> { /* ops registered in pass 1 */ }
-            case Decl.HandlerDecl __ -> { /* dispatcher emitted in pass 2c */ }
+            case Decl.HandlerDecl hd -> emitHandlerStateInit(hd, mv, locals);
             case Decl.WithDecl wd -> emitStmt(wd.with(), mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported top-level decl: " + d.getClass().getSimpleName());
@@ -264,9 +280,30 @@ final class ClassEmitter implements Opcodes {
                 emitWith(w, mv, locals);
                 mv.visitInsn(POP);
             }
+            case Stmt.Assign a -> emitAssign(a, mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported statement: " + s.getClass().getSimpleName());
         }
+    }
+
+    private void emitAssign(Stmt.Assign a, MethodVisitor mv, Locals locals) {
+        if (!(a.target() instanceof Stmt.BindTarget.Simple s)) {
+            throw new IrijCompiler.CompileException(
+                    "MVP: assignment must target a simple name");
+        }
+        emitExpr(a.value(), mv, locals);
+        Integer slot = locals.lookup(s.name());
+        if (slot != null) {
+            mv.visitVarInsn(ASTORE, slot);
+            return;
+        }
+        String field = currentStateFields.get(s.name());
+        if (field != null) {
+            mv.visitFieldInsn(PUTSTATIC, internalName, field, OBJ_DESC);
+            return;
+        }
+        throw new IrijCompiler.CompileException(
+                "MVP: assignment to unknown target: " + s.name());
     }
 
     private void emitBind(Stmt.Bind b, MethodVisitor mv, Locals locals) {
@@ -355,6 +392,7 @@ final class ClassEmitter implements Opcodes {
             case Expr.MatchExpr me -> emitMatchExpr(me, mv, locals);
             case Expr.Lambda lam -> emitLambda(lam, mv, locals);
             case Expr.Block blk -> emitBlock(blk, mv, locals);
+            case Expr.DotAccess da -> emitDotAccess(da, mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported expression: " + e.getClass().getSimpleName());
         }
@@ -373,10 +411,43 @@ final class ClassEmitter implements Opcodes {
             default -> {}
         }
         Integer slot = locals.lookup(name);
-        if (slot == null) {
-            throw new IrijCompiler.CompileException("Unbound variable: " + name);
+        if (slot != null) {
+            mv.visitVarInsn(ALOAD, slot);
+            return;
         }
-        mv.visitVarInsn(ALOAD, slot);
+        String stateField = currentStateFields.get(name);
+        if (stateField != null) {
+            mv.visitFieldInsn(GETSTATIC, internalName, stateField, OBJ_DESC);
+            return;
+        }
+        throw new IrijCompiler.CompileException("Unbound variable: " + name);
+    }
+
+    private void emitDotAccess(Expr.DotAccess da, MethodVisitor mv, Locals locals) {
+        if (da.target() instanceof Expr.Var v) {
+            Map<String, String> fields = handlerStateFields.get(v.name());
+            if (fields != null) {
+                String field = fields.get(da.field());
+                if (field != null) {
+                    mv.visitFieldInsn(GETSTATIC, internalName, field, OBJ_DESC);
+                    return;
+                }
+            }
+        }
+        throw new IrijCompiler.CompileException(
+                "MVP: dot-access only supported for handler state: " + da.field());
+    }
+
+    private void emitHandlerStateInit(Decl.HandlerDecl hd, MethodVisitor mv, Locals locals) {
+        Map<String, String> fields = handlerStateFields.get(hd.name());
+        if (fields == null) return;
+        for (Stmt sb : hd.stateBindings()) {
+            if (!(sb instanceof Stmt.MutBind mb)) continue;
+            String stateName = stateBindingName(hd.name(), sb);
+            String fieldName = fields.get(stateName);
+            emitExpr(mb.value(), mv, locals);
+            mv.visitFieldInsn(PUTSTATIC, internalName, fieldName, OBJ_DESC);
+        }
     }
 
     private void emitBinaryOp(Expr.BinaryOp bop, MethodVisitor mv, Locals locals) {
@@ -558,14 +629,26 @@ final class ClassEmitter implements Opcodes {
     // ── Effects / handlers (14c.2 thread+channel, one-shot resume) ────
 
     private void validateHandler14c2(Decl.HandlerDecl h) {
-        if (!h.stateBindings().isEmpty()) {
-            throw new IrijCompiler.CompileException(
-                    "handler " + h.name() + ": mutable state not yet implemented in bytecode compiler (14c.2b)");
+        for (Stmt sb : h.stateBindings()) {
+            if (!(sb instanceof Stmt.MutBind mb)
+                    || !(mb.target() instanceof Stmt.BindTarget.Simple)) {
+                throw new IrijCompiler.CompileException(
+                        "handler " + h.name() + ": state binding must be `name :! init`");
+            }
         }
         if (h.requiredEffects() != null && !h.requiredEffects().isEmpty()) {
             throw new IrijCompiler.CompileException(
                     "handler " + h.name() + ": required effects (::: …) not yet implemented in bytecode compiler (14c.2b)");
         }
+    }
+
+    private static String stateBindingName(String handlerName, Stmt sb) {
+        if (sb instanceof Stmt.MutBind mb
+                && mb.target() instanceof Stmt.BindTarget.Simple s) {
+            return s.name();
+        }
+        throw new IrijCompiler.CompileException(
+                "handler " + handlerName + ": state binding must be `name :! init`");
     }
 
     private static final String COMP_HANDLER = "dev/irij/compiler/RuntimeSupport$CompiledHandler";
@@ -592,6 +675,10 @@ final class ClassEmitter implements Opcodes {
         Locals locals = new Locals();
         locals.allocate("$map"); // slot 0
 
+        Map<String, String> savedState = currentStateFields;
+        Map<String, String> myState = handlerStateFields.get(h.name());
+        currentStateFields = myState != null ? myState : Map.of();
+        try {
         for (Decl.HandlerClause c : h.clauses()) {
             mv.visitVarInsn(ALOAD, mapSlot);
             mv.visitLdcInsn(c.opName());
@@ -620,6 +707,10 @@ final class ClassEmitter implements Opcodes {
             mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "put",
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
             mv.visitInsn(POP);
+        }
+
+        } finally {
+            currentStateFields = savedState;
         }
 
         // new CompiledHandler(name, effectName, map)
@@ -932,7 +1023,30 @@ final class ClassEmitter implements Opcodes {
             case Expr.VectorLit vl -> { for (Expr x : vl.elements()) collectFreeVars(x, bound, outer, out, seen); }
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) collectFreeVars(x, bound, outer, out, seen); }
             case Expr.SetLit sl -> { for (Expr x : sl.elements()) collectFreeVars(x, bound, outer, out, seen); }
+            case Expr.DotAccess da -> collectFreeVars(da.target(), bound, outer, out, seen);
+            case Expr.Block blk -> {
+                Set<String> bound2 = new HashSet<>(bound);
+                for (Stmt st : blk.stmts()) collectFreeVarsStmt(st, bound2, outer, out, seen);
+            }
             default -> { /* literals, TypeRef, Keyword — no free vars */ }
+        }
+    }
+
+    private void collectFreeVarsStmt(Stmt s, Set<String> bound, Locals outer,
+                                       List<String> out, Set<String> seen) {
+        switch (s) {
+            case Stmt.ExprStmt es -> collectFreeVars(es.expr(), bound, outer, out, seen);
+            case Stmt.Bind b -> {
+                collectFreeVars(b.value(), bound, outer, out, seen);
+                if (b.target() instanceof Stmt.BindTarget.Simple si) bound.add(si.name());
+                else if (b.target() instanceof Stmt.BindTarget.Destructure dp) collectPatternBinds(dp.pattern(), bound);
+            }
+            case Stmt.MutBind mb -> {
+                collectFreeVars(mb.value(), bound, outer, out, seen);
+                if (mb.target() instanceof Stmt.BindTarget.Simple si) bound.add(si.name());
+            }
+            case Stmt.Assign a -> collectFreeVars(a.value(), bound, outer, out, seen);
+            default -> { /* others rare inside clause bodies */ }
         }
     }
 
