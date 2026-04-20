@@ -44,7 +44,7 @@ irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
 ## Tests
 
 ```sh
-./gradlew test                # 761 Java unit tests (incl. 45 bytecode-compiler tests)
+./gradlew test                # 762 Java unit tests (incl. 46 bytecode-compiler tests)
 irij test                     # 299 integration tests (tests/*.irj)
 ```
 

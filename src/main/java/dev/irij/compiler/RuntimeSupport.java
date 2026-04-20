@@ -256,6 +256,29 @@ public final class RuntimeSupport {
         }
     }
 
+    /** Flat ordered list of handlers from a `>>` composition. */
+    public static final class CompiledComposedHandler {
+        public final java.util.List<CompiledHandler> handlers;
+        public CompiledComposedHandler(java.util.List<CompiledHandler> handlers) {
+            this.handlers = handlers;
+        }
+    }
+
+    /** Flatten and build a composed handler from two operand values. */
+    public static Object compose(Object left, Object right) {
+        java.util.List<CompiledHandler> all = new java.util.ArrayList<>();
+        appendHandlers(left, all);
+        appendHandlers(right, all);
+        return new CompiledComposedHandler(java.util.List.copyOf(all));
+    }
+
+    private static void appendHandlers(Object v, java.util.List<CompiledHandler> out) {
+        if (v instanceof CompiledHandler h) out.add(h);
+        else if (v instanceof CompiledComposedHandler c) out.addAll(c.handlers);
+        else throw new dev.irij.interpreter.IrijRuntimeError(
+                ">> requires handler operands, got " + typeTag(v));
+    }
+
     /** Emitted call-site for effect ops. Routes through EffectSystem.fireOp. */
     public static Object perform(String effectName, String opName, Object[] args) {
         return dev.irij.interpreter.EffectSystem.fireOp(
@@ -279,6 +302,9 @@ public final class RuntimeSupport {
      * drives the handler loop on the calling thread, supports one-shot resume.
      */
     public static Object runWith(Object handlerObj, IrijFn body) {
+        if (handlerObj instanceof CompiledComposedHandler cc) {
+            return runWithComposed(cc.handlers, 0, body);
+        }
         if (!(handlerObj instanceof CompiledHandler h)) {
             throw new dev.irij.interpreter.IrijRuntimeError(
                     "with requires a handler, got " + typeTag(handlerObj));
@@ -313,6 +339,13 @@ public final class RuntimeSupport {
         } finally {
             if (bodyThread.isAlive()) bodyThread.interrupt();
         }
+    }
+
+    /** Nested runWith: with (h0 >> h1 >> h2) body ≡ runWith h0 (\ -> runWith h1 (\ -> runWith h2 body)). */
+    private static Object runWithComposed(java.util.List<CompiledHandler> handlers, int idx, IrijFn body) {
+        if (idx >= handlers.size()) return body.apply(new Object[0]);
+        IrijFn nested = (args) -> runWithComposed(handlers, idx + 1, body);
+        return runWith(handlers.get(idx), nested);
     }
 
     private static Object runHandlerLoop(

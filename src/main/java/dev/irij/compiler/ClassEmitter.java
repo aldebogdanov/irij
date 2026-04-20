@@ -393,6 +393,7 @@ final class ClassEmitter implements Opcodes {
             case Expr.Lambda lam -> emitLambda(lam, mv, locals);
             case Expr.Block blk -> emitBlock(blk, mv, locals);
             case Expr.DotAccess da -> emitDotAccess(da, mv, locals);
+            case Expr.Compose c -> emitCompose(c, mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported expression: " + e.getClass().getSimpleName());
         }
@@ -420,7 +421,21 @@ final class ClassEmitter implements Opcodes {
             mv.visitFieldInsn(GETSTATIC, internalName, stateField, OBJ_DESC);
             return;
         }
+        if (handlers.containsKey(name)) {
+            mv.visitMethodInsn(INVOKESTATIC, internalName, handlerBuildName(name),
+                    "()L" + COMP_HANDLER + ";", false);
+            return;
+        }
         throw new IrijCompiler.CompileException("Unbound variable: " + name);
+    }
+
+    private void emitCompose(Expr.Compose c, MethodVisitor mv, Locals locals) {
+        // Assume handler composition — emit both as Object and call RuntimeSupport.compose.
+        // (Function composition for non-handler values isn't supported in MVP.)
+        emitExpr(c.left(), mv, locals);
+        emitExpr(c.right(), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "compose",
+                "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
     }
 
     private void emitDotAccess(Expr.DotAccess da, MethodVisitor mv, Locals locals) {
@@ -726,40 +741,6 @@ final class ClassEmitter implements Opcodes {
         mv.visitEnd();
     }
 
-    private void flattenComposeHandlers(Expr e, List<String> out) {
-        if (e instanceof Expr.Compose c) {
-            flattenComposeHandlers(c.left(), out);
-            flattenComposeHandlers(c.right(), out);
-            return;
-        }
-        if (e instanceof Expr.Var v) {
-            if (!handlers.containsKey(v.name())) {
-                throw new IrijCompiler.CompileException(
-                        "MVP with-compose: unknown handler " + v.name());
-            }
-            out.add(v.name());
-            return;
-        }
-        throw new IrijCompiler.CompileException(
-                "MVP with-compose: operand must be a named handler reference");
-    }
-
-    private Stmt.With buildNestedWith(List<String> names, int idx,
-                                        List<Stmt> body, List<Stmt> onFailure,
-                                        dev.irij.ast.Node.SourceLoc loc) {
-        if (idx == names.size() - 1) {
-            return new Stmt.With(new Expr.Var(names.get(idx), null),
-                    body,
-                    idx == 0 ? onFailure : List.of(),
-                    loc);
-        }
-        Stmt.With inner = buildNestedWith(names, idx + 1, body, onFailure, loc);
-        return new Stmt.With(new Expr.Var(names.get(idx), null),
-                List.of(new Stmt.ExprStmt(new Expr.Block(List.of(inner), null), null)),
-                idx == 0 ? onFailure : List.of(),
-                loc);
-    }
-
     private void emitPerform(String opName, List<Expr> args, MethodVisitor mv, Locals locals) {
         // `() -> ()` effects are called `op ()` — strip single unit arg.
         if (args.size() == 1 && args.get(0) instanceof Expr.UnitLit) args = List.of();
@@ -777,25 +758,6 @@ final class ClassEmitter implements Opcodes {
      * EffectSystem; handler clauses compiled as IrijFns receiving (args…, resume).
      */
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
-        // Handler composition: `with h1 >> h2 body` ≡ nested `with h1 (with h2 body)`.
-        // on-failure attaches only to the outermost with.
-        if (w.handler() instanceof Expr.Compose) {
-            List<String> names = new ArrayList<>();
-            flattenComposeHandlers(w.handler(), names);
-            Stmt.With nested = buildNestedWith(names, 0, w.body(), w.onFailure(), w.loc());
-            emitWith(nested, mv, outer);
-            return;
-        }
-        if (!(w.handler() instanceof Expr.Var hv)) {
-            throw new IrijCompiler.CompileException(
-                    "MVP with: handler must be a named handler reference");
-        }
-        Decl.HandlerDecl h = handlers.get(hv.name());
-        if (h == null) {
-            throw new IrijCompiler.CompileException(
-                    "MVP with: unknown handler " + hv.name());
-        }
-
         String runEx = "java/lang/RuntimeException";
         int resultSlot = outer.allocateAnon();
 
@@ -809,9 +771,8 @@ final class ClassEmitter implements Opcodes {
         }
 
         mv.visitLabel(tryStart);
-        // handler$name$build() → CompiledHandler
-        mv.visitMethodInsn(INVOKESTATIC, internalName, handlerBuildName(h.name()),
-                "()L" + COMP_HANDLER + ";", false);
+        // Emit handler expression as Object (CompiledHandler or CompiledComposedHandler).
+        emitExpr(w.handler(), mv, outer);
         // Body: IrijFn of zero params — synthesize Expr.Lambda wrapping a Block.
         Expr bodyExpr = new Expr.Block(w.body(), null);
         Expr.Lambda bodyLam = new Expr.Lambda(List.of(), null, bodyExpr, null);
