@@ -22,8 +22,37 @@ public final class RuntimeSupport {
 
     /** Helper for App sites when callee is an expression of unknown type. */
     public static Object callFn(Object fn, Object[] args) {
+        return callAny(fn, args);
+    }
+
+    /**
+     * Dispatch a call against any runtime "callable": IrijFn (compiled
+     * lambdas), interpreter BuiltinFn (Java interop refs from
+     * Class/member or obj.method), or interpreter Closure.
+     */
+    public static Object callAny(Object fn, Object[] args) {
         if (fn instanceof IrijFn f) return f.apply(args);
+        if (fn instanceof dev.irij.interpreter.Values.BuiltinFn bf) {
+            return bf.apply(java.util.Arrays.asList(args));
+        }
         throw new IllegalArgumentException("Not callable: " + display(fn));
+    }
+
+    /** Resolve a Java static ref like "System/getenv" → BuiltinFn. */
+    public static Object javaStaticRef(String ref) {
+        return dev.irij.interpreter.JavaInterop.resolveStaticRef(ref);
+    }
+
+    /**
+     * Dot-access fallthrough at runtime: dispatch over compile-time unknown
+     * targets. Returns handler-state/closure fields if applicable, else
+     * defers to JavaInterop.resolveInstanceRef.
+     */
+    public static Object javaInstanceRef(Object recv, String member) {
+        if (recv == null) {
+            throw new IllegalArgumentException("Cannot access ." + member + " on null");
+        }
+        return dev.irij.interpreter.JavaInterop.resolveInstanceRef(recv, member);
     }
 
     public static void print(Object v) {

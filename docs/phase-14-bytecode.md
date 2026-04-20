@@ -1,6 +1,6 @@
 # Phase 14 — Bytecode Compiler (MVP spike)
 
-Status: **14d (modules) — in progress on `bytecode-mvp` branch.** 14a + 14b + 14c.2 + 14c.2b (handlers + state + composition + required rows) green; 14d modules via compile-time source inlining now green.
+Status: **14d (modules + Java interop) — in progress on `bytecode-mvp` branch.** 14a + 14b + 14c.2 + 14c.2b + 14d-modules + 14d-interop green; 14d concurrency (`scope`/`fork`/`par`/`race`/`timeout`) deferred (interpreter-coupled, needs design).
 
 Experimental ahead-of-time compiler that targets JVM bytecode directly (ASM 9.x),
 running alongside the interpreter — not replacing it. Shares AST and parser with
@@ -119,11 +119,29 @@ virtual thread, and the clause's return value becomes the `with` result.
 - No runtime module registry — everything resolves to top-level methods /
   static fields after inlining.
 
+## Scope of 14d — Java interop (implemented)
+
+- `Class/member` refs (`Math/abs`, `System/getenv`, `System/out`, …) — emitted
+  as `RuntimeSupport.javaStaticRef(String)` which delegates to the
+  interpreter's `JavaInterop.resolveStaticRef` and returns the same `BuiltinFn`
+  used by the interpreter.
+- `Class/new` constructor callables work (`StringBuilder/new ()`).
+- Instance access via dot-access fallthrough: `obj.method args` and
+  `obj.field` — any dot-access that isn't a handler-state or module-alias
+  rewrite is lowered to `RuntimeSupport.javaInstanceRef(recv, name)`, again
+  delegating to `JavaInterop.resolveInstanceRef`.
+- Coercion, overload scoring, `java.lang.*` auto-imports all inherit from
+  the interpreter (shared code path — bug-for-bug parity).
+- Uniform call dispatch: `RuntimeSupport.callAny` accepts either compiled
+  `IrijFn` values or interpreter `BuiltinFn` values, so interop callables are
+  invokable from anywhere a first-class fn would be.
+
 ## Not yet supported (14c.3+ / 14d+)
 
 - Multi-shot `resume` (backtracking) — deferred (CPS skipped)
 - State-machine rewrite for perf — 14c.3 if/when perf matters
-- Concurrency, Java interop — 14d (remaining)
+- Concurrency: `scope` / `fork` / `par` / `race` / `timeout` / `spawn` — 14d.2
+  (interpreter-coupled; needs compiler-side Fiber/ScopeHandle design)
 - Same-short-name collisions across multiple `use`s are not disambiguated
   (last `use` wins in the alias set)
 

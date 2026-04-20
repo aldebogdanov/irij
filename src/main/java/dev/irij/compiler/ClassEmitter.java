@@ -400,6 +400,11 @@ final class ClassEmitter implements Opcodes {
             case Expr.Lambda lam -> emitLambda(lam, mv, locals);
             case Expr.Block blk -> emitBlock(blk, mv, locals);
             case Expr.DotAccess da -> emitDotAccess(da, mv, locals);
+            case Expr.JavaRef jr -> {
+                mv.visitLdcInsn(jr.ref());
+                mv.visitMethodInsn(INVOKESTATIC, RT, "javaStaticRef",
+                        "(Ljava/lang/String;)Ljava/lang/Object;", false);
+            }
             case Expr.Compose c -> emitCompose(c, mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported expression: " + e.getClass().getSimpleName());
@@ -461,8 +466,11 @@ final class ClassEmitter implements Opcodes {
                 return;
             }
         }
-        throw new IrijCompiler.CompileException(
-                "MVP: dot-access only supported for handler state or module alias: " + da.field());
+        // Interop fallthrough: evaluate target, delegate to JavaInterop.
+        emitExpr(da.target(), mv, locals);
+        mv.visitLdcInsn(da.field());
+        mv.visitMethodInsn(INVOKESTATIC, RT, "javaInstanceRef",
+                "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
     }
 
     private void emitHandlerStateInit(Decl.HandlerDecl hd, MethodVisitor mv, Locals locals) {
@@ -894,12 +902,13 @@ final class ClassEmitter implements Opcodes {
 
     // ── Lambda values (first-class functions) ───────────────────────────
 
-    /** Call an IrijFn: eval callee → IrijFn, pack args into Object[], invoke apply. */
+    /** Call any runtime callable (IrijFn or interop BuiltinFn): evaluate callee,
+     *  pack args into Object[], dispatch via RuntimeSupport.callAny. */
     private void emitIrijFnCall(Expr fnExpr, List<Expr> args, MethodVisitor mv, Locals locals) {
         emitExpr(fnExpr, mv, locals);
-        mv.visitTypeInsn(CHECKCAST, IRIJ_FN);
         pushObjectArray(args, mv, locals);
-        mv.visitMethodInsn(INVOKEINTERFACE, IRIJ_FN, "apply", APPLY_DESC, true);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "callAny",
+                "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
     }
 
     private void pushObjectArray(List<Expr> args, MethodVisitor mv, Locals locals) {

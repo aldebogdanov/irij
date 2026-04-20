@@ -567,6 +567,21 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void javaInteropStaticAndInstance() throws Exception {
+        assertSame("interop_basics", """
+            print (Math/abs (0 - 7))
+            print (Math/max 3 10)
+            print (String/valueOf 42)
+
+            sb := StringBuilder/new ()
+            sb.append "hello "
+            sb.append "world"
+            print (sb.toString ())
+            print (sb.length ())
+            """);
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """
