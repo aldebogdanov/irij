@@ -627,8 +627,8 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
     - [x] `runWith(handler, bodyFn)` runtime driver with handler loop + one-shot resume
     - [x] Nested `with` via thread-local stack; `on-failure` via RuntimeException catch
     - [x] Golden parity tests: resume, resume-unit, nested
-    - [ ] 14c.2b — handler mutable state (`state :! init`, `<-`) + dot-access
-    - [ ] 14c.2b — handler composition (`>>`)
+    - [x] 14c.2b — handler mutable state (`state :! init`, `<-`) + dot-access (static-field lowering per handler decl)
+    - [x] 14c.2b — handler composition (`>>`) inline in `with` (compile-time flatten to nested `with`)
   - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
 
 - [ ] **14d — Concurrency, modules, Java interop**

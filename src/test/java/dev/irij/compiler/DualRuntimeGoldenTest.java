@@ -390,6 +390,112 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void effectHandlerState() throws Exception {
+        assertSame("eff_state", """
+            effect Counter
+              bump :: () -> ()
+              get-count :: () -> Int
+
+            handler counting :: Counter
+              state :! 0
+              bump () =>
+                state <- state + 1
+                resume ()
+              get-count () => resume state
+
+            fn run
+              _ =>
+                with counting
+                  bump ()
+                  bump ()
+                  bump ()
+                  get-count ()
+
+            println (run ())
+            """);
+    }
+
+    @Test
+    void effectHandlerDotAccess() throws Exception {
+        assertSame("eff_dot", """
+            effect Counter
+              bump :: () -> ()
+
+            handler acc :: Counter
+              state :! 0
+              bump () =>
+                state <- state + 1
+                resume ()
+
+            fn run
+              _ =>
+                with acc
+                  bump ()
+                  bump ()
+                acc.state
+
+            println (run ())
+            """);
+    }
+
+    @Test
+    void effectHandlerComposition() throws Exception {
+        assertSame("eff_compose", """
+            effect Greet
+              greet :: Str -> Str
+
+            effect Logger
+              log :: Str -> ()
+
+            handler friendly :: Greet
+              greet name => resume ("Hi, " ++ name)
+
+            handler quiet-log :: Logger
+              log msg => resume ()
+
+            fn run
+              _ =>
+                with quiet-log >> friendly
+                  log "ignored"
+                  greet "World"
+
+            println (run ())
+            """);
+    }
+
+    @Test
+    void effectHandlerRequiredEffects() throws Exception {
+        // Inner handler declares `::: Logger`, meaning its clause performs
+        // Logger.log, which is dispatched by the outer quiet-log handler.
+        assertSame("eff_required", """
+            effect Logger
+              log :: Str -> ()
+
+            effect Counter
+              bump :: () -> Int
+
+            handler quiet-log :: Logger
+              log msg => resume ()
+
+            handler loud-counter :: Counter ::: Logger
+              state :! 0
+              bump () =>
+                state <- state + 1
+                log "bumped"
+                resume state
+
+            fn run
+              _ =>
+                with quiet-log >> loud-counter
+                  bump ()
+                  bump ()
+                  bump ()
+
+            println (run ())
+            """);
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """
