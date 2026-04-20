@@ -56,8 +56,15 @@ final class ClassEmitter implements Opcodes {
     private ClassWriter classWriter;
     private int lambdaCounter = 0;
 
+    private final Set<String> moduleAliases;
+
     ClassEmitter(String className) {
+        this(className, Set.of());
+    }
+
+    ClassEmitter(String className, Set<String> moduleAliases) {
         this.internalName = className.replace('.', '/');
+        this.moduleAliases = moduleAliases;
     }
 
     byte[] emit(List<Decl> decls) {
@@ -448,9 +455,14 @@ final class ClassEmitter implements Opcodes {
                     return;
                 }
             }
+            // `mod.name` where mod is a `use` alias: resolve as unqualified name.
+            if (moduleAliases.contains(v.name())) {
+                emitVarLoad(da.field(), mv, locals);
+                return;
+            }
         }
         throw new IrijCompiler.CompileException(
-                "MVP: dot-access only supported for handler state: " + da.field());
+                "MVP: dot-access only supported for handler state or module alias: " + da.field());
     }
 
     private void emitHandlerStateInit(Decl.HandlerDecl hd, MethodVisitor mv, Locals locals) {
@@ -1073,6 +1085,14 @@ final class ClassEmitter implements Opcodes {
     private void emitApp(Expr.App app, MethodVisitor mv, Locals locals) {
         if (app.fn() instanceof Expr.TypeRef tr) {
             emitConstructorApp(tr.name(), app.args(), mv, locals);
+            return;
+        }
+        // `mod.fn x` where mod is a `use` alias → call unqualified fn.
+        if (app.fn() instanceof Expr.DotAccess da
+                && da.target() instanceof Expr.Var modVar
+                && moduleAliases.contains(modVar.name())) {
+            emitApp(new Expr.App(new Expr.Var(da.field(), null), app.args(), null),
+                    mv, locals);
             return;
         }
         String fnName = null;

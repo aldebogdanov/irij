@@ -631,7 +631,12 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
     - [x] 14c.2b — handler composition (`>>`) as runtime value (CompiledComposedHandler), inline + local-bound
   - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
 
-- [ ] **14d — Concurrency, modules, Java interop**
+- [~] **14d — Concurrency, modules, Java interop**
+  - [x] Modules — compile-time source inlining via `ModuleInliner`:
+        `mod`/`use` stripped, `pub` unwrapped, classpath + sourceRoot lookup,
+        short-name alias rewrite in call + dot-access position
+  - [ ] Concurrency (`scope`, `fork`, `par`, `race`, `timeout`)
+  - [ ] Java interop (`Class/member`, dot-access reflection)
 
 ---
 

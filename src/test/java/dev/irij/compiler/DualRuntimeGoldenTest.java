@@ -522,6 +522,51 @@ class DualRuntimeGoldenTest {
     }
 
     @Test
+    void useModuleFromSourceRoot(@org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp) throws Exception {
+        java.nio.file.Path modDir = tmp.resolve("mymod");
+        java.nio.file.Files.createDirectories(modDir);
+        java.nio.file.Files.writeString(modDir.resolve("util.irj"), """
+            mod mymod.util
+
+            pub fn inc
+              (x -> x + 1)
+
+            pub fn twice
+              (x -> x * 2)
+            """);
+        String source = """
+            use mymod.util
+
+            print (util.inc 41)
+            print (util.twice 21)
+            """;
+        // Interpreter path: feed program + preload module by eval? Simpler: run through
+        // the compiler with sourceRoot, compare against an inline version through interp.
+        String inlineEquivalent = """
+            fn inc
+              (x -> x + 1)
+
+            fn twice
+              (x -> x * 2)
+
+            print (inc 41)
+            print (twice 21)
+            """;
+        String interp = runInterp(inlineEquivalent);
+        byte[] bytes = IrijCompiler.compileSource(source, "irij.Golden_use_mod", tmp);
+        java.io.PrintStream orig = System.out;
+        java.io.ByteArrayOutputStream buf = new java.io.ByteArrayOutputStream();
+        System.setOut(new java.io.PrintStream(buf, true, java.nio.charset.StandardCharsets.UTF_8));
+        try {
+            Class<?> cls = new BytesLoader().define("irij.Golden_use_mod", bytes);
+            cls.getMethod("main", String[].class).invoke(null, (Object) new String[0]);
+        } finally {
+            System.setOut(orig);
+        }
+        assertEquals(interp, buf.toString(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    @Test
     void fibIterativeStyle() throws Exception {
         // Recursive fib; avoids laziness concerns.
         assertSame("fib", """

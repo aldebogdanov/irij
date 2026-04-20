@@ -44,7 +44,7 @@ irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
 ## Tests
 
 ```sh
-./gradlew test                # 762 Java unit tests (incl. 46 bytecode-compiler tests)
+./gradlew test                # 763 Java unit tests (incl. 47 bytecode-compiler tests)
 irij test                     # 299 integration tests (tests/*.irj)
 ```
 
@@ -60,7 +60,7 @@ irij test                     # 299 integration tests (tests/*.irj)
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)
-- **Bytecode compiler (experimental, 14a+14b+14c.2+14c.2b)** &mdash; `irij compile file.irj -o out.jar` emits a runnable JVM jar (subset: literals, arith, `if`, `:=`, `fn`, `match`, pattern dispatch, collections, ADT constructors, first-class lambdas with captures, rest params, protocol dispatch, algebraic effects with one-shot `resume` and `on-failure`; see `docs/phase-14-bytecode.md`)
+- **Bytecode compiler (experimental, 14a+14b+14c.2+14c.2b+14d-modules)** &mdash; `irij compile file.irj -o out.jar` emits a runnable JVM jar (subset: literals, arith, `if`, `:=`, `fn`, `match`, pattern dispatch, collections, ADT constructors, first-class lambdas with captures, rest params, protocol dispatch, algebraic effects with one-shot `resume` and `on-failure`, modules via compile-time source inlining (`use std.X`); see `docs/phase-14-bytecode.md`)
 - **nREPL** &mdash; Emacs integration via `editors/emacs/irij-nrepl.el`
 
 ## Documentation

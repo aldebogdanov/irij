@@ -1,6 +1,6 @@
 # Phase 14 — Bytecode Compiler (MVP spike)
 
-Status: **14c.2b — in progress on `phase-14c-2b` branch.** 14a + 14b + 14c.2 + 14c.2b (handler-local state + dot-access) green.
+Status: **14d (modules) — in progress on `bytecode-mvp` branch.** 14a + 14b + 14c.2 + 14c.2b (handlers + state + composition + required rows) green; 14d modules via compile-time source inlining now green.
 
 Experimental ahead-of-time compiler that targets JVM bytecode directly (ASM 9.x),
 running alongside the interpreter — not replacing it. Shares AST and parser with
@@ -99,11 +99,33 @@ virtual thread, and the clause's return value becomes the `with` result.
   `::: …` annotation is not enforced at the bytecode layer (it is a
   declaration-time concern handled elsewhere).
 
-## Not yet supported (14c.3+)
+## Scope of 14d — modules (implemented)
+
+- `mod X.Y` top-level declarations — stripped by the inliner.
+- `use X.Y` — resolved at compile time by `ModuleInliner`:
+  - classpath resource lookup first (`X/Y.irj` on the classpath — covers
+    `src/main/resources/std/*.irj` and any bundled modules);
+  - then `<sourceRoot>/X/Y.irj` if a source root was passed in (the CLI
+    passes the parent directory of the input file).
+- Loaded once per qualified name; circular `use` detected.
+- `pub` wrappers are unwrapped (the compiler treats `pub fn` as `fn`);
+  module-private decls are inlined alongside.
+- Qualified access:
+  - `mod.fn args` call-position — rewritten to `fn args` (short-name lookup).
+  - `mod.name` value-position dot-access — rewritten to a `Var(name)` load.
+  The `ModuleInliner` registers the last segment of each qualified name
+  (e.g. `std.math` → `math`) as an alias so the emitter knows when to
+  rewrite.
+- No runtime module registry — everything resolves to top-level methods /
+  static fields after inlining.
+
+## Not yet supported (14c.3+ / 14d+)
 
 - Multi-shot `resume` (backtracking) — deferred (CPS skipped)
 - State-machine rewrite for perf — 14c.3 if/when perf matters
-- Concurrency, modules, Java interop — 14d
+- Concurrency, Java interop — 14d (remaining)
+- Same-short-name collisions across multiple `use`s are not disambiguated
+  (last `use` wins in the alias set)
 
 Compile errors are explicit (`MVP: unsupported expression: …`) so the escape
 hatch is always the interpreter.
