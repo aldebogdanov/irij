@@ -21,14 +21,26 @@ public final class IrijCompiler {
 
     /** Compile Irij source string to a classfile byte[]. */
     public static byte[] compileSource(String source, String className) {
-        return compileSource(source, className, null);
+        return compileSource(source, className, null, CompileOptions.defaults());
+    }
+
+    /** Back-compat: compile with a source root (default options). */
+    public static byte[] compileSource(String source, String className, Path sourceRoot) {
+        return compileSource(source, className, sourceRoot, CompileOptions.defaults());
     }
 
     /**
-     * Compile with a source root (used to resolve relative `use` modules that
-     * aren't on the classpath).
+     * Compile with a source root + explicit options.
+     * {@code sourceRoot} resolves relative `use` modules that aren't on the
+     * classpath. {@code opts} selects the handler lowering strategy (14c.2
+     * threaded vs 14c.3 state-machine).
      */
-    public static byte[] compileSource(String source, String className, Path sourceRoot) {
+    public static byte[] compileSource(String source, String className,
+                                        Path sourceRoot, CompileOptions opts) {
+        if (opts.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE) {
+            throw new CompileException(
+                    "handler-strategy=state-machine (14c.3) is not yet implemented");
+        }
         var parsed = IrijParseDriver.parse(source);
         if (parsed.hasErrors()) {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
@@ -36,13 +48,18 @@ public final class IrijCompiler {
         List<Decl> decls = new AstBuilder().build(parsed.tree());
         var inliner = new ModuleInliner(sourceRoot);
         List<Decl> inlined = inliner.inline(decls);
-        return new ClassEmitter(className, inliner.aliases()).emit(inlined);
+        return new ClassEmitter(className, inliner.aliases(), opts).emit(inlined);
     }
 
     /** Compile an Irij file to a classfile byte[]. */
     public static byte[] compileFile(Path path, String className) throws IOException {
+        return compileFile(path, className, CompileOptions.defaults());
+    }
+
+    public static byte[] compileFile(Path path, String className, CompileOptions opts)
+            throws IOException {
         return compileSource(Files.readString(path), className,
-                path.toAbsolutePath().getParent());
+                path.toAbsolutePath().getParent(), opts);
     }
 
     public static final class CompileException extends RuntimeException {

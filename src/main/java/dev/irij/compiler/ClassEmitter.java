@@ -57,14 +57,20 @@ final class ClassEmitter implements Opcodes {
     private int lambdaCounter = 0;
 
     private final Set<String> moduleAliases;
+    private final CompileOptions options;
 
     ClassEmitter(String className) {
-        this(className, Set.of());
+        this(className, Set.of(), CompileOptions.defaults());
     }
 
     ClassEmitter(String className, Set<String> moduleAliases) {
+        this(className, moduleAliases, CompileOptions.defaults());
+    }
+
+    ClassEmitter(String className, Set<String> moduleAliases, CompileOptions options) {
         this.internalName = className.replace('.', '/');
         this.moduleAliases = moduleAliases;
+        this.options = options;
     }
 
     byte[] emit(List<Decl> decls) {

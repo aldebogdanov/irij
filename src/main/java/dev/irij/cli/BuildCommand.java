@@ -1,9 +1,12 @@
 package dev.irij.cli;
 
+import dev.irij.compiler.CompileOptions;
+import dev.irij.compiler.IrijCompiler;
 import dev.irij.module.ProjectFile;
 import dev.irij.module.DependencyResolver;
 
 import java.io.*;
+import java.net.URL;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.*;
@@ -25,10 +28,21 @@ import java.util.stream.Stream;
  */
 public final class BuildCommand {
 
+    /** How the entry program is packaged into the output JAR. */
+    public enum Mode {
+        /** Bundle the interpreter + source (pre-14 behaviour, current default). */
+        INTERP,
+        /** Bytecode compile with 14c.2 threaded handlers. */
+        BYTECODE_THREADED,
+        /** Bytecode compile with 14c.3 state-machine handlers (not yet impl). */
+        BYTECODE_SM,
+    }
+
     private static final String APP_PREFIX = "__irij_app/";
     private static final String DEPS_PREFIX = "__irij_deps/";
     private static final String RESOURCES_PREFIX = "__irij_resources/";
     private static final String MANIFEST_ENTRY = "Irij-Entry-Point";
+    private static final String BYTECODE_CLASS_NAME = "irij.Program";
 
     /**
      * Run the build command.
@@ -37,12 +51,24 @@ public final class BuildCommand {
      */
     public static void run(String[] args) throws IOException {
         Path projectRoot = Path.of("").toAbsolutePath();
+        Mode mode = parseMode(args);
         String entryPoint = findEntryPoint(projectRoot, args);
         Path outputJar = resolveOutputPath(args, entryPoint);
 
         System.out.println("Building Irij application...");
+        System.out.println("  mode:   " + modeLabel(mode));
         System.out.println("  entry:  " + entryPoint);
         System.out.println("  output: " + outputJar);
+
+        if (mode != Mode.INTERP) {
+            buildBytecodeJar(projectRoot, entryPoint, outputJar, mode);
+            long sizeKbBc = Files.size(outputJar) / 1024;
+            System.out.println();
+            System.out.println("Built: " + outputJar + " (" + sizeKbBc + " KB)");
+            System.out.println("Run:   java --enable-native-access=ALL-UNNAMED -jar "
+                    + outputJar.getFileName());
+            return;
+        }
 
         // Find the running irij JAR (our own JAR)
         Path runtimeJar = findRuntimeJar();
@@ -242,6 +268,139 @@ public final class BuildCommand {
                 }
             }
         }
+    }
+
+    // ── --mode parsing ──────────────────────────────────────────────────
+
+    private static Mode parseMode(String[] args) {
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
+            String value = null;
+            if (a.startsWith("--mode=")) value = a.substring("--mode=".length());
+            else if (a.equals("--mode") && i + 1 < args.length) value = args[i + 1];
+            if (value != null) {
+                return switch (value) {
+                    case "interp", "interpreter" -> Mode.INTERP;
+                    case "bytecode-threaded", "threaded", "bc-threaded" -> Mode.BYTECODE_THREADED;
+                    case "bytecode-sm", "sm", "state-machine" -> Mode.BYTECODE_SM;
+                    default -> {
+                        System.err.println("Unknown --mode value: " + value
+                                + " (expected: interp | bytecode-threaded | bytecode-sm)");
+                        System.exit(1);
+                        yield Mode.INTERP;
+                    }
+                };
+            }
+        }
+        return Mode.INTERP;
+    }
+
+    private static String modeLabel(Mode m) {
+        return switch (m) {
+            case INTERP -> "interp (bundled interpreter)";
+            case BYTECODE_THREADED -> "bytecode-threaded (14c.2)";
+            case BYTECODE_SM -> "bytecode-sm (14c.3)";
+        };
+    }
+
+    // ── Bytecode-build path ─────────────────────────────────────────────
+
+    private static void buildBytecodeJar(Path projectRoot, String entryPoint,
+                                          Path outputJar, Mode mode) throws IOException {
+        CompileOptions opts = switch (mode) {
+            case BYTECODE_THREADED -> CompileOptions.threaded();
+            case BYTECODE_SM -> CompileOptions.stateMachine();
+            default -> CompileOptions.defaults();
+        };
+
+        Path entryFile = projectRoot.resolve(entryPoint);
+        byte[] classBytes;
+        try {
+            classBytes = IrijCompiler.compileFile(entryFile, BYTECODE_CLASS_NAME, opts);
+        } catch (IrijCompiler.CompileException e) {
+            System.err.println("Compile error: " + e.getMessage());
+            System.exit(1);
+            return;
+        }
+
+        Path resourcesDir = projectRoot.resolve("resources");
+        List<Path> resourceFiles = Files.isDirectory(resourcesDir)
+                ? collectAllFiles(resourcesDir) : List.of();
+
+        Manifest mf = new Manifest();
+        mf.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        mf.getMainAttributes().put(Attributes.Name.MAIN_CLASS, BYTECODE_CLASS_NAME);
+
+        try (JarOutputStream jos = new JarOutputStream(
+                new BufferedOutputStream(Files.newOutputStream(outputJar)), mf)) {
+            Set<String> written = new HashSet<>();
+            written.add("META-INF/MANIFEST.MF");
+
+            // 1. User program class
+            String classEntry = BYTECODE_CLASS_NAME.replace('.', '/') + ".class";
+            jos.putNextEntry(new JarEntry(classEntry));
+            jos.write(classBytes);
+            jos.closeEntry();
+            written.add(classEntry);
+
+            // 2. Bundle the runtime (everything under dev/irij/** except cli/repl/nrepl/mcp)
+            //    and the packaged stdlib (std/*.irj).
+            bundleRuntimeClasses(jos, written);
+
+            // 3. Resources under __irij_resources/ (mirrors interp mode layout).
+            for (Path resFile : resourceFiles) {
+                String relative = resourcesDir.relativize(resFile).toString();
+                String name = RESOURCES_PREFIX + relative;
+                if (written.add(name)) {
+                    jos.putNextEntry(new JarEntry(name));
+                    Files.copy(resFile, jos);
+                    jos.closeEntry();
+                }
+            }
+        }
+    }
+
+    /** Copy all dev/irij/** classes (except cli/repl/nrepl/mcp) and std/*.irj
+     *  from our own jar into {@code jos} so bytecode output is self-contained. */
+    private static void bundleRuntimeClasses(JarOutputStream jos, Set<String> written)
+            throws IOException {
+        Path selfJar = findRuntimeJar();
+        if (selfJar == null) {
+            System.err.println("Error: cannot locate irij runtime JAR for bundling.");
+            System.exit(1);
+            return;
+        }
+        try (JarFile jf = new JarFile(selfJar.toFile())) {
+            var entries = jf.entries();
+            while (entries.hasMoreElements()) {
+                JarEntry e = entries.nextElement();
+                String name = e.getName();
+                boolean keep =
+                        (name.endsWith(".class") && name.startsWith("dev/irij/")
+                                && !name.startsWith("dev/irij/cli/")
+                                && !name.startsWith("dev/irij/repl/")
+                                && !name.startsWith("dev/irij/nrepl/")
+                                && !name.startsWith("dev/irij/mcp/"))
+                        || name.startsWith("std/")
+                        // Classes pulled in as dependencies of RuntimeSupport (ASM, gson, …)
+                        // are already in dev/irij/** space? No — they live under their own
+                        // packages. Copy them too so emitted classes resolve at runtime.
+                        || name.endsWith(".class") && isRuntimeDep(name);
+                if (!keep) continue;
+                if (!written.add(name)) continue;
+                jos.putNextEntry(new JarEntry(name));
+                try (var is = jf.getInputStream(e)) { is.transferTo(jos); }
+                jos.closeEntry();
+            }
+        }
+    }
+
+    /** Packages the bytecode runtime transitively depends on. */
+    private static boolean isRuntimeDep(String name) {
+        return name.startsWith("com/google/gson/")
+                || name.startsWith("com/moandjiezana/toml/")
+                || name.startsWith("org/antlr/v4/runtime/")
+                || name.startsWith("org/objectweb/asm/");
     }
 
     private static List<Path> collectIrjFilesRecursive(Path dir) throws IOException {

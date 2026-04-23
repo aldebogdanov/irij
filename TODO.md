@@ -631,6 +631,16 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
     - [x] 14c.2b — handler composition (`>>`) as runtime value (CompiledComposedHandler), inline + local-bound
   - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
 
+- [~] **14d.1 — `--mode` flag for `irij build`**
+  - [x] `CompileOptions` record + `HandlerStrategy` enum (`THREADED`/`STATE_MACHINE`)
+  - [x] `IrijCompiler.compileSource/compileFile` opts overloads (default `THREADED`)
+  - [x] `ClassEmitter` carries `CompileOptions` (wiring for 14c.3)
+  - [x] `BuildCommand` modes: `interp` (pre-14 bundled interpreter, default),
+        `bytecode-threaded` (14c.2), `bytecode-sm` (14c.3, stub → rejects until implemented)
+  - [x] `--mode=<x>` / `--mode <x>` with synonyms (`threaded`/`bc-threaded`, `sm`/`state-machine`)
+  - [ ] `irij bench` subcommand comparing modes + other langs
+  - [ ] Flip default to `bytecode-sm` once 14c.3 lands
+
 - [x] **14d — Concurrency, modules, Java interop**
   - [x] Modules — compile-time source inlining via `ModuleInliner`:
         `mod`/`use` stripped, `pub` unwrapped, classpath + sourceRoot lookup,
