@@ -430,6 +430,164 @@ public final class RuntimeSupport {
         }
     }
 
+    // ── Effects (14c.3: state-machine lowering — runtime scaffolding) ──
+    //
+    // Parent design doc: docs/phase-14c3-state-machine.md
+    //
+    // This section provides the runtime surface that the state-machine lowering
+    // pass (step 2+) will target. The emitter is NOT yet wired to emit
+    // IrijContinuation subclasses — step 1 just lands the runtime so it can
+    // be exercised with hand-written continuations in tests.
+
+    /**
+     * Base class for state-machine-lowered effect-bearing bodies and clauses.
+     *
+     * <p>Subclasses implement {@link #resume(Object)} with a {@code switch}
+     * over {@code state}:
+     * <ul>
+     *   <li>Pure sections execute inline.</li>
+     *   <li>At an op call-site: store next-state into {@code state}, throw
+     *       {@link PerformSignal#of} with the continuation ({@code this}).</li>
+     *   <li>On re-entry: read {@code value} (the resume value), continue.</li>
+     *   <li>On completion: return the final body value.</li>
+     * </ul>
+     *
+     * <p>Per-{@code with} freshly allocated (see design doc § 14 — pooling
+     * deferred as tech debt).
+     */
+    public abstract static class IrijContinuation {
+        /** Current state-machine label; written before throwing a signal. */
+        protected int state;
+
+        protected IrijContinuation() {}
+
+        /**
+         * Enter or re-enter the state machine. Argument is the value fed in
+         * by the handler's {@code resume} call (or {@code null} on first entry).
+         *
+         * <p>Either returns the body's final value, or throws
+         * {@link PerformSignal} to yield to the enclosing handler.
+         */
+        public abstract Object resume(Object value);
+    }
+
+    /**
+     * Pooled, stack-trace-free signal used by state-machine bodies to yield
+     * to the nearest enclosing {@link #runWithSM} frame.
+     *
+     * <p>Allocated via {@link #of}, which reuses a thread-local instance — the
+     * hot path does not allocate. Safe because a signal is either consumed by
+     * the dispatcher before the next op call, or re-raised past the dispatcher
+     * (in which case the outer dispatcher also consumes it synchronously).
+     *
+     * <p>Overriding {@link Throwable#fillInStackTrace()} to a no-op is the
+     * standard trick for control-flow-only exceptions.
+     */
+    public static final class PerformSignal extends RuntimeException {
+        public String effectName;
+        public String opName;
+        public Object[] args;
+        public IrijContinuation continuation;
+
+        private PerformSignal() { super(null, null, false, false); }
+
+        private static final ThreadLocal<PerformSignal> POOL =
+                ThreadLocal.withInitial(PerformSignal::new);
+
+        public static PerformSignal of(String effectName, String opName,
+                                        Object[] args, IrijContinuation k) {
+            PerformSignal s = POOL.get();
+            s.effectName = effectName;
+            s.opName = opName;
+            s.args = args;
+            s.continuation = k;
+            return s;
+        }
+
+        @Override public synchronized Throwable fillInStackTrace() { return this; }
+    }
+
+    /**
+     * State-machine runtime for {@code with handler body} — parallel to
+     * {@link #runWith}. Not yet selected by the emitter; invoked directly
+     * by tests (step 1) and by emitted code in later steps.
+     *
+     * <p>Enters the body by calling {@code k.resume(null)}. Each
+     * {@link PerformSignal} caught here dispatches to the matching clause;
+     * the clause's {@code resume v} call re-enters {@code k.resume(v)} via
+     * a synthesised one-shot {@link IrijFn}. Abort (clause never resumed)
+     * returns the clause's value directly.
+     *
+     * <p><b>Current limitation:</b> re-entry after a clause's {@code resume}
+     * is recursive (one JVM frame per {@code perform}); for deep loops this
+     * grows the stack. Trampoline optimisation recorded as tech debt in the
+     * design doc (§ 14). Correctness is unaffected.
+     */
+    public static Object runWithSM(Object handlerObj, IrijContinuation k) {
+        if (handlerObj instanceof CompiledComposedHandler cc) {
+            return runWithSMComposed(cc.handlers, 0, k);
+        }
+        if (!(handlerObj instanceof CompiledHandler h)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "with requires a handler, got " + typeTag(handlerObj));
+        }
+        try {
+            return k.resume(null);
+        } catch (PerformSignal s) {
+            return dispatchSM(h, s);
+        }
+    }
+
+    /** Composed handler path — nested runWithSM frames, outermost first. */
+    private static Object runWithSMComposed(
+            java.util.List<CompiledHandler> handlers, int idx, IrijContinuation k) {
+        if (idx >= handlers.size()) return k.resume(null);
+        IrijContinuation nested = new IrijContinuation() {
+            @Override public Object resume(Object value) {
+                return runWithSMComposed(handlers, idx + 1, k);
+            }
+        };
+        return runWithSM(handlers.get(idx), nested);
+    }
+
+    /** Dispatch a single signal to the right clause; recurse if the clause resumes. */
+    private static Object dispatchSM(CompiledHandler h, PerformSignal s) {
+        if (!h.effectName.equals(s.effectName)) {
+            // Outer handler's responsibility; re-raise (fields intact).
+            throw s;
+        }
+        IrijFn clause = h.clauses.get(s.opName);
+        if (clause == null) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "Handler " + h.name + " has no clause for " + s.opName);
+        }
+        final IrijContinuation k = s.continuation;
+        final var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
+
+        IrijFn resumeFn = (resumeArgs) -> {
+            if (!resumed.compareAndSet(false, true)) {
+                throw new dev.irij.interpreter.IrijRuntimeError(
+                        "resume called twice (one-shot continuation)");
+            }
+            Object v = resumeArgs.length > 0
+                    ? resumeArgs[0]
+                    : dev.irij.interpreter.Values.UNIT;
+            // Re-enter the body state machine. May return (body done) or
+            // throw another PerformSignal (next op) which this same handler
+            // (or an outer one) must catch.
+            try {
+                return k.resume(v);
+            } catch (PerformSignal next) {
+                return dispatchSM(h, next);
+            }
+        };
+
+        Object[] clauseArgs = new Object[s.args.length + 1];
+        System.arraycopy(s.args, 0, clauseArgs, 0, s.args.length);
+        clauseArgs[s.args.length] = resumeFn;
+        return clause.apply(clauseArgs);
+    }
+
     // ── Concurrency ─────────────────────────────────────────────────────
 
     public static final class Fiber {
