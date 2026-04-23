@@ -111,8 +111,8 @@ Key invariants:
 ### AST → EffIR rules (sketch)
 
 - Pure expression: emitted into the current block as `Pure`/`Assign`/`Call`.
-- `perform op args`: flush operand stack into locals, emit `Perform(op, args,
-  nextBlock)`, switch to `nextBlock`.
+- Op call `op args` (call-site of a declared effect op): flush operand stack
+  into locals, emit `Perform(op, args, nextBlock)`, switch to `nextBlock`.
 - `if cond t e` where `t`/`e` contain `Perform`: split into `Branch` with two
   sub-regions; their join block takes the result via `Jump(join, [resultLocal])`.
 - `with H body`: body is an `IrijContinuation` subclass compiled from its own
@@ -160,8 +160,8 @@ carrying `effectName, opName, args, continuation`. Pooled (thread-local
 reusable instance) so the hot path doesn't allocate — matches what Loom does
 internally.
 
-**Why throw instead of return?** Because `Perform` can happen inside arbitrarily
-deep pure calls (`fn helper (x -> perform log x)`). Returning would require
+**Why throw instead of return?** Because an op call can happen inside arbitrarily
+deep pure calls (`fn helper (x -> log x)` where `log` is an op). Returning would require
 rewriting every caller up to the `with`. Throwing escapes them all in one hop.
 Handlers catch at the `runWith` frame.
 
@@ -216,16 +216,19 @@ signal is fully consumed (or rethrown) before the next `perform`.
 Example:
 
 ```
-effect Log; op log :: String Unit
-effect DB;  op save :: Data Unit
+effect Log
+  log :: Str -> ()
 
-handler logged-db
+effect DB
+  save :: Data -> ()
+
+handler logged-db :: DB
   save d =>
-    log ("saving " ++ (to-str d))   ;; <-- performs Log
+    log ("saving " ++ (to-str d))   ;; <-- calls Log op from clause body
     resume (db-write d)
 ```
 
-`logged-db`'s `save` clause body performs `log`. That `log` is handled by an
+`logged-db`'s `save` clause body calls `log`. That `log` is handled by an
 outer handler (lexically outside the `with logged-db …`). So the clause body
 is itself an effectful computation — must become its own state-machine class.
 
@@ -357,25 +360,69 @@ Each step committable, green-tests on the way.
 
 ---
 
-## 12. Open questions (to resolve during implementation)
+## 12. Resolved design calls
 
-1. Can we share the `IrijContinuation` class per-call-site (pool instances)
-   or must each `with` invocation alloc a fresh one? Fresh-per-invocation is
-   simplest; pooling is a later optimisation.
-2. Multi-shot `resume` (currently out of scope, was deferred in 14c.2) — does
-   the SM design accidentally admit it? Yes, in principle, by cloning the
-   continuation's field snapshot. Still out of scope for 14c.3 unless cheap.
-3. Debuggability: JVM stack traces through a state machine are opaque. Can we
-   synthesise a LocalVariableTable + LineNumberTable from EffIR so debuggers
-   see source positions?
+1. **Continuation allocation**: fresh `IrijContinuation` instance per `with`
+   invocation. Simple, thread-safe, GC handles it. Instance pooling deferred
+   (see § 14 tech debt).
+2. **Multi-shot `resume`**: out of scope for 14c.3. SM design does not
+   preclude it — a cloned continuation (deep-copy of locals + state) would
+   admit `resume` called N times. Hooks left in `IrijContinuation` for a
+   future `clone()`; no code path materialised now (see § 14 tech debt).
+3. **Debuggability — REQUIRED.** Stack traces and step-debugging through the
+   state machine must land on the correct source lines. Implementation:
+   - `EffIR` nodes carry the originating AST node's source position.
+   - Emitter writes a `LineNumberTable` attribute per state-machine class:
+     for each `switch` case, map to the source line of the block's first
+     statement; for each `Perform`, map to the op-call source line.
+   - Emit `LocalVariableTable` entries for lifted locals, scoped to the
+     states in which they're live, with their original AST names.
+   - Synthesised methods named `resume$<origFn>$<with-index>` so JVM traces
+     are readable.
+   - Golden test: a deliberately-throwing program under SM mode produces
+     a stack trace whose top user frame points at the source line of the
+     throwing expression (byte-for-byte parity with interpreter where
+     possible, or a documented structural match).
 
 ---
 
-## 13. Non-goals
+## 13. Non-goals (14c.3)
 
 - Loom replacement on the concurrency side. `spawn`/`par`/`race`/`scope` keep
   using virtual threads — 14c.3 only kills the vthread for `with` bodies.
-- Multi-shot `resume` (unless free).
+- Multi-shot `resume` (deferred — see § 14).
 - Whole-program escape analysis to avoid the `PerformSignal` throw entirely.
   The JIT is very good at patterns like "throw immediately caught in parent
   frame"; we measure first.
+
+---
+
+## 14. Tech debt / future optimisations
+
+Recorded now so 14c.3 lands with a clean foundation and known next steps.
+
+1. **`IrijContinuation` instance pooling.** Today: fresh alloc per `with`.
+   Future: per-call-site `ThreadLocal` free-list (similar to `PerformSignal`
+   pool). Hot paths that create many short-lived `with` frames would win.
+   Prereq: prove it on a benchmark before adding complexity.
+2. **Multi-shot `resume`.** Requires `IrijContinuation.clone()` that
+   deep-copies `state` + all lifted locals. Design keeps this possible:
+   no cross-instance coupling, all per-invocation state lives in fields.
+   Expose `resume` as a first-class value that, when invoked twice, clones
+   the snapshot. Will unlock backtracking handlers (nondet search,
+   probability, parsers-as-effects).
+3. **Hoist `PerformSignal` throw under JIT-friendly shape.** If profiling
+   shows the throw/catch still dominates, emit a bespoke "suspend-return"
+   marker object that the caller frame explicitly checks, for inner loops
+   where the throw isn't being elided. Trade-off: caller-frame pollution.
+4. **Escape analysis / specialisation.** For `with` bodies whose static
+   analysis proves a bounded number of `perform` calls, inline the
+   state-machine into the caller (skip class allocation).
+5. **Shared pure-code paths.** Two bodies with identical pure sections
+   shouldn't emit duplicate bytecode — dedupe via IR hashing.
+6. **Debugger integration beyond line-tables.** Full JDWP support for
+   stepping through state transitions (ask the JVM to report "now in state N
+   of continuation X"). Needs agent-level work; deep work.
+7. **Reify the handler stack for introspection.** Today: JVM stack only.
+   Tool-friendly alternative: a thin per-fiber `HandlerFrame[]` that
+   matches. Useful for debugging + for crash-report context.
