@@ -638,7 +638,9 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
   - [x] `BuildCommand` modes: `interp` (pre-14 bundled interpreter, default),
         `bytecode-threaded` (14c.2), `bytecode-sm` (14c.3, stub → rejects until implemented)
   - [x] `--mode=<x>` / `--mode <x>` with synonyms (`threaded`/`bc-threaded`, `sm`/`state-machine`)
-  - [ ] `irij bench` subcommand comparing modes + other langs
+  - [x] `bench/run.sh` — wall-clock matrix harness
+        (modes × {clojure, python3}); benches `fib`, `tak`
+  - [ ] `irij bench` subcommand wrapping the harness (optional)
   - [ ] Flip default to `bytecode-sm` once 14c.3 lands
 
 - [x] **14d — Concurrency, modules, Java interop**
