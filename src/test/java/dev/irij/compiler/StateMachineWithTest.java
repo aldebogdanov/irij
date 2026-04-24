@@ -412,6 +412,55 @@ class StateMachineWithTest {
         assertEquals(nl("recovered: kaboom!"), runSM(src));
     }
 
+    // ── Step 5: handler state + dot-access ───────────────────────────
+
+    @Test void handler_state_accumulates_across_ops() throws Exception {
+        String src = """
+            effect Counter
+              bump :: () -> ()
+              get-count :: () -> Int
+            handler accumulator :: Counter
+              state :! 0
+              bump () =>
+                state <- state + 1
+                resume ()
+              get-count () => resume state
+            fn run
+              _ =>
+                with accumulator
+                  bump ()
+                  bump ()
+                  bump ()
+                accumulator.state
+            println (to-str (run ()))
+            """;
+        assertEquals(nl("3"), runSM(src));
+    }
+
+    @Test void handler_state_read_via_op_and_dot_access() throws Exception {
+        String src = """
+            effect Counter
+              bump :: () -> ()
+              get-count :: () -> Int
+            handler accumulator :: Counter
+              state :! 0
+              bump () =>
+                state <- state + 1
+                resume ()
+              get-count () => resume state
+            fn run
+              _ =>
+                with accumulator
+                  bump ()
+                  bump ()
+                  c := get-count ()
+                  println ("via op: " ++ to-str c)
+                println ("via dot: " ++ to-str accumulator.state)
+            run ()
+            """;
+        assertEquals(nl("via op: 2", "via dot: 2"), runSM(src));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail
