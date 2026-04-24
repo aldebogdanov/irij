@@ -923,9 +923,12 @@ final class ClassEmitter implements Opcodes {
         // fits what we support so far. Otherwise fall back to 14c.2 (threaded).
         if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE
                 && (w.onFailure() == null || w.onFailure().isEmpty())) {
-            WithBodyShape shape = classifyWithBody(w.body());
+            // Step 3c: A-normalize first so nested op calls become top-level
+            // Simple-Binds before classification.
+            List<Stmt> body = new ANormalizer().normalize(w.body());
+            WithBodyShape shape = classifyWithBody(body);
             if (!(shape instanceof WithBodyShape.Unsupported)) {
-                emitWithSM(w, shape, mv, outer);
+                emitWithSM(w, body, shape, mv, outer);
                 return;
             }
         }
@@ -1146,6 +1149,134 @@ final class ClassEmitter implements Opcodes {
         }
     }
 
+    // ── A-normalization pre-pass (step 3c) ──────────────────────────────
+    //
+    // Lifts any op call appearing in a non-top-level position into a
+    // preceding Simple-Bind with a fresh name. After this pass every op
+    // call in the body appears either as an ExprStmt (`op args`) or as a
+    // Simple-Bind RHS (`x := op args`) — the two shapes classifyWithBody
+    // already recognises. Preserves Irij's strict left-to-right evaluation
+    // order by lifting sub-expressions in the order they're encountered.
+
+    private final class ANormalizer {
+        int counter = 0;
+        String fresh() { return "$anf$" + (counter++); }
+
+        List<Stmt> normalize(List<Stmt> stmts) {
+            List<Stmt> out = new ArrayList<>();
+            for (Stmt s : stmts) normalizeStmt(s, out);
+            return out;
+        }
+
+        void normalizeStmt(Stmt s, List<Stmt> out) {
+            switch (s) {
+                case Stmt.ExprStmt es -> {
+                    if (isDirectOpCall(es.expr())) {
+                        out.add(new Stmt.ExprStmt(
+                                normalizeOpArgs((Expr.App) es.expr(), out), es.loc()));
+                    } else {
+                        out.add(new Stmt.ExprStmt(normalizeExpr(es.expr(), out), es.loc()));
+                    }
+                }
+                case Stmt.Bind b -> {
+                    if (b.target() instanceof Stmt.BindTarget.Simple
+                            && isDirectOpCall(b.value())) {
+                        Expr rhs = normalizeOpArgs((Expr.App) b.value(), out);
+                        out.add(new Stmt.Bind(b.target(), rhs, b.specAnnotation(), b.loc()));
+                    } else {
+                        out.add(new Stmt.Bind(b.target(),
+                                normalizeExpr(b.value(), out),
+                                b.specAnnotation(), b.loc()));
+                    }
+                }
+                case Stmt.MutBind b -> out.add(new Stmt.MutBind(b.target(),
+                        normalizeExpr(b.value(), out), b.loc()));
+                case Stmt.Assign a -> out.add(new Stmt.Assign(a.target(),
+                        normalizeExpr(a.value(), out), a.loc()));
+                case Stmt.IfStmt ifs -> {
+                    Expr cond = normalizeExpr(ifs.cond(), out);
+                    List<Stmt> thenN = normalize(ifs.thenBranch());
+                    List<Stmt> elseN = ifs.elseBranch() != null
+                            ? normalize(ifs.elseBranch()) : null;
+                    out.add(new Stmt.IfStmt(cond, thenN, elseN, ifs.loc()));
+                }
+                case Stmt.MatchStmt ms -> {
+                    Expr scrut = normalizeExpr(ms.scrutinee(), out);
+                    // Arms kept as-is: guards/bodies with ops are rejected later.
+                    out.add(new Stmt.MatchStmt(scrut, ms.arms(), ms.loc()));
+                }
+                default -> out.add(s);
+            }
+        }
+
+        /** Normalize only the args of a direct op call (the call itself stays
+         *  top-level); any op sub-expr in an arg gets lifted to a fresh bind. */
+        Expr normalizeOpArgs(Expr.App app, List<Stmt> out) {
+            List<Expr> args = new ArrayList<>();
+            for (Expr a : app.args()) args.add(normalizeExpr(a, out));
+            return new Expr.App(app.fn(), args, app.loc());
+        }
+
+        /** Normalize an expression in a non-top-level position. Any op call
+         *  encountered is lifted to a fresh Simple-Bind in {@code out}. */
+        Expr normalizeExpr(Expr e, List<Stmt> out) {
+            if (e == null) return null;
+            if (!containsOpCallExpr(e)) return e;
+            return switch (e) {
+                case Expr.App app -> {
+                    boolean isOp = app.fn() instanceof Expr.Var v
+                            && effectOps.containsKey(v.name());
+                    Expr fn = isOp ? app.fn() : normalizeExpr(app.fn(), out);
+                    List<Expr> args = new ArrayList<>();
+                    for (Expr a : app.args()) args.add(normalizeExpr(a, out));
+                    Expr call = new Expr.App(fn, args, app.loc());
+                    if (isOp) {
+                        String name = fresh();
+                        out.add(new Stmt.Bind(new Stmt.BindTarget.Simple(name),
+                                call, app.loc()));
+                        yield new Expr.Var(name, app.loc());
+                    }
+                    yield call;
+                }
+                case Expr.BinaryOp bop -> new Expr.BinaryOp(bop.op(),
+                        normalizeExpr(bop.left(), out),
+                        normalizeExpr(bop.right(), out), bop.loc());
+                case Expr.UnaryOp u -> new Expr.UnaryOp(u.op(),
+                        normalizeExpr(u.operand(), out), u.loc());
+                case Expr.DotAccess da -> new Expr.DotAccess(
+                        normalizeExpr(da.target(), out), da.field(), da.loc());
+                case Expr.Pipe p -> new Expr.Pipe(
+                        normalizeExpr(p.left(), out),
+                        normalizeExpr(p.right(), out), p.forward(), p.loc());
+                case Expr.VectorLit vl -> {
+                    List<Expr> xs = new ArrayList<>();
+                    for (Expr x : vl.elements()) xs.add(normalizeExpr(x, out));
+                    yield new Expr.VectorLit(xs, vl.loc());
+                }
+                case Expr.TupleLit tl -> {
+                    List<Expr> xs = new ArrayList<>();
+                    for (Expr x : tl.elements()) xs.add(normalizeExpr(x, out));
+                    yield new Expr.TupleLit(xs, tl.loc());
+                }
+                case Expr.SetLit sl -> {
+                    List<Expr> xs = new ArrayList<>();
+                    for (Expr x : sl.elements()) xs.add(normalizeExpr(x, out));
+                    yield new Expr.SetLit(xs, sl.loc());
+                }
+                // IfExpr / MatchExpr / Lambda / Block: can't easily A-normalize
+                // inline — leave untouched; EffIRBuilder will reject if ops
+                // remain in non-top-level positions.
+                default -> e;
+            };
+        }
+
+        boolean isDirectOpCall(Expr e) {
+            return e instanceof Expr.App app
+                    && app.fn() instanceof Expr.Var v
+                    && effectOps.containsKey(v.name());
+        }
+    }
+
     private boolean stmtContainsOpRecursive(Stmt s) {
         if (extractTopLevelOp(s) != null) return true;
         return switch (s) {
@@ -1317,7 +1448,8 @@ final class ClassEmitter implements Opcodes {
      * Lower a `with` via state-machine: emit a step IrijFn via invokedynamic,
      * allocate a continuation, call RuntimeSupport.runWithSM.
      */
-    private void emitWithSM(Stmt.With w, WithBodyShape shape, MethodVisitor mv, Locals outer) {
+    private void emitWithSM(Stmt.With w, List<Stmt> body, WithBodyShape shape,
+                             MethodVisitor mv, Locals outer) {
         int resultSlot = outer.allocateAnon();
 
         // Push handler value.
@@ -1327,10 +1459,10 @@ final class ClassEmitter implements Opcodes {
         // become step captures, same mechanism as emitLambda.
         Set<String> bound = new HashSet<>();
         List<String> captures = new ArrayList<>();
-        for (Stmt s : w.body()) collectFreeVarsStmt(s, bound, outer, captures, new HashSet<>());
+        for (Stmt s : body) collectFreeVarsStmt(s, bound, outer, captures, new HashSet<>());
 
         // Emit step method + return IrijFn on stack.
-        emitSMStep(shape, w.body(), captures, mv, outer);
+        emitSMStep(shape, body, captures, mv, outer);
 
         // Push nFields: number of lifted locals (0 for Pure/SingleOp).
         int nFields = switch (shape) {

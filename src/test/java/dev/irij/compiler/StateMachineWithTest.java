@@ -283,6 +283,74 @@ class StateMachineWithTest {
         assertEquals(nl("got: y", "done"), runSM(src));
     }
 
+    // ── Step 3c: A-normalization of nested op calls ─────────────────
+
+    @Test void op_nested_in_binary_op() throws Exception {
+        String src = """
+            effect Ask
+              ask :: () -> Str
+            handler ans :: Ask
+              ask => resume "world"
+            with ans
+              println ("hello, " ++ ask ())
+            """;
+        assertEquals(nl("hello, world"), runSM(src));
+    }
+
+    @Test void op_nested_in_function_arg() throws Exception {
+        String src = """
+            effect Ask
+              ask :: () -> Int
+            handler ans :: Ask
+              ask => resume 41
+            with ans
+              println (ask () + 1)
+            """;
+        assertEquals(nl("42"), runSM(src));
+    }
+
+    @Test void two_nested_ops_in_one_expression() throws Exception {
+        String src = """
+            effect Chat
+              hello :: () -> Str
+              world :: () -> Str
+            handler chat :: Chat
+              hello => resume "hi"
+              world => resume "earth"
+            with chat
+              println (hello () ++ " " ++ world ())
+            """;
+        assertEquals(nl("hi earth"), runSM(src));
+    }
+
+    @Test void op_result_used_in_if_cond() throws Exception {
+        String src = """
+            effect Ask
+              pick :: () -> Int
+            handler ans :: Ask
+              pick => resume 1
+            with ans
+              if pick () == 1
+                println "one"
+              else
+                println "other"
+            """;
+        assertEquals(nl("one"), runSM(src));
+    }
+
+    @Test void op_nested_in_bind_rhs() throws Exception {
+        String src = """
+            effect Ask
+              ask :: () -> Int
+            handler ans :: Ask
+              ask => resume 10
+            with ans
+              x := ask () + ask ()
+              println x
+            """;
+        assertEquals(nl("20"), runSM(src));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail
