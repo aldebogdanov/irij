@@ -102,6 +102,81 @@ class StateMachineWithTest {
         assertEquals(nl("42"), runSM(src));
     }
 
+    // ── Step 3a: multi-op sequences + local lifting ──────────────────
+
+    @Test void two_ops_in_sequence() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              log "a"
+              log "b"
+            println "done"
+            """;
+        assertEquals(nl("got: a", "got: b", "done"), runSM(src));
+    }
+
+    @Test void three_ops_interleaved_with_prints() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              println "start"
+              log "a"
+              println "mid1"
+              log "b"
+              println "mid2"
+              log "c"
+              println "end"
+            """;
+        assertEquals(nl("start", "got: a", "mid1", "got: b", "mid2", "got: c", "end"),
+                runSM(src));
+    }
+
+    @Test void pre_op_local_used_after_perform() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              greeting := "hello"
+              log "middle"
+              println greeting
+            """;
+        assertEquals(nl("got: middle", "hello"), runSM(src));
+    }
+
+    @Test void resume_value_used_in_later_op() throws Exception {
+        // Single-handler case with two ops from same effect; first op's
+        // resume-bind is consumed after the second perform returns.
+        String src = """
+            effect Chat
+              hello :: () -> Str
+              say   :: Str -> ()
+            handler chat :: Chat
+              hello => resume "world"
+              say msg =>
+                println ("say: " ++ msg)
+                resume ()
+            with chat
+              who := hello ()
+              say "before-who"
+              println who
+            """;
+        assertEquals(nl("say: before-who", "world"), runSM(src));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail

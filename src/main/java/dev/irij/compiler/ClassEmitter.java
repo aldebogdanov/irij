@@ -53,6 +53,9 @@ final class ClassEmitter implements Opcodes {
     private final Map<String, Map<String, String>> handlerStateFields = new HashMap<>();
     // state field name -> JVM descriptor (always OBJ_DESC here)
     private Map<String, String> currentStateFields = Map.of();
+    // 14c.3 SM lowering: name -> continuation fields[] index; kSlot holds cont.
+    private Map<String, Integer> currentLiftedLocals = Map.of();
+    private int currentKSlot = -1;
     private ClassWriter classWriter;
     private int lambdaCounter = 0;
 
@@ -312,6 +315,15 @@ final class ClassEmitter implements Opcodes {
             throw new IrijCompiler.CompileException(
                     "MVP: assignment must target a simple name");
         }
+        Integer liftedIdx = currentLiftedLocals.get(s.name());
+        if (liftedIdx != null && currentKSlot >= 0) {
+            mv.visitVarInsn(ALOAD, currentKSlot);
+            mv.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+            pushIconst(mv, liftedIdx);
+            emitExpr(a.value(), mv, locals);
+            mv.visitInsn(AASTORE);
+            return;
+        }
         emitExpr(a.value(), mv, locals);
         Integer slot = locals.lookup(s.name());
         if (slot != null) {
@@ -330,6 +342,15 @@ final class ClassEmitter implements Opcodes {
     private void emitBind(Stmt.Bind b, MethodVisitor mv, Locals locals) {
         switch (b.target()) {
             case Stmt.BindTarget.Simple simple -> {
+                Integer liftedIdx = currentLiftedLocals.get(simple.name());
+                if (liftedIdx != null && currentKSlot >= 0) {
+                    mv.visitVarInsn(ALOAD, currentKSlot);
+                    mv.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+                    pushIconst(mv, liftedIdx);
+                    emitExpr(b.value(), mv, locals);
+                    mv.visitInsn(AASTORE);
+                    return;
+                }
                 emitExpr(b.value(), mv, locals);
                 int slot = locals.allocate(simple.name());
                 mv.visitVarInsn(ASTORE, slot);
@@ -440,6 +461,14 @@ final class ClassEmitter implements Opcodes {
         Integer slot = locals.lookup(name);
         if (slot != null) {
             mv.visitVarInsn(ALOAD, slot);
+            return;
+        }
+        Integer liftedIdx = currentLiftedLocals.get(name);
+        if (liftedIdx != null && currentKSlot >= 0) {
+            mv.visitVarInsn(ALOAD, currentKSlot);
+            mv.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+            pushIconst(mv, liftedIdx);
+            mv.visitInsn(AALOAD);
             return;
         }
         String stateField = currentStateFields.get(name);
@@ -976,7 +1005,17 @@ final class ClassEmitter implements Opcodes {
     private static final String CONT_DESC = "Ldev/irij/compiler/RuntimeSupport$IrijContinuation;";
     private static final String PERF_SIGNAL = "dev/irij/compiler/RuntimeSupport$PerformSignal";
 
+    /** One chunk of a SM body: pure stmts then (optional) terminating op call.
+     *  opName is null iff this is the final segment (no trailing op). */
+    private record Segment(
+            List<Stmt> pureStmts,
+            String opName,
+            List<Expr> opArgs,
+            String bindName) {}
+
     private sealed interface WithBodyShape {
+        record Sequence(List<Segment> segments, List<String> liftedLocals)
+                implements WithBodyShape {}
         record Pure() implements WithBodyShape {}
         /** Op appears at body[idx] either as an ExprStmt or `bindName := op args`. */
         record SingleOp(int idx, String opName, List<Expr> opArgs, String bindName)
@@ -985,33 +1024,69 @@ final class ClassEmitter implements Opcodes {
     }
 
     private WithBodyShape classifyWithBody(List<Stmt> body) {
-        int opIdx = -1;
-        String opName = null;
-        List<Expr> opArgs = null;
-        String bindName = null;
-
+        // Partition into segments at each top-level op call.
+        List<Segment> segments = new ArrayList<>();
+        List<Stmt> cur = new ArrayList<>();
+        int opCount = 0;
+        int firstOpIdx = -1;
         for (int i = 0; i < body.size(); i++) {
             Stmt s = body.get(i);
             TopLevelOp tl = extractTopLevelOp(s);
             if (tl != null) {
-                if (opIdx >= 0) return new WithBodyShape.Unsupported();
-                opIdx = i;
-                opName = tl.opName;
-                opArgs = tl.args;
-                bindName = tl.bindName;
+                if (opCount == 0) firstOpIdx = i;
+                segments.add(new Segment(new ArrayList<>(cur), tl.opName, tl.args, tl.bindName));
+                cur.clear();
+                opCount++;
             } else {
-                // Any nested op inside a non-top-level position is unsupported.
                 if (containsOpCall(s)) return new WithBodyShape.Unsupported();
+                cur.add(s);
             }
         }
-        if (opIdx < 0) return new WithBodyShape.Pure();
-        // Pre-op stmts with bindings would need local-lifting (step 3).
-        for (int j = 0; j < opIdx; j++) {
-            if (body.get(j) instanceof Stmt.Bind || body.get(j) instanceof Stmt.MutBind) {
-                return new WithBodyShape.Unsupported();
+        segments.add(new Segment(cur, null, null, null));
+
+        if (opCount == 0) return new WithBodyShape.Pure();
+
+        // Fast path: single op, no pre-op binds → SingleOp (no lifting needed).
+        if (opCount == 1) {
+            boolean anyPreBind = false;
+            for (Stmt s : segments.get(0).pureStmts()) {
+                if (s instanceof Stmt.Bind || s instanceof Stmt.MutBind) {
+                    anyPreBind = true;
+                    break;
+                }
+            }
+            if (!anyPreBind) {
+                Segment s0 = segments.get(0);
+                return new WithBodyShape.SingleOp(
+                        firstOpIdx, s0.opName(), s0.opArgs(), s0.bindName());
             }
         }
-        return new WithBodyShape.SingleOp(opIdx, opName, opArgs, bindName);
+
+        // Sequence path: collect lifted-local names.
+        //   - Every Simple-Bind in any non-final segment
+        //   - Every resume-bind (Segment.bindName) of non-final segments
+        //   - Destructure/MutBind in non-final segments → Unsupported (3a scope)
+        List<String> lifted = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (int i = 0; i < segments.size(); i++) {
+            Segment seg = segments.get(i);
+            boolean nonFinal = (i < segments.size() - 1);
+            for (Stmt st : seg.pureStmts()) {
+                if (st instanceof Stmt.Bind b) {
+                    if (b.target() instanceof Stmt.BindTarget.Simple sm) {
+                        if (seen.add(sm.name())) lifted.add(sm.name());
+                    } else if (nonFinal) {
+                        return new WithBodyShape.Unsupported();
+                    }
+                } else if (st instanceof Stmt.MutBind && nonFinal) {
+                    return new WithBodyShape.Unsupported();
+                }
+            }
+            if (nonFinal && seg.bindName() != null && seen.add(seg.bindName())) {
+                lifted.add(seg.bindName());
+            }
+        }
+        return new WithBodyShape.Sequence(segments, lifted);
     }
 
     private record TopLevelOp(String opName, List<Expr> args, String bindName) {}
@@ -1097,8 +1172,10 @@ final class ClassEmitter implements Opcodes {
         // Emit step method + return IrijFn on stack.
         emitSMStep(shape, w.body(), captures, mv, outer);
 
-        // Push nFields (0 for step 2 scope — nothing to lift across suspension).
-        pushIconst(mv, 0);
+        // Push nFields: number of lifted locals (0 for Pure/SingleOp).
+        int nFields = (shape instanceof WithBodyShape.Sequence seq)
+                ? seq.liftedLocals().size() : 0;
+        pushIconst(mv, nFields);
 
         // RuntimeSupport.runWithSM(Object, IrijFn, int) -> Object
         mv.visitMethodInsn(INVOKESTATIC, RT, "runWithSM",
@@ -1147,6 +1224,7 @@ final class ClassEmitter implements Opcodes {
         switch (shape) {
             case WithBodyShape.Pure p -> emitSMStateBody(body, sm, inner);
             case WithBodyShape.SingleOp so -> emitSMSingleOp(so, body, sm, inner, kSlot, vSlot);
+            case WithBodyShape.Sequence seq -> emitSMSequence(seq, sm, inner, kSlot, vSlot);
             case WithBodyShape.Unsupported ignored ->
                     throw new IrijCompiler.CompileException("internal: Unsupported in emitSMStep");
         }
@@ -1236,6 +1314,92 @@ final class ClassEmitter implements Opcodes {
         sm.visitInsn(ATHROW);
 
         sm.visitLabel(end);
+    }
+
+    /** Multi-op body with local lifting: N-state switch, all Binds/resume-binds
+     *  routed through k.fields[]. */
+    private void emitSMSequence(WithBodyShape.Sequence seq, MethodVisitor sm,
+                                 Locals inner, int kSlot, int vSlot) {
+        Map<String, Integer> lifted = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < seq.liftedLocals().size(); i++) {
+            lifted.put(seq.liftedLocals().get(i), i);
+        }
+        Map<String, Integer> savedLifted = currentLiftedLocals;
+        int savedKSlot = currentKSlot;
+        currentLiftedLocals = lifted;
+        currentKSlot = kSlot;
+        try {
+            int nStates = seq.segments().size();
+            Label[] stateLabels = new Label[nStates];
+            for (int i = 0; i < nStates; i++) stateLabels[i] = new Label();
+            Label errLabel = new Label();
+            Label end = new Label();
+
+            // switch (k.state)
+            sm.visitVarInsn(ALOAD, kSlot);
+            sm.visitFieldInsn(GETFIELD, CONT, "state", "I");
+            sm.visitTableSwitchInsn(0, nStates - 1, errLabel, stateLabels);
+
+            for (int i = 0; i < nStates; i++) {
+                sm.visitLabel(stateLabels[i]);
+                Segment seg = seq.segments().get(i);
+
+                // On re-entry (i>0): if previous segment's op had a resume-bind,
+                // store vSlot into k.fields[idx].
+                if (i > 0) {
+                    Segment prev = seq.segments().get(i - 1);
+                    if (prev.bindName() != null) {
+                        Integer idx = lifted.get(prev.bindName());
+                        if (idx != null) {
+                            sm.visitVarInsn(ALOAD, kSlot);
+                            sm.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+                            pushIconst(sm, idx);
+                            sm.visitVarInsn(ALOAD, vSlot);
+                            sm.visitInsn(AASTORE);
+                        }
+                    }
+                }
+
+                if (seg.opName() == null) {
+                    // Final segment: emit pure stmts with last as return value.
+                    emitBlockStmtsReturning(seg.pureStmts(), sm, inner);
+                } else {
+                    // Intermediate: pure stmts as statements, bump state, throw signal.
+                    emitBlockStmtsAsStatements(seg.pureStmts(), sm, inner);
+                    sm.visitVarInsn(ALOAD, kSlot);
+                    pushIconst(sm, i + 1);
+                    sm.visitFieldInsn(PUTFIELD, CONT, "state", "I");
+                    String effectName = effectOps.get(seg.opName());
+                    sm.visitLdcInsn(effectName);
+                    sm.visitLdcInsn(seg.opName());
+                    List<Expr> callArgs = seg.opArgs();
+                    if (callArgs.size() == 1 && callArgs.get(0) instanceof Expr.UnitLit) {
+                        callArgs = List.of();
+                    }
+                    pushObjectArray(callArgs, sm, inner);
+                    sm.visitVarInsn(ALOAD, kSlot);
+                    sm.visitMethodInsn(INVOKESTATIC, PERF_SIGNAL, "of",
+                            "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;"
+                                    + CONT_DESC + ")L" + PERF_SIGNAL + ";",
+                            false);
+                    sm.visitInsn(ATHROW);
+                }
+            }
+
+            // default: bad state
+            sm.visitLabel(errLabel);
+            sm.visitTypeInsn(NEW, "java/lang/IllegalStateException");
+            sm.visitInsn(DUP);
+            sm.visitLdcInsn("bad state");
+            sm.visitMethodInsn(INVOKESPECIAL, "java/lang/IllegalStateException",
+                    "<init>", "(Ljava/lang/String;)V", false);
+            sm.visitInsn(ATHROW);
+
+            sm.visitLabel(end);
+        } finally {
+            currentLiftedLocals = savedLifted;
+            currentKSlot = savedKSlot;
+        }
     }
 
     /** Emit stmts discarding non-last values; last stmt's value returned via ARETURN. */
