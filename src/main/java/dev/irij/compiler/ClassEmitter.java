@@ -1020,10 +1020,170 @@ final class ClassEmitter implements Opcodes {
         /** Op appears at body[idx] either as an ExprStmt or `bindName := op args`. */
         record SingleOp(int idx, String opName, List<Expr> opArgs, String bindName)
                 implements WithBodyShape {}
+        /** Full CFG: blocks with branch/jump/perform/return terminators.
+         *  Used when the body contains an IfStmt/MatchStmt whose branches
+         *  contain op calls (step 3b). */
+        record EffIR(List<BB> blocks,
+                     List<String> liftedLocals,
+                     Map<Integer, String> resumeBindOf,
+                     int lastValueBlock) implements WithBodyShape {}
         record Unsupported() implements WithBodyShape {}
     }
 
+    // ── EffIR terminators + blocks (step 3b) ────────────────────────────
+
+    private sealed interface Term {
+        /** Return a value (expr may be null → return Unit/null). */
+        record Return(Expr expr) implements Term {}
+        /** Throw PerformSignal; on resume, continue at block `next`.
+         *  If bindName != null, the resume value is stored into
+         *  k.fields[lifted[bindName]] on re-entry to `next`. */
+        record Perform(String effectName, String opName, List<Expr> args,
+                       String bindName, int next) implements Term {}
+        /** Pure branch (cond has no op). */
+        record Branch(Expr cond, int thenId, int elseId) implements Term {}
+        /** Unconditional jump inside the same step invocation. */
+        record Jump(int target) implements Term {}
+    }
+
+    private record BB(int id, List<Stmt> pure, Term term) {}
+
+    private final class EffIRBuilder {
+        final List<BB> blocks = new ArrayList<>();
+        final List<List<Stmt>> pureAcc = new ArrayList<>();
+        final Map<Integer, String> resumeBindOf = new LinkedHashMap<>();
+        final List<String> lifted = new ArrayList<>();
+        final Set<String> liftedSet = new HashSet<>();
+        boolean ok = true;
+        /** Block whose last pure stmt's value is the body result.
+         *  Set when we reach the final fallthrough block. */
+        int lastValueBlock = -1;
+
+        int newBlock() {
+            int id = blocks.size();
+            blocks.add(null);
+            pureAcc.add(new ArrayList<>());
+            return id;
+        }
+
+        void finalize(int id, Term t) {
+            blocks.set(id, new BB(id, pureAcc.get(id), t));
+        }
+
+        void liftName(String n) {
+            if (liftedSet.add(n)) lifted.add(n);
+        }
+
+        /** Lower a stmt list starting at `entry`. After the last stmt, jump
+         *  to `exitJump` (null = terminate with Return of last expr).
+         *  Returns the id of the tail block (post-last-stmt).  */
+        int lower(List<Stmt> stmts, int entry, Integer exitJump) {
+            int cur = entry;
+            for (int i = 0; i < stmts.size(); i++) {
+                Stmt s = stmts.get(i);
+                TopLevelOp tl = extractTopLevelOp(s);
+                boolean isLast = (i == stmts.size() - 1);
+                if (tl != null) {
+                    int next = newBlock();
+                    if (tl.bindName != null) {
+                        liftName(tl.bindName);
+                        resumeBindOf.put(next, tl.bindName);
+                    }
+                    String effectName = effectOps.get(tl.opName);
+                    finalize(cur, new Term.Perform(effectName, tl.opName,
+                            tl.args, tl.bindName, next));
+                    cur = next;
+                } else if (s instanceof Stmt.IfStmt ifs
+                        && stmtContainsOpRecursive(s)) {
+                    if (containsOpCallExpr(ifs.cond())) { ok = false; return cur; }
+                    int thenB = newBlock();
+                    int elseB = newBlock();
+                    int merge = newBlock();
+                    finalize(cur, new Term.Branch(ifs.cond(), thenB, elseB));
+                    lower(ifs.thenBranch(), thenB, merge);
+                    List<Stmt> el = ifs.elseBranch() != null
+                            ? ifs.elseBranch() : List.of();
+                    lower(el, elseB, merge);
+                    cur = merge;
+                } else if (stmtContainsOpRecursive(s)) {
+                    // Ops nested inside non-If stmt (match, with, block...): 3c
+                    ok = false;
+                    return cur;
+                } else {
+                    // Pure stmt: append. Lift Simple-Bind names unconditionally
+                    // (conservative — safe if never crosses perform).
+                    if (s instanceof Stmt.Bind b
+                            && b.target() instanceof Stmt.BindTarget.Simple sm) {
+                        liftName(sm.name());
+                    }
+                    pureAcc.get(cur).add(s);
+                    if (isLast && exitJump == null) {
+                        // Fallthrough last stmt: if it's an ExprStmt, its expr
+                        // becomes the return value (emitted via Return term).
+                        // Otherwise append null.
+                        // For simplicity the Return terminator carries the
+                        // ExprStmt's expr directly; strip from pureAcc.
+                        List<Stmt> acc = pureAcc.get(cur);
+                        Expr retExpr = null;
+                        if (acc.get(acc.size() - 1) instanceof Stmt.ExprStmt es) {
+                            retExpr = es.expr();
+                            acc.remove(acc.size() - 1);
+                        }
+                        finalize(cur, new Term.Return(retExpr));
+                        lastValueBlock = cur;
+                        return cur;
+                    }
+                }
+            }
+            if (exitJump != null) {
+                finalize(cur, new Term.Jump(exitJump));
+            } else {
+                // Empty stmts or all consumed without a fallthrough return.
+                finalize(cur, new Term.Return(null));
+                lastValueBlock = cur;
+            }
+            return cur;
+        }
+    }
+
+    private boolean stmtContainsOpRecursive(Stmt s) {
+        if (extractTopLevelOp(s) != null) return true;
+        return switch (s) {
+            case Stmt.IfStmt ifs -> {
+                if (containsOpCallExpr(ifs.cond())) yield true;
+                for (Stmt t : ifs.thenBranch()) if (stmtContainsOpRecursive(t)) yield true;
+                if (ifs.elseBranch() != null) {
+                    for (Stmt t : ifs.elseBranch()) if (stmtContainsOpRecursive(t)) yield true;
+                }
+                yield false;
+            }
+            case Stmt.ExprStmt es -> containsOpCallExpr(es.expr());
+            case Stmt.Bind b -> containsOpCallExpr(b.value());
+            case Stmt.MutBind b -> containsOpCallExpr(b.value());
+            case Stmt.Assign a -> containsOpCallExpr(a.value());
+            default -> true;
+        };
+    }
+
+    private boolean bodyHasBranchingOp(List<Stmt> body) {
+        for (Stmt s : body) {
+            if (s instanceof Stmt.IfStmt && stmtContainsOpRecursive(s)) return true;
+        }
+        return false;
+    }
+
     private WithBodyShape classifyWithBody(List<Stmt> body) {
+        // Step 3b: if body has top-level IfStmt whose branches perform ops,
+        // route to full EffIR lowering.
+        if (bodyHasBranchingOp(body)) {
+            EffIRBuilder b = new EffIRBuilder();
+            int entry = b.newBlock();
+            b.lower(body, entry, null);
+            if (!b.ok) return new WithBodyShape.Unsupported();
+            return new WithBodyShape.EffIR(b.blocks, b.lifted, b.resumeBindOf,
+                    b.lastValueBlock);
+        }
+
         // Partition into segments at each top-level op call.
         List<Segment> segments = new ArrayList<>();
         List<Stmt> cur = new ArrayList<>();
@@ -1173,8 +1333,11 @@ final class ClassEmitter implements Opcodes {
         emitSMStep(shape, w.body(), captures, mv, outer);
 
         // Push nFields: number of lifted locals (0 for Pure/SingleOp).
-        int nFields = (shape instanceof WithBodyShape.Sequence seq)
-                ? seq.liftedLocals().size() : 0;
+        int nFields = switch (shape) {
+            case WithBodyShape.Sequence seq -> seq.liftedLocals().size();
+            case WithBodyShape.EffIR eir -> eir.liftedLocals().size();
+            default -> 0;
+        };
         pushIconst(mv, nFields);
 
         // RuntimeSupport.runWithSM(Object, IrijFn, int) -> Object
@@ -1225,6 +1388,7 @@ final class ClassEmitter implements Opcodes {
             case WithBodyShape.Pure p -> emitSMStateBody(body, sm, inner);
             case WithBodyShape.SingleOp so -> emitSMSingleOp(so, body, sm, inner, kSlot, vSlot);
             case WithBodyShape.Sequence seq -> emitSMSequence(seq, sm, inner, kSlot, vSlot);
+            case WithBodyShape.EffIR eir -> emitSMEffIR(eir, sm, inner, kSlot, vSlot);
             case WithBodyShape.Unsupported ignored ->
                     throw new IrijCompiler.CompileException("internal: Unsupported in emitSMStep");
         }
@@ -1396,6 +1560,103 @@ final class ClassEmitter implements Opcodes {
             sm.visitInsn(ATHROW);
 
             sm.visitLabel(end);
+        } finally {
+            currentLiftedLocals = savedLifted;
+            currentKSlot = savedKSlot;
+        }
+    }
+
+    /** Emit an EffIR CFG: one tableswitch entry per block (for resumption),
+     *  plus intra-step JVM GOTOs for Jump/Branch. Each block has two labels:
+     *  {@code hdrLabels[id]} is the resumption target (does the resume-bind
+     *  store if any); {@code bodyLabels[id]} is the intra-step entry used
+     *  by Jump/Branch (skips the resume-bind store). */
+    private void emitSMEffIR(WithBodyShape.EffIR eir, MethodVisitor sm,
+                              Locals inner, int kSlot, int vSlot) {
+        Map<String, Integer> lifted = new LinkedHashMap<>();
+        for (int i = 0; i < eir.liftedLocals().size(); i++) {
+            lifted.put(eir.liftedLocals().get(i), i);
+        }
+        Map<String, Integer> savedLifted = currentLiftedLocals;
+        int savedKSlot = currentKSlot;
+        currentLiftedLocals = lifted;
+        currentKSlot = kSlot;
+        try {
+            int n = eir.blocks().size();
+            Label[] hdr = new Label[n];
+            Label[] body = new Label[n];
+            for (int i = 0; i < n; i++) { hdr[i] = new Label(); body[i] = new Label(); }
+            Label errLabel = new Label();
+
+            sm.visitVarInsn(ALOAD, kSlot);
+            sm.visitFieldInsn(GETFIELD, CONT, "state", "I");
+            sm.visitTableSwitchInsn(0, n - 1, errLabel, hdr);
+
+            for (int i = 0; i < n; i++) {
+                BB b = eir.blocks().get(i);
+                sm.visitLabel(hdr[i]);
+                // Resume-bind: store vSlot into k.fields[idx]
+                String rb = eir.resumeBindOf().get(i);
+                if (rb != null) {
+                    Integer idx = lifted.get(rb);
+                    if (idx != null) {
+                        sm.visitVarInsn(ALOAD, kSlot);
+                        sm.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+                        pushIconst(sm, idx);
+                        sm.visitVarInsn(ALOAD, vSlot);
+                        sm.visitInsn(AASTORE);
+                    }
+                }
+                sm.visitLabel(body[i]);
+                // Emit pure statements.
+                for (Stmt s : b.pure()) emitStmt(s, sm, inner);
+                // Terminator.
+                switch (b.term()) {
+                    case Term.Return r -> {
+                        if (r.expr() == null) {
+                            sm.visitInsn(ACONST_NULL);
+                        } else {
+                            emitExpr(r.expr(), sm, inner);
+                        }
+                        sm.visitInsn(ARETURN);
+                    }
+                    case Term.Perform p -> {
+                        sm.visitVarInsn(ALOAD, kSlot);
+                        pushIconst(sm, p.next());
+                        sm.visitFieldInsn(PUTFIELD, CONT, "state", "I");
+                        sm.visitLdcInsn(p.effectName());
+                        sm.visitLdcInsn(p.opName());
+                        List<Expr> callArgs = p.args();
+                        if (callArgs.size() == 1
+                                && callArgs.get(0) instanceof Expr.UnitLit) {
+                            callArgs = List.of();
+                        }
+                        pushObjectArray(callArgs, sm, inner);
+                        sm.visitVarInsn(ALOAD, kSlot);
+                        sm.visitMethodInsn(INVOKESTATIC, PERF_SIGNAL, "of",
+                                "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;"
+                                        + CONT_DESC + ")L" + PERF_SIGNAL + ";",
+                                false);
+                        sm.visitInsn(ATHROW);
+                    }
+                    case Term.Branch br -> {
+                        emitExpr(br.cond(), sm, inner);
+                        sm.visitMethodInsn(INVOKESTATIC, RT, "truthy",
+                                "(Ljava/lang/Object;)Z", false);
+                        sm.visitJumpInsn(IFEQ, body[br.elseId()]);
+                        sm.visitJumpInsn(GOTO, body[br.thenId()]);
+                    }
+                    case Term.Jump j -> sm.visitJumpInsn(GOTO, body[j.target()]);
+                }
+            }
+
+            sm.visitLabel(errLabel);
+            sm.visitTypeInsn(NEW, "java/lang/IllegalStateException");
+            sm.visitInsn(DUP);
+            sm.visitLdcInsn("bad state");
+            sm.visitMethodInsn(INVOKESPECIAL, "java/lang/IllegalStateException",
+                    "<init>", "(Ljava/lang/String;)V", false);
+            sm.visitInsn(ATHROW);
         } finally {
             currentLiftedLocals = savedLifted;
             currentKSlot = savedKSlot;
@@ -1665,6 +1926,15 @@ final class ClassEmitter implements Opcodes {
                 if (mb.target() instanceof Stmt.BindTarget.Simple si) bound.add(si.name());
             }
             case Stmt.Assign a -> collectFreeVars(a.value(), bound, outer, out, seen);
+            case Stmt.IfStmt ifs -> {
+                collectFreeVars(ifs.cond(), bound, outer, out, seen);
+                Set<String> bThen = new HashSet<>(bound);
+                for (Stmt t : ifs.thenBranch()) collectFreeVarsStmt(t, bThen, outer, out, seen);
+                if (ifs.elseBranch() != null) {
+                    Set<String> bElse = new HashSet<>(bound);
+                    for (Stmt t : ifs.elseBranch()) collectFreeVarsStmt(t, bElse, outer, out, seen);
+                }
+            }
             default -> { /* others rare inside clause bodies */ }
         }
     }

@@ -177,6 +177,112 @@ class StateMachineWithTest {
         assertEquals(nl("say: before-who", "world"), runSM(src));
     }
 
+    // ── Step 3b: branching with ops ──────────────────────────────────
+
+    @Test void if_then_perform_taken() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              if true
+                log "yes"
+              println "after"
+            """;
+        assertEquals(nl("got: yes", "after"), runSM(src));
+    }
+
+    @Test void if_then_perform_not_taken() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              if false
+                log "skipped"
+              println "after"
+            """;
+        assertEquals(nl("after"), runSM(src));
+    }
+
+    @Test void if_both_branches_perform() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              if true
+                log "a"
+              else
+                log "b"
+              println "merge"
+            """;
+        assertEquals(nl("got: a", "merge"), runSM(src));
+    }
+
+    @Test void if_else_branch_performs() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              if false
+                log "a"
+              else
+                log "b"
+              println "merge"
+            """;
+        assertEquals(nl("got: b", "merge"), runSM(src));
+    }
+
+    @Test void op_before_and_inside_if() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              log "pre"
+              if true
+                log "mid"
+              log "post"
+            """;
+        assertEquals(nl("got: pre", "got: mid", "got: post"), runSM(src));
+    }
+
+    @Test void nested_if_with_ops() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            with echo
+              if true
+                if false
+                  log "x"
+                else
+                  log "y"
+              println "done"
+            """;
+        assertEquals(nl("got: y", "done"), runSM(src));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail
