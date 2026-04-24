@@ -37,10 +37,6 @@ public final class IrijCompiler {
      */
     public static byte[] compileSource(String source, String className,
                                         Path sourceRoot, CompileOptions opts) {
-        if (opts.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE) {
-            throw new CompileException(
-                    "handler-strategy=state-machine (14c.3) is not yet implemented");
-        }
         var parsed = IrijParseDriver.parse(source);
         if (parsed.hasErrors()) {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));

@@ -440,35 +440,45 @@ public final class RuntimeSupport {
     // be exercised with hand-written continuations in tests.
 
     /**
-     * Base class for state-machine-lowered effect-bearing bodies and clauses.
+     * State-machine-lowered effect-bearing body or clause.
      *
-     * <p>Subclasses implement {@link #resume(Object)} with a {@code switch}
-     * over {@code state}:
-     * <ul>
-     *   <li>Pure sections execute inline.</li>
-     *   <li>At an op call-site: store next-state into {@code state}, throw
-     *       {@link PerformSignal#of} with the continuation ({@code this}).</li>
-     *   <li>On re-entry: read {@code value} (the resume value), continue.</li>
-     *   <li>On completion: return the final body value.</li>
-     * </ul>
+     * <p>Concrete — not subclassed. The lowering pass emits a {@link IrijFn}
+     * "step" closure that implements the switch-on-state; the continuation
+     * holds the mutable state ({@code state} label + {@code fields} for
+     * locals that cross {@code perform} boundaries).
+     *
+     * <p>Step contract: {@code step.apply([thisContinuation, resumeValue])}
+     * either returns the final body value or throws {@link PerformSignal}.
+     * The first entry passes {@code null} as {@code resumeValue}.
+     *
+     * <p>Lifted locals are stored in {@link #fields} so they survive across
+     * state transitions (JVM operand stack does not survive a throw). The
+     * lowering pass assigns each lifted local a stable index into this array.
      *
      * <p>Per-{@code with} freshly allocated (see design doc § 14 — pooling
      * deferred as tech debt).
      */
-    public abstract static class IrijContinuation {
-        /** Current state-machine label; written before throwing a signal. */
-        protected int state;
+    public static final class IrijContinuation {
+        public int state;
+        public final Object[] fields;
+        public final IrijFn step;
 
-        protected IrijContinuation() {}
+        public IrijContinuation(IrijFn step, int nFields) {
+            this.step = step;
+            this.fields = nFields == 0 ? EMPTY_FIELDS : new Object[nFields];
+        }
+
+        private static final Object[] EMPTY_FIELDS = new Object[0];
 
         /**
          * Enter or re-enter the state machine. Argument is the value fed in
          * by the handler's {@code resume} call (or {@code null} on first entry).
-         *
-         * <p>Either returns the body's final value, or throws
+         * Either returns the body's final value, or throws
          * {@link PerformSignal} to yield to the enclosing handler.
          */
-        public abstract Object resume(Object value);
+        public Object resume(Object value) {
+            return step.apply(new Object[]{this, value});
+        }
     }
 
     /**
@@ -523,6 +533,14 @@ public final class RuntimeSupport {
      * grows the stack. Trampoline optimisation recorded as tech debt in the
      * design doc (§ 14). Correctness is unaffected.
      */
+    /**
+     * Call-site overload used by emitted bytecode: allocates a fresh
+     * continuation from a step function and field-count, then delegates.
+     */
+    public static Object runWithSM(Object handlerObj, IrijFn step, int nFields) {
+        return runWithSM(handlerObj, new IrijContinuation(step, nFields));
+    }
+
     public static Object runWithSM(Object handlerObj, IrijContinuation k) {
         if (handlerObj instanceof CompiledComposedHandler cc) {
             return runWithSMComposed(cc.handlers, 0, k);
@@ -542,11 +560,8 @@ public final class RuntimeSupport {
     private static Object runWithSMComposed(
             java.util.List<CompiledHandler> handlers, int idx, IrijContinuation k) {
         if (idx >= handlers.size()) return k.resume(null);
-        IrijContinuation nested = new IrijContinuation() {
-            @Override public Object resume(Object value) {
-                return runWithSMComposed(handlers, idx + 1, k);
-            }
-        };
+        IrijFn step = args -> runWithSMComposed(handlers, idx + 1, k);
+        IrijContinuation nested = new IrijContinuation(step, 0);
         return runWithSM(handlers.get(idx), nested);
     }
 

@@ -890,6 +890,20 @@ final class ClassEmitter implements Opcodes {
      * EffectSystem; handler clauses compiled as IrijFns receiving (args…, resume).
      */
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
+        // 14c.3: try the state-machine lowering when selected + body shape
+        // fits what we support so far. Otherwise fall back to 14c.2 (threaded).
+        if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE
+                && (w.onFailure() == null || w.onFailure().isEmpty())) {
+            WithBodyShape shape = classifyWithBody(w.body());
+            if (!(shape instanceof WithBodyShape.Unsupported)) {
+                emitWithSM(w, shape, mv, outer);
+                return;
+            }
+        }
+        emitWithThreaded(w, mv, outer);
+    }
+
+    private void emitWithThreaded(Stmt.With w, MethodVisitor mv, Locals outer) {
         String runEx = "java/lang/RuntimeException";
         int resultSlot = outer.allocateAnon();
 
@@ -940,6 +954,311 @@ final class ClassEmitter implements Opcodes {
 
         mv.visitLabel(end);
         mv.visitVarInsn(ALOAD, resultSlot);
+    }
+
+    // ── 14c.3 state-machine lowering (step 2: pure + single-op bodies) ──
+    //
+    // Design: docs/phase-14c3-state-machine.md
+    //
+    // Each `with H body` in SM mode emits a step IrijFn whose signature is
+    //   (Object[]) -> Object
+    // where args = [IrijContinuation, resumeValue]. The step switches on
+    // the continuation's state field and either returns or throws a
+    // PerformSignal. The call site allocates a fresh continuation and calls
+    // RuntimeSupport.runWithSM(handler, step, nFields).
+    //
+    // STEP 2 SCOPE: body contains zero or one op call, top-level only
+    // (either `op args` as an ExprStmt or `x := op args` as a Bind).
+    // Bodies with bindings in pre-op position fall back to threaded lowering
+    // (no local-lifting yet). Multi-perform + branching arrive in step 3.
+
+    private static final String CONT = "dev/irij/compiler/RuntimeSupport$IrijContinuation";
+    private static final String CONT_DESC = "Ldev/irij/compiler/RuntimeSupport$IrijContinuation;";
+    private static final String PERF_SIGNAL = "dev/irij/compiler/RuntimeSupport$PerformSignal";
+
+    private sealed interface WithBodyShape {
+        record Pure() implements WithBodyShape {}
+        /** Op appears at body[idx] either as an ExprStmt or `bindName := op args`. */
+        record SingleOp(int idx, String opName, List<Expr> opArgs, String bindName)
+                implements WithBodyShape {}
+        record Unsupported() implements WithBodyShape {}
+    }
+
+    private WithBodyShape classifyWithBody(List<Stmt> body) {
+        int opIdx = -1;
+        String opName = null;
+        List<Expr> opArgs = null;
+        String bindName = null;
+
+        for (int i = 0; i < body.size(); i++) {
+            Stmt s = body.get(i);
+            TopLevelOp tl = extractTopLevelOp(s);
+            if (tl != null) {
+                if (opIdx >= 0) return new WithBodyShape.Unsupported();
+                opIdx = i;
+                opName = tl.opName;
+                opArgs = tl.args;
+                bindName = tl.bindName;
+            } else {
+                // Any nested op inside a non-top-level position is unsupported.
+                if (containsOpCall(s)) return new WithBodyShape.Unsupported();
+            }
+        }
+        if (opIdx < 0) return new WithBodyShape.Pure();
+        // Pre-op stmts with bindings would need local-lifting (step 3).
+        for (int j = 0; j < opIdx; j++) {
+            if (body.get(j) instanceof Stmt.Bind || body.get(j) instanceof Stmt.MutBind) {
+                return new WithBodyShape.Unsupported();
+            }
+        }
+        return new WithBodyShape.SingleOp(opIdx, opName, opArgs, bindName);
+    }
+
+    private record TopLevelOp(String opName, List<Expr> args, String bindName) {}
+
+    private TopLevelOp extractTopLevelOp(Stmt s) {
+        if (s instanceof Stmt.ExprStmt es && es.expr() instanceof Expr.App app
+                && app.fn() instanceof Expr.Var v && effectOps.containsKey(v.name())) {
+            // Confirm args have no nested op.
+            for (Expr a : app.args()) if (containsOpCallExpr(a)) return null;
+            return new TopLevelOp(v.name(), app.args(), null);
+        }
+        if (s instanceof Stmt.Bind b
+                && b.target() instanceof Stmt.BindTarget.Simple simp
+                && b.value() instanceof Expr.App app
+                && app.fn() instanceof Expr.Var v && effectOps.containsKey(v.name())) {
+            for (Expr a : app.args()) if (containsOpCallExpr(a)) return null;
+            return new TopLevelOp(v.name(), app.args(), simp.name());
+        }
+        return null;
+    }
+
+    private boolean containsOpCall(Stmt s) {
+        return switch (s) {
+            case Stmt.ExprStmt es -> containsOpCallExpr(es.expr());
+            case Stmt.Bind b -> containsOpCallExpr(b.value());
+            case Stmt.MutBind b -> containsOpCallExpr(b.value());
+            case Stmt.Assign a -> containsOpCallExpr(a.value());
+            default -> true; // other stmt kinds: conservatively mark unsupported
+        };
+    }
+
+    private boolean containsOpCallExpr(Expr e) {
+        if (e == null) return false;
+        return switch (e) {
+            case Expr.App app -> {
+                if (app.fn() instanceof Expr.Var v && effectOps.containsKey(v.name())) yield true;
+                if (containsOpCallExpr(app.fn())) yield true;
+                for (Expr a : app.args()) if (containsOpCallExpr(a)) yield true;
+                yield false;
+            }
+            case Expr.BinaryOp bop -> containsOpCallExpr(bop.left()) || containsOpCallExpr(bop.right());
+            case Expr.UnaryOp u -> containsOpCallExpr(u.operand());
+            case Expr.IfExpr ie -> containsOpCallExpr(ie.cond())
+                    || containsOpCallExpr(ie.thenBranch())
+                    || containsOpCallExpr(ie.elseBranch());
+            case Expr.Block blk -> {
+                for (Stmt st : blk.stmts()) if (containsOpCall(st)) yield true;
+                yield false;
+            }
+            case Expr.Lambda lam -> containsOpCallExpr(lam.body()); // conservative
+            case Expr.VectorLit vl -> { for (Expr x : vl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
+            case Expr.TupleLit tl -> { for (Expr x : tl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
+            case Expr.SetLit sl -> { for (Expr x : sl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
+            case Expr.DotAccess da -> containsOpCallExpr(da.target());
+            case Expr.MatchExpr me -> {
+                if (containsOpCallExpr(me.scrutinee())) yield true;
+                for (Expr.MatchArm arm : me.arms()) {
+                    if (containsOpCallExpr(arm.guard())) yield true;
+                    if (containsOpCallExpr(arm.body())) yield true;
+                }
+                yield false;
+            }
+            default -> false;
+        };
+    }
+
+    /**
+     * Lower a `with` via state-machine: emit a step IrijFn via invokedynamic,
+     * allocate a continuation, call RuntimeSupport.runWithSM.
+     */
+    private void emitWithSM(Stmt.With w, WithBodyShape shape, MethodVisitor mv, Locals outer) {
+        int resultSlot = outer.allocateAnon();
+
+        // Push handler value.
+        emitExpr(w.handler(), mv, outer);
+
+        // Collect free variables in body that resolve to outer locals — these
+        // become step captures, same mechanism as emitLambda.
+        Set<String> bound = new HashSet<>();
+        List<String> captures = new ArrayList<>();
+        for (Stmt s : w.body()) collectFreeVarsStmt(s, bound, outer, captures, new HashSet<>());
+
+        // Emit step method + return IrijFn on stack.
+        emitSMStep(shape, w.body(), captures, mv, outer);
+
+        // Push nFields (0 for step 2 scope — nothing to lift across suspension).
+        pushIconst(mv, 0);
+
+        // RuntimeSupport.runWithSM(Object, IrijFn, int) -> Object
+        mv.visitMethodInsn(INVOKESTATIC, RT, "runWithSM",
+                "(Ljava/lang/Object;L" + IRIJ_FN + ";I)Ljava/lang/Object;", false);
+        mv.visitVarInsn(ASTORE, resultSlot);
+        mv.visitVarInsn(ALOAD, resultSlot);
+    }
+
+    /**
+     * Emit the step function for a `with` body as a private static method,
+     * then push an IrijFn view via invokedynamic (captures become bound args).
+     *
+     * Descriptor: (captures..., Object[] args) -> Object
+     * where args = [IrijContinuation, resumeValue].
+     */
+    private void emitSMStep(WithBodyShape shape, List<Stmt> body,
+                             List<String> captures, MethodVisitor mv, Locals outerLocals) {
+        int id = lambdaCounter++;
+        String methodName = "smstep$" + id;
+        StringBuilder desc = new StringBuilder("(");
+        for (int i = 0; i < captures.size(); i++) desc.append(OBJ_DESC);
+        desc.append("[Ljava/lang/Object;)Ljava/lang/Object;");
+        MethodVisitor sm = classWriter.visitMethod(
+                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                methodName, desc.toString(), null, null);
+        sm.visitCode();
+
+        Locals inner = new Locals();
+        for (String cap : captures) inner.allocate(cap);
+        int argsSlot = inner.allocateAnon();
+        int kSlot = inner.allocateAnon();    // continuation
+        int vSlot = inner.allocateAnon();    // resume value
+
+        // kSlot = (IrijContinuation) args[0]
+        sm.visitVarInsn(ALOAD, argsSlot);
+        pushIconst(sm, 0);
+        sm.visitInsn(AALOAD);
+        sm.visitTypeInsn(CHECKCAST, CONT);
+        sm.visitVarInsn(ASTORE, kSlot);
+        // vSlot = args[1]
+        sm.visitVarInsn(ALOAD, argsSlot);
+        pushIconst(sm, 1);
+        sm.visitInsn(AALOAD);
+        sm.visitVarInsn(ASTORE, vSlot);
+
+        switch (shape) {
+            case WithBodyShape.Pure p -> emitSMStateBody(body, sm, inner);
+            case WithBodyShape.SingleOp so -> emitSMSingleOp(so, body, sm, inner, kSlot, vSlot);
+            case WithBodyShape.Unsupported ignored ->
+                    throw new IrijCompiler.CompileException("internal: Unsupported in emitSMStep");
+        }
+
+        sm.visitMaxs(0, 0);
+        sm.visitEnd();
+
+        // Call site: push captures, invokedynamic → IrijFn.
+        for (String cap : captures) {
+            mv.visitVarInsn(ALOAD, outerLocals.lookup(cap));
+        }
+        StringBuilder indyDesc = new StringBuilder("(");
+        for (int i = 0; i < captures.size(); i++) indyDesc.append(OBJ_DESC);
+        indyDesc.append(")").append(IRIJ_FN_DESC);
+        Handle bsm = new Handle(H_INVOKESTATIC,
+                "java/lang/invoke/LambdaMetafactory", "metafactory",
+                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                        + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
+                        + "Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                        + "Ljava/lang/invoke/CallSite;",
+                false);
+        Type samType = Type.getMethodType(APPLY_DESC);
+        Handle implHandle = new Handle(H_INVOKESTATIC, internalName, methodName, desc.toString(), false);
+        mv.visitInvokeDynamicInsn("apply", indyDesc.toString(), bsm,
+                samType, implHandle, samType);
+    }
+
+    /** Pure body: single-state step. Just emit statements; return last value. */
+    private void emitSMStateBody(List<Stmt> body, MethodVisitor sm, Locals inner) {
+        emitBlockStmtsReturning(body, sm, inner);
+    }
+
+    /** Single-op body: 2-state switch. */
+    private void emitSMSingleOp(WithBodyShape.SingleOp so, List<Stmt> body,
+                                 MethodVisitor sm, Locals inner, int kSlot, int vSlot) {
+        List<Stmt> preStmts = body.subList(0, so.idx());
+        List<Stmt> postStmts = body.subList(so.idx() + 1, body.size());
+
+        Label state0 = new Label();
+        Label state1 = new Label();
+        Label errLabel = new Label();
+        Label end = new Label();
+
+        // switch (k.state)
+        sm.visitVarInsn(ALOAD, kSlot);
+        sm.visitFieldInsn(GETFIELD, CONT, "state", "I");
+        sm.visitTableSwitchInsn(0, 1, errLabel, state0, state1);
+
+        // state 0: pre-stmts (as statements, no return); set state=1; throw signal.
+        sm.visitLabel(state0);
+        emitBlockStmtsAsStatements(preStmts, sm, inner);
+        sm.visitVarInsn(ALOAD, kSlot);
+        pushIconst(sm, 1);
+        sm.visitFieldInsn(PUTFIELD, CONT, "state", "I");
+        // PerformSignal.of(effectName, opName, argsArray, k)
+        String effectName = effectOps.get(so.opName());
+        sm.visitLdcInsn(effectName);
+        sm.visitLdcInsn(so.opName());
+        // args array — strip single-unit arg ( `op ()` )
+        List<Expr> callArgs = so.opArgs();
+        if (callArgs.size() == 1 && callArgs.get(0) instanceof Expr.UnitLit) callArgs = List.of();
+        pushObjectArray(callArgs, sm, inner);
+        sm.visitVarInsn(ALOAD, kSlot);
+        sm.visitMethodInsn(INVOKESTATIC, PERF_SIGNAL, "of",
+                "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;"
+                        + CONT_DESC + ")L" + PERF_SIGNAL + ";",
+                false);
+        sm.visitInsn(ATHROW);
+
+        // state 1: bind resume value if `x := op args`, emit post-stmts, return.
+        sm.visitLabel(state1);
+        if (so.bindName() != null) {
+            int bindSlot = inner.allocate(so.bindName());
+            sm.visitVarInsn(ALOAD, vSlot);
+            sm.visitVarInsn(ASTORE, bindSlot);
+        }
+        emitBlockStmtsReturning(postStmts, sm, inner);
+        sm.visitJumpInsn(GOTO, end);
+
+        // default: IllegalStateException
+        sm.visitLabel(errLabel);
+        sm.visitTypeInsn(NEW, "java/lang/IllegalStateException");
+        sm.visitInsn(DUP);
+        sm.visitLdcInsn("bad state");
+        sm.visitMethodInsn(INVOKESPECIAL, "java/lang/IllegalStateException",
+                "<init>", "(Ljava/lang/String;)V", false);
+        sm.visitInsn(ATHROW);
+
+        sm.visitLabel(end);
+    }
+
+    /** Emit stmts discarding non-last values; last stmt's value returned via ARETURN. */
+    private void emitBlockStmtsReturning(List<Stmt> stmts, MethodVisitor sm, Locals inner) {
+        if (stmts.isEmpty()) {
+            sm.visitInsn(ACONST_NULL);
+            sm.visitInsn(ARETURN);
+            return;
+        }
+        for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), sm, inner);
+        Stmt last = stmts.get(stmts.size() - 1);
+        if (last instanceof Stmt.ExprStmt es) {
+            emitExpr(es.expr(), sm, inner);
+        } else {
+            emitStmt(last, sm, inner);
+            sm.visitInsn(ACONST_NULL);
+        }
+        sm.visitInsn(ARETURN);
+    }
+
+    /** Emit stmts as pure statements (no value left on stack afterwards). */
+    private void emitBlockStmtsAsStatements(List<Stmt> stmts, MethodVisitor sm, Locals inner) {
+        for (Stmt s : stmts) emitStmt(s, sm, inner);
     }
 
     // ── Protocols / impls ───────────────────────────────────────────────
