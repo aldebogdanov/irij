@@ -921,8 +921,7 @@ final class ClassEmitter implements Opcodes {
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
         // 14c.3: try the state-machine lowering when selected + body shape
         // fits what we support so far. Otherwise fall back to 14c.2 (threaded).
-        if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE
-                && (w.onFailure() == null || w.onFailure().isEmpty())) {
+        if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE) {
             // Step 3c: A-normalize first so nested op calls become top-level
             // Simple-Binds before classification.
             List<Stmt> body = new ANormalizer().normalize(w.body());
@@ -1451,6 +1450,16 @@ final class ClassEmitter implements Opcodes {
     private void emitWithSM(Stmt.With w, List<Stmt> body, WithBodyShape shape,
                              MethodVisitor mv, Locals outer) {
         int resultSlot = outer.allocateAnon();
+        boolean hasOnFailure = w.onFailure() != null && !w.onFailure().isEmpty();
+
+        Label tryStart = new Label();
+        Label tryEnd = new Label();
+        Label catchL = new Label();
+        Label end = new Label();
+        if (hasOnFailure) {
+            mv.visitTryCatchBlock(tryStart, tryEnd, catchL, "java/lang/RuntimeException");
+            mv.visitLabel(tryStart);
+        }
 
         // Push handler value.
         emitExpr(w.handler(), mv, outer);
@@ -1476,6 +1485,33 @@ final class ClassEmitter implements Opcodes {
         mv.visitMethodInsn(INVOKESTATIC, RT, "runWithSM",
                 "(Ljava/lang/Object;L" + IRIJ_FN + ";I)Ljava/lang/Object;", false);
         mv.visitVarInsn(ASTORE, resultSlot);
+
+        if (hasOnFailure) {
+            mv.visitLabel(tryEnd);
+            mv.visitJumpInsn(GOTO, end);
+
+            mv.visitLabel(catchL);
+            int teSlot = outer.allocateAnon();
+            mv.visitVarInsn(ASTORE, teSlot);
+            Locals ofLocals = outer.childScope();
+            int errorSlot = ofLocals.allocate("error");
+            mv.visitVarInsn(ALOAD, teSlot);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "errorMessage",
+                    "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
+            mv.visitVarInsn(ASTORE, errorSlot);
+            List<Stmt> of = w.onFailure();
+            for (int i = 0; i < of.size() - 1; i++) emitStmt(of.get(i), mv, ofLocals);
+            Stmt last = of.get(of.size() - 1);
+            if (last instanceof Stmt.ExprStmt es) {
+                emitExpr(es.expr(), mv, ofLocals);
+            } else {
+                emitStmt(last, mv, ofLocals);
+                mv.visitInsn(ACONST_NULL);
+            }
+            mv.visitVarInsn(ASTORE, resultSlot);
+
+            mv.visitLabel(end);
+        }
         mv.visitVarInsn(ALOAD, resultSlot);
     }
 

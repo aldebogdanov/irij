@@ -351,6 +351,67 @@ class StateMachineWithTest {
         assertEquals(nl("20"), runSM(src));
     }
 
+    // ── Step 4: on-failure ───────────────────────────────────────────
+
+    @Test void on_failure_catches_body_error() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            fn run
+              _ =>
+                with echo
+                  log "before"
+                  error "kaboom!"
+                  "never"
+                on-failure
+                  "recovered: " ++ error
+            println (run ())
+            """;
+        assertEquals(nl("got: before", "recovered: kaboom!"), runSM(src));
+    }
+
+    @Test void on_failure_not_triggered_on_success() throws Exception {
+        String src = """
+            effect Log
+              log :: Str -> ()
+            handler echo :: Log
+              log msg =>
+                println ("got: " ++ msg)
+                resume ()
+            fn run
+              _ =>
+                with echo
+                  log "hello"
+                  "ok"
+                on-failure
+                  "recovered: " ++ error
+            println (run ())
+            """;
+        assertEquals(nl("got: hello", "ok"), runSM(src));
+    }
+
+    @Test void on_failure_catches_error_from_clause() throws Exception {
+        String src = """
+            effect Boom
+              explode :: () -> ()
+            handler bomb :: Boom
+              explode () => error "kaboom!"
+            fn run
+              _ =>
+                with bomb
+                  explode ()
+                  "never reached"
+                on-failure
+                  "recovered: " ++ error
+            println (run ())
+            """;
+        assertEquals(nl("recovered: kaboom!"), runSM(src));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail
