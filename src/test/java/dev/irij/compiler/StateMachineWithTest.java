@@ -461,6 +461,210 @@ class StateMachineWithTest {
         assertEquals(nl("via op: 2", "via dot: 2"), runSM(src));
     }
 
+    // ── Step 6: handler composition (>>) ────────────────────────────
+
+    @Test void composed_two_effects_each_op_once() throws Exception {
+        String src = """
+            effect Greet
+              greet :: Str -> Str
+            effect Logger
+              log :: Str -> ()
+            handler friendly :: Greet
+              greet name => resume ("Hi, " ++ name)
+            handler quiet-log :: Logger
+              log msg => resume ()
+            fn run
+              _ =>
+                with quiet-log >> friendly
+                  log "ignored"
+                  greet "World"
+            println (run ())
+            """;
+        assertEquals(nl("Hi, World"), runSM(src));
+    }
+
+    @Test void composed_interleaved_ops_across_handlers() throws Exception {
+        // Cross-handler scenario: op-for-inner, resume, op-for-outer, resume,
+        // op-for-inner again. Exercises that outer's resume re-enters the
+        // body with the inner handler still in scope.
+        String src = """
+            effect Greet
+              greet :: Str -> Str
+            effect Logger
+              log :: Str -> ()
+            handler friendly :: Greet
+              greet name => resume ("hi-" ++ name)
+            handler echo-log :: Logger
+              log msg =>
+                println ("log: " ++ msg)
+                resume ()
+            fn run
+              _ =>
+                with echo-log >> friendly
+                  a := greet "A"
+                  log "between"
+                  b := greet "B"
+                  println (a ++ " / " ++ b)
+            run ()
+            """;
+        assertEquals(nl("log: between", "hi-A / hi-B"), runSM(src));
+    }
+
+    @Test void composed_local_binding() throws Exception {
+        String src = """
+            effect Greet
+              greet :: Str -> Str
+            effect Logger
+              log :: Str -> ()
+            handler friendly :: Greet
+              greet name => resume ("Hi, " ++ name)
+            handler quiet-log :: Logger
+              log msg => resume ()
+            fn run
+              _ =>
+                combined := quiet-log >> friendly
+                with combined
+                  log "ignored"
+                  greet "World"
+            println (run ())
+            """;
+        assertEquals(nl("Hi, World"), runSM(src));
+    }
+
+    // ── Step 7: tier (c) — clauses that themselves perform effects ───
+    // SM lowering doesn't natively handle clause-internal performs (would
+    // require continuation-style clause compilation). Strategy: detect at
+    // emit time and fall back to threaded (which already supports it).
+
+    @Test void clause_performs_outer_effect_falls_back_threaded() throws Exception {
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            effect Counter
+              bump :: () -> Int
+            handler quiet-log :: Logger
+              log msg => resume ()
+            handler loud-counter :: Counter ::: Logger
+              state :! 0
+              bump () =>
+                state <- state + 1
+                log "bumped"
+                resume state
+            fn run
+              _ =>
+                with quiet-log >> loud-counter
+                  bump ()
+                  bump ()
+                  bump ()
+            println (to-str (run ()))
+            """;
+        assertEquals(nl("3"), runSM(src));
+    }
+
+    @Test void clause_with_implicit_foreign_perform_falls_back() throws Exception {
+        // No `:::` annotation but clause body still performs Logger.log.
+        // Detector also catches this via clause-body scan.
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            effect Greet
+              greet :: Str -> Str
+            handler quiet-log :: Logger
+              log msg => resume ()
+            handler chatty :: Greet
+              greet name =>
+                log ("greeting " ++ name)
+                resume ("Hi, " ++ name)
+            fn run
+              _ =>
+                with quiet-log >> chatty
+                  greet "World"
+            println (run ())
+            """;
+        assertEquals(nl("Hi, World"), runSM(src));
+    }
+
+    // ── Step 8: nested `with` ────────────────────────────────────────
+    // Outer `with h2 (with h1 body)`. Inner SM frame catches its own effect;
+    // anything else propagates out and is caught by the outer SM frame.
+
+    @Test void nested_with_inner_handles_inner_effect() throws Exception {
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            effect Greet
+              greet :: Str -> Str
+            handler quiet-log :: Logger
+              log msg => resume ()
+            handler friendly :: Greet
+              greet name => resume ("Hi, " ++ name)
+            fn run
+              _ =>
+                with quiet-log
+                  with friendly
+                    log "ignored"
+                    greet "World"
+            println (run ())
+            """;
+        assertEquals(nl("Hi, World"), runSM(src));
+    }
+
+    @Test void nested_with_outer_handles_after_inner_resume() throws Exception {
+        // body: greet (inner), log (outer), greet (inner) — exercises that
+        // re-throw from inner SM frame escapes to outer SM frame and that
+        // outer's resume re-enters body which still has inner frame above.
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            effect Greet
+              greet :: Str -> Str
+            handler echo-log :: Logger
+              log msg =>
+                println ("log: " ++ msg)
+                resume ()
+            handler friendly :: Greet
+              greet name => resume ("hi-" ++ name)
+            fn run
+              _ =>
+                with echo-log
+                  with friendly
+                    a := greet "A"
+                    log "between"
+                    b := greet "B"
+                    println (a ++ " / " ++ b)
+            run ()
+            """;
+        assertEquals(nl("log: between", "hi-A / hi-B"), runSM(src));
+    }
+
+    // ── Step 9: concurrency parity ───────────────────────────────────
+    // Forked fibers must see handlers active at fork time. SM mode doesn't
+    // have a thread-local handler stack the way the interpreter does; for
+    // safety, `with` containing `spawn` falls back to threaded mode where
+    // EffectSystem.STACK snapshot machinery is in place.
+
+    @Test void spawn_inside_with_runs_under_handler() throws Exception {
+        // `spawn` triggers fallback to threaded (where EffectSystem.STACK
+        // snapshot inherits handlers into the fiber). Verifies the gate
+        // works and the threaded path stays correct.
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            handler echo-log :: Logger
+              log msg =>
+                println ("log: " ++ msg)
+                resume ()
+            fn fiber-body
+              _ =>
+                log "from-fiber"
+            with echo-log
+              t := spawn (-> fiber-body ())
+              sleep 50
+              log "from-main"
+            """;
+        assertEquals(nl("log: from-fiber", "log: from-main"), runSM(src));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail

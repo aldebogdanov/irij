@@ -921,7 +921,9 @@ final class ClassEmitter implements Opcodes {
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
         // 14c.3: try the state-machine lowering when selected + body shape
         // fits what we support so far. Otherwise fall back to 14c.2 (threaded).
-        if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE) {
+        if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE
+                && smCanHandle(w.handler())
+                && !bodyContainsSpawn(w.body())) {
             // Step 3c: A-normalize first so nested op calls become top-level
             // Simple-Binds before classification.
             List<Stmt> body = new ANormalizer().normalize(w.body());
@@ -932,6 +934,142 @@ final class ClassEmitter implements Opcodes {
             }
         }
         emitWithThreaded(w, mv, outer);
+    }
+
+    /**
+     * Step 7 gate: SM lowering only handles tier (a)+(b) handlers — clauses
+     * that don't themselves perform effects beyond their own resume. Any
+     * referenced handler with non-empty {@code requiredEffects} (declared via
+     * {@code ::: Other}) or whose clause body contains a perform of a
+     * different effect falls back to the threaded path (which natively
+     * supports the EffectSystem stack walk for clause-internal performs).
+     */
+    private boolean smCanHandle(Expr handlerExpr) {
+        for (String name : collectHandlerNames(handlerExpr)) {
+            Decl.HandlerDecl hd = handlers.get(name);
+            if (hd == null) return false; // unknown / dynamic — be conservative
+            if (hd.requiredEffects() != null && !hd.requiredEffects().isEmpty()) {
+                return false;
+            }
+            if (clausePerformsForeignEffect(hd)) return false;
+        }
+        return true;
+    }
+
+    private List<String> collectHandlerNames(Expr e) {
+        List<String> out = new ArrayList<>();
+        collectHandlerNamesInto(e, out);
+        return out;
+    }
+
+    private void collectHandlerNamesInto(Expr e, List<String> out) {
+        if (e instanceof Expr.Var v) {
+            out.add(v.name());
+        } else if (e instanceof Expr.App app && app.fn() instanceof Expr.Var fv
+                && (">>".equals(fv.name()) || "compose".equals(fv.name()))) {
+            for (Expr a : app.args()) collectHandlerNamesInto(a, out);
+        } else {
+            // Unknown shape (lambda result, function call, etc.): mark unknown.
+            out.add("__unknown__");
+        }
+    }
+
+    private boolean clausePerformsForeignEffect(Decl.HandlerDecl hd) {
+        for (var clause : hd.clauses()) {
+            if (exprPerformsForeignEffect(clause.body(), hd.effectName())) return true;
+        }
+        return false;
+    }
+
+    private boolean exprPerformsForeignEffect(Object node, String selfEffect) {
+        if (node == null) return false;
+        if (node instanceof Expr.App app && app.fn() instanceof Expr.Var v
+                && effectOps.containsKey(v.name())
+                && !selfEffect.equals(effectOps.get(v.name()))) {
+            return true;
+        }
+        // Recurse via reflection-free structural traversal of common shapes.
+        if (node instanceof Expr.Block b) {
+            for (Stmt s : b.stmts()) if (stmtPerformsForeignEffect(s, selfEffect)) return true;
+        } else if (node instanceof Expr.App app) {
+            if (exprPerformsForeignEffect(app.fn(), selfEffect)) return true;
+            for (Expr a : app.args()) if (exprPerformsForeignEffect(a, selfEffect)) return true;
+        } else if (node instanceof Expr.IfExpr ie) {
+            if (exprPerformsForeignEffect(ie.cond(), selfEffect)) return true;
+            if (exprPerformsForeignEffect(ie.thenBranch(), selfEffect)) return true;
+            if (exprPerformsForeignEffect(ie.elseBranch(), selfEffect)) return true;
+        } else if (node instanceof Expr.Lambda lam) {
+            if (exprPerformsForeignEffect(lam.body(), selfEffect)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Step 9: SM mode lacks a thread-local handler stack, so spawned fibers
+     * can't inherit SM-mode handlers. Fall back to threaded for any `with`
+     * whose body contains `spawn` — threaded mode already snapshots
+     * EffectSystem.STACK at fork time.
+     */
+    private boolean bodyContainsSpawn(List<Stmt> stmts) {
+        for (Stmt s : stmts) if (stmtContainsSpawn(s)) return true;
+        return false;
+    }
+
+    private boolean stmtContainsSpawn(Stmt s) {
+        if (s instanceof Stmt.ExprStmt es) return exprContainsSpawn(es.expr());
+        if (s instanceof Stmt.Bind b) return exprContainsSpawn(b.value());
+        if (s instanceof Stmt.MutBind mb) return exprContainsSpawn(mb.value());
+        if (s instanceof Stmt.Assign a) return exprContainsSpawn(a.value());
+        if (s instanceof Stmt.IfStmt is) {
+            if (exprContainsSpawn(is.cond())) return true;
+            for (Stmt t : is.thenBranch()) if (stmtContainsSpawn(t)) return true;
+            if (is.elseBranch() != null)
+                for (Stmt t : is.elseBranch()) if (stmtContainsSpawn(t)) return true;
+        }
+        if (s instanceof Stmt.With w) {
+            // Spawn inside an inner `with` is the inner's concern — but its
+            // own classifier will fall back if needed. Recurse anyway so the
+            // outer frame stays threaded too (simpler).
+            if (bodyContainsSpawn(w.body())) return true;
+            if (w.onFailure() != null && bodyContainsSpawn(w.onFailure())) return true;
+        }
+        return false;
+    }
+
+    private boolean exprContainsSpawn(Expr e) {
+        if (e == null) return false;
+        if (e instanceof Expr.App app && app.fn() instanceof Expr.Var v
+                && ("spawn".equals(v.name()) || "fork".equals(v.name())
+                    || "fork-all".equals(v.name()) || "race".equals(v.name()))) {
+            return true;
+        }
+        if (e instanceof Expr.App app) {
+            if (exprContainsSpawn(app.fn())) return true;
+            for (Expr a : app.args()) if (exprContainsSpawn(a)) return true;
+        } else if (e instanceof Expr.IfExpr ie) {
+            if (exprContainsSpawn(ie.cond())) return true;
+            if (exprContainsSpawn(ie.thenBranch())) return true;
+            if (exprContainsSpawn(ie.elseBranch())) return true;
+        } else if (e instanceof Expr.Block b) {
+            for (Stmt s : b.stmts()) if (stmtContainsSpawn(s)) return true;
+        } else if (e instanceof Expr.Lambda lam) {
+            if (exprContainsSpawn(lam.body())) return true;
+        }
+        return false;
+    }
+
+    private boolean stmtPerformsForeignEffect(Stmt s, String selfEffect) {
+        if (s instanceof Stmt.ExprStmt es) return exprPerformsForeignEffect(es.expr(), selfEffect);
+        if (s instanceof Stmt.Bind b) return exprPerformsForeignEffect(b.value(), selfEffect);
+        if (s instanceof Stmt.MutBind mb) return exprPerformsForeignEffect(mb.value(), selfEffect);
+        if (s instanceof Stmt.Assign a) return exprPerformsForeignEffect(a.value(), selfEffect);
+        if (s instanceof Stmt.IfStmt is) {
+            if (exprPerformsForeignEffect(is.cond(), selfEffect)) return true;
+            for (Stmt t : is.thenBranch()) if (stmtPerformsForeignEffect(t, selfEffect)) return true;
+            if (is.elseBranch() != null)
+                for (Stmt t : is.elseBranch()) if (stmtPerformsForeignEffect(t, selfEffect)) return true;
+        }
+        return false;
     }
 
     private void emitWithThreaded(Stmt.With w, MethodVisitor mv, Locals outer) {
@@ -1404,7 +1542,12 @@ final class ClassEmitter implements Opcodes {
             case Stmt.Bind b -> containsOpCallExpr(b.value());
             case Stmt.MutBind b -> containsOpCallExpr(b.value());
             case Stmt.Assign a -> containsOpCallExpr(a.value());
-            default -> true; // other stmt kinds: conservatively mark unsupported
+            // Step 8: nested `with` would require the outer continuation to
+            // resume INSIDE the inner with rather than at its start, plus
+            // bridging PerformSignal across SM/threaded boundaries. Both
+            // are out of scope for 14c.3 — fall back to threaded for the
+            // outer (and inner) so EffectSystem dispatch handles it.
+            default -> true; // includes Stmt.With — conservatively unsupported
         };
     }
 
@@ -1694,7 +1837,15 @@ final class ClassEmitter implements Opcodes {
 
                 if (seg.opName() == null) {
                     // Final segment: emit pure stmts with last as return value.
-                    emitBlockStmtsReturning(seg.pureStmts(), sm, inner);
+                    // Special case: body ends with a bare op call (no pureStmts
+                    // after it, prev seg has no bind) — the resume value of the
+                    // previous op IS the body's final value. Return vSlot.
+                    if (seg.pureStmts().isEmpty() && i > 0) {
+                        sm.visitVarInsn(ALOAD, vSlot);
+                        sm.visitInsn(ARETURN);
+                    } else {
+                        emitBlockStmtsReturning(seg.pureStmts(), sm, inner);
+                    }
                 } else {
                     // Intermediate: pure stmts as statements, bump state, throw signal.
                     emitBlockStmtsAsStatements(seg.pureStmts(), sm, inner);

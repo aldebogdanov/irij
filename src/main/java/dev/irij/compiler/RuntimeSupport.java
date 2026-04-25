@@ -542,33 +542,51 @@ public final class RuntimeSupport {
     }
 
     public static Object runWithSM(Object handlerObj, IrijContinuation k) {
+        java.util.List<CompiledHandler> hs;
         if (handlerObj instanceof CompiledComposedHandler cc) {
-            return runWithSMComposed(cc.handlers, 0, k);
-        }
-        if (!(handlerObj instanceof CompiledHandler h)) {
+            hs = cc.handlers;
+        } else if (handlerObj instanceof CompiledHandler h) {
+            hs = java.util.List.of(h);
+        } else {
             throw new dev.irij.interpreter.IrijRuntimeError(
                     "with requires a handler, got " + typeTag(handlerObj));
         }
         try {
             return k.resume(null);
         } catch (PerformSignal s) {
-            return dispatchSM(h, s);
+            return dispatchSM(hs, s);
         }
     }
 
-    /** Composed handler path — nested runWithSM frames, outermost first. */
-    private static Object runWithSMComposed(
-            java.util.List<CompiledHandler> handlers, int idx, IrijContinuation k) {
-        if (idx >= handlers.size()) return k.resume(null);
-        IrijFn step = args -> runWithSMComposed(handlers, idx + 1, k);
-        IrijContinuation nested = new IrijContinuation(step, 0);
-        return runWithSM(handlers.get(idx), nested);
-    }
-
-    /** Dispatch a single signal to the right clause; recurse if the clause resumes. */
-    private static Object dispatchSM(CompiledHandler h, PerformSignal s) {
-        if (!h.effectName.equals(s.effectName)) {
-            // Outer handler's responsibility; re-raise (fields intact).
+    /**
+     * Dispatch a signal across a handler stack; innermost-first search so a
+     * later-composed handler shadows an earlier one for the same effect.
+     * On resume, re-enters the body with the SAME handler stack so signals
+     * from subsequent ops (any effect in the stack) are caught correctly.
+     */
+    private static Object dispatchSM(java.util.List<CompiledHandler> hs, PerformSignal s) {
+        CompiledHandler h = null;
+        for (int i = hs.size() - 1; i >= 0; i--) {
+            if (hs.get(i).effectName.equals(s.effectName)) { h = hs.get(i); break; }
+        }
+        if (h == null) {
+            // No SM handler matches. Step 8 bridge: if a threaded outer
+            // `with` has installed a HandlerContext on EffectSystem.STACK
+            // for this effect, route through the threaded protocol and
+            // resume the SM continuation with the result.
+            var stack = dev.irij.interpreter.EffectSystem.STACK.get();
+            for (var ctx : stack) {
+                if (ctx.effectName().equals(s.effectName)) {
+                    Object v = dev.irij.interpreter.EffectSystem.fireOp(
+                            s.effectName, s.opName, java.util.Arrays.asList(s.args));
+                    try {
+                        return s.continuation.resume(v);
+                    } catch (PerformSignal next) {
+                        return dispatchSM(hs, next);
+                    }
+                }
+            }
+            // Otherwise propagate to an outer SM `with` (or top).
             throw s;
         }
         IrijFn clause = h.clauses.get(s.opName);
@@ -587,13 +605,10 @@ public final class RuntimeSupport {
             Object v = resumeArgs.length > 0
                     ? resumeArgs[0]
                     : dev.irij.interpreter.Values.UNIT;
-            // Re-enter the body state machine. May return (body done) or
-            // throw another PerformSignal (next op) which this same handler
-            // (or an outer one) must catch.
             try {
                 return k.resume(v);
             } catch (PerformSignal next) {
-                return dispatchSM(h, next);
+                return dispatchSM(hs, next);
             }
         };
 
