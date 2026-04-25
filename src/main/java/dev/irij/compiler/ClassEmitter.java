@@ -2451,7 +2451,25 @@ final class ClassEmitter implements Opcodes {
         StringBuilder desc = new StringBuilder("(");
         for (int i = 0; i < arity; i++) desc.append(OBJ_DESC);
         desc.append(")").append(OBJ_DESC);
-        mv.visitMethodInsn(INVOKESTATIC, internalName, mangle(fnName), desc.toString(), false);
+        if (options.directLinking()) {
+            // Direct-linked deploy build: max JIT inlinability, no hot-redef.
+            mv.visitMethodInsn(INVOKESTATIC, internalName, mangle(fnName),
+                    desc.toString(), false);
+        } else {
+            // Dev/REPL build: indy + MutableCallSite so REPL can swap impls
+            // without restarting the JVM. Bootstrap registers the site in
+            // RuntimeSupport.REDEF_SITES; redefine() updates it later.
+            Handle bootstrap = new Handle(
+                    H_INVOKESTATIC,
+                    RT,
+                    "redefBootstrap",
+                    "(Ljava/lang/invoke/MethodHandles$Lookup;"
+                            + "Ljava/lang/String;"
+                            + "Ljava/lang/invoke/MethodType;)"
+                            + "Ljava/lang/invoke/CallSite;",
+                    false);
+            mv.visitInvokeDynamicInsn(mangle(fnName), desc.toString(), bootstrap);
+        }
     }
 
     // ── Match / pattern matching ────────────────────────────────────────

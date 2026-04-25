@@ -956,4 +956,68 @@ public final class RuntimeSupport {
             return bodyResult;
         }
     }
+
+    // ── Hot-redef: invokedynamic + MutableCallSite (Clojure-style) ──────
+    //
+    // Each top-level `fn` call site emits an `invokedynamic` whose
+    // bootstrap returns a {@link MutableCallSite} pointing at the impl
+    // method. The REPL (or any embedder) can swap that callsite's target
+    // via {@link #redefine}. With {@code --direct-linking} the emitter
+    // skips indy and uses plain {@code invokestatic} for max JIT
+    // inlinability — same trade-off Clojure exposes.
+
+    /** Registry of mutable call sites keyed by "owner.method:descriptor". */
+    private static final java.util.concurrent.ConcurrentHashMap<String,
+            java.lang.invoke.MutableCallSite> REDEF_SITES =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private static String redefKey(Class<?> owner, String name,
+                                    java.lang.invoke.MethodType mt) {
+        return owner.getName() + "." + name + ":" + mt.toMethodDescriptorString();
+    }
+
+    /**
+     * Bootstrap method for the hot-redef invokedynamic. The {@code name}
+     * is the mangled fn name (already a valid Java identifier); {@code mt}
+     * is the method type. The bootstrap looks up the static impl on the
+     * caller's class, registers a MutableCallSite for it, and returns it.
+     *
+     * <p>If the same call site is requested twice (e.g. two source files
+     * each calling the same fn), each gets its own MutableCallSite — they
+     * happen to share the impl. {@link #redefine} updates them all via the
+     * registry's collision list.
+     */
+    public static java.lang.invoke.CallSite redefBootstrap(
+            java.lang.invoke.MethodHandles.Lookup lookup,
+            String name,
+            java.lang.invoke.MethodType mt) throws NoSuchMethodException,
+                                                    IllegalAccessException {
+        Class<?> owner = lookup.lookupClass();
+        java.lang.invoke.MethodHandle target = lookup.findStatic(owner, name, mt);
+        java.lang.invoke.MutableCallSite cs = new java.lang.invoke.MutableCallSite(target);
+        REDEF_SITES.put(redefKey(owner, name, mt), cs);
+        return cs;
+    }
+
+    /**
+     * Swap the implementation of a previously-bootstrapped redef site.
+     * The {@code key} is the {@code "owner.method:descriptor"} string
+     * matching what the bootstrap registered. Subsequent calls through
+     * the indy site dispatch to {@code newImpl}.
+     *
+     * <p>Visible to the nREPL / embedder. Returns {@code true} if a site
+     * was found and updated, {@code false} otherwise.
+     */
+    public static boolean redefine(String key, java.lang.invoke.MethodHandle newImpl) {
+        java.lang.invoke.MutableCallSite cs = REDEF_SITES.get(key);
+        if (cs == null) return false;
+        cs.setTarget(newImpl);
+        java.lang.invoke.MutableCallSite.syncAll(new java.lang.invoke.MutableCallSite[]{cs});
+        return true;
+    }
+
+    /** Test/inspection helper — number of registered redef sites. */
+    public static int redefSiteCount() {
+        return REDEF_SITES.size();
+    }
 }

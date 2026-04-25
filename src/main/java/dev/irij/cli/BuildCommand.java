@@ -52,16 +52,18 @@ public final class BuildCommand {
     public static void run(String[] args) throws IOException {
         Path projectRoot = Path.of("").toAbsolutePath();
         Mode mode = parseMode(args);
+        boolean directLinking = parseDirectLinking(args);
         String entryPoint = findEntryPoint(projectRoot, args);
         Path outputJar = resolveOutputPath(args, entryPoint);
 
         System.out.println("Building Irij application...");
         System.out.println("  mode:   " + modeLabel(mode));
+        if (directLinking) System.out.println("  link:   direct (no hot-redef)");
         System.out.println("  entry:  " + entryPoint);
         System.out.println("  output: " + outputJar);
 
         if (mode != Mode.INTERP) {
-            buildBytecodeJar(projectRoot, entryPoint, outputJar, mode);
+            buildBytecodeJar(projectRoot, entryPoint, outputJar, mode, directLinking);
             long sizeKbBc = Files.size(outputJar) / 1024;
             System.out.println();
             System.out.println("Built: " + outputJar + " (" + sizeKbBc + " KB)");
@@ -270,6 +272,16 @@ public final class BuildCommand {
         }
     }
 
+    // ── --direct-linking parsing ────────────────────────────────────────
+
+    private static boolean parseDirectLinking(String[] args) {
+        for (String a : args) {
+            if (a.equals("--direct-linking") || a.equals("--direct-linking=true")) return true;
+            if (a.equals("--direct-linking=false")) return false;
+        }
+        return false; // default: hot-redef enabled
+    }
+
     // ── --mode parsing ──────────────────────────────────────────────────
 
     private static Mode parseMode(String[] args) {
@@ -306,12 +318,14 @@ public final class BuildCommand {
     // ── Bytecode-build path ─────────────────────────────────────────────
 
     private static void buildBytecodeJar(Path projectRoot, String entryPoint,
-                                          Path outputJar, Mode mode) throws IOException {
+                                          Path outputJar, Mode mode,
+                                          boolean directLinking) throws IOException {
         CompileOptions opts = switch (mode) {
             case BYTECODE_THREADED -> CompileOptions.threaded();
             case BYTECODE_SM -> CompileOptions.stateMachine();
             default -> CompileOptions.defaults();
         };
+        opts = opts.withDirectLinking(directLinking);
 
         Path entryFile = projectRoot.resolve(entryPoint);
         byte[] classBytes;
