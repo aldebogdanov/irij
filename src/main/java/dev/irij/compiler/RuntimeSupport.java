@@ -518,6 +518,36 @@ public final class RuntimeSupport {
     }
 
     /**
+     * Tail-resume sentinel — thrown by the synthesised {@code resumeFn} when
+     * a clause invokes {@code resume v} so the dispatch loop unwinds the
+     * clause's JVM frames and continues iteratively. Pooled, stack-trace-free.
+     *
+     * <p><b>Semantic note:</b> idiomatic Irij clauses put {@code resume} in
+     * tail position ({@code "stmt; stmt; resume v"}). For those, this throw
+     * is purely a control-flow shortcut and behaviour is unchanged. For
+     * non-tail clauses ({@code "resume v; postStmt"}) the trampoline causes
+     * post-resume statements to be skipped — a deliberate trade-off so that
+     * tight perform-loops scale beyond the JVM stack. The same shape can be
+     * expressed by moving post-resume code outside the clause.
+     */
+    public static final class TailResume extends RuntimeException {
+        public Object value;
+
+        private TailResume() { super(null, null, false, false); }
+
+        private static final ThreadLocal<TailResume> POOL =
+                ThreadLocal.withInitial(TailResume::new);
+
+        public static TailResume of(Object v) {
+            TailResume r = POOL.get();
+            r.value = v;
+            return r;
+        }
+
+        @Override public synchronized Throwable fillInStackTrace() { return this; }
+    }
+
+    /**
      * State-machine runtime for {@code with handler body} — parallel to
      * {@link #runWith}. Not yet selected by the emitter; invoked directly
      * by tests (step 1) and by emitted code in later steps.
@@ -551,71 +581,93 @@ public final class RuntimeSupport {
             throw new dev.irij.interpreter.IrijRuntimeError(
                     "with requires a handler, got " + typeTag(handlerObj));
         }
-        try {
-            return k.resume(null);
-        } catch (PerformSignal s) {
-            return dispatchSM(hs, s);
-        }
+        return dispatchLoopSM(hs, k);
     }
 
     /**
-     * Dispatch a signal across a handler stack; innermost-first search so a
-     * later-composed handler shadows an earlier one for the same effect.
-     * On resume, re-enters the body with the SAME handler stack so signals
-     * from subsequent ops (any effect in the stack) are caught correctly.
+     * Trampolined dispatch loop — runs the body to completion under a stack
+     * of SM handlers without growing the JVM stack per {@code perform}.
+     *
+     * <p>Each iteration enters the body via {@code k.resume(v)}. If it
+     * returns, the body finished and the value bubbles out. If it throws
+     * {@link PerformSignal}, look up the matching handler innermost-first;
+     * the synthesised {@code resumeFn} unwinds the clause via
+     * {@link TailResume} so the loop re-enters with the resume value rather
+     * than via a recursive JVM call.
+     *
+     * <p>Bridges to threaded outer {@code with}: if no SM handler matches,
+     * walk {@link dev.irij.interpreter.EffectSystem#STACK}; if a threaded
+     * outer handles this effect, route via {@code fireOp} and continue the
+     * loop with the result.
      */
-    private static Object dispatchSM(java.util.List<CompiledHandler> hs, PerformSignal s) {
-        CompiledHandler h = null;
-        for (int i = hs.size() - 1; i >= 0; i--) {
-            if (hs.get(i).effectName.equals(s.effectName)) { h = hs.get(i); break; }
-        }
-        if (h == null) {
-            // No SM handler matches. Step 8 bridge: if a threaded outer
-            // `with` has installed a HandlerContext on EffectSystem.STACK
-            // for this effect, route through the threaded protocol and
-            // resume the SM continuation with the result.
-            var stack = dev.irij.interpreter.EffectSystem.STACK.get();
-            for (var ctx : stack) {
-                if (ctx.effectName().equals(s.effectName)) {
-                    Object v = dev.irij.interpreter.EffectSystem.fireOp(
-                            s.effectName, s.opName, java.util.Arrays.asList(s.args));
-                    try {
-                        return s.continuation.resume(v);
-                    } catch (PerformSignal next) {
-                        return dispatchSM(hs, next);
+    private static Object dispatchLoopSM(java.util.List<CompiledHandler> hs,
+                                         IrijContinuation k) {
+        Object resumeArg = null;
+        boolean firstEntry = true;
+        while (true) {
+            PerformSignal sig;
+            try {
+                Object result = firstEntry ? k.resume(null) : k.resume(resumeArg);
+                return result; // body finished
+            } catch (PerformSignal s) {
+                sig = s;
+            }
+            firstEntry = false;
+
+            // Find the innermost matching SM handler.
+            CompiledHandler h = null;
+            for (int i = hs.size() - 1; i >= 0; i--) {
+                if (hs.get(i).effectName.equals(sig.effectName)) { h = hs.get(i); break; }
+            }
+            if (h == null) {
+                // Bridge to threaded outer (EffectSystem.STACK) before propagating.
+                boolean bridged = false;
+                var stack = dev.irij.interpreter.EffectSystem.STACK.get();
+                for (var ctx : stack) {
+                    if (ctx.effectName().equals(sig.effectName)) {
+                        resumeArg = dev.irij.interpreter.EffectSystem.fireOp(
+                                sig.effectName, sig.opName,
+                                java.util.Arrays.asList(sig.args));
+                        bridged = true;
+                        break;
                     }
                 }
+                if (bridged) continue; // re-enter k.resume with bridged value
+                throw sig;             // unhandled by either chain
             }
-            // Otherwise propagate to an outer SM `with` (or top).
-            throw s;
-        }
-        IrijFn clause = h.clauses.get(s.opName);
-        if (clause == null) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
-                    "Handler " + h.name + " has no clause for " + s.opName);
-        }
-        final IrijContinuation k = s.continuation;
-        final var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
 
-        IrijFn resumeFn = (resumeArgs) -> {
-            if (!resumed.compareAndSet(false, true)) {
+            IrijFn clause = h.clauses.get(sig.opName);
+            if (clause == null) {
                 throw new dev.irij.interpreter.IrijRuntimeError(
-                        "resume called twice (one-shot continuation)");
+                        "Handler " + h.name + " has no clause for " + sig.opName);
             }
-            Object v = resumeArgs.length > 0
-                    ? resumeArgs[0]
-                    : dev.irij.interpreter.Values.UNIT;
-            try {
-                return k.resume(v);
-            } catch (PerformSignal next) {
-                return dispatchSM(hs, next);
-            }
-        };
 
-        Object[] clauseArgs = new Object[s.args.length + 1];
-        System.arraycopy(s.args, 0, clauseArgs, 0, s.args.length);
-        clauseArgs[s.args.length] = resumeFn;
-        return clause.apply(clauseArgs);
+            final var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
+            IrijFn resumeFn = (resumeArgs) -> {
+                if (!resumed.compareAndSet(false, true)) {
+                    throw new dev.irij.interpreter.IrijRuntimeError(
+                            "resume called twice (one-shot continuation)");
+                }
+                Object v = resumeArgs.length > 0
+                        ? resumeArgs[0]
+                        : dev.irij.interpreter.Values.UNIT;
+                throw TailResume.of(v); // unwinds clause to dispatch loop
+            };
+
+            Object[] clauseArgs = new Object[sig.args.length + 1];
+            System.arraycopy(sig.args, 0, clauseArgs, 0, sig.args.length);
+            clauseArgs[sig.args.length] = resumeFn;
+
+            try {
+                Object clauseReturn = clause.apply(clauseArgs);
+                // Clause returned without calling resume — abort path; this
+                // value is what the `with` evaluates to.
+                return clauseReturn;
+            } catch (TailResume tr) {
+                resumeArg = tr.value;
+                // Loop iterates: re-enter k.resume(resumeArg).
+            }
+        }
     }
 
     // ── Concurrency ─────────────────────────────────────────────────────

@@ -77,17 +77,24 @@ class StateMachineRuntimeTest {
         assertEquals(0, postResume.get(), "body must NOT have continued");
     }
 
-    @Test void one_shot_resume_rejects_second_call() {
+    @Test void resume_unwinds_clause_via_tail_resume() {
+        // Trampoline semantics: the synthesised resumeFn throws TailResume
+        // to unwind the clause's JVM frames so the dispatch loop iterates
+        // without growing the stack per perform. Statements after the first
+        // resume in a clause therefore don't execute — `with` evaluates to
+        // the body's eventual value, not the clause's tail-return.
+        AtomicInteger postClauseStmts = new AtomicInteger(0);
         IrijFn logClause = args -> {
             IrijFn resume = (IrijFn) args[1];
-            resume.apply(new Object[]{});
-            assertThrows(RuntimeException.class,
-                    () -> resume.apply(new Object[]{}));
-            return "done";
+            resume.apply(new Object[]{}); // unwinds via TailResume
+            postClauseStmts.incrementAndGet(); // unreachable
+            return "ignored";
         };
         Object result = RuntimeSupport.runWithSM(
                 logHandler(logClause), logThenReturn(new AtomicInteger()));
-        assertEquals("done", result);
+        assertEquals(42L, result);
+        assertEquals(0, postClauseStmts.get(),
+                "post-resume clause stmts must not execute under trampoline");
     }
 
     @Test void multiple_sequential_performs_loop_through_handler() {

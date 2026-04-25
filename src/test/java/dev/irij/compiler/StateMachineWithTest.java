@@ -665,6 +665,33 @@ class StateMachineWithTest {
         assertEquals(nl("log: from-fiber", "log: from-main"), runSM(src));
     }
 
+    // ── Trampoline: deep perform-loops don't blow the JVM stack ──────
+
+    @Test void deep_perform_loop_no_stackoverflow() throws Exception {
+        // 1000 sequential top-level performs — would have blown the stack
+        // before the trampoline (recursive resumeFn → k.resume → throw →
+        // dispatchSM grew ~3 JVM frames per iteration). Capped below the
+        // JVM 64KB method-size limit (each state adds ~30 bytes).
+        int n = 1000;
+        StringBuilder src = new StringBuilder();
+        src.append("effect Counter\n");
+        src.append("  bump :: () -> ()\n");
+        src.append("  get-count :: () -> Int\n");
+        src.append("handler accumulator :: Counter\n");
+        src.append("  state :! 0\n");
+        src.append("  bump () =>\n");
+        src.append("    state <- state + 1\n");
+        src.append("    resume ()\n");
+        src.append("  get-count () => resume state\n");
+        src.append("fn run\n");
+        src.append("  _ =>\n");
+        src.append("    with accumulator\n");
+        for (int i = 0; i < n; i++) src.append("      bump ()\n");
+        src.append("      get-count ()\n");
+        src.append("println (to-str (run ()))\n");
+        assertEquals(nl(String.valueOf(n)), runSM(src.toString()));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail
