@@ -571,7 +571,15 @@ public final class RuntimeSupport {
         return runWithSM(handlerObj, new IrijContinuation(step, nFields));
     }
 
-    public static Object runWithSM(Object handlerObj, IrijContinuation k) {
+    /**
+     * Re-entrant {@code runWithSM}: if {@code k} has already partly executed
+     * (state != 0), thread {@code reentryValue} as the resume value rather
+     * than starting fresh with null. Used by nested-SM-`with` lowering so
+     * an outer-handled signal can hand its resume value back into the inner
+     * body's saved continuation.
+     */
+    public static Object runWithSM(Object handlerObj, IrijContinuation k,
+                                    Object reentryValue) {
         java.util.List<CompiledHandler> hs;
         if (handlerObj instanceof CompiledComposedHandler cc) {
             hs = cc.handlers;
@@ -581,7 +589,29 @@ public final class RuntimeSupport {
             throw new dev.irij.interpreter.IrijRuntimeError(
                     "with requires a handler, got " + typeTag(handlerObj));
         }
-        return dispatchLoopSM(hs, k);
+        return dispatchLoopSM(hs, k, reentryValue);
+    }
+
+    /**
+     * Helper used by nested-with emission: alloc-or-fetch the inner
+     * continuation from {@code kOuter.fields[slot]}. First call initialises
+     * the slot with a fresh {@link IrijContinuation}; subsequent calls
+     * (after the outer trampoline resumed past an inner-leaked perform)
+     * return the same continuation with its state preserved.
+     */
+    public static IrijContinuation getOrAllocInnerCont(IrijContinuation kOuter,
+                                                       int slot,
+                                                       IrijFn step,
+                                                       int nFields) {
+        Object existing = kOuter.fields[slot];
+        if (existing != null) return (IrijContinuation) existing;
+        IrijContinuation kInner = new IrijContinuation(step, nFields);
+        kOuter.fields[slot] = kInner;
+        return kInner;
+    }
+
+    public static Object runWithSM(Object handlerObj, IrijContinuation k) {
+        return runWithSM(handlerObj, k, null);
     }
 
     /**
@@ -601,18 +631,20 @@ public final class RuntimeSupport {
      * loop with the result.
      */
     private static Object dispatchLoopSM(java.util.List<CompiledHandler> hs,
-                                         IrijContinuation k) {
-        Object resumeArg = null;
-        boolean firstEntry = true;
+                                         IrijContinuation k,
+                                         Object reentryValue) {
+        // First iteration: pass null if the continuation hasn't yet started
+        // (state == 0); otherwise thread the externally-supplied reentry
+        // value (used by nested-with re-entry).
+        Object resumeArg = (k.state == 0) ? null : reentryValue;
         while (true) {
             PerformSignal sig;
             try {
-                Object result = firstEntry ? k.resume(null) : k.resume(resumeArg);
+                Object result = k.resume(resumeArg);
                 return result; // body finished
             } catch (PerformSignal s) {
                 sig = s;
             }
-            firstEntry = false;
 
             // Find the innermost matching SM handler.
             CompiledHandler h = null;

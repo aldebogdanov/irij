@@ -692,6 +692,42 @@ class StateMachineWithTest {
         assertEquals(nl(String.valueOf(n)), runSM(src.toString()));
     }
 
+    // ── Native nested SM — outer resume threads value into saved kInner ─
+
+    @Test void nested_sm_outer_resume_into_kInner_preserves_state() throws Exception {
+        // Cross-handler choreography under DUAL SM (no threaded fallback):
+        //   greet (inner, friendly)   -> resume "hi-A"
+        //   log "between" (outer, echo-log) -> escapes inner trampoline,
+        //                                       caught by outer; outer resume
+        //                                       must thread value INTO the
+        //                                       saved inner continuation
+        //   greet (inner) -> resume "hi-B"
+        // Verifies kInner persists across outer-resume cycle and re-entry
+        // resumes inner body where it left off.
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            effect Greet
+              greet :: Str -> Str
+            handler echo-log :: Logger
+              log msg =>
+                println ("log: " ++ msg)
+                resume ()
+            handler friendly :: Greet
+              greet name => resume ("hi-" ++ name)
+            fn run
+              _ =>
+                with echo-log
+                  with friendly
+                    a := greet "A"
+                    log "between"
+                    b := greet "B"
+                    println (a ++ " / " ++ b)
+            run ()
+            """;
+        assertEquals(nl("log: between", "hi-A / hi-B"), runSM(src));
+    }
+
     @Test void abort_path_returns_clause_value() throws Exception {
         String src = """
             effect Fail

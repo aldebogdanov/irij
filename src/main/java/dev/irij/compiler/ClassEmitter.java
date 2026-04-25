@@ -1145,13 +1145,29 @@ final class ClassEmitter implements Opcodes {
     private static final String CONT_DESC = "Ldev/irij/compiler/RuntimeSupport$IrijContinuation;";
     private static final String PERF_SIGNAL = "dev/irij/compiler/RuntimeSupport$PerformSignal";
 
-    /** One chunk of a SM body: pure stmts then (optional) terminating op call.
-     *  opName is null iff this is the final segment (no trailing op). */
+    /** One chunk of a SM body. Three flavours:
+     *  - Trailing pure: opName == null && innerWith == null
+     *  - Op terminator: opName != null (perform yields to enclosing handler)
+     *  - Nested-with terminator: innerWith != null (run a nested `with` whose
+     *    own performs may escape and be caught by the OUTER trampoline; the
+     *    inner continuation lives in the outer's k.fields[innerSlot] so
+     *    state survives across the outer resume cycle).
+     */
     private record Segment(
             List<Stmt> pureStmts,
             String opName,
             List<Expr> opArgs,
-            String bindName) {}
+            String bindName,
+            Stmt.With innerWith,
+            int innerSlot,
+            String innerBind) {
+
+        /** Pure / op-terminated segment (no nested with). */
+        public Segment(List<Stmt> pureStmts, String opName,
+                       List<Expr> opArgs, String bindName) {
+            this(pureStmts, opName, opArgs, bindName, null, -1, null);
+        }
+    }
 
     private sealed interface WithBodyShape {
         record Sequence(List<Segment> segments, List<String> liftedLocals)
@@ -1452,30 +1468,54 @@ final class ClassEmitter implements Opcodes {
                     b.lastValueBlock);
         }
 
-        // Partition into segments at each top-level op call.
+        // Partition into segments at each top-level op call OR nested `with`.
+        // Nested `with` becomes its own resumable segment whose continuation
+        // is persisted in k.fields[innerSlot] so its state survives across
+        // outer-resume cycles. Slot indices are assigned post-hoc below.
         List<Segment> segments = new ArrayList<>();
         List<Stmt> cur = new ArrayList<>();
         int opCount = 0;
+        int withCount = 0;
         int firstOpIdx = -1;
         for (int i = 0; i < body.size(); i++) {
             Stmt s = body.get(i);
             TopLevelOp tl = extractTopLevelOp(s);
             if (tl != null) {
-                if (opCount == 0) firstOpIdx = i;
+                if (opCount == 0 && withCount == 0) firstOpIdx = i;
                 segments.add(new Segment(new ArrayList<>(cur), tl.opName, tl.args, tl.bindName));
                 cur.clear();
                 opCount++;
-            } else {
-                if (containsOpCall(s)) return new WithBodyShape.Unsupported();
-                cur.add(s);
+                continue;
             }
+            if (s instanceof Stmt.With w) {
+                // Inner with must itself be SM-eligible for native nesting.
+                // If not, fall back so the outer goes threaded too.
+                if (!smCanHandle(w.handler())) return new WithBodyShape.Unsupported();
+                if (w.onFailure() != null && !w.onFailure().isEmpty()) {
+                    // on-failure inside nested SM not yet supported.
+                    return new WithBodyShape.Unsupported();
+                }
+                List<Stmt> innerBody = new ANormalizer().normalize(w.body());
+                WithBodyShape innerShape = classifyWithBody(innerBody);
+                if (innerShape instanceof WithBodyShape.Unsupported) {
+                    return new WithBodyShape.Unsupported();
+                }
+                segments.add(new Segment(
+                        new ArrayList<>(cur), null, null, null,
+                        w, /*slot — assigned later*/ -1, /*innerBind*/ null));
+                cur.clear();
+                withCount++;
+                continue;
+            }
+            if (containsOpCall(s)) return new WithBodyShape.Unsupported();
+            cur.add(s);
         }
         segments.add(new Segment(cur, null, null, null));
 
-        if (opCount == 0) return new WithBodyShape.Pure();
+        if (opCount == 0 && withCount == 0) return new WithBodyShape.Pure();
 
-        // Fast path: single op, no pre-op binds → SingleOp (no lifting needed).
-        if (opCount == 1) {
+        // Fast path: single op, no pre-op binds, no nested-with → SingleOp.
+        if (opCount == 1 && withCount == 0) {
             boolean anyPreBind = false;
             for (Stmt s : segments.get(0).pureStmts()) {
                 if (s instanceof Stmt.Bind || s instanceof Stmt.MutBind) {
@@ -1494,6 +1534,9 @@ final class ClassEmitter implements Opcodes {
         //   - Every Simple-Bind in any non-final segment
         //   - Every resume-bind (Segment.bindName) of non-final segments
         //   - Destructure/MutBind in non-final segments → Unsupported (3a scope)
+        // Then assign slots for inner-with continuations beyond the named
+        // lifted entries (synthetic "$with$N" names so emitVarLoad never
+        // resolves to them).
         List<String> lifted = new ArrayList<>();
         Set<String> seen = new HashSet<>();
         for (int i = 0; i < segments.size(); i++) {
@@ -1510,8 +1553,21 @@ final class ClassEmitter implements Opcodes {
                     return new WithBodyShape.Unsupported();
                 }
             }
-            if (nonFinal && seg.bindName() != null && seen.add(seg.bindName())) {
+            if (nonFinal && seg.opName() != null && seg.bindName() != null
+                    && seen.add(seg.bindName())) {
                 lifted.add(seg.bindName());
+            }
+        }
+        // Assign nested-with slots and rebuild segments with concrete indices.
+        int withSlotCounter = 0;
+        for (int i = 0; i < segments.size(); i++) {
+            Segment seg = segments.get(i);
+            if (seg.innerWith() != null) {
+                int slot = lifted.size() + withSlotCounter++;
+                segments.set(i, new Segment(
+                        seg.pureStmts(), null, null, null,
+                        seg.innerWith(), slot, seg.innerBind()));
+                lifted.add("$with$" + slot); // synthetic — emitVarLoad never sees it
             }
         }
         return new WithBodyShape.Sequence(segments, lifted);
@@ -1819,11 +1875,13 @@ final class ClassEmitter implements Opcodes {
                 sm.visitLabel(stateLabels[i]);
                 Segment seg = seq.segments().get(i);
 
-                // On re-entry (i>0): if previous segment's op had a resume-bind,
-                // store vSlot into k.fields[idx].
+                // On re-entry (i>0): if previous segment was an op-with-bind,
+                // store vSlot into k.fields[bindIdx]. Inner-with segments
+                // don't yield a resume-bind here — their value is consumed
+                // inline by the runWithSM call site, not via vSlot.
                 if (i > 0) {
                     Segment prev = seq.segments().get(i - 1);
-                    if (prev.bindName() != null) {
+                    if (prev.opName() != null && prev.bindName() != null) {
                         Integer idx = lifted.get(prev.bindName());
                         if (idx != null) {
                             sm.visitVarInsn(ALOAD, kSlot);
@@ -1835,19 +1893,39 @@ final class ClassEmitter implements Opcodes {
                     }
                 }
 
-                if (seg.opName() == null) {
+                if (seg.innerWith() != null) {
+                    // Nested-with segment: run the inner `with` as a state of
+                    // the outer SM. The inner continuation is persisted in
+                    // the outer's k.fields[innerSlot]; on outer-resume after
+                    // an inner-leaked PerformSignal, this state re-executes
+                    // and runWithSM detects kInner.state != 0 to resume the
+                    // inner body where it left off (with vSlot threaded down).
+                    emitBlockStmtsAsStatements(seg.pureStmts(), sm, inner);
+                    emitInnerWithCall(seg, sm, inner, kSlot, vSlot);
+                    // Stash the inner-with's value in vSlot so a trailing
+                    // empty segment can ARETURN it (analogous to bare-op
+                    // tail). Subsequent op states overwrite vSlot anyway.
+                    sm.visitVarInsn(ASTORE, vSlot);
+                    // Bump state and fall through to the next state's body.
+                    sm.visitVarInsn(ALOAD, kSlot);
+                    pushIconst(sm, i + 1);
+                    sm.visitFieldInsn(PUTFIELD, CONT, "state", "I");
+                    sm.visitJumpInsn(GOTO, stateLabels[i + 1]);
+                } else if (seg.opName() == null) {
                     // Final segment: emit pure stmts with last as return value.
-                    // Special case: body ends with a bare op call (no pureStmts
-                    // after it, prev seg has no bind) — the resume value of the
-                    // previous op IS the body's final value. Return vSlot.
-                    if (seg.pureStmts().isEmpty() && i > 0) {
+                    // Special case: body ends with a bare op call OR a nested
+                    // with — vSlot holds the resume / inner value, return it.
+                    boolean prevYieldsValue = i > 0 && (
+                            seq.segments().get(i - 1).opName() != null
+                            || seq.segments().get(i - 1).innerWith() != null);
+                    if (seg.pureStmts().isEmpty() && prevYieldsValue) {
                         sm.visitVarInsn(ALOAD, vSlot);
                         sm.visitInsn(ARETURN);
                     } else {
                         emitBlockStmtsReturning(seg.pureStmts(), sm, inner);
                     }
                 } else {
-                    // Intermediate: pure stmts as statements, bump state, throw signal.
+                    // Intermediate op: pure stmts as stmts, bump state, throw.
                     emitBlockStmtsAsStatements(seg.pureStmts(), sm, inner);
                     sm.visitVarInsn(ALOAD, kSlot);
                     pushIconst(sm, i + 1);
@@ -1883,6 +1961,49 @@ final class ClassEmitter implements Opcodes {
             currentLiftedLocals = savedLifted;
             currentKSlot = savedKSlot;
         }
+    }
+
+    /**
+     * Emit a nested `with` call as a state of the outer SM: alloc-or-fetch
+     * the inner continuation from k.fields[innerSlot], compile the inner
+     * step, and call the 3-arg {@code runWithSM(handler, kInner, vSlot)}
+     * which thread the outer's resume value down on re-entry.
+     *
+     * <p>Result: inner-with's value left on the JVM operand stack. Caller
+     * is responsible for either consuming or POP'ing it.
+     */
+    private void emitInnerWithCall(Segment seg, MethodVisitor sm, Locals inner,
+                                    int kSlot, int vSlot) {
+        Stmt.With w = seg.innerWith();
+        List<Stmt> innerBody = new ANormalizer().normalize(w.body());
+        WithBodyShape innerShape = classifyWithBody(innerBody);
+        int innerNFields = switch (innerShape) {
+            case WithBodyShape.Sequence s -> s.liftedLocals().size();
+            case WithBodyShape.EffIR e -> e.liftedLocals().size();
+            default -> 0;
+        };
+
+        // Push: handler, kInner, resumeValue → call runWithSM(Object, IrijContinuation, Object)
+        emitExpr(w.handler(), sm, inner);
+
+        // RT.getOrAllocInnerCont(kOuter, slot, step, nFields) → kInner
+        sm.visitVarInsn(ALOAD, kSlot);
+        pushIconst(sm, seg.innerSlot());
+        // Free vars of inner body that resolve to outer locals = step captures.
+        Set<String> bound = new HashSet<>();
+        List<String> captures = new ArrayList<>();
+        for (Stmt s : innerBody) {
+            collectFreeVarsStmt(s, bound, inner, captures, new HashSet<>());
+        }
+        emitSMStep(innerShape, innerBody, captures, sm, inner);
+        pushIconst(sm, innerNFields);
+        sm.visitMethodInsn(INVOKESTATIC, RT, "getOrAllocInnerCont",
+                "(" + CONT_DESC + "IL" + IRIJ_FN + ";I)" + CONT_DESC, false);
+
+        sm.visitVarInsn(ALOAD, vSlot);
+        sm.visitMethodInsn(INVOKESTATIC, RT, "runWithSM",
+                "(Ljava/lang/Object;" + CONT_DESC + "Ljava/lang/Object;)Ljava/lang/Object;",
+                false);
     }
 
     /** Emit an EffIR CFG: one tableswitch entry per block (for resumption),
