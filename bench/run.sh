@@ -3,7 +3,8 @@
 #
 # Runs each bench (subdirs of bench/ with main.{irj,clj,py}) across:
 #   irij-interp             — `irij build --mode=interp`
-#   irij-bytecode-threaded  — `irij build --mode=bytecode-threaded`
+#   irij-bytecode-threaded  — `irij build --mode=bytecode-threaded` (14c.2)
+#   irij-bytecode-sm        — `irij build --mode=bytecode-sm`       (14c.3)
 #   clojure                 — `clojure -M main.clj`    (skipped if not on PATH)
 #   python                  — `python3 main.py`        (skipped if not on PATH)
 #
@@ -113,7 +114,7 @@ for bench in "${BENCHES[@]}"; do
     echo "── $bench ───────────────────────────────────────"
 
     if [[ -f "$ROOT/$bench/main.irj" ]]; then
-        for mode in interp bytecode-threaded; do
+        for mode in interp bytecode-threaded bytecode-sm; do
             jar="$(build_irij_jar "$bench" "$mode")"
             run_variant "irij-$mode" \
                 java --enable-native-access=ALL-UNNAMED -jar "$jar"

@@ -1,0 +1,75 @@
+;; Effect-heavy micro-benchmark: many `perform`s in a flat `with` body.
+;;
+;; Stresses per-`perform` cost. Each `bump` is a top-level stmt in the
+;; with body so SM lowering classifies each as its own segment (avoids
+;; the helper-fn limitation where performs nested in non-SM fns cause
+;; resume to re-run the whole segment — needs tier-c continuation-style
+;; clauses, deferred from 14c.3).
+
+effect Counter
+  bump :: () -> ()
+  get-count :: () -> Int
+
+handler accumulator :: Counter
+  state :! 0
+  bump () =>
+    state <- state + 1
+    resume ()
+  get-count () => resume state
+
+fn run
+  _ =>
+    with accumulator
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      bump ()
+      get-count ()
+
+println (to-str (run ()))
