@@ -692,6 +692,32 @@ class StateMachineWithTest {
         assertEquals(nl(String.valueOf(n)), runSM(src.toString()));
     }
 
+    // ── Native nested SM — on-failure inside inner with ──────────────
+
+    @Test void nested_inner_with_on_failure_native() throws Exception {
+        // Inner with has on-failure; outer is also SM. Body in inner
+        // with throws via `error` — caught by inner's on-failure block.
+        // Native nested-SM emit wraps the inner runWithSM call in a
+        // try/catch that re-throws PerformSignal/TailResume so SM
+        // control flow keeps working past the on-failure layer.
+        StringBuilder src = new StringBuilder();
+        src.append("effect Logger\n");
+        src.append("  log :: Str -> ()\n");
+        src.append("handler quiet-log :: Logger\n");
+        src.append("  log msg => resume ()\n");
+        src.append("fn run\n");
+        src.append("  _ =>\n");
+        src.append("    with quiet-log\n");
+        src.append("      with quiet-log\n");
+        src.append("        log \"before\"\n");
+        src.append("        error \"boom\"\n");
+        src.append("        \"never\"\n");
+        src.append("      on-failure\n");
+        src.append("        println (\"recovered: \" ++ error)\n");
+        src.append("run ()\n");
+        assertEquals(nl("recovered: boom"), runSM(src.toString()));
+    }
+
     // ── Native nested SM — outer resume threads value into saved kInner ─
 
     @Test void nested_sm_outer_resume_into_kInner_preserves_state() throws Exception {

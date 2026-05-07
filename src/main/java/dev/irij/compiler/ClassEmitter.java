@@ -1144,6 +1144,7 @@ final class ClassEmitter implements Opcodes {
     private static final String CONT = "dev/irij/compiler/RuntimeSupport$IrijContinuation";
     private static final String CONT_DESC = "Ldev/irij/compiler/RuntimeSupport$IrijContinuation;";
     private static final String PERF_SIGNAL = "dev/irij/compiler/RuntimeSupport$PerformSignal";
+    private static final String TAIL_RESUME = "dev/irij/compiler/RuntimeSupport$TailResume";
 
     /** One chunk of a SM body. Three flavours:
      *  - Trailing pure: opName == null && innerWith == null
@@ -1491,10 +1492,6 @@ final class ClassEmitter implements Opcodes {
                 // Inner with must itself be SM-eligible for native nesting.
                 // If not, fall back so the outer goes threaded too.
                 if (!smCanHandle(w.handler())) return new WithBodyShape.Unsupported();
-                if (w.onFailure() != null && !w.onFailure().isEmpty()) {
-                    // on-failure inside nested SM not yet supported.
-                    return new WithBodyShape.Unsupported();
-                }
                 List<Stmt> innerBody = new ANormalizer().normalize(w.body());
                 WithBodyShape innerShape = classifyWithBody(innerBody);
                 if (innerShape instanceof WithBodyShape.Unsupported) {
@@ -1975,6 +1972,72 @@ final class ClassEmitter implements Opcodes {
     private void emitInnerWithCall(Segment seg, MethodVisitor sm, Locals inner,
                                     int kSlot, int vSlot) {
         Stmt.With w = seg.innerWith();
+        boolean hasOnFailure = w.onFailure() != null && !w.onFailure().isEmpty();
+
+        Label tryStart = new Label();
+        Label tryEnd = new Label();
+        Label catchL = new Label();
+        Label end = new Label();
+        if (hasOnFailure) {
+            // RuntimeException catch — but PerformSignal/TailResume must
+            // propagate to the outer trampoline. Filtered inside the
+            // catch block by re-throwing the SM-control exceptions.
+            sm.visitTryCatchBlock(tryStart, tryEnd, catchL, "java/lang/RuntimeException");
+            sm.visitLabel(tryStart);
+        }
+
+        emitInnerWithCallCore(w, seg, sm, inner, kSlot, vSlot);
+
+        if (hasOnFailure) {
+            sm.visitLabel(tryEnd);
+            sm.visitJumpInsn(GOTO, end);
+
+            sm.visitLabel(catchL);
+            int teSlot = inner.allocateAnon();
+            sm.visitVarInsn(ASTORE, teSlot);
+
+            // Re-throw PerformSignal — it's not a failure, it's a yield.
+            sm.visitVarInsn(ALOAD, teSlot);
+            sm.visitTypeInsn(INSTANCEOF, PERF_SIGNAL);
+            Label notPerform = new Label();
+            sm.visitJumpInsn(IFEQ, notPerform);
+            sm.visitVarInsn(ALOAD, teSlot);
+            sm.visitInsn(ATHROW);
+            sm.visitLabel(notPerform);
+
+            // Re-throw TailResume — it targets a specific dispatch loop.
+            sm.visitVarInsn(ALOAD, teSlot);
+            sm.visitTypeInsn(INSTANCEOF, TAIL_RESUME);
+            Label notTailResume = new Label();
+            sm.visitJumpInsn(IFEQ, notTailResume);
+            sm.visitVarInsn(ALOAD, teSlot);
+            sm.visitInsn(ATHROW);
+            sm.visitLabel(notTailResume);
+
+            // Genuine failure → run on-failure block.
+            Locals ofLocals = inner.childScope();
+            int errorSlot = ofLocals.allocate("error");
+            sm.visitVarInsn(ALOAD, teSlot);
+            sm.visitMethodInsn(INVOKESTATIC, RT, "errorMessage",
+                    "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
+            sm.visitVarInsn(ASTORE, errorSlot);
+            List<Stmt> of = w.onFailure();
+            for (int i = 0; i < of.size() - 1; i++) emitStmt(of.get(i), sm, ofLocals);
+            Stmt last = of.get(of.size() - 1);
+            if (last instanceof Stmt.ExprStmt es) {
+                emitExpr(es.expr(), sm, ofLocals);
+            } else {
+                emitStmt(last, sm, ofLocals);
+                sm.visitInsn(ACONST_NULL);
+            }
+
+            sm.visitLabel(end);
+        }
+    }
+
+    /** Core emit of the inner runWithSM call (no on-failure wrap). */
+    private void emitInnerWithCallCore(Stmt.With w, Segment seg, MethodVisitor sm,
+                                        Locals inner, int kSlot, int vSlot) {
         List<Stmt> innerBody = new ANormalizer().normalize(w.body());
         WithBodyShape innerShape = classifyWithBody(innerBody);
         int innerNFields = switch (innerShape) {
@@ -1983,7 +2046,7 @@ final class ClassEmitter implements Opcodes {
             default -> 0;
         };
 
-        // Push: handler, kInner, resumeValue → call runWithSM(Object, IrijContinuation, Object)
+        // Push: handler, kInner, resumeValue → runWithSM(Object, IrijContinuation, Object)
         emitExpr(w.handler(), sm, inner);
 
         // RT.getOrAllocInnerCont(kOuter, slot, step, nFields) → kInner
