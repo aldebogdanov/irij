@@ -582,6 +582,21 @@ public final class RuntimeSupport {
     }
 
     /**
+     * Run a continuation with no own SM handlers — all of its performs
+     * fall through SM_STACK to enclosing SM frames (tier-c path: clause
+     * body runs as its own SM, but it doesn't define handlers — its
+     * own performs target the next-outer with).
+     */
+    public static Object runWithSMNoHs(IrijContinuation k) {
+        return dispatchLoopSM(java.util.List.of(), k, null);
+    }
+
+    /** Allocate a fresh continuation — emit-side helper. */
+    public static IrijContinuation newCont(IrijFn step, int nFields) {
+        return new IrijContinuation(step, nFields);
+    }
+
+    /**
      * Re-entrant {@code runWithSM}: if {@code k} has already partly executed
      * (state != 0), thread {@code reentryValue} as the resume value rather
      * than starting fresh with null. Used by nested-SM-`with` lowering so

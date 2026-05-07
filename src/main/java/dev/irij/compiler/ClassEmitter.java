@@ -876,8 +876,18 @@ final class ClassEmitter implements Opcodes {
             }
             clauseParams.add(new Pattern.VarPat("resume", null));
 
-            Expr.Lambda clauseLam = new Expr.Lambda(clauseParams, null, c.body(), null);
-            emitLambda(clauseLam, mv, locals);
+            // Tier-c: clause body performs a foreign effect. Compile body
+            // as an SM continuation so the foreign perform throws a
+            // PerformSignal that escapes to an enclosing SM frame.
+            boolean isTierC = exprPerformsForeignEffect(c.body(), h.effectName())
+                    && tierCClauseCompilable(c);
+
+            if (isTierC) {
+                emitTierCClauseLambda(c, clauseParams, mv, locals);
+            } else {
+                Expr.Lambda clauseLam = new Expr.Lambda(clauseParams, null, c.body(), null);
+                emitLambda(clauseLam, mv, locals);
+            }
 
             mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "put",
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
@@ -948,12 +958,41 @@ final class ClassEmitter implements Opcodes {
         for (String name : collectHandlerNames(handlerExpr)) {
             Decl.HandlerDecl hd = handlers.get(name);
             if (hd == null) return false; // unknown / dynamic — be conservative
-            if (hd.requiredEffects() != null && !hd.requiredEffects().isEmpty()) {
-                return false;
+            // Tier-c clauses (clause body performs foreign effects) are now
+            // natively supported via clause-as-SM compilation, but only if
+            // the body shape is SM-compilable.
+            for (var clause : hd.clauses()) {
+                if (exprPerformsForeignEffect(clause.body(), hd.effectName())) {
+                    if (!tierCClauseCompilable(clause)) return false;
+                }
             }
-            if (clausePerformsForeignEffect(hd)) return false;
         }
         return true;
+    }
+
+    /**
+     * Whether a tier-c clause body can be lowered to an SM step. v1 limits:
+     * Block-or-Expr body, Sequence shape post-classification, no nested
+     * `with` inside the clause.
+     */
+    private boolean tierCClauseCompilable(Decl.HandlerClause c) {
+        List<Stmt> stmts;
+        if (c.body() instanceof Expr.Block blk) {
+            stmts = new ArrayList<>(blk.stmts());
+        } else {
+            stmts = new ArrayList<>(List.of(new Stmt.ExprStmt(c.body(), null)));
+        }
+        try {
+            stmts = new ANormalizer().normalize(stmts);
+            WithBodyShape shape = classifyWithBody(stmts);
+            if (!(shape instanceof WithBodyShape.Sequence seq)) return false;
+            for (Segment s : seq.segments()) {
+                if (s.innerWith() != null) return false;
+            }
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private List<String> collectHandlerNames(Expr e) {
@@ -2342,6 +2381,133 @@ final class ClassEmitter implements Opcodes {
     }
 
     /** Emit a lambda literal: synthesize a static method + invokedynamic creating an IrijFn. */
+    /**
+     * Tier-c clause emit: clause body compiled as an SM step function so its
+     * own performs throw {@link RuntimeSupport#PerformSignal} (resumable),
+     * caught by the next-outer SM frame via {@code SM_STACK} fallback.
+     *
+     * <p>The wrapper IrijFn we push onto the operand stack receives
+     * {@code [opArgs..., resume]} when invoked, allocates a fresh
+     * {@code IrijContinuation} whose fields are pre-populated with the args
+     * and resume fn, and runs it via {@link RuntimeSupport#runWithSMNoHs}.
+     */
+    private void emitTierCClauseLambda(Decl.HandlerClause c,
+                                        List<Pattern> clauseParams,
+                                        MethodVisitor mv,
+                                        Locals outerLocals) {
+        // Param names from clauseParams (last is "resume"). Strip wildcards.
+        List<String> paramNames = new ArrayList<>();
+        for (Pattern p : clauseParams) {
+            paramNames.add(switch (p) {
+                case Pattern.VarPat v -> v.name();
+                case Pattern.WildcardPat __ -> "_";
+                default -> throw new IrijCompiler.CompileException(
+                        "tier-c clause: unsupported param pattern");
+            });
+        }
+        // paramNames.size() = nOpArgs + 1 (resume).
+        int nFieldsForArgs = paramNames.size();
+
+        // Body → stmts list
+        List<Stmt> stmts;
+        if (c.body() instanceof Expr.Block blk) {
+            stmts = new ArrayList<>(blk.stmts());
+        } else {
+            stmts = new ArrayList<>(List.of(new Stmt.ExprStmt(c.body(), null)));
+        }
+        stmts = new ANormalizer().normalize(stmts);
+        WithBodyShape shape = classifyWithBody(stmts);
+        if (!(shape instanceof WithBodyShape.Sequence seq)) {
+            throw new IrijCompiler.CompileException(
+                    "tier-c clause: only Sequence shape supported (v1)");
+        }
+
+        // Augmented lifted: paramNames + classifier-lifted. emitSMSequence
+        // uses currentLiftedLocals to route Var loads through k.fields[].
+        List<String> augLifted = new ArrayList<>(paramNames);
+        for (String n : seq.liftedLocals()) {
+            // Avoid clashes (shouldn't happen for fresh Bind names).
+            if (!augLifted.contains(n)) augLifted.add(n);
+        }
+        int totalNFields = augLifted.size();
+        WithBodyShape.Sequence augShape = new WithBodyShape.Sequence(
+                seq.segments(), augLifted);
+
+        // 1. Emit the step method.
+        int id = lambdaCounter++;
+        String stepName = "clauseStep$tierC$" + id;
+        String stepDesc = "([Ljava/lang/Object;)Ljava/lang/Object;";
+        MethodVisitor sm = classWriter.visitMethod(
+                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                stepName, stepDesc, null, null);
+        sm.visitCode();
+        Locals stepLocals = new Locals();
+        int argsSlot = stepLocals.allocateAnon();
+        int kSlot = stepLocals.allocateAnon();
+        int vSlot = stepLocals.allocateAnon();
+        sm.visitVarInsn(ALOAD, argsSlot); pushIconst(sm, 0); sm.visitInsn(AALOAD);
+        sm.visitTypeInsn(CHECKCAST, CONT); sm.visitVarInsn(ASTORE, kSlot);
+        sm.visitVarInsn(ALOAD, argsSlot); pushIconst(sm, 1); sm.visitInsn(AALOAD);
+        sm.visitVarInsn(ASTORE, vSlot);
+        emitSMSequence(augShape, sm, stepLocals, kSlot, vSlot);
+        sm.visitMaxs(0, 0); sm.visitEnd();
+
+        // 2. Emit wrapper IrijFn method.
+        int wrapperId = lambdaCounter++;
+        String wrapperName = "clauseWrap$tierC$" + wrapperId;
+        String wrapperDesc = "([Ljava/lang/Object;)Ljava/lang/Object;";
+        MethodVisitor w = classWriter.visitMethod(
+                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                wrapperName, wrapperDesc, null, null);
+        w.visitCode();
+        int wArgsSlot = 0;
+        int wKSlot = 1;
+
+        Handle bsm = new Handle(H_INVOKESTATIC,
+                "java/lang/invoke/LambdaMetafactory", "metafactory",
+                "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                        + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
+                        + "Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                        + "Ljava/lang/invoke/CallSite;",
+                false);
+        Type samType = Type.getMethodType(APPLY_DESC);
+        Handle stepHandle = new Handle(H_INVOKESTATIC, internalName,
+                stepName, stepDesc, false);
+
+        // step IrijFn = LambdaMetafactory.metafactory(...) → IrijFn
+        w.visitInvokeDynamicInsn("apply", "()" + IRIJ_FN_DESC, bsm,
+                samType, stepHandle, samType);
+        // newCont(stepFn, totalNFields) → kClause
+        pushIconst(w, totalNFields);
+        w.visitMethodInsn(INVOKESTATIC, RT, "newCont",
+                "(L" + IRIJ_FN + ";I)" + CONT_DESC, false);
+        w.visitVarInsn(ASTORE, wKSlot);
+
+        // For each i in 0..nFieldsForArgs-1: k.fields[i] = args[i]
+        for (int i = 0; i < nFieldsForArgs; i++) {
+            w.visitVarInsn(ALOAD, wKSlot);
+            w.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+            pushIconst(w, i);
+            w.visitVarInsn(ALOAD, wArgsSlot);
+            pushIconst(w, i);
+            w.visitInsn(AALOAD);
+            w.visitInsn(AASTORE);
+        }
+
+        // RT.runWithSMNoHs(kClause)
+        w.visitVarInsn(ALOAD, wKSlot);
+        w.visitMethodInsn(INVOKESTATIC, RT, "runWithSMNoHs",
+                "(" + CONT_DESC + ")Ljava/lang/Object;", false);
+        w.visitInsn(ARETURN);
+        w.visitMaxs(0, 0); w.visitEnd();
+
+        // 3. Push wrapper as IrijFn at the call site.
+        Handle wrapperHandle = new Handle(H_INVOKESTATIC, internalName,
+                wrapperName, wrapperDesc, false);
+        mv.visitInvokeDynamicInsn("apply", "()" + IRIJ_FN_DESC, bsm,
+                samType, wrapperHandle, samType);
+    }
+
     private void emitLambda(Expr.Lambda lam, MethodVisitor mv, Locals outerLocals) {
         // 1. Collect parameter names (VarPat/WildcardPat only for MVP).
         List<String> paramNames = new ArrayList<>();
@@ -2549,6 +2715,12 @@ final class ClassEmitter implements Opcodes {
             }
             // Local lambda value? invoke as IrijFn.
             if (locals.lookup(fnName) != null) {
+                emitIrijFnCall(app.fn(), app.args(), mv, locals);
+                return;
+            }
+            // Lifted (k.fields[]) lambda value — same call shape, the
+            // Var-load inside emitIrijFnCall resolves via lifted lookup.
+            if (currentLiftedLocals.containsKey(fnName)) {
                 emitIrijFnCall(app.fn(), app.args(), mv, locals);
                 return;
             }

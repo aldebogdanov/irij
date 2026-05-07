@@ -532,9 +532,10 @@ class StateMachineWithTest {
     }
 
     // ── Step 7: tier (c) — clauses that themselves perform effects ───
-    // SM lowering doesn't natively handle clause-internal performs (would
-    // require continuation-style clause compilation). Strategy: detect at
-    // emit time and fall back to threaded (which already supports it).
+    // Native: clause body compiled as its own SM step. Foreign performs
+    // throw PerformSignal that escapes to the next-outer SM frame via
+    // SM_STACK fallback. The threaded path is now only used for handlers
+    // whose body shape SM can't lower (none in current tests).
 
     @Test void clause_performs_outer_effect_falls_back_threaded() throws Exception {
         String src = """
@@ -690,6 +691,39 @@ class StateMachineWithTest {
         src.append("      get-count ()\n");
         src.append("println (to-str (run ()))\n");
         assertEquals(nl(String.valueOf(n)), runSM(src.toString()));
+    }
+
+    // ── Native tier-c — clause body as its own SM continuation ──────
+
+    @Test void native_tier_c_clause_resume_value_flows_through() throws Exception {
+        // Inner handler's clause body performs an outer effect, then
+        // resumes with a derived value. The body's `:= bump` bind must
+        // receive the post-foreign-perform value.
+        String src = """
+            effect Counter
+              bump :: () -> Int
+            effect Logger
+              log :: Str -> ()
+            handler echo-log :: Logger
+              log msg =>
+                println ("log: " ++ msg)
+                resume ()
+            handler counted :: Counter
+              state :! 0
+              bump () =>
+                state <- state + 10
+                log "bumped"
+                resume state
+            fn run
+              _ =>
+                with echo-log
+                  with counted
+                    a := bump ()
+                    b := bump ()
+                    println (to-str a ++ "/" ++ to-str b)
+            run ()
+            """;
+        assertEquals(nl("log: bumped", "log: bumped", "10/20"), runSM(src));
     }
 
     // ── Native nested SM — `r := with X body` binds inner result ────
