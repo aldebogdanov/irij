@@ -66,6 +66,14 @@ public final class Interpreter {
         @Override public boolean contains(Object o) { return true; } // everything is available
     });
 
+    /** The single capability tag for Java interop. Any Java reference,
+     *  static field, instance method, or constructor invocation requires
+     *  "JVM" in the surrounding effect row. Top-level scripts inherit
+     *  AMBIENT_EFFECTS so they're exempt; annotated `fn`s must declare
+     *  `::: JVM` (or a row containing it) to touch Java.
+     *  Name matches the existing `JVM` convention in std/test.irj. */
+    private static final List<String> JAVA_EFF = List.of("JVM");
+
     static final ThreadLocal<Deque<Set<String>>> AVAILABLE_EFFECTS =
         ThreadLocal.withInitial(() -> {
             var d = new ArrayDeque<Set<String>>();
@@ -2560,7 +2568,10 @@ public final class Interpreter {
             case Expr.Var(var name, var loc) -> env.lookup(name, loc);
             case Expr.TypeRef(var name, var loc) -> env.lookup(name, loc);
             case Expr.RoleRef(var name, var loc__) -> name; // just pass through as string
-            case Expr.JavaRef(var ref, var loc__) -> JavaInterop.resolveStaticRef(ref);
+            case Expr.JavaRef(var ref, var loc__) -> {
+                checkEffectsAvailable(JAVA_EFF, "java-interop:" + ref, loc__);
+                yield JavaInterop.resolveStaticRef(ref);
+            }
 
             // ── Operators ───────────────────────────────────────────────
             case Expr.BinaryOp bo -> evalBinaryOp(bo, env);
@@ -2668,6 +2679,7 @@ public final class Interpreter {
                 }
                 // Java interop fallthrough: instance method / field on an opaque Java object
                 if (target != null && !(target instanceof Values.BuiltinFn)) {
+                    checkEffectsAvailable(JAVA_EFF, "java-interop:" + da.field(), da.loc());
                     yield JavaInterop.resolveInstanceRef(target, da.field());
                 }
                 throw new IrijRuntimeError("Cannot access field '" + da.field() + "' on " + Values.typeName(target), da.loc());

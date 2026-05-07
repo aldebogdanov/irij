@@ -451,17 +451,19 @@ public class AstBuilder {
 
         var clauses = new ArrayList<Decl.HandlerClause>();
         var stateBindings = new ArrayList<Stmt>();
-        for (var c : ctx.handlerBody().handlerClause()) {
-            if (c.IDENT() != null) {
-                String opName = c.IDENT().getText();
-                var params = new ArrayList<Pattern>();
-                for (var p : c.pattern()) {
-                    params.add(visitPattern(p));
+        if (ctx.handlerBody() != null) {
+            for (var c : ctx.handlerBody().handlerClause()) {
+                if (c.IDENT() != null) {
+                    String opName = c.IDENT().getText();
+                    var params = new ArrayList<Pattern>();
+                    for (var p : c.pattern()) {
+                        params.add(visitPattern(p));
+                    }
+                    Expr body = visitArmBody(c.armBody());
+                    clauses.add(new Decl.HandlerClause(opName, params, body));
+                } else if (c.binding() != null) {
+                    stateBindings.add(visitBinding(c.binding()));
                 }
-                Expr body = visitArmBody(c.armBody());
-                clauses.add(new Decl.HandlerClause(opName, params, body));
-            } else if (c.binding() != null) {
-                stateBindings.add(visitBinding(c.binding()));
             }
         }
         return new Decl.HandlerDecl(name, effectName, requiredEffects, clauses, stateBindings, loc(ctx));
