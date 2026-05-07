@@ -597,6 +597,73 @@ public final class RuntimeSupport {
     }
 
     /**
+     * Sentinel returned by {@link #fireOpToSM} when no SM handler matches
+     * — distinct from any legal Irij value so {@link
+     * dev.irij.interpreter.EffectSystem#fireOp} can fall through to
+     * "Unhandled effect" without ambiguity.
+     */
+    public static final Object SM_NO_MATCH = new Object();
+
+    /**
+     * Synchronous SM-handler dispatch from {@code EffectSystem.fireOp} —
+     * lets a fiber spawned inside an SM {@code with} reach the parent's
+     * SM handler via the inherited {@link #SM_STACK}.
+     *
+     * <p>The synthesised resumeFn here just stores + returns the resume
+     * value (no trampoline) since the caller is plain Java code, not an
+     * SM continuation. For idiomatic tail-position {@code resume v}
+     * clauses, behaviour matches the threaded protocol (returns the
+     * value back to the perform call site). Non-tail clauses see
+     * post-resume statements run on the calling thread before the
+     * value is propagated — same trade-off as the on-thread trampoline.
+     *
+     * <p>Returns {@link #SM_NO_MATCH} if no SM_STACK frame matches.
+     */
+    public static Object fireOpToSM(String effectName, String opName,
+                                     java.util.List<Object> args) {
+        var stack = SM_STACK.get();
+        for (var hs : stack) {
+            for (int i = hs.size() - 1; i >= 0; i--) {
+                CompiledHandler h = hs.get(i);
+                if (h.effectName.equals(effectName)) {
+                    IrijFn clause = h.clauses.get(opName);
+                    if (clause == null) {
+                        throw new dev.irij.interpreter.IrijRuntimeError(
+                                "Handler " + h.name + " has no clause for " + opName);
+                    }
+                    final Object[] resumeBox = {null};
+                    final boolean[] resumed = {false};
+                    IrijFn resumeFn = (resumeArgs) -> {
+                        if (resumed[0]) {
+                            throw new dev.irij.interpreter.IrijRuntimeError(
+                                    "resume called twice (one-shot)");
+                        }
+                        resumed[0] = true;
+                        Object v = resumeArgs.length > 0
+                                ? resumeArgs[0]
+                                : dev.irij.interpreter.Values.UNIT;
+                        resumeBox[0] = v;
+                        return v;
+                    };
+                    Object[] clauseArgs = new Object[args.size() + 1];
+                    for (int j = 0; j < args.size(); j++) clauseArgs[j] = args.get(j);
+                    clauseArgs[args.size()] = resumeFn;
+                    Object clauseRet = clause.apply(clauseArgs);
+                    if (resumed[0]) return resumeBox[0];
+                    // Abort path: clause never resumed. Best we can do
+                    // synchronously is propagate the abort value as a
+                    // RuntimeException so the calling fn (or fiber)
+                    // can decide what to do.
+                    throw new dev.irij.interpreter.IrijRuntimeError(
+                            "SM clause aborted from synchronous-perform context: "
+                                    + clauseRet);
+                }
+            }
+        }
+        return SM_NO_MATCH;
+    }
+
+    /**
      * Re-entrant {@code runWithSM}: if {@code k} has already partly executed
      * (state != 0), thread {@code reentryValue} as the resume value rather
      * than starting fresh with null. Used by nested-SM-`with` lowering so
@@ -788,11 +855,38 @@ public final class RuntimeSupport {
         }
     }
 
+    /** Snapshot of both the threaded EffectSystem.STACK and the SM_STACK
+     *  taken at fork time so the fiber can re-establish the parent's
+     *  effect-handling context (both 14c.2 threaded and 14c.3 SM frames). */
+    private record ParentSnapshot(
+            java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> effectStack,
+            java.util.Deque<java.util.List<CompiledHandler>> smStack) {}
+
     /** Snapshot the current effect stack + push onto the child fiber's stack. */
     private static void inheritEffectStack(java.util.Deque<
             dev.irij.interpreter.EffectSystem.HandlerContext> parentStack) {
         var fiberStack = dev.irij.interpreter.EffectSystem.STACK.get();
         fiberStack.addAll(parentStack);
+    }
+
+    /** Inherit the parent's SM dispatch frames so a fiber's body can find
+     *  matching SM handlers via the SM_STACK fallback (concurrency parity). */
+    private static void inheritSMStack(java.util.Deque<java.util.List<CompiledHandler>> parentSMStack) {
+        var fiberSMStack = SM_STACK.get();
+        // Push parent frames in OUTER-first order so the fiber's stack
+        // mirrors the parent's innermost-on-top ordering.
+        var arr = parentSMStack.toArray(new Object[0]);
+        for (int i = arr.length - 1; i >= 0; i--) {
+            @SuppressWarnings("unchecked")
+            var frame = (java.util.List<CompiledHandler>) arr[i];
+            fiberSMStack.push(frame);
+        }
+    }
+
+    private static ParentSnapshot snapParent() {
+        return new ParentSnapshot(
+                new java.util.ArrayDeque<>(dev.irij.interpreter.EffectSystem.STACK.get()),
+                new java.util.ArrayDeque<>(SM_STACK.get()));
     }
 
     private static java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> snapStack() {
@@ -801,11 +895,11 @@ public final class RuntimeSupport {
     }
 
     /** Spawn a virtual thread running the thunk (IrijFn or BuiltinFn). */
-    private static Fiber forkOne(Object thunk,
-            java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> parentStack) {
+    private static Fiber forkOne(Object thunk, ParentSnapshot parent) {
         var future = new java.util.concurrent.CompletableFuture<Object>();
         var t = Thread.startVirtualThread(() -> {
-            inheritEffectStack(parentStack);
+            inheritEffectStack(parent.effectStack());
+            inheritSMStack(parent.smStack());
             try {
                 future.complete(callAny(thunk, new Object[0]));
             } catch (Throwable ex) {
@@ -817,9 +911,10 @@ public final class RuntimeSupport {
 
     /** `spawn thunk` — fire-and-forget vthread, returns the Thread. */
     public static Object spawn(Object thunk) {
-        var parentStack = snapStack();
+        var parent = snapParent();
         return Thread.startVirtualThread(() -> {
-            inheritEffectStack(parentStack);
+            inheritEffectStack(parent.effectStack());
+            inheritSMStack(parent.smStack());
             try { callAny(thunk, new Object[0]); }
             catch (Throwable t) { System.err.println("[spawn] error: " + t.getMessage()); }
         });
@@ -855,9 +950,9 @@ public final class RuntimeSupport {
         }
         Object combiner = args[0];
         int n = args.length - 1;
-        var parentStack = snapStack();
+        var parent = snapParent();
         var fibers = new Fiber[n];
-        for (int i = 0; i < n; i++) fibers[i] = forkOne(args[i + 1], parentStack);
+        for (int i = 0; i < n; i++) fibers[i] = forkOne(args[i + 1], parent);
         var results = new Object[n];
         try {
             for (int i = 0; i < n; i++) results[i] = fibers[i].result.join();
@@ -874,9 +969,9 @@ public final class RuntimeSupport {
             throw new dev.irij.interpreter.IrijRuntimeError(
                     "race requires at least one thunk");
         }
-        var parentStack = snapStack();
+        var parent = snapParent();
         var fibers = new Fiber[args.length];
-        for (int i = 0; i < args.length; i++) fibers[i] = forkOne(args[i], parentStack);
+        for (int i = 0; i < args.length; i++) fibers[i] = forkOne(args[i], parent);
 
         var winner = new java.util.concurrent.CompletableFuture<Object>();
         var errors = java.util.Collections.synchronizedList(
@@ -907,8 +1002,8 @@ public final class RuntimeSupport {
         long ms = (msArg instanceof Long l) ? l
                 : (msArg instanceof Number n) ? n.longValue()
                 : 0L;
-        var parentStack = snapStack();
-        Fiber f = forkOne(thunk, parentStack);
+        var parent = snapParent();
+        Fiber f = forkOne(thunk, parent);
         try {
             return f.result.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
@@ -950,16 +1045,16 @@ public final class RuntimeSupport {
         public final String modifier; // null | "race" | "supervised"
         private final java.util.List<Fiber> fibers =
                 java.util.Collections.synchronizedList(new java.util.ArrayList<>());
-        private final java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> parentStack;
+        private final ParentSnapshot parent;
 
         public CompiledScopeHandle(String modifier) {
             this.modifier = modifier;
-            this.parentStack = snapStack();
+            this.parent = snapParent();
         }
 
         /** Reflection target for `handle.fork thunk`. */
         public Object fork(Object thunk) {
-            Fiber f = forkOne(thunk, parentStack);
+            Fiber f = forkOne(thunk, parent);
             fibers.add(f);
             return f;
         }

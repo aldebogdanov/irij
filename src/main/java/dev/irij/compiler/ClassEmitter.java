@@ -932,8 +932,7 @@ final class ClassEmitter implements Opcodes {
         // 14c.3: try the state-machine lowering when selected + body shape
         // fits what we support so far. Otherwise fall back to 14c.2 (threaded).
         if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE
-                && smCanHandle(w.handler())
-                && !bodyContainsSpawn(w.body())) {
+                && smCanHandle(w.handler())) {
             // Step 3c: A-normalize first so nested op calls become top-level
             // Simple-Binds before classification.
             List<Stmt> body = new ANormalizer().normalize(w.body());
@@ -1032,60 +1031,6 @@ final class ClassEmitter implements Opcodes {
             if (exprPerformsForeignEffect(ie.elseBranch(), selfEffect)) return true;
         } else if (node instanceof Expr.Lambda lam) {
             if (exprPerformsForeignEffect(lam.body(), selfEffect)) return true;
-        }
-        return false;
-    }
-
-    /**
-     * Step 9: SM mode lacks a thread-local handler stack, so spawned fibers
-     * can't inherit SM-mode handlers. Fall back to threaded for any `with`
-     * whose body contains `spawn` — threaded mode already snapshots
-     * EffectSystem.STACK at fork time.
-     */
-    private boolean bodyContainsSpawn(List<Stmt> stmts) {
-        for (Stmt s : stmts) if (stmtContainsSpawn(s)) return true;
-        return false;
-    }
-
-    private boolean stmtContainsSpawn(Stmt s) {
-        if (s instanceof Stmt.ExprStmt es) return exprContainsSpawn(es.expr());
-        if (s instanceof Stmt.Bind b) return exprContainsSpawn(b.value());
-        if (s instanceof Stmt.MutBind mb) return exprContainsSpawn(mb.value());
-        if (s instanceof Stmt.Assign a) return exprContainsSpawn(a.value());
-        if (s instanceof Stmt.IfStmt is) {
-            if (exprContainsSpawn(is.cond())) return true;
-            for (Stmt t : is.thenBranch()) if (stmtContainsSpawn(t)) return true;
-            if (is.elseBranch() != null)
-                for (Stmt t : is.elseBranch()) if (stmtContainsSpawn(t)) return true;
-        }
-        if (s instanceof Stmt.With w) {
-            // Spawn inside an inner `with` is the inner's concern — but its
-            // own classifier will fall back if needed. Recurse anyway so the
-            // outer frame stays threaded too (simpler).
-            if (bodyContainsSpawn(w.body())) return true;
-            if (w.onFailure() != null && bodyContainsSpawn(w.onFailure())) return true;
-        }
-        return false;
-    }
-
-    private boolean exprContainsSpawn(Expr e) {
-        if (e == null) return false;
-        if (e instanceof Expr.App app && app.fn() instanceof Expr.Var v
-                && ("spawn".equals(v.name()) || "fork".equals(v.name())
-                    || "fork-all".equals(v.name()) || "race".equals(v.name()))) {
-            return true;
-        }
-        if (e instanceof Expr.App app) {
-            if (exprContainsSpawn(app.fn())) return true;
-            for (Expr a : app.args()) if (exprContainsSpawn(a)) return true;
-        } else if (e instanceof Expr.IfExpr ie) {
-            if (exprContainsSpawn(ie.cond())) return true;
-            if (exprContainsSpawn(ie.thenBranch())) return true;
-            if (exprContainsSpawn(ie.elseBranch())) return true;
-        } else if (e instanceof Expr.Block b) {
-            for (Stmt s : b.stmts()) if (stmtContainsSpawn(s)) return true;
-        } else if (e instanceof Expr.Lambda lam) {
-            if (exprContainsSpawn(lam.body())) return true;
         }
         return false;
     }

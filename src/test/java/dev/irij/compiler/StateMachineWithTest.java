@@ -650,9 +650,11 @@ class StateMachineWithTest {
     // EffectSystem.STACK snapshot machinery is in place.
 
     @Test void spawn_inside_with_runs_under_handler() throws Exception {
-        // `spawn` triggers fallback to threaded (where EffectSystem.STACK
-        // snapshot inherits handlers into the fiber). Verifies the gate
-        // works and the threaded path stays correct.
+        // Native concurrency parity: spawn snapshots both EffectSystem.STACK
+        // and SM_STACK at fork time; the fiber inherits both. The fiber's
+        // perform goes through fireOp which falls through to fireOpToSM
+        // when no threaded handler matches, dispatching synchronously
+        // against the inherited SM frame.
         String src = """
             effect Logger
               log :: Str -> ()
