@@ -640,42 +640,74 @@ public final class RuntimeSupport {
      * outer handles this effect, route via {@code fireOp} and continue the
      * loop with the result.
      */
+    /** Per-thread stack of active SM dispatch frames — innermost on top.
+     *  Lets a clause body's `perform` (tier-c) find a matching handler in
+     *  any enclosing SM frame even though the inner clause's own dispatch
+     *  loop has hs=[]. Existing nested-SM still benefits as a defensive
+     *  fallback: if an inner loop sees an unmatched signal, it can dispatch
+     *  via an outer frame's hs without unwinding back to that frame. */
+    private static final ThreadLocal<java.util.Deque<java.util.List<CompiledHandler>>>
+            SM_STACK = ThreadLocal.withInitial(java.util.ArrayDeque::new);
+
     private static Object dispatchLoopSM(java.util.List<CompiledHandler> hs,
                                          IrijContinuation k,
                                          Object reentryValue) {
+        var stack = SM_STACK.get();
+        stack.push(hs);
+        try {
+            return dispatchLoopSMImpl(hs, k, reentryValue, stack);
+        } finally {
+            stack.pop();
+        }
+    }
+
+    private static Object dispatchLoopSMImpl(java.util.List<CompiledHandler> hs,
+                                              IrijContinuation k,
+                                              Object reentryValue,
+                                              java.util.Deque<java.util.List<CompiledHandler>> stack) {
         // First iteration: pass null if the continuation hasn't yet started
         // (state == 0); otherwise thread the externally-supplied reentry
         // value (used by nested-with re-entry).
         Object resumeArg = (k.state == 0) ? null : reentryValue;
+        IrijContinuation currentK = k;
         while (true) {
             PerformSignal sig;
             try {
-                Object result = k.resume(resumeArg);
+                Object result = currentK.resume(resumeArg);
                 return result; // body finished
             } catch (PerformSignal s) {
                 sig = s;
             }
 
-            // Find the innermost matching SM handler.
-            CompiledHandler h = null;
-            for (int i = hs.size() - 1; i >= 0; i--) {
-                if (hs.get(i).effectName.equals(sig.effectName)) { h = hs.get(i); break; }
+            // Find the innermost matching SM handler — own hs first.
+            CompiledHandler h = findHandler(hs, sig.effectName);
+            // Fallback: walk other frames in SM_STACK (innermost-first,
+            // skipping our own frame which is on top). Lets a tier-c
+            // clause's perform reach the next-outer SM with's handler.
+            if (h == null) {
+                boolean skippedSelf = false;
+                for (var frame : stack) {
+                    if (!skippedSelf) { skippedSelf = true; continue; }
+                    h = findHandler(frame, sig.effectName);
+                    if (h != null) break;
+                }
             }
             if (h == null) {
-                // Bridge to threaded outer (EffectSystem.STACK) before propagating.
+                // Bridge to threaded outer (EffectSystem.STACK).
                 boolean bridged = false;
-                var stack = dev.irij.interpreter.EffectSystem.STACK.get();
-                for (var ctx : stack) {
+                var threadedStack = dev.irij.interpreter.EffectSystem.STACK.get();
+                for (var ctx : threadedStack) {
                     if (ctx.effectName().equals(sig.effectName)) {
                         resumeArg = dev.irij.interpreter.EffectSystem.fireOp(
                                 sig.effectName, sig.opName,
                                 java.util.Arrays.asList(sig.args));
+                        currentK = sig.continuation;
                         bridged = true;
                         break;
                     }
                 }
-                if (bridged) continue; // re-enter k.resume with bridged value
-                throw sig;             // unhandled by either chain
+                if (bridged) continue;
+                throw sig; // truly unhandled
             }
 
             IrijFn clause = h.clauses.get(sig.opName);
@@ -714,9 +746,20 @@ public final class RuntimeSupport {
             } catch (TailResume tr) {
                 if (tr.target != expectedTarget) throw tr; // not for me
                 resumeArg = tr.value;
-                // Loop iterates: re-enter k.resume(resumeArg).
+                // Resume the body that yielded — sig.continuation may differ
+                // from the original `k` if the signal originated in a nested
+                // SM frame and we dispatched on its behalf via SM_STACK.
+                currentK = sig.continuation;
             }
         }
+    }
+
+    private static CompiledHandler findHandler(java.util.List<CompiledHandler> hs,
+                                                String effectName) {
+        for (int i = hs.size() - 1; i >= 0; i--) {
+            if (hs.get(i).effectName.equals(effectName)) return hs.get(i);
+        }
+        return null;
     }
 
     // ── Concurrency ─────────────────────────────────────────────────────
