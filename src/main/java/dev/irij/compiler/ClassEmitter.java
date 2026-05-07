@@ -1488,6 +1488,27 @@ final class ClassEmitter implements Opcodes {
                 opCount++;
                 continue;
             }
+            // Bind whose value is `with X body` — Bind(name, Block([With])).
+            // Treat the inner with as a resumable segment whose result is
+            // bound to `name` (lifted into k.fields so subsequent segments
+            // can read it).
+            TopLevelBindWith bw = extractTopLevelBindWith(s);
+            if (bw != null) {
+                if (!smCanHandle(bw.with().handler())) {
+                    return new WithBodyShape.Unsupported();
+                }
+                List<Stmt> innerBody = new ANormalizer().normalize(bw.with().body());
+                WithBodyShape innerShape = classifyWithBody(innerBody);
+                if (innerShape instanceof WithBodyShape.Unsupported) {
+                    return new WithBodyShape.Unsupported();
+                }
+                segments.add(new Segment(
+                        new ArrayList<>(cur), null, null, null,
+                        bw.with(), -1, bw.bindName()));
+                cur.clear();
+                withCount++;
+                continue;
+            }
             if (s instanceof Stmt.With w) {
                 // Inner with must itself be SM-eligible for native nesting.
                 // If not, fall back so the outer goes threaded too.
@@ -1554,6 +1575,12 @@ final class ClassEmitter implements Opcodes {
                     && seen.add(seg.bindName())) {
                 lifted.add(seg.bindName());
             }
+            // innerWith bind name: lift unconditionally so subsequent
+            // segments can read it from k.fields[].
+            if (seg.innerWith() != null && seg.innerBind() != null
+                    && seen.add(seg.innerBind())) {
+                lifted.add(seg.innerBind());
+            }
         }
         // Assign nested-with slots and rebuild segments with concrete indices.
         int withSlotCounter = 0;
@@ -1568,6 +1595,20 @@ final class ClassEmitter implements Opcodes {
             }
         }
         return new WithBodyShape.Sequence(segments, lifted);
+    }
+
+    private record TopLevelBindWith(String bindName, Stmt.With with) {}
+
+    /** Bind whose value is a single nested `with` — e.g. `r := with X body`. */
+    private TopLevelBindWith extractTopLevelBindWith(Stmt s) {
+        if (s instanceof Stmt.Bind b
+                && b.target() instanceof Stmt.BindTarget.Simple sm
+                && b.value() instanceof Expr.Block blk
+                && blk.stmts().size() == 1
+                && blk.stmts().get(0) instanceof Stmt.With w) {
+            return new TopLevelBindWith(sm.name(), w);
+        }
+        return null;
     }
 
     private record TopLevelOp(String opName, List<Expr> args, String bindName) {}
@@ -1829,7 +1870,14 @@ final class ClassEmitter implements Opcodes {
             sm.visitVarInsn(ALOAD, vSlot);
             sm.visitVarInsn(ASTORE, bindSlot);
         }
-        emitBlockStmtsReturning(postStmts, sm, inner);
+        // Bare-op-tail: body is just `op args` with no postStmts and no
+        // bind — the resume value IS the body's final value. Return it.
+        if (postStmts.isEmpty() && so.bindName() == null) {
+            sm.visitVarInsn(ALOAD, vSlot);
+            sm.visitInsn(ARETURN);
+        } else {
+            emitBlockStmtsReturning(postStmts, sm, inner);
+        }
         sm.visitJumpInsn(GOTO, end);
 
         // default: IllegalStateException
@@ -1903,6 +1951,18 @@ final class ClassEmitter implements Opcodes {
                     // empty segment can ARETURN it (analogous to bare-op
                     // tail). Subsequent op states overwrite vSlot anyway.
                     sm.visitVarInsn(ASTORE, vSlot);
+                    // If `r := with X body`, also store value into k.fields[bindIdx]
+                    // so subsequent segments reading `r` find it lifted.
+                    if (seg.innerBind() != null) {
+                        Integer bindIdx = lifted.get(seg.innerBind());
+                        if (bindIdx != null) {
+                            sm.visitVarInsn(ALOAD, kSlot);
+                            sm.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+                            pushIconst(sm, bindIdx);
+                            sm.visitVarInsn(ALOAD, vSlot);
+                            sm.visitInsn(AASTORE);
+                        }
+                    }
                     // Bump state and fall through to the next state's body.
                     sm.visitVarInsn(ALOAD, kSlot);
                     pushIconst(sm, i + 1);

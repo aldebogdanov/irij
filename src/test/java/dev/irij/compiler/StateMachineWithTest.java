@@ -692,6 +692,34 @@ class StateMachineWithTest {
         assertEquals(nl(String.valueOf(n)), runSM(src.toString()));
     }
 
+    // ── Native nested SM — `r := with X body` binds inner result ────
+
+    @Test void nested_inner_with_as_bind_rhs() throws Exception {
+        // The inner with appears as a Bind RHS (Block-wrapped). Native
+        // nested SM extracts it as a segment, runs runWithSM, stores
+        // the result both in vSlot AND in k.fields[bindIdx_of_r] so
+        // subsequent segments can read it.
+        String src = """
+            effect Greet
+              greet :: Str -> Str
+            handler friendly :: Greet
+              greet name => resume ("Hi, " ++ name)
+            effect Logger
+              log :: Str -> ()
+            handler quiet-log :: Logger
+              log msg => resume ()
+            fn run
+              _ =>
+                with quiet-log
+                  r := with friendly
+                    greet "World"
+                  log "after"
+                  println r
+            run ()
+            """;
+        assertEquals(nl("Hi, World"), runSM(src));
+    }
+
     // ── Native nested SM — on-failure inside inner with ──────────────
 
     @Test void nested_inner_with_on_failure_native() throws Exception {
