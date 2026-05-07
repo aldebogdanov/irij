@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.3.0 &mdash; Phases 0-13 complete (Java interop).
+0.4.0 &mdash; Phase 14c.3 (state-machine bytecode compiler) + JVM capability enforcement.
