@@ -181,7 +181,7 @@ effectOp
 // ── handler ──────────────────────────────────────────────────────────
 
 handlerDecl
-    : HANDLER fnName SPEC_ANN upperName effectAnnotation? NEWLINE INDENT handlerBody NEWLINE* DEDENT
+    : HANDLER fnName SPEC_ANN upperName effectAnnotation? (NEWLINE INDENT handlerBody NEWLINE* DEDENT)?
     ;
 
 handlerBody

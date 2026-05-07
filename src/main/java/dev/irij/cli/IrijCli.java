@@ -85,6 +85,12 @@ public final class IrijCli {
             return;
         }
 
+        // ── compile subcommand (experimental bytecode compiler) ─────────
+        if (args[0].equals("compile")) {
+            CompileCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
+            return;
+        }
+
         // Walk flags
         boolean parseOnly    = false;
         boolean dumpAst      = false;
@@ -590,6 +596,8 @@ public final class IrijCli {
               irij build                 package app into self-contained JAR
               irij build <file.irj>      build with explicit entry point
               irij build -o out.jar      build with custom output path
+              irij compile <file.irj>    (experimental) compile to .class
+              irij compile <file> -o j.jar  (experimental) compile to runnable jar
               irij install               fetch seeds from irij.toml (alias: seed)
               irij publish               publish seed to registry (alias: sow)
               irij test                  run all test-*.irj in ./tests/

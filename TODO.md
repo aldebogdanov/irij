@@ -576,6 +576,105 @@ Clojure-style `Class/member` access to the JVM. No imports, no type declarations
 
 ---
 
+## Phase 14 — Bytecode Compiler (experimental)
+
+AOT compiler to JVM bytecode via ASM 9.x. Runs alongside the interpreter.
+Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
+
+- [x] **14a — MVP spike**
+  - [x] ASM 9.7 dependency
+  - [x] `dev.irij.compiler` package (`IrijCompiler`, `ClassEmitter`, `RuntimeSupport`)
+  - [x] Literals (`Int`/`Float`/`Bool`/`Str`/`()`), `true`/`false` vars
+  - [x] Binary/unary ops with Long/Double dispatch (`RuntimeSupport`)
+  - [x] `:=` bindings (`Simple` targets), `if`/`else` (stmt + expr)
+  - [x] `fn` / `pub fn` decls → `INVOKESTATIC` methods (forward refs, recursion)
+  - [x] `print` / `println` built-ins → `RuntimeSupport` helpers
+  - [x] `irij compile file.irj [-o out.class|out.jar]` CLI
+  - [x] Self-contained runnable jar (bundles `RuntimeSupport`)
+  - [x] Unit + golden tests (`HelloWorldCompileTest`, `DualRuntimeGoldenTest`)
+  - [x] Example (`examples/compiled.irj`)
+
+- [~] **14b — Patterns, ADTs, protocols** (in progress)
+  - [x] `match` expressions (literal/var/wildcard/unit/keyword/grouped patterns)
+  - [x] `MatchArmsBody` fn form (arity-1 dispatch)
+  - [x] `ConstructorPat`, `VectorPat` (with spread), `TuplePat`, `DestructurePat` (map)
+  - [x] Constructor application via `Values.Tagged` (e.g. `Circle 3.0`)
+  - [x] `SpecDecl` no-op (constructors resolved via `TypeRef`)
+  - [x] Collection literals: `Vector`, `Tuple`, `Set`, `Map`
+  - [x] Keyword literals
+  - [x] Strings: `++` concat, `to-str`, `&&`/`||`
+  - [x] `display` delegates to `Values.toIrijString` (interp parity)
+  - [x] Destructuring binds (`:=` with record/vector/tuple/ctor pattern)
+  - [x] Product-spec `Tagged` with named fields (enables record destructure)
+  - [x] Self-contained jar bundles `dev.irij.*` runtime classes
+  - [x] Lambda values (first-class fns) via `IrijFn` + `invokedynamic`/`LambdaMetafactory`, with closure captures
+  - [x] Higher-order fns (pass lambdas as args, call locals as fns)
+  - [x] Rest params in lambdas (`...rest` → `IrijVector`)
+  - [x] `proto`/`impl` method tables — type-tag dispatch via `typeTag(arg0)`
+        + generated `impl$method$Type` static methods
+
+- [~] **14c — Effects**
+  - [x] Decide lowering: exception-as-effect (14c.1) → thread+channel (14c.2) → state-machine (14c.3); skip CPS
+  - [x] **14c.1 — exception-as-effect, abort-only**
+    - [x] `effect`/op registry + `perform` call-site lowering (throws `EffectException`)
+    - [x] Abort-only `handler` dispatcher (rejects `resume`, state bindings, required effects, composition, dot-access)
+    - [x] `Stmt.With` try/catch + `on-failure` (`error` bound to message)
+    - [x] Unhandled ops rethrow to outer `with`
+    - [x] Golden parity tests: abort, no-trigger, on-failure
+  - [~] **14c.2 — thread+channel (full `resume`)**
+    - [x] Reuse `EffectSystem.fireOp` + `HandlerContext` + `SynchronousQueue` on a virtual body thread
+    - [x] Each handler clause compiled as `IrijFn` (args…, resume) via invokedynamic
+    - [x] `runWith(handler, bodyFn)` runtime driver with handler loop + one-shot resume
+    - [x] Nested `with` via thread-local stack; `on-failure` via RuntimeException catch
+    - [x] Golden parity tests: resume, resume-unit, nested
+    - [x] 14c.2b — handler mutable state (`state :! init`, `<-`) + dot-access (static-field lowering per handler decl)
+    - [x] 14c.2b — handler composition (`>>`) as runtime value (CompiledComposedHandler), inline + local-bound
+  - [x] **14c.3 — state-machine rewrite** (perf + correctness):
+    - [x] Steps 1–10: continuation runtime, single-op / sequence / EffIR
+          shapes, A-normalization, abort + on-failure, handler state +
+          dot-access, composition (`>>`), tier-c gate (threaded fallback),
+          nested with gate (threaded fallback), spawn fallback, bench.
+    - [x] Trampolining via pooled TailResume (no per-perform stack growth)
+    - [x] Native nested SM `with` (kInner persisted in outer's fields)
+          including `r := with X body` Bind-RHS form and on-failure
+    - [x] Hot-redef via `invokedynamic` + `MutableCallSite`,
+          `--direct-linking` flag for deploy
+    - [x] Native tier-c (clause body as its own SM continuation,
+          foreign performs route via SM_STACK fallback)
+    - See `docs/phase-14c3-techdebt.md` for as-built mechanism + the
+      small remaining tail (concurrency parity, broader tier-c shape
+      coverage, bench expansion).
+
+- [~] **14d.1 — `--mode` flag for `irij build`**
+  - [x] `CompileOptions` record + `HandlerStrategy` enum (`THREADED`/`STATE_MACHINE`)
+  - [x] `IrijCompiler.compileSource/compileFile` opts overloads (default `THREADED`)
+  - [x] `ClassEmitter` carries `CompileOptions` (wiring for 14c.3)
+  - [x] `BuildCommand` modes: `interp` (pre-14 bundled interpreter, default),
+        `bytecode-threaded` (14c.2), `bytecode-sm` (14c.3, fully wired)
+  - [x] `--direct-linking` flag (Clojure-style; disables hot-redef indy
+        and emits plain invokestatic for max JIT inlinability)
+  - [x] `--mode=<x>` / `--mode <x>` with synonyms (`threaded`/`bc-threaded`, `sm`/`state-machine`)
+  - [x] `bench/run.sh` — wall-clock matrix harness
+        (modes × {clojure, python3}); benches `fib`, `tak`
+  - [ ] `irij bench` subcommand wrapping the harness (optional)
+  - [ ] Flip default to `bytecode-sm` once 14c.3 lands
+
+- [x] **14d — Concurrency, modules, Java interop**
+  - [x] Modules — compile-time source inlining via `ModuleInliner`:
+        `mod`/`use` stripped, `pub` unwrapped, classpath + sourceRoot lookup,
+        short-name alias rewrite in call + dot-access position
+  - [x] Java interop — `Class/member` via `RuntimeSupport.javaStaticRef`,
+        instance dot-access fallthrough via `javaInstanceRef`; shares
+        `JavaInterop` with the interpreter (coercion/overload parity);
+        `callAny` unifies IrijFn + BuiltinFn dispatch
+  - [x] Concurrency — `spawn`/`sleep`/`await`/`par`/`race`/`timeout`/`try`
+        as `RuntimeSupport` statics; `scope`/`scope.race`/`scope.supervised`
+        via native `CompiledScopeHandle` (bound local, `s.fork thunk`
+        resolved through reflection interop fallthrough); fibers inherit
+        the enclosing `EffectSystem.STACK` snapshot at fork time
+
+---
+
 ## Future / Deferred
 
 - [ ] Choreographic programming (located types, EPP, `~>`, `<~`, roles)

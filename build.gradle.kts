@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.irij"
-version = "0.3.0"
+version = "0.4.0"
 
 java {
     toolchain {
@@ -27,6 +27,9 @@ dependencies {
     implementation("com.google.code.gson:gson:2.11.0")
     implementation("org.xerial:sqlite-jdbc:3.47.1.0")
     implementation("com.moandjiezana.toml:toml4j:0.7.2")
+    implementation("org.ow2.asm:asm:9.7")
+    implementation("org.ow2.asm:asm-util:9.7")
+    implementation("org.ow2.asm:asm-analysis:9.7")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

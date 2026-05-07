@@ -1,0 +1,39 @@
+mod std.jvm
+
+;; ── JVM / Java interop capability ──────────────────────
+;;
+;; The `JVM` effect is a *capability marker* — it has no operations.
+;; Any Java interop site (`Class/method`, `Class/staticField`,
+;; constructor `Class/new`, dot-access on a Java reference) requires
+;; "JVM" to be in the surrounding fn's effect row.
+;;
+;; Top-level scripts inherit ambient permissions, so they're exempt.
+;; Annotated `fn`s that touch Java must declare `::: JVM` (or wrap
+;; their callers in `with unsafe-jvm`).
+;;
+;; Why this exists: Irij's effect rows would otherwise be a lie —
+;; arbitrary `java.io.*` / `java.util.Random` / `System/exit` calls
+;; could happen inside a fn declared "pure". Tracking every Java
+;; method's purity is intractable across JDK versions, so the design
+;; takes a hard line: *all* Java interop is impure unless explicitly
+;; declared. Stdlib effects (Random, FileIO, Time, Db, …) wrap common
+;; Java surface so most code never needs `JVM` directly.
+;;
+;; Usage:
+;;
+;;   use std.jvm :open
+;;
+;;   fn parse-int :: Int ::: JVM
+;;     (s -> java.lang.Long/parseLong s)
+;;
+;;   with unsafe-jvm
+;;     parse-int "42"
+
+pub effect JVM
+
+;; Default handler: provides the `JVM` capability with no clauses
+;; (the effect has no operations). Use as `with unsafe-jvm body`
+;; to enable Java interop in a scope. The name signals the trade-off:
+;; you've opted out of Irij's effect-tracking guarantees within this
+;; block.
+pub handler unsafe-jvm :: JVM

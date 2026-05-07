@@ -79,7 +79,7 @@ public final class EffectSystem {
     public static Object fireOp(String effectName, String opName, List<Object> args) {
         Deque<HandlerContext> stack = STACK.get();
 
-        // Scan stack top-down for matching effect
+        // Scan threaded stack top-down for matching effect.
         for (HandlerContext ctx : stack) {
             if (ctx.effectName().equals(effectName)) {
                 try {
@@ -91,6 +91,15 @@ public final class EffectSystem {
                     throw new IrijRuntimeError("Effect operation interrupted: " + opName);
                 }
             }
+        }
+
+        // SM_STACK fallback — lets a fiber spawned inside an SM `with`
+        // reach the parent's SM handler synchronously. Returns SM_NO_MATCH
+        // if no SM frame matches either.
+        Object smResult = dev.irij.compiler.RuntimeSupport.fireOpToSM(
+                effectName, opName, args);
+        if (smResult != dev.irij.compiler.RuntimeSupport.SM_NO_MATCH) {
+            return smResult;
         }
 
         throw new IrijRuntimeError("Unhandled effect: " + effectName + "." + opName

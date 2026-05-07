@@ -1183,6 +1183,12 @@
 
 ** 9.2 Platform Targets
 
+   Status: a tree-walking interpreter is the default runtime. An experimental
+   AOT compiler to JVM bytecode is being developed alongside (Phase 14,
+   branch =bytecode-mvp=, =docs/phase-14-bytecode.md=). 14a ships a usable
+   subset via =irij compile file.irj -o app.jar=; the interpreter remains
+   the semantic reference until the compiler reaches parity.
+
    #+begin_example
    ;; Compilation targets (phased roadmap)
 

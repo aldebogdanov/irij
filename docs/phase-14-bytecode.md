@@ -1,0 +1,237 @@
+# Phase 14 — Bytecode Compiler (MVP spike)
+
+Status: **14d complete on `bytecode-mvp` branch.** 14a + 14b + 14c.2 + 14c.2b + 14d-modules + 14d-interop + 14d-concurrency all green.
+
+Experimental ahead-of-time compiler that targets JVM bytecode directly (ASM 9.x),
+running alongside the interpreter — not replacing it. Shares AST and parser with
+the tree-walking interpreter.
+
+## Scope of 14a (implemented)
+
+- Literals: `Int`, `Float`, `Bool`, `Str`, `()`
+- Vars: `true`/`false` (as Vars), local slots
+- Bindings: `x := expr` (Simple targets only)
+- Control flow: `if/else` (expression and statement), boolean coercion via `RuntimeSupport.truthy`
+- Binary ops: `+ - * / %` (Long/Double dispatched), `< <= > >= == !=`
+- Unary ops: `-`, `!`
+- User functions:
+  - `fn name` / `pub fn name` with `LambdaBody` or `ImperativeBody`
+  - `VarPat` / `WildcardPat` parameters
+  - Forward references (two-pass: collect arities, then emit methods)
+  - Recursion works (`fact`, `fib` dual-runtime-verified)
+- Built-ins: `print` → `RuntimeSupport.print` (no newline), `println` → `RuntimeSupport.println`
+
+## Scope of 14b (implemented so far)
+
+- `match` expression: literal, var, wildcard, unit, keyword, grouped, constructor,
+  vector (with spread), tuple, destructure (map) patterns; guards via `|`
+- `MatchArmsBody` function form (`fn name\n  pat => body`) — arity-1 dispatch
+- Constructor application of spec tags (`Circle 3.0` → `Values.Tagged`)
+- `SpecDecl` at top level — collects product-spec field names for record
+  destructure; constructors built as `Values.Tagged` with `namedFields` when applicable
+- Destructuring binds in `:=` (record/vector/tuple/constructor patterns)
+- Self-contained jar bundles all `dev.irij.*` runtime classes (excluding
+  `cli`/`repl`/`nrepl`/`mcp`) so compiled programs run standalone
+- First-class lambda values via `RuntimeSupport.IrijFn` + `invokedynamic` /
+  `LambdaMetafactory`; closures capture enclosing locals; higher-order fns
+  (pass lambdas as args, call local fn values) work
+- Rest params in lambdas (`(a ...rest -> ...)` → `rest` bound to `IrijVector`
+  of remaining args via `RuntimeSupport.restVector`)
+- Protocols / impls: `proto` no-op at runtime; each impl binding compiled to
+  `impl$method$Type` static method; dispatcher `method(...)` switches on
+  `RuntimeSupport.typeTag(arg0)` — covers primitives, collections, and
+  spec-tagged values
+- Collection literals: `Vector`, `Tuple`, `Set`, `Map` (via interpreter `Values`)
+- Keyword literals (`:foo`)
+- String/vector `++` concat, `to-str` builtin, `&&` / `||` short-circuit
+- `display` delegates to `Values.toIrijString` for interpreter parity
+
+## Scope of 14c.2 (implemented)
+
+Thread+channel lowering — reuses the interpreter's `EffectSystem` runtime so
+compiled programs share one-shot `resume` semantics with the interpreter.
+
+- `effect Name  op :: …` — registers ops in `effectOps: opName → effectName`;
+  compiled calls to op names lower to
+  `RuntimeSupport.perform(effectName, opName, args)` which routes through
+  `EffectSystem.fireOp` (blocks on a `SynchronousQueue` until resumed)
+- `handler H :: Effect  op pat… => body` — each clause compiled as an
+  `IrijFn` whose last param is the synthetic `resume` continuation; all
+  clauses collected into a `CompiledHandler { name, effectName, Map<String,IrijFn> }`
+  built by a static `handler$H$build()` method
+- `with H  body [on-failure block]` — body is compiled as a zero-arg
+  `IrijFn` thunk; `RuntimeSupport.runWith(handler, bodyFn)` spawns a virtual
+  thread for the body (pushing a `HandlerContext` onto `EffectSystem.STACK`)
+  and drives `runHandlerLoop` on the calling thread. Clause body invokes
+  `resume v` which unblocks the body's `SynchronousQueue` and recursively
+  re-enters the handler loop.
+- `on-failure` catches any non-effect `RuntimeException` from `runWith` and
+  binds `error` to its message
+- Nested `with` blocks compose naturally via the thread-local handler stack
+
+Abort semantics (no `resume`) still work — clause returns without unblocking
+the body channel, the `finally` block in `runWith` interrupts the body
+virtual thread, and the clause's return value becomes the `with` result.
+
+## Scope of 14c.2b (implemented)
+
+- `state :! init` state bindings in handlers — each compiled to a private static
+  Object field `handler$<h>$state$<var>` on the program class; initialised at the
+  handler decl's textual position in `main` via `PUTSTATIC`.
+- `state <- expr` assignments inside clause bodies — lowered to `PUTSTATIC`.
+- Free reads of the state name inside clause bodies — lowered to `GETSTATIC`.
+- `handler.state` dot-access anywhere — lowered to `GETSTATIC` on the
+  corresponding static field.
+- State persists across `with` invocations and survives virtual-thread
+  body execution (static field is shared), matching the interpreter.
+- Handler composition `>>` is a first-class runtime value
+  (`RuntimeSupport.CompiledComposedHandler`). `h1 >> h2` evaluates to a flat
+  ordered list of `CompiledHandler`s; references to handler-decl names in
+  value position call `handler$<name>$build()`. `runWith` detects a composed
+  handler and iterates `runWith h0 (\-> runWith h1 (\-> … body))` — the
+  outermost `with`'s try/catch owns `on-failure`, matching the interpreter.
+  Works for both inline (`with h1 >> h2 body`) and local-bound
+  (`x := h1 >> h2; with x body`) forms.
+
+- Required-effect rows on handlers (`handler h ::: E1 E2`) — accepted; the
+  compiled runtime dispatches via `EffectSystem.STACK`, so clause bodies that
+  perform outer effects resolve against the enclosing `with` stack. The
+  `::: …` annotation is not enforced at the bytecode layer (it is a
+  declaration-time concern handled elsewhere).
+
+## Scope of 14d — modules (implemented)
+
+- `mod X.Y` top-level declarations — stripped by the inliner.
+- `use X.Y` — resolved at compile time by `ModuleInliner`:
+  - classpath resource lookup first (`X/Y.irj` on the classpath — covers
+    `src/main/resources/std/*.irj` and any bundled modules);
+  - then `<sourceRoot>/X/Y.irj` if a source root was passed in (the CLI
+    passes the parent directory of the input file).
+- Loaded once per qualified name; circular `use` detected.
+- `pub` wrappers are unwrapped (the compiler treats `pub fn` as `fn`);
+  module-private decls are inlined alongside.
+- Qualified access:
+  - `mod.fn args` call-position — rewritten to `fn args` (short-name lookup).
+  - `mod.name` value-position dot-access — rewritten to a `Var(name)` load.
+  The `ModuleInliner` registers the last segment of each qualified name
+  (e.g. `std.math` → `math`) as an alias so the emitter knows when to
+  rewrite.
+- No runtime module registry — everything resolves to top-level methods /
+  static fields after inlining.
+
+## Scope of 14d — Java interop (implemented)
+
+- `Class/member` refs (`Math/abs`, `System/getenv`, `System/out`, …) — emitted
+  as `RuntimeSupport.javaStaticRef(String)` which delegates to the
+  interpreter's `JavaInterop.resolveStaticRef` and returns the same `BuiltinFn`
+  used by the interpreter.
+- `Class/new` constructor callables work (`StringBuilder/new ()`).
+- Instance access via dot-access fallthrough: `obj.method args` and
+  `obj.field` — any dot-access that isn't a handler-state or module-alias
+  rewrite is lowered to `RuntimeSupport.javaInstanceRef(recv, name)`, again
+  delegating to `JavaInterop.resolveInstanceRef`.
+- Coercion, overload scoring, `java.lang.*` auto-imports all inherit from
+  the interpreter (shared code path — bug-for-bug parity).
+- Uniform call dispatch: `RuntimeSupport.callAny` accepts either compiled
+  `IrijFn` values or interpreter `BuiltinFn` values, so interop callables are
+  invokable from anywhere a first-class fn would be.
+
+## Scope of 14d — concurrency (implemented)
+
+- `spawn`, `sleep`, `await`, `par`, `race`, `timeout`, `try` — intercepted
+  in `emitBuiltinApp`, lowered to static methods on `RuntimeSupport`.
+  Thunks may be compiled `IrijFn` values or interpreter `BuiltinFn`s;
+  `callAny` unifies dispatch.
+- `scope name ...body`, `scope.race name ...body`, `scope.supervised name
+  ...body` — compiled natively:
+  - allocate `RuntimeSupport.CompiledScopeHandle(modifier)`,
+  - bind handle to the declared local name,
+  - emit body statements (last stmt's value = body result),
+  - finalise via `handle.joinByModifier(bodyResult)`.
+- `s.fork thunk` inside the scope: resolves through the generic dot-access
+  interop fallthrough — `JavaInterop.resolveInstanceRef` picks the public
+  `fork(Object)` method on `CompiledScopeHandle` via reflection. No
+  compiler-side special case needed.
+- Fibers inherit the enclosing effect stack snapshot at fork time
+  (`EffectSystem.STACK`), matching interpreter semantics so that effect
+  handlers installed outside the `scope` are visible inside forked
+  thunks.
+- Join semantics by modifier:
+  - `scope`   → join-all; first failure cancels siblings + propagates.
+  - `scope.race` → first success wins; others interrupted.
+  - `scope.supervised` → per-fiber isolation, no sibling cancellation.
+
+## Not yet supported
+
+- Multi-shot `resume` (backtracking) — deferred (CPS skipped)
+- State-machine rewrite for perf — 14c.3 if/when perf matters
+- Same-short-name collisions across multiple `use`s are not disambiguated
+  (last `use` wins in the alias set)
+
+Compile errors are explicit (`MVP: unsupported expression: …`) so the escape
+hatch is always the interpreter.
+
+## Value representation
+
+All Irij values are boxed Java `Object`:
+
+| Irij     | Java       |
+|----------|------------|
+| `Int`    | `Long`     |
+| `Float`  | `Double`   |
+| `Bool`   | `Boolean`  |
+| `Str`    | `String`   |
+| `()`     | `null`     |
+
+Arithmetic dispatches in `RuntimeSupport`: both-Long → long op; otherwise
+double op. Comparison follows the same path.
+
+## Entry points
+
+```sh
+irij compile file.irj                 # emits file.class (class irij.Program)
+irij compile file.irj -o out.class    # custom class output
+irij compile file.irj -o app.jar      # self-contained runnable jar
+java -jar app.jar                     # runs the compiled program
+```
+
+The `.jar` mode bundles `dev.irij.compiler.RuntimeSupport` so the jar is
+self-contained.
+
+## Architecture
+
+```
+src/main/java/dev/irij/compiler/
+  IrijCompiler.java     — entry point: source → classfile bytes
+  ClassEmitter.java     — two-pass emit: register fn arities → emit methods → main
+  RuntimeSupport.java   — boxed-object runtime helpers (arith, compare, display, print)
+
+src/main/java/dev/irij/cli/
+  CompileCommand.java   — `irij compile` CLI driver, .class + .jar output modes
+```
+
+## Tests
+
+- `HelloWorldCompileTest` (17 tests) — end-to-end compile → define → invoke
+- `DualRuntimeGoldenTest` (18 programs) — same source runs through interpreter
+  and compiler; outputs must match byte-for-byte. Covers arith, bindings, fns,
+  recursion, match expressions, guards, collections, string concat, ADT
+  constructor dispatch, `MatchArmsBody` fn form.
+
+## Next (14b — patterns & protocols)
+
+Extend bodies to `MatchArmsBody`, constructor-pattern dispatch, protocol
+method tables. Introduce a tagged-ADT runtime (probably a `IrijVariant`
+record with tag + args) so constructor patterns can match at runtime.
+
+## Next (14c — effects)
+
+Three options on the table (tree-walk semantics are CPS-driven, bytecode needs
+to match observable behavior):
+
+1. **Exception-as-effect** — simplest; pure fns stay direct, effectful ops
+   raise a typed sentinel exception, handler frames catch-and-resume.
+2. **CPS lowering** — full delimited-continuation semantics; heavy.
+3. **State-machine** — `async/await`-style rewrite per effectful fn.
+
+Decision deferred; 14b ships first to stress-test the ADT lowering.
