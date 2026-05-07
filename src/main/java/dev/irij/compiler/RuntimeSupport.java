@@ -532,15 +532,25 @@ public final class RuntimeSupport {
      */
     public static final class TailResume extends RuntimeException {
         public Object value;
+        /**
+         * The dispatch loop this resume targets — the continuation that
+         * threw the original {@link PerformSignal}. Each loop's catch
+         * compares against its own expected target and re-throws on
+         * mismatch so nested loops don't accidentally consume each other's
+         * resumes (relevant for native nested-SM and future tier-c
+         * clause-as-SM compilation).
+         */
+        public Object target;
 
         private TailResume() { super(null, null, false, false); }
 
         private static final ThreadLocal<TailResume> POOL =
                 ThreadLocal.withInitial(TailResume::new);
 
-        public static TailResume of(Object v) {
+        public static TailResume of(Object v, Object target) {
             TailResume r = POOL.get();
             r.value = v;
+            r.target = target;
             return r;
         }
 
@@ -674,6 +684,12 @@ public final class RuntimeSupport {
                         "Handler " + h.name + " has no clause for " + sig.opName);
             }
 
+            // The TailResume thrown by this iteration's resumeFn must
+            // target THIS dispatch loop — pinned via sig.continuation. A
+            // nested loop catching a TailResume not addressed to it
+            // re-throws so the right loop consumes it (matters for native
+            // nested-SM and for future tier-c clause-as-SM compilation).
+            final IrijContinuation expectedTarget = sig.continuation;
             final var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
             IrijFn resumeFn = (resumeArgs) -> {
                 if (!resumed.compareAndSet(false, true)) {
@@ -683,7 +699,7 @@ public final class RuntimeSupport {
                 Object v = resumeArgs.length > 0
                         ? resumeArgs[0]
                         : dev.irij.interpreter.Values.UNIT;
-                throw TailResume.of(v); // unwinds clause to dispatch loop
+                throw TailResume.of(v, expectedTarget);
             };
 
             Object[] clauseArgs = new Object[sig.args.length + 1];
@@ -696,6 +712,7 @@ public final class RuntimeSupport {
                 // value is what the `with` evaluates to.
                 return clauseReturn;
             } catch (TailResume tr) {
+                if (tr.target != expectedTarget) throw tr; // not for me
                 resumeArg = tr.value;
                 // Loop iterates: re-enter k.resume(resumeArg).
             }

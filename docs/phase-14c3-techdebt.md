@@ -6,34 +6,51 @@ session can pick up with full context.
 
 ## 1. Native tier (c) — clauses that perform foreign effects
 
-**Current state:** detected at emit time via `smCanHandle`; `with`-stmts that
-reference such handlers fall back to the threaded path. Correct, but means
-those programs don't benefit from SM lowering.
+**Status (after the trampoline + nested-SM + hot-redef session):** the
+threaded fallback (`smCanHandle` returns false → emit via threaded path)
+remains the correct, working approach. Native tier-c **was attempted in
+sketch and the architectural issue is now precise**: see "Why no shortcut"
+below.
 
-**Why hard:** clauses are compiled as plain `IrijFn` lambdas. Their
-`perform` calls go through `RT.perform` → `EffectSystem.fireOp`, which needs
-either an `EffectSystem.STACK` entry (threaded) or a continuation to resume
-into (SM). Neither exists for an `IrijFn`-style clause.
-
-**Plan:**
+**Plan (still the right design):**
 
 1. At `HandlerDecl` emit, run `clausePerformsForeignEffect`. For tier-c
    clauses, emit the clause body as an SM step function (mirror of with-body
    emission), with the clause's params + a `resume` slot becoming the
-   continuation's first fields.
-2. `CompiledHandler.clauses[opName]` stores a *factory* that takes
-   `(args..., outerResumeFn)` and returns an `IrijContinuation` whose
-   step is the clause SM. Plain (non-tier-c) clauses keep the simple
-   `IrijFn` shape — the dispatcher checks the type.
+   continuation's fields.
+2. `CompiledHandler.clauses[opName]` becomes a factory that returns an
+   `IrijContinuation` (stored args + outer-resume-fn in its fields).
+   Plain clauses keep the simple `IrijFn` shape — dispatcher checks type.
 3. `dispatchLoopSM`, when invoking a tier-c clause, allocates the clause
-   continuation and runs it via a *nested* `dispatchLoopSM` whose `hs` is
-   the OUTER chain (handlers above the current `h`) — per design doc § 6.
-4. The clause's `resume` is its own `TailResume`-based unwind, distinct
-   from the body's, but mechanically identical.
+   continuation and runs it via `runWithSM(NO_HS, kClause)` — empty
+   handler stack so any `perform` in the clause body re-throws and is
+   caught by the outer-outer dispatch loop.
+4. The clause's own `resume` (its own perform-resume) is its own
+   `TailResume`-target.
 
-**Key invariant:** clause continuation outlives the clause's first
-`perform`, so its state survives across the outer resume cycle — same
-machinery as nested `with`.
+**Why no shortcut exists** (lesson from the attempted sketch this session):
+
+- Tried: have the clause body use the existing `RT.perform` → `EffectSystem.fireOp`
+  path with SM handlers also pushed onto `EffectSystem.STACK`.
+- Fails because `fireOp` would need to either (a) throw a `PerformSignal`
+  carrying a continuation that represents *the rest of the clause body
+  after the perform*, or (b) block-wait for an outer handler to dispatch
+  and return the resume value. (a) cannot synthesise a continuation for
+  arbitrary Java/IrijFn code mid-call without CPS compilation. (b) is
+  the threaded-vthread machinery, which doesn't compose with the
+  on-stack SM dispatch loop on a single thread.
+- Tried: TailResume-with-target marker (so nested dispatch loops re-throw
+  signals not addressed to them). This *is* needed and is shipped for
+  nested-SM, but it doesn't help here — the missing piece is the
+  clause's own continuation, not signal routing.
+
+**TailResume target marker** (small follow-up either way): the trampoline's
+`TailResume` should carry the target `IrijContinuation` and the dispatch
+loop should re-throw mismatches. With nested-SM `with` shipped, dual-SM
+test cases are correct because the inner trampoline's perform-signals
+escape to the outer trampoline naturally — but a tier-c clause body that
+calls `resume` could land in the wrong loop without the target marker.
+Worth adding pre-emptively.
 
 ---
 
