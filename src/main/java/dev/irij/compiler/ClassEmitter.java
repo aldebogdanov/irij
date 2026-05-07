@@ -1013,13 +1013,6 @@ final class ClassEmitter implements Opcodes {
         }
     }
 
-    private boolean clausePerformsForeignEffect(Decl.HandlerDecl hd) {
-        for (var clause : hd.clauses()) {
-            if (exprPerformsForeignEffect(clause.body(), hd.effectName())) return true;
-        }
-        return false;
-    }
-
     private boolean exprPerformsForeignEffect(Object node, String selfEffect) {
         if (node == null) return false;
         if (node instanceof Expr.App app && app.fn() instanceof Expr.Var v

@@ -537,7 +537,11 @@ class StateMachineWithTest {
     // SM_STACK fallback. The threaded path is now only used for handlers
     // whose body shape SM can't lower (none in current tests).
 
-    @Test void clause_performs_outer_effect_falls_back_threaded() throws Exception {
+    @Test void tier_c_clause_with_required_effects_annotation() throws Exception {
+        // Handler declares `::: Logger` and clause body performs log.
+        // Native tier-c emits clause body as an SM step; the foreign
+        // perform escapes the empty-hs clause loop and is dispatched
+        // by the outer composed handler chain via SM_STACK fallback.
         String src = """
             effect Logger
               log :: Str -> ()
@@ -562,9 +566,10 @@ class StateMachineWithTest {
         assertEquals(nl("3"), runSM(src));
     }
 
-    @Test void clause_with_implicit_foreign_perform_falls_back() throws Exception {
-        // No `:::` annotation but clause body still performs Logger.log.
-        // Detector also catches this via clause-body scan.
+    @Test void tier_c_clause_implicit_foreign_perform() throws Exception {
+        // No `:::` annotation but clause body still performs Logger.log —
+        // the foreign-effect scan catches it and routes through native
+        // tier-c. Verifies we don't depend on the declarative annotation.
         String src = """
             effect Logger
               log :: Str -> ()

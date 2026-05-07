@@ -1,142 +1,158 @@
-# Phase 14c.3 — Tech debt design notes
+# Phase 14c.3 — Status & follow-ups
 
-After steps 1–10 plus the trampoline pass (c547bcd), four substantial items
-remain. Each is sized for its own session — sketched here so the next
-session can pick up with full context.
+All four major tech-debt items from the original plan have shipped on
+`bytecode-mvp`. This doc records the as-built mechanism and the small
+remaining tail.
 
-## 1. Native tier (c) — clauses that perform foreign effects
+## Shipped
 
-**Status (after the trampoline + nested-SM + hot-redef session):** the
-threaded fallback (`smCanHandle` returns false → emit via threaded path)
-remains the correct, working approach. Native tier-c **was attempted in
-sketch and the architectural issue is now precise**: see "Why no shortcut"
-below.
+### 1. Trampolining (`c547bcd`)
 
-**Plan (still the right design):**
+`runWithSM` no longer recurses through `clause.apply → resumeFn →
+k.resume → throw → dispatchSM` per perform. A single `dispatchLoopSM`
+while-loop catches `PerformSignal`, dispatches to a clause, and on
+`resume v` the synthesised resumeFn throws a pooled `TailResume` that
+unwinds the clause's JVM frames back to the loop. Loop iterates,
+re-entering `currentK.resume(resumeArg)`. Deep perform loops scale.
 
-1. At `HandlerDecl` emit, run `clausePerformsForeignEffect`. For tier-c
-   clauses, emit the clause body as an SM step function (mirror of with-body
-   emission), with the clause's params + a `resume` slot becoming the
-   continuation's fields.
-2. `CompiledHandler.clauses[opName]` becomes a factory that returns an
-   `IrijContinuation` (stored args + outer-resume-fn in its fields).
-   Plain clauses keep the simple `IrijFn` shape — dispatcher checks type.
-3. `dispatchLoopSM`, when invoking a tier-c clause, allocates the clause
-   continuation and runs it via `runWithSM(NO_HS, kClause)` — empty
-   handler stack so any `perform` in the clause body re-throws and is
-   caught by the outer-outer dispatch loop.
-4. The clause's own `resume` (its own perform-resume) is its own
-   `TailResume`-target.
+Test: `deep_perform_loop_no_stackoverflow` (1000 sequential performs).
 
-**Why no shortcut exists** (lesson from the attempted sketch this session):
+### 2. TailResume target marker (`3a7af49`)
 
-- Tried: have the clause body use the existing `RT.perform` → `EffectSystem.fireOp`
-  path with SM handlers also pushed onto `EffectSystem.STACK`.
-- Fails because `fireOp` would need to either (a) throw a `PerformSignal`
-  carrying a continuation that represents *the rest of the clause body
-  after the perform*, or (b) block-wait for an outer handler to dispatch
-  and return the resume value. (a) cannot synthesise a continuation for
-  arbitrary Java/IrijFn code mid-call without CPS compilation. (b) is
-  the threaded-vthread machinery, which doesn't compose with the
-  on-stack SM dispatch loop on a single thread.
-- Tried: TailResume-with-target marker (so nested dispatch loops re-throw
-  signals not addressed to them). This *is* needed and is shipped for
-  nested-SM, but it doesn't help here — the missing piece is the
-  clause's own continuation, not signal routing.
+`TailResume` carries `target` (the continuation that yielded). Each
+loop's catch consumes only its own; mismatches are re-thrown. Required
+for clean nested-SM and tier-c routing.
 
-**TailResume target marker** (small follow-up either way): the trampoline's
-`TailResume` should carry the target `IrijContinuation` and the dispatch
-loop should re-throw mismatches. With nested-SM `with` shipped, dual-SM
-test cases are correct because the inner trampoline's perform-signals
-escape to the outer trampoline naturally — but a tier-c clause body that
-calls `resume` could land in the wrong loop without the target marker.
-Worth adding pre-emptively.
+### 3. Native nested SM `with` (`1e1cb67`, `853e66a`, `e6914d4`)
 
----
+Top-level inner `with` becomes a resumable segment in the outer's SM.
+The inner continuation lives in `outerK.fields[innerSlot]` and persists
+across outer-resume cycles. New 3-arg `runWithSM(handler, k, reentryValue)`
+threads the outer-handled value down into the saved inner continuation
+on re-entry.
 
-## 2. Native nested SM `with`
+Bind-RHS form `r := with X body` is also routed natively — the inner
+result is stored in `k.fields[bindIdx_of_r]` so subsequent segments can
+read `r` via the lifted-locals path. `on-failure` inside an inner
+nested-SM `with` is wrapped in try/catch that re-throws PerformSignal
+and TailResume so SM control flow keeps propagating; only genuine
+failures trigger the on-failure block.
 
-**Current state:** `containsOpCall(Stmt.With) == true` so outer falls back
-to threaded; inner stays SM and signals are bridged via
-`EffectSystem.STACK`. Correct, less efficient than dual-SM.
+Tests:
+- `nested_with_inner_handles_inner_effect`
+- `nested_sm_outer_resume_into_kInner_preserves_state` (cross-handler
+  greet → log → greet — proves kInner state survives outer-resume)
+- `nested_inner_with_as_bind_rhs`
+- `nested_inner_with_on_failure_native`
 
-**Why hard:** outer's continuation must resume INSIDE the inner with rather
-than at its start. Naive re-execution restarts the inner with from scratch
-on every outer resume, losing inner state and producing wrong output.
+### 4. Hot-redef (`6bd6d71`)
 
-**Plan A (continuation-on-continuation, the clean design):**
+Top-level `fn` calls compile to `invokedynamic` by default; the
+bootstrap `RuntimeSupport.redefBootstrap` registers a `MutableCallSite`
+keyed by `"owner.method:descriptor"` that the REPL can swap via
+`RuntimeSupport.redefine(key, MethodHandle)`. Mirrors Clojure's deploy
+model: `--direct-linking` emits plain `invokestatic` for max JIT
+inlinability and disables hot-redef.
 
-1. Outer EffIR builder treats `Stmt.With(innerHandler, innerBody)` as a
-   region with three boundaries: enter-inner, run-inner-body, leave-inner.
-2. Allocate `kInner` once; persist it in `kOuter.fields[innerSlot]`.
-3. Outer state at the inner-with-region:
-   ```
-   kInner = (IrijContinuation) k.fields[innerSlot];
-   if (kInner == null) {
-       kInner = new IrijContinuation(innerStep, innerNFields);
-       k.fields[innerSlot] = kInner;
-   }
-   runWithSM(innerHandler, kInner);
-   ```
-4. Make `runWithSM` re-entrant: if `k.state != 0` on entry, resume with the
-   value supplied externally (read from a side slot or arg).
-5. Add an overload `runWithSM(handler, k, externalResumeValue)` so outer can
-   thread a value down on re-entry after the outer handler resumes.
+Tests in `HotRedefTest`: redef swaps a fn at runtime; direct-linking
+disables it.
 
-**Plan B (handler-stack-on-continuation, the "flat" design):**
+### 5. Shared SM_STACK (`1312f78`) + native tier-c (`151e4ab`)
 
-1. Single trampoline frame; `k` carries a mutable handler stack.
-2. Inner-with-region in outer's body emits `pushHandler` / `popHandler`
-   pseudo-states.
-3. `dispatchLoopSM` consults `k.handlerStack` (innermost-first) instead of
-   a fixed `hs`.
+`RuntimeSupport.SM_STACK` is a thread-local Deque of every active SM
+dispatch frame's `hs`. On `PerformSignal`, dispatch first searches its
+own frame; on miss it walks the stack innermost-first to find a match,
+and dispatches in the *current* loop frame.
 
-Plan A keeps the runtime simple; plan B keeps emission simple. Either
-works — plan A is closer to the existing code. Pick one in the next
-session.
+This lets tier-c clauses (clause body performs a foreign effect) work
+natively. The clause body compiles to its own SM step function via
+`emitTierCClauseLambda`; the wrapper `IrijFn` allocates a
+continuation, populates `fields[]` with the op args + outer resumeFn,
+and calls `runWithSMNoHs(kClause)` (empty hs). The clause body's
+foreign perform throws a `PerformSignal` carrying `kClause`; it
+escapes the inner empty-hs frame and is caught by the next-outer SM
+frame via SM_STACK fallback. The outer's clause resume targets
+`kClause`, so the trampoline iterates back to the clause body's saved
+state with the foreign-perform's resume value.
+
+Tests:
+- `clause_performs_outer_effect_falls_back_threaded` (now the native
+  path; name kept for historical context)
+- `native_tier_c_clause_resume_value_flows_through` (state mutation +
+  foreign perform + clause resume value all round-trip)
 
 ---
 
-## 3. Hot-redef via invokedynamic + MutableCallSite
+## Remaining tail
 
-**Current state:** none. Top-level `fn` calls compile to direct
-`invokestatic`. REPL redefinitions of compiled fns don't take effect.
+### Concurrency parity
 
-**Plan:**
+`bodyContainsSpawn` still forces the outer `with` to threaded mode
+because SM_STACK is per-thread (push/pop in `dispatchLoopSM`'s
+try/finally) — a forked vthread starts with an empty SM_STACK and
+can't see its parent's SM frames.
 
-1. Each `pub fn`/`fn` emits a static method holding the implementation
-   (call it `f$impl`) plus an `invokedynamic` bootstrap that returns a
-   `MutableCallSite` pointing at `f$impl`.
-2. Call sites for `f` use the indy site, so a future `redefineCallSite(f,
-   newImpl)` can swap the target without re-linking call sites.
-3. Add `--direct-linking` flag to `irij build`: when set, emit direct
-   `invokestatic` to `f$impl` (no indy), matching Clojure's deploy
-   model. The runtime overhead of a non-`--direct-linking` build is one
-   indy stub per call (well within JIT inlining range).
-4. Wire nREPL redefine to `MutableCallSite.setTarget(newImplHandle)`.
-5. New tests: define fn → call → redefine → call returns new impl.
+Fix: `RuntimeSupport.spawn` snapshots the current SM_STACK and the
+fiber installs that snapshot at the top of its run. Same idea as
+`inheritEffectStack` for the threaded path.
 
-Independent of the effects work — could land in any order.
+Sketched, not implemented.
+
+### Tier-c shape coverage
+
+`tierCClauseCompilable` currently accepts only `Sequence` shape and
+rejects clauses whose body has a nested `with`. Could be extended to:
+- EffIR shape (clause body has IfStmt-with-perform branches)
+- Nested with inside clause (recursion through `getOrAllocInnerCont`)
+
+Both are mechanical; just need the same Segment/EffIR machinery
+threaded through `emitTierCClauseLambda`. No fundamental obstacle.
+
+### Composed handlers + tier-c stress test
+
+Tier-c with `>>`-composed handlers should work via SM_STACK fallback
+but isn't dedicated-tested. Add a golden where the foreign perform's
+matching handler is in the *outer's* composition slot, not just a
+direct outer frame.
+
+### Tier-c clause inside on-failure
+
+Untested. Theoretically OK because on-failure runs in the outer SM
+context after the inner runWithSM returned/threw — clause-as-SM
+machinery doesn't apply.
+
+### Per-perform allocation
+
+Trampoline allocates an `AtomicBoolean resumed` per perform. Could be
+folded into `IrijContinuation` (one flag per continuation). Minor.
+
+### Bench expansion
+
+`bench/effects-bump` is 50 inline performs (JVM-startup-dominated).
+Add benches that drive 10K+ performs in tight loops to expose the
+trampoline's cache effects + JIT speedup.
 
 ---
 
-## 4. (Stretch) Fold trampoline cache misses
+## Post-mortem note on TailResume
 
-The current trampoline reallocates an `AtomicBoolean resumed` flag per
-perform. Replace with a thread-local pool, or store the flag on `k`. Minor.
+Earlier design analysis claimed tier-c needs a way to keep the outer
+loop frame alive while clause-body performs propagate. The shipped
+solution:
 
----
+1. SM_STACK lets a clause's empty-hs loop dispatch on behalf of an
+   outer frame (without the outer frame having a chance to act).
+2. Routed dispatch is in the *clause's* loop frame, but the synthesised
+   resumeFn targets `sig.continuation` (`= kClause`), so the resume
+   value flows back into the clause's iterative resume.
+3. When the clause body eventually calls its own outer-body resume
+   (the `resume` parameter), that fires `TailResume(target=kBody)`,
+   which propagates through the clause's loop catch (mismatch — re-throw),
+   out of `runWithSMNoHs`, out of the wrapper, out of the outer's
+   `clause.apply` try, and lands in the outer's TailResume catch which
+   matches `kBody`. Consume → resume body.
 
-## Test strategy
-
-For 1 and 2: write the *same* test under all three back-ends (interpreter,
-threaded, SM) and assert identical output. Add to `DualRuntimeGoldenTest`
-as it stands.
-
-For 3: a small `HotRedefTest` exercising redefine without restart.
-
-## Order of attack (recommended)
-
-1. Native nested SM `with` (Plan A) — biggest correctness win.
-2. Native tier-c — depends on continuation machinery from #1.
-3. Hot-redef — independent, can run in parallel.
+The two-loop interleaving works because the target marker
+distinguishes which loop owns each TailResume. No special "outer loop
+stays alive" mechanism is needed — Java exception unwinding is
+exactly the right primitive.

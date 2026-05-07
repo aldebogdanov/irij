@@ -629,14 +629,30 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
     - [x] Golden parity tests: resume, resume-unit, nested
     - [x] 14c.2b — handler mutable state (`state :! init`, `<-`) + dot-access (static-field lowering per handler decl)
     - [x] 14c.2b — handler composition (`>>`) as runtime value (CompiledComposedHandler), inline + local-bound
-  - [ ] **14c.3 — state-machine rewrite** (perf — only if needed)
+  - [x] **14c.3 — state-machine rewrite** (perf + correctness):
+    - [x] Steps 1–10: continuation runtime, single-op / sequence / EffIR
+          shapes, A-normalization, abort + on-failure, handler state +
+          dot-access, composition (`>>`), tier-c gate (threaded fallback),
+          nested with gate (threaded fallback), spawn fallback, bench.
+    - [x] Trampolining via pooled TailResume (no per-perform stack growth)
+    - [x] Native nested SM `with` (kInner persisted in outer's fields)
+          including `r := with X body` Bind-RHS form and on-failure
+    - [x] Hot-redef via `invokedynamic` + `MutableCallSite`,
+          `--direct-linking` flag for deploy
+    - [x] Native tier-c (clause body as its own SM continuation,
+          foreign performs route via SM_STACK fallback)
+    - See `docs/phase-14c3-techdebt.md` for as-built mechanism + the
+      small remaining tail (concurrency parity, broader tier-c shape
+      coverage, bench expansion).
 
 - [~] **14d.1 — `--mode` flag for `irij build`**
   - [x] `CompileOptions` record + `HandlerStrategy` enum (`THREADED`/`STATE_MACHINE`)
   - [x] `IrijCompiler.compileSource/compileFile` opts overloads (default `THREADED`)
   - [x] `ClassEmitter` carries `CompileOptions` (wiring for 14c.3)
   - [x] `BuildCommand` modes: `interp` (pre-14 bundled interpreter, default),
-        `bytecode-threaded` (14c.2), `bytecode-sm` (14c.3, stub → rejects until implemented)
+        `bytecode-threaded` (14c.2), `bytecode-sm` (14c.3, fully wired)
+  - [x] `--direct-linking` flag (Clojure-style; disables hot-redef indy
+        and emits plain invokestatic for max JIT inlinability)
   - [x] `--mode=<x>` / `--mode <x>` with synonyms (`threaded`/`bc-threaded`, `sm`/`state-machine`)
   - [x] `bench/run.sh` — wall-clock matrix harness
         (modes × {clojure, python3}); benches `fib`, `tak`
