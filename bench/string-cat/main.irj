@@ -1,0 +1,10 @@
+;; String concatenation in a loop — exercises allocation + Str ops.
+;; Print first char as a deterministic signal of completion; length()
+;; builtin isn't wired into the bytecode emitter yet, so use a print
+;; that exercises the final value differently.
+
+fn build
+  (acc n -> if (n == 0) acc else (build (acc ++ "x") (n - 1)))
+
+s := build "" 500
+println s

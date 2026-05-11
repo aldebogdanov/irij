@@ -1,0 +1,8 @@
+;; Recursive accumulator sum 1..N — exercises arithmetic + recursion depth
+;; without the exponential fanout of naive fib. Tail position; relies on
+;; JIT to keep frames cheap.
+
+fn sum-to
+  (acc n -> if (n == 0) acc else (sum-to (acc + n) (n - 1)))
+
+println (sum-to 0 1000)

@@ -50,6 +50,7 @@ fi
 HAVE_IRIJ=0;    command -v irij       >/dev/null 2>&1 && HAVE_IRIJ=1
 HAVE_JAVA=0;    command -v java       >/dev/null 2>&1 && HAVE_JAVA=1
 HAVE_CLOJURE=0; command -v clojure    >/dev/null 2>&1 && HAVE_CLOJURE=1
+HAVE_BB=0;      command -v bb         >/dev/null 2>&1 && HAVE_BB=1
 HAVE_PYTHON=0;  command -v python3    >/dev/null 2>&1 && HAVE_PYTHON=1
 
 if [[ $HAVE_IRIJ -eq 0 || $HAVE_JAVA -eq 0 ]]; then
@@ -122,6 +123,9 @@ for bench in "${BENCHES[@]}"; do
     fi
     if [[ -f "$ROOT/$bench/main.clj" && $HAVE_CLOJURE -eq 1 ]]; then
         run_variant "clojure" clojure -M "$ROOT/$bench/main.clj"
+    fi
+    if [[ -f "$ROOT/$bench/main.clj" && $HAVE_BB -eq 1 ]]; then
+        run_variant "babashka" bb "$ROOT/$bench/main.clj"
     fi
     if [[ -f "$ROOT/$bench/main.py" && $HAVE_PYTHON -eq 1 ]]; then
         run_variant "python3" python3 "$ROOT/$bench/main.py"

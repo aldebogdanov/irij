@@ -1,0 +1,11 @@
+;; Vector build-and-fold — exercises immutable vector allocation +
+;; traversal. NOTE: bytecode-threaded / bytecode-sm currently lack
+;; collection builtins (length / fold / reduce) so this bench is
+;; interpreter-only on the Irij side. Other-language baselines run
+;; their idiomatic versions for shape comparison.
+
+fn build
+  (acc n -> if (n == 0) acc else (build (acc ++ #[n]) (n - 1)))
+
+v := build #[] 500
+println (fold (+) 0 v)
