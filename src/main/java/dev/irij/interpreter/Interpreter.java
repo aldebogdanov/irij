@@ -190,6 +190,23 @@ public final class Interpreter {
         }));
 
         // ── fold — left fold over a collection ────────────────────────
+        //
+        // KEPT here as a Java BuiltinFn ALONGSIDE the Irij-ported version
+        // in `std.list`. They're functionally equivalent on the data, but
+        // they differ in *effect-row semantics*:
+        //
+        //   - BuiltinFn fold is effect-transparent — the callback runs in
+        //     the caller's effect-row, so `fold (_ x -> println x) () v`
+        //     works under `::: Console` like a built-in loop would.
+        //   - std.list.fold is a regular pub fn declared `::: JVM`, so
+        //     its body runs in {JVM}-only — a callback that performs
+        //     Console fails the effect check.
+        //
+        // Until Irij grows effect-row polymorphism for higher-order fns
+        // (so the callback's required effects propagate into the caller's
+        // row), the Java fold stays as the "transparent loop" path and
+        // std.list.fold is for callbacks that are themselves declared with
+        // a matching row.
         globalEnv.define("fold", new BuiltinFn("fold", 3, args -> {
             var fn = args.get(0);
             var init = args.get(1);

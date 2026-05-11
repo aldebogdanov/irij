@@ -1,5 +1,7 @@
 mod std.collection
 
+use std.list :open
+
 ;; Collection combinators built on existing builtins.
 
 pub fn zip :: Vec Vec Vec

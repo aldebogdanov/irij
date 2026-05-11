@@ -1,5 +1,7 @@
 mod std.func
 
+use std.list :open
+
 ;; Function combinators.
 
 pub fn flip :: Fn _ _ _
