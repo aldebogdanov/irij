@@ -20,6 +20,24 @@ public final class RuntimeSupport {
         Object apply(Object[] args);
     }
 
+    // ── Operator sections — (+), (-), (*), etc. as first-class values ──
+    //
+    // Emitter lowers `Expr.OpSection(op)` to GETSTATIC of one of these
+    // constants. Lets users pass operators by name to higher-order fns:
+    //   fold (+) 0 #[1 2 3]   ;; sums 6
+    public static final IrijFn OP_ADD = args -> add(args[0], args[1]);
+    public static final IrijFn OP_SUB = args -> sub(args[0], args[1]);
+    public static final IrijFn OP_MUL = args -> mul(args[0], args[1]);
+    public static final IrijFn OP_DIV = args -> div(args[0], args[1]);
+    public static final IrijFn OP_MOD = args -> mod(args[0], args[1]);
+    public static final IrijFn OP_CONCAT = args -> concat(args[0], args[1]);
+    public static final IrijFn OP_LT  = args -> Boolean.valueOf(lt(args[0], args[1]));
+    public static final IrijFn OP_LE  = args -> Boolean.valueOf(le(args[0], args[1]));
+    public static final IrijFn OP_GT  = args -> Boolean.valueOf(gt(args[0], args[1]));
+    public static final IrijFn OP_GE  = args -> Boolean.valueOf(ge(args[0], args[1]));
+    public static final IrijFn OP_EQ  = args -> Boolean.valueOf(eq(args[0], args[1]));
+    public static final IrijFn OP_NEQ = args -> Boolean.valueOf(neq(args[0], args[1]));
+
     /** Helper for App sites when callee is an expression of unknown type. */
     public static Object callFn(Object fn, Object[] args) {
         return callAny(fn, args);

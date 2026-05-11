@@ -67,6 +67,13 @@ final class ClassEmitter implements Opcodes {
     private int currentFnArity = 0;
     private Label currentFnEntry = null;
 
+    // For each user fn `f` referenced as a value (not at an App call
+    // site), we synthesise a single IrijFn-shape wrapper method
+    // `f$irijfn([Ljava/lang/Object;)Ljava/lang/Object;` that unpacks args
+    // and forwards to the real `f`. Tracked here so each fn gets at
+    // most one wrapper per class.
+    private final Set<String> emittedFnWrappers = new HashSet<>();
+
     private final Set<String> moduleAliases;
     private final CompileOptions options;
 
@@ -530,6 +537,7 @@ final class ClassEmitter implements Opcodes {
                         "(Ljava/lang/String;)Ljava/lang/Object;", false);
             }
             case Expr.Compose c -> emitCompose(c, mv, locals);
+            case Expr.OpSection os -> emitOpSection(os.op(), mv);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported expression: " + e.getClass().getSimpleName());
         }
@@ -570,7 +578,77 @@ final class ClassEmitter implements Opcodes {
                     "()L" + COMP_HANDLER + ";", false);
             return;
         }
+        // User fn referenced as a value (e.g. passed to a higher-order fn
+        // like `fold add 0 v`). Synthesise an IrijFn wrapper once per fn
+        // and push it here as an LMF-built lambda.
+        if (fnArity.containsKey(name)) {
+            int arity = fnArity.get(name);
+            ensureUserFnWrapper(name, arity);
+            Handle bsm = new Handle(H_INVOKESTATIC,
+                    "java/lang/invoke/LambdaMetafactory", "metafactory",
+                    "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                            + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
+                            + "Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                            + "Ljava/lang/invoke/CallSite;",
+                    false);
+            Type samType = Type.getMethodType(APPLY_DESC);
+            Handle implHandle = new Handle(H_INVOKESTATIC, internalName,
+                    userFnWrapperName(name), APPLY_DESC, false);
+            mv.visitInvokeDynamicInsn("apply", "()" + IRIJ_FN_DESC, bsm,
+                    samType, implHandle, samType);
+            return;
+        }
         throw new IrijCompiler.CompileException("Unbound variable: " + name);
+    }
+
+    private static String userFnWrapperName(String fnName) {
+        return mangle(fnName) + "$irijfn";
+    }
+
+    /** Emit a one-time `f$irijfn(Object[]) -> Object` adapter that
+     *  unpacks the array and calls `f` via INVOKESTATIC. */
+    private void ensureUserFnWrapper(String fnName, int arity) {
+        if (!emittedFnWrappers.add(fnName)) return; // already emitted
+        MethodVisitor w = classWriter.visitMethod(
+                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                userFnWrapperName(fnName), APPLY_DESC, null, null);
+        w.visitCode();
+        int argsSlot = 0;
+        for (int i = 0; i < arity; i++) {
+            w.visitVarInsn(ALOAD, argsSlot);
+            pushIconst(w, i);
+            w.visitInsn(AALOAD);
+        }
+        StringBuilder desc = new StringBuilder("(");
+        for (int i = 0; i < arity; i++) desc.append(OBJ_DESC);
+        desc.append(")").append(OBJ_DESC);
+        w.visitMethodInsn(INVOKESTATIC, internalName, mangle(fnName),
+                desc.toString(), false);
+        w.visitInsn(ARETURN);
+        w.visitMaxs(0, 0);
+        w.visitEnd();
+    }
+
+    /** Operator section `(op)` — push the pre-built RuntimeSupport.IrijFn
+     *  constant so the operator can be passed as a value. */
+    private void emitOpSection(String op, MethodVisitor mv) {
+        String constName = switch (op) {
+            case "+"  -> "OP_ADD";
+            case "-"  -> "OP_SUB";
+            case "*"  -> "OP_MUL";
+            case "/"  -> "OP_DIV";
+            case "%"  -> "OP_MOD";
+            case "++" -> "OP_CONCAT";
+            case "<"  -> "OP_LT";
+            case "<=" -> "OP_LE";
+            case ">"  -> "OP_GT";
+            case ">=" -> "OP_GE";
+            case "==" -> "OP_EQ";
+            case "!=" -> "OP_NEQ";
+            default -> throw new IrijCompiler.CompileException(
+                    "MVP: operator section not yet supported: (" + op + ")");
+        };
+        mv.visitFieldInsn(GETSTATIC, RT, constName, IRIJ_FN_DESC);
     }
 
     private void emitCompose(Expr.Compose c, MethodVisitor mv, Locals locals) {
