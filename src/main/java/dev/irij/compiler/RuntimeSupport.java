@@ -199,6 +199,96 @@ public final class RuntimeSupport {
         return new dev.irij.interpreter.Values.IrijVector(new java.util.ArrayList<>(es.subList(from, to)));
     }
 
+    // ── Bytecode-callable raw primitives ────────────────────────────────
+    //
+    // Irij-facing names — boxed Long indices, Object return. Stdlib Irij
+    // functions (fold/map/length/etc., to be ported) call these via the
+    // bytecode emitter's emitBuiltinApp dispatch table; users can call
+    // them too. Names mirror the interpreter convention: kebab-case.
+
+    /** `length x` — works on String, IrijVector, IrijMap, IrijTuple, null. */
+    public static Object length(Object v) {
+        if (v == null) return 0L;
+        if (v instanceof String s) return (long) s.length();
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            return (long) vec.elements().size();
+        }
+        if (v instanceof dev.irij.interpreter.Values.IrijMap m) {
+            return (long) m.entries().size();
+        }
+        if (v instanceof dev.irij.interpreter.Values.IrijTuple t) {
+            return (long) t.elements().length;
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "len: expected Str/Vector/Map/Tuple, got " + typeTag(v));
+    }
+
+    /** `nth coll i` — element at index (works on Vector or String). */
+    public static Object nth(Object v, Object iBoxed) {
+        int i = (int) ((Long) iBoxed).longValue();
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            return vec.elements().get(i);
+        }
+        if (v instanceof String s) return String.valueOf(s.charAt(i));
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "nth: expected Vector or Str, got " + typeTag(v));
+    }
+
+    /** `conj v x` — append x, return new vector (immutable semantics). */
+    public static Object conj(Object v, Object x) {
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            var out = new java.util.ArrayList<>(vec.elements());
+            out.add(x);
+            return new dev.irij.interpreter.Values.IrijVector(out);
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "conj: expected Vector, got " + typeTag(v));
+    }
+
+    /** `empty? x` — true if String/Vector/Map/Tuple is empty, or null. */
+    public static Object isEmpty(Object v) {
+        if (v == null) return Boolean.TRUE;
+        if (v instanceof String s) return s.isEmpty();
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            return vec.elements().isEmpty();
+        }
+        if (v instanceof dev.irij.interpreter.Values.IrijMap m) {
+            return m.entries().isEmpty();
+        }
+        if (v instanceof dev.irij.interpreter.Values.IrijTuple t) {
+            return t.elements().length == 0;
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "empty?: expected Str/Vector/Map/Tuple, got " + typeTag(v));
+    }
+
+    /** `head v` — first element of a non-empty vector. */
+    public static Object head(Object v) {
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            var es = vec.elements();
+            if (es.isEmpty()) {
+                throw new dev.irij.interpreter.IrijRuntimeError("head: empty vector");
+            }
+            return es.get(0);
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "head: expected Vector, got " + typeTag(v));
+    }
+
+    /** `tail v` — vector without first element (immutable). */
+    public static Object tail(Object v) {
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            var es = vec.elements();
+            if (es.isEmpty()) {
+                return new dev.irij.interpreter.Values.IrijVector(new java.util.ArrayList<>());
+            }
+            return new dev.irij.interpreter.Values.IrijVector(
+                    new java.util.ArrayList<>(es.subList(1, es.size())));
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "tail: expected Vector, got " + typeTag(v));
+    }
+
     /** Build an IrijVector from args[from..] — used for lambda rest params. */
     public static Object restVector(Object[] args, int from) {
         java.util.List<Object> out = new java.util.ArrayList<>();

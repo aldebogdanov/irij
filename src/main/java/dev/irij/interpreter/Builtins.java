@@ -168,6 +168,30 @@ public final class Builtins {
             throw new IrijRuntimeError("length expects a collection, got " + Values.typeName(v));
         }));
 
+        // `empty? x` — true if a collection is empty (or null).
+        env.define("empty?", new BuiltinFn("empty?", 1, args -> {
+            var v = args.get(0);
+            if (v == null) return Boolean.TRUE;
+            if (v instanceof String s) return s.isEmpty();
+            if (v instanceof IrijVector vec) return vec.elements().isEmpty();
+            if (v instanceof IrijMap m) return m.entries().isEmpty();
+            if (v instanceof IrijSet s) return s.elements().isEmpty();
+            if (v instanceof IrijTuple t) return t.elements().length == 0;
+            throw new IrijRuntimeError("empty? expects a collection, got " + Values.typeName(v));
+        }));
+
+        // `conj v x` — append x to vector, returning a new vector.
+        env.define("conj", new BuiltinFn("conj", 2, args -> {
+            var v = args.get(0);
+            var x = args.get(1);
+            if (v instanceof IrijVector vec) {
+                var copy = new ArrayList<>(vec.elements());
+                copy.add(x);
+                return new IrijVector(copy);
+            }
+            throw new IrijRuntimeError("conj expects a Vector, got " + Values.typeName(v));
+        }));
+
         env.define("reverse", new BuiltinFn("reverse", 1, args -> {
             var v = args.get(0);
             if (v instanceof IrijVector vec) {

@@ -59,6 +59,14 @@ final class ClassEmitter implements Opcodes {
     private ClassWriter classWriter;
     private int lambdaCounter = 0;
 
+    // Self-tail-call optimization scratch. While emitting a top-level fn
+    // body, these point at the in-flight method so a self-recursive call
+    // in tail position can be lowered to a GOTO back to the method entry
+    // (re-binding param slots in place) instead of an INVOKESTATIC.
+    private String currentFnName = null;
+    private int currentFnArity = 0;
+    private Label currentFnEntry = null;
+
     private final Set<String> moduleAliases;
     private final CompileOptions options;
 
@@ -200,44 +208,125 @@ final class ClassEmitter implements Opcodes {
             locals.allocate(name);
         }
 
-        switch (fn.body()) {
-            case Decl.FnBody.LambdaBody lb -> {
-                emitExpr(lb.body(), mv, locals);
-                mv.visitInsn(ARETURN);
-            }
-            case Decl.FnBody.MatchArmsBody mab -> {
-                Expr.MatchExpr me = new Expr.MatchExpr(
-                        new Expr.Var("$scrut", null),
-                        mab.arms(),
-                        null);
-                emitMatchExpr(me, mv, locals);
-                mv.visitInsn(ARETURN);
-            }
-            case Decl.FnBody.ImperativeBody ib -> {
-                List<Stmt> stmts = ib.stmts();
-                if (stmts.isEmpty()) {
-                    mv.visitInsn(ACONST_NULL);
+        // Self-TCO scaffolding: place an entry label right after param slot
+        // setup. A self-recursive call in tail position GOTOs here after
+        // re-binding the param slots, instead of paying an INVOKESTATIC
+        // frame per recursion.
+        String savedFnName = currentFnName;
+        int savedFnArity = currentFnArity;
+        Label savedFnEntry = currentFnEntry;
+        currentFnName = fn.name();
+        currentFnArity = params.size();
+        currentFnEntry = new Label();
+        mv.visitLabel(currentFnEntry);
+        try {
+            switch (fn.body()) {
+                case Decl.FnBody.LambdaBody lb -> emitTailExpr(lb.body(), mv, locals);
+                case Decl.FnBody.MatchArmsBody mab -> {
+                    Expr.MatchExpr me = new Expr.MatchExpr(
+                            new Expr.Var("$scrut", null),
+                            mab.arms(),
+                            null);
+                    emitMatchExpr(me, mv, locals);
                     mv.visitInsn(ARETURN);
-                    break;
                 }
-                for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
-                Stmt last = stmts.get(stmts.size() - 1);
-                if (last instanceof Stmt.ExprStmt es) {
-                    emitExpr(es.expr(), mv, locals);
-                } else if (last instanceof Stmt.With w) {
-                    emitWith(w, mv, locals);
-                } else {
-                    emitStmt(last, mv, locals);
-                    mv.visitInsn(ACONST_NULL);
+                case Decl.FnBody.ImperativeBody ib -> {
+                    List<Stmt> stmts = ib.stmts();
+                    if (stmts.isEmpty()) {
+                        mv.visitInsn(ACONST_NULL);
+                        mv.visitInsn(ARETURN);
+                        break;
+                    }
+                    for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
+                    Stmt last = stmts.get(stmts.size() - 1);
+                    if (last instanceof Stmt.ExprStmt es) {
+                        emitTailExpr(es.expr(), mv, locals);
+                    } else if (last instanceof Stmt.With w) {
+                        emitWith(w, mv, locals);
+                        mv.visitInsn(ARETURN);
+                    } else {
+                        emitStmt(last, mv, locals);
+                        mv.visitInsn(ACONST_NULL);
+                        mv.visitInsn(ARETURN);
+                    }
                 }
-                mv.visitInsn(ARETURN);
+                default -> throw new IrijCompiler.CompileException(
+                        "MVP: unsupported fn body: " + fn.body().getClass().getSimpleName());
             }
-            default -> throw new IrijCompiler.CompileException(
-                    "MVP: unsupported fn body: " + fn.body().getClass().getSimpleName());
+        } finally {
+            currentFnName = savedFnName;
+            currentFnArity = savedFnArity;
+            currentFnEntry = savedFnEntry;
         }
 
         mv.visitMaxs(0, 0);
         mv.visitEnd();
+    }
+
+    /**
+     * Emit an expression at tail position: either lowers to a self-tail-call
+     * GOTO + arg rebind, or falls through to {@code emitExpr} followed by
+     * {@code ARETURN}. Recurses into tail-propagating shapes (if/else) so a
+     * deeply-nested self call still gets the optimisation.
+     */
+    private void emitTailExpr(Expr e, MethodVisitor mv, Locals locals) {
+        // 1. Direct self-tail-call: `App(Var(currentFn), args)` with matching arity.
+        if (e instanceof Expr.App app
+                && app.fn() instanceof Expr.Var v
+                && currentFnName != null
+                && currentFnName.equals(v.name())
+                && app.args().size() == currentFnArity) {
+            // Evaluate all args onto the JVM operand stack first, THEN ASTORE
+            // into param slots in reverse order. This guarantees args see the
+            // pre-call param values (e.g. `loop (acc + n) (n - 1)` reads the
+            // old acc + old n before either slot is overwritten).
+            for (Expr a : app.args()) emitExpr(a, mv, locals);
+            for (int i = currentFnArity - 1; i >= 0; i--) {
+                mv.visitVarInsn(ASTORE, i);
+            }
+            mv.visitJumpInsn(GOTO, currentFnEntry);
+            return;
+        }
+
+        // 2. Tail-propagating shape: if/else — both branches are tail.
+        if (e instanceof Expr.IfExpr ie) {
+            emitExpr(ie.cond(), mv, locals);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "truthy",
+                    "(Ljava/lang/Object;)Z", false);
+            Label elseL = new Label();
+            mv.visitJumpInsn(IFEQ, elseL);
+            emitTailExpr(ie.thenBranch(), mv, locals);
+            mv.visitLabel(elseL);
+            emitTailExpr(ie.elseBranch(), mv, locals);
+            return;
+        }
+
+        // 3. Block: earlier stmts non-tail, last expr tail.
+        if (e instanceof Expr.Block blk) {
+            List<Stmt> stmts = blk.stmts();
+            if (stmts.isEmpty()) {
+                mv.visitInsn(ACONST_NULL);
+                mv.visitInsn(ARETURN);
+                return;
+            }
+            for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
+            Stmt last = stmts.get(stmts.size() - 1);
+            if (last instanceof Stmt.ExprStmt es) {
+                emitTailExpr(es.expr(), mv, locals);
+            } else if (last instanceof Stmt.With w) {
+                emitWith(w, mv, locals);
+                mv.visitInsn(ARETURN);
+            } else {
+                emitStmt(last, mv, locals);
+                mv.visitInsn(ACONST_NULL);
+                mv.visitInsn(ARETURN);
+            }
+            return;
+        }
+
+        // 4. Default: just compute the value and return.
+        emitExpr(e, mv, locals);
+        mv.visitInsn(ARETURN);
     }
 
     private void emitBlock(Expr.Block blk, MethodVisitor mv, Locals outer) {
@@ -708,6 +797,55 @@ final class ClassEmitter implements Opcodes {
                 if (args.size() != 1) return false;
                 emitExpr(args.get(0), mv, locals);
                 mv.visitMethodInsn(INVOKESTATIC, RT, "tryFn",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            // ── Collection / string primitives (Phase 2) ───────────────
+            // Names match the interpreter convention in Builtins.java so a
+            // single .irj source compiles + interprets identically. These
+            // are the raw building blocks; stdlib fns (fold/map/filter/etc.)
+            // are written in Irij on top.
+            case "length" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "length",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "nth" -> {
+                if (args.size() != 2) return false;
+                emitExpr(args.get(0), mv, locals);
+                emitExpr(args.get(1), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "nth",
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "conj" -> {
+                if (args.size() != 2) return false;
+                emitExpr(args.get(0), mv, locals);
+                emitExpr(args.get(1), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "conj",
+                        "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "empty?" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "isEmpty",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "head" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "head",
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            case "tail" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "tail",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
