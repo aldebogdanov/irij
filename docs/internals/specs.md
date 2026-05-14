@@ -1,0 +1,147 @@
+# Spec system
+
+Irij has no static type system. Instead it has *specs* — Malli-inspired
+runtime predicates that validate values at function boundaries.
+
+## Layers
+
+The spec system has four levels of strictness, picked by the
+declaration form:
+
+| Form | What runs |
+|---|---|
+| `fn f (...)` | Nothing — no validation. |
+| `fn f :: A B (...)` | Input + output validated against `A` (the arg) and `B` (the return) at each call. |
+| `fn f :: A B  in pre  out post (...)` | Same as above + pre/post contract clauses. |
+| `pub fn f :: ...` | Same as above + spec-lint at compile time: pub fn MUST have a spec annotation. |
+
+## Spec expressions
+
+`SpecExpr` (sealed AST node):
+
+| Kind | Example | Validates |
+|---|---|---|
+| Primitive | `Int`, `Str`, `Bool`, `Float`, `Any` | type tag |
+| Composite | `Vec[Int]`, `Map[Str, Int]` | container + element specs |
+| Tuple | `#(Int Str)` | fixed-shape tuple |
+| Arrow | `Int Str -> Bool` | a function with that signature |
+| Enum | `:: ok :: error` | one of the listed values |
+| Wildcard | `_` | accept anything |
+| Ref | `MyShape` | named spec defined elsewhere |
+
+## At what time
+
+Specs are *runtime* validators. They run when a `SpecContractFn`-
+wrapped function is called:
+
+1. **Input pass**: each declared input spec checked against the
+   corresponding arg. Failure throws `IrijRuntimeError("spec failure
+   on arg N of f: expected …, got …")` with blame info.
+2. **Body runs**.
+3. **Output pass**: declared output spec checked against return value.
+   Same blame-rich error on failure.
+
+The wrapping happens at fn-definition time — `Interpreter.evalDecl`
+for `FnDecl` instantiates a `SpecContractFn(underlying, specs)` if
+specs are present.
+
+## Contracts: pre/post (separate from specs)
+
+`in pre out post` clauses are additional Boolean predicates:
+
+```
+fn divide :: Int Int Int
+  in (b != 0)            ;; pre — runs before body
+  out (out >= 0)         ;; post — runs after body, `out` is the return
+  (a b -> a / b)
+```
+
+Pre clauses fail with "pre-condition violated in f"; post with
+"post-condition violated in f". Failure carries the source location
+of the clause for blame.
+
+Pre/post are *truthiness* checks — they evaluate to a value and call
+`truthy()`. Distinct from specs (which check structure).
+
+## Module-boundary blame
+
+`pub` declarations export with "blame envelope" wrappers. When a
+caller imports `mod.foo` and calls `foo`, a spec failure shows:
+
+```
+Spec failure on input 1 of mod.foo:
+  expected Int, got Str "abc"
+  blamed:  caller-side at <file>:<line>
+```
+
+The blame label points at the *caller*, not the callee, when input
+specs fail. For output failures it points at the callee. This is
+classical higher-order contract blame (Findler/Felleisen 2002).
+
+## Law verification
+
+QuickCheck-style. Declared via:
+
+```
+law name :: Int Int
+  (a b -> a + b == b + a)
+```
+
+Runs N=100 random inputs (via `Arbitrary` instances) and checks the
+property. Reports the smallest failing input via shrinking. Run via
+`irij test`.
+
+## `Arbitrary` instances
+
+Each primitive spec carries an `arbitrary()` method that generates
+random samples. Composites compose: `Vec[Int]` generates a random-
+length list of random ints. Custom specs need an explicit
+`arbitrary` declaration.
+
+Implementation in `dev.irij.spec` (interp-side; bytecode mode doesn't
+yet run law-verification).
+
+## Spec-lint
+
+At parse time, `pub fn` without `:: ...` triggers a warning (or error
+under `--strict`). The recommendation:
+
+- All `pub fn` declarations MUST have spec annotations.
+- Use `_` for positions where the shape is too complex or
+  undetermined.
+- `--no-spec-lint` is a human emergency escape hatch; don't use as a
+  workaround.
+
+(See `CLAUDE.md` for the project policy.)
+
+## What bytecode mode doesn't do (yet)
+
+Bytecode mode currently *parses* spec annotations but doesn't generate
+the `SpecContractFn`-wrapping code. So:
+
+- Bytecode-compiled programs run without runtime spec validation.
+- Effect-row enforcement (a related but separate check) also lives
+  only in the interpreter today.
+
+Closing these gaps requires emitter changes — generate spec-check
+preludes/postludes around each annotated fn. Tracked tech debt.
+
+## Why runtime specs and not static types
+
+The project bet:
+
+- **Effect rows want to be runtime-checked anyway** (handlers can be
+  swapped at runtime). A static type system that doesn't capture
+  effects is half-checked; one that does is Haskell/Koka-complex.
+- **Java interop** is inherently dynamically-typed at the boundary.
+  Forcing a static type system on Java-returning calls makes the
+  interop ergonomics terrible.
+- **Specs are values** — you can compute, compose, and store specs at
+  runtime. Static types can't be manipulated programmatically.
+- **Spec failures point at a value**, not at a type expression. Easier
+  to debug.
+
+Trade-off: no compile-time type errors. Some bugs surface at runtime
+that would be caught at compile time in a typed lang. The project
+position is that effect rows + specs + contracts + law verification
+catch enough of the same bugs to be worth the trade.
