@@ -295,7 +295,7 @@ public final class RuntimeSupport {
                 "conj: expected Vector, got " + typeTag(v));
     }
 
-    /** `empty? x` — true if String/Vector/Map/Tuple is empty, or null. */
+    /** `empty? x` — true if String/Vector/Map/Tuple/Range is empty, or null. */
     public static Object isEmpty(Object v) {
         if (v == null) return Boolean.TRUE;
         if (v instanceof String s) return s.isEmpty();
@@ -308,8 +308,12 @@ public final class RuntimeSupport {
         if (v instanceof dev.irij.interpreter.Values.IrijTuple t) {
             return t.elements().length == 0;
         }
+        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+            long upper = r.exclusive() ? r.to() : r.to() + 1;
+            return r.from() >= upper;
+        }
         throw new dev.irij.interpreter.IrijRuntimeError(
-                "empty?: expected Str/Vector/Map/Tuple, got " + typeTag(v));
+                "empty?: expected Str/Vector/Map/Tuple/Range, got " + typeTag(v));
     }
 
     /** `fold f init coll` — left fold. Effect-transparent like the
@@ -336,7 +340,8 @@ public final class RuntimeSupport {
         return acc;
     }
 
-    /** `head v` — first element of a non-empty vector. */
+    /** `head v` — first element of a non-empty collection. Works on
+     *  Vector and IrijRange (so `head (0 ..< 10)` returns 0L). */
     public static Object head(Object v) {
         if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
             var es = vec.elements();
@@ -345,11 +350,19 @@ public final class RuntimeSupport {
             }
             return es.get(0);
         }
+        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+            long upper = r.exclusive() ? r.to() : r.to() + 1;
+            if (r.from() >= upper) {
+                throw new dev.irij.interpreter.IrijRuntimeError("head: empty range");
+            }
+            return r.from();
+        }
         throw new dev.irij.interpreter.IrijRuntimeError(
-                "head: expected Vector, got " + typeTag(v));
+                "head: expected Vector or Range, got " + typeTag(v));
     }
 
-    /** `tail v` — vector without first element (immutable). */
+    /** `tail v` — collection without first element (immutable). Works
+     *  on Vector and IrijRange. */
     public static Object tail(Object v) {
         if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
             var es = vec.elements();
@@ -359,8 +372,14 @@ public final class RuntimeSupport {
             return new dev.irij.interpreter.Values.IrijVector(
                     new java.util.ArrayList<>(es.subList(1, es.size())));
         }
+        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+            long upper = r.exclusive() ? r.to() : r.to() + 1;
+            if (r.from() >= upper) return r; // empty stays empty
+            return new dev.irij.interpreter.Values.IrijRange(
+                    r.from() + 1, r.to(), r.exclusive());
+        }
         throw new dev.irij.interpreter.IrijRuntimeError(
-                "tail: expected Vector, got " + typeTag(v));
+                "tail: expected Vector or Range, got " + typeTag(v));
     }
 
     /** Build an IrijVector from args[from..] — used for lambda rest params. */

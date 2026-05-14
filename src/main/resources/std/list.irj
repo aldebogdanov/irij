@@ -8,48 +8,48 @@ mod std.list
 ;; JVM stack flat — `fold` over a million-element vector runs without
 ;; overflow.
 ;;
-;; All public fns carry `::: JVM` because the underlying primitives
-;; (head/tail/nth/etc.) are wired into bytecode via RuntimeSupport
-;; static methods, which today require JVM capability. This is a
-;; transitional annotation that can be relaxed once the capability
-;; analysis distinguishes "pure JVM math/data ops" from genuine IO.
+;; All public fns carry `::: Any` — effect-row polymorphism: the
+;; callback can require any caller's effects (e.g.
+;; `fold (_ x -> println x) ()` works under `::: Console`). The
+;; body sees the caller's full effect row when invoking the callback.
+;; The `Any` marker is recognised by the effect-row checker.
 
-pub fn fold :: _ _ _ _ ::: JVM
+pub fn fold :: _ _ _ _ ::: Any
   (f acc v ->
     if (empty? v) acc
     else (fold f (f acc (head v)) (tail v)))
 
-pub fn map :: _ _ _ ::: JVM
+pub fn map :: _ _ _ ::: Any
   (f v -> map-step f v #[])
 
 ;; Tail-recursive map driver. Accumulates into `acc` and returns it
 ;; when the input is exhausted.
-fn map-step ::: JVM
+fn map-step ::: Any
   (f v acc ->
     if (empty? v) acc
     else (map-step f (tail v) (conj acc (f (head v)))))
 
-pub fn filter :: _ _ _ ::: JVM
+pub fn filter :: _ _ _ ::: Any
   (pred v -> filter-step pred v #[])
 
-fn filter-step ::: JVM
+fn filter-step ::: Any
   (pred v acc ->
     if (empty? v) acc
     else (filter-step pred (tail v) (filter-pick pred (head v) acc)))
 
-fn filter-pick ::: JVM
+fn filter-pick ::: Any
   (pred x acc -> if (pred x) (conj acc x) else acc)
 
-pub fn reverse-vec :: _ _ ::: JVM
+pub fn reverse-vec :: _ _ ::: Any
   (v -> reverse-step v #[])
 
-fn reverse-step ::: JVM
+fn reverse-step ::: Any
   (v acc ->
     if (empty? v) acc
     else (reverse-step (tail v) (conj acc (head v))))
 
-pub fn sum :: _ _ ::: JVM
+pub fn sum :: _ _ ::: Any
   (v -> fold (+) 0 v)
 
-pub fn count :: _ _ ::: JVM
+pub fn count :: _ _ ::: Any
   (v -> length v)

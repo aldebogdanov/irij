@@ -1384,11 +1384,13 @@ class InterpreterTest {
         }
 
         @Test void foldWithInit() {
-            assertEquals("10", run("println (fold (+) 0 #[1 2 3 4])"));
+            assertEquals("10", run(
+                "use std.list :open\nprintln (fold (+) 0 #[1 2 3 4])"));
         }
 
         @Test void foldEmptyReturnsInit() {
-            assertEquals("0", run("println (fold (+) 0 #[])"));
+            assertEquals("0", run(
+                "use std.list :open\nprintln (fold (+) 0 #[])"));
         }
     }
 
@@ -2436,6 +2438,7 @@ class InterpreterTest {
         @Test void stdCollectionEach() {
             assertEquals("1\n2\n3", run("""
                 use std.collection :open
+                use std.list :open
                 fn print-each ::: Console
                   => vec
                   fold (_ x -> println x) () vec

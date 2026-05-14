@@ -29,6 +29,37 @@ declaration form:
 | Wildcard | `_` | accept anything |
 | Ref | `MyShape` | named spec defined elsewhere |
 
+## Effect-row polymorphism via `Any`
+
+Higher-order fns whose callback may need effects unknown at
+definition site declare `::: Any` in their row:
+
+```
+pub fn fold :: _ _ _ _ ::: Any
+  (f acc v ->
+    if (empty? v) acc
+    else (fold f (f acc (head v)) (tail v)))
+```
+
+When such a fn is *called*, the effect-row pushed onto
+`AVAILABLE_EFFECTS` is the UNION of declared effects (minus `Any`)
+and the caller's available set. So `fold (_ x -> println x) () v`
+called from a fn declared `::: Console` lets the callback's
+`println` see Console — even though `fold` itself doesn't mention
+Console.
+
+Implemented in `Interpreter.effectiveRow(declared)`:
+
+- declared contains `Any` AND caller was AMBIENT → push AMBIENT.
+- declared contains `Any` AND caller has a finite row → push UNION.
+- declared doesn't contain `Any` → push declared verbatim (old
+  behaviour).
+
+This is what lets `std.list.fold` (Irij-ported) replace the old
+Java BuiltinFn fold. The BuiltinFn was effect-transparent by
+construction (no row push); `::: Any` gives Irij-side fns the same
+transparency explicitly.
+
 ## At what time
 
 Specs are *runtime* validators. They run when a `SpecContractFn`-

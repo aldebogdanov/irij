@@ -93,6 +93,32 @@ public final class Interpreter {
         }
     }
 
+    /** Build the effect-row set a fn-call should push.
+     *
+     * Effect-row polymorphism marker: an effect named {@code Any} in
+     * the declared row means "inherit caller's effects in addition to
+     * the explicitly listed ones." Used by higher-order fns whose
+     * callback can require effects unknown at definition site:
+     *
+     * <pre>
+     * fn map-effectful :: Fn Vec Vec ::: Any
+     *   (f v -> ...)
+     * </pre>
+     *
+     * Without {@code Any}: callable from any context but body sees a
+     * row of exactly the declared effects (the old behaviour).
+     * With {@code Any}: body sees declared row UNION caller's row.
+     */
+    private Set<String> effectiveRow(List<String> declared) {
+        boolean polymorphic = declared.contains("Any");
+        if (!polymorphic) return new HashSet<>(declared);
+        Set<String> base = AVAILABLE_EFFECTS.get().peek();
+        if (base == AMBIENT_EFFECTS) return AMBIENT_EFFECTS;
+        Set<String> merged = new HashSet<>(base);
+        for (String e : declared) if (!e.equals("Any")) merged.add(e);
+        return merged;
+    }
+
     /** Get the effect row from a function value, or null if not annotated. */
     private static List<String> getEffectRow(Object fn) {
         return switch (fn) {
@@ -189,35 +215,13 @@ public final class Interpreter {
             }
         }));
 
-        // ── fold — left fold over a collection ────────────────────────
-        //
-        // KEPT here as a Java BuiltinFn ALONGSIDE the Irij-ported version
-        // in `std.list`. They're functionally equivalent on the data, but
-        // they differ in *effect-row semantics*:
-        //
-        //   - BuiltinFn fold is effect-transparent — the callback runs in
-        //     the caller's effect-row, so `fold (_ x -> println x) () v`
-        //     works under `::: Console` like a built-in loop would.
-        //   - std.list.fold is a regular pub fn declared `::: JVM`, so
-        //     its body runs in {JVM}-only — a callback that performs
-        //     Console fails the effect check.
-        //
-        // Until Irij grows effect-row polymorphism for higher-order fns
-        // (so the callback's required effects propagate into the caller's
-        // row), the Java fold stays as the "transparent loop" path and
-        // std.list.fold is for callbacks that are themselves declared with
-        // a matching row.
-        globalEnv.define("fold", new BuiltinFn("fold", 3, args -> {
-            var fn = args.get(0);
-            var init = args.get(1);
-            var coll = args.get(2);
-            var list = Builtins.toList(coll);
-            Object acc = init;
-            for (var elem : list) {
-                acc = apply(fn, List.of(acc, elem), SourceLoc.UNKNOWN);
-            }
-            return acc;
-        }));
+        // ── fold — DELETED. Now lives in `std.list` (real Irij,
+        // bytecode-compilable, tail-recursive). std.list.fold is
+        // declared `::: Any` so its callback inherits the caller's
+        // full effect row — same transparency the old Java BuiltinFn
+        // had, now via the language's effect-row polymorphism marker.
+        // Callers do `use std.list :open` (already in std.collection
+        // and std.func; explicit elsewhere).
 
         // ── await — block until a fiber completes ─────────────────────
         globalEnv.define("await", new BuiltinFn("await", 1, args -> {
@@ -1863,7 +1867,7 @@ public final class Interpreter {
         Builtins.install(moduleEnv, out, pathResolver);
         // Install interpreter builtins (fold, spawn) in module env too
         // Forward interpreter-level builtins to module env
-        for (var name : List.of("fold", "spawn", "try", "raw-http-serve",
+        for (var name : List.of("spawn", "try", "raw-http-serve",
                 "raw-db-open", "raw-db-query", "raw-db-exec", "raw-db-close", "raw-db-transaction",
                 "raw-nrepl-eval-sandboxed",
                 "raw-sse-response", "raw-sse-send", "raw-sse-close", "raw-sse-closed?",
@@ -2990,7 +2994,7 @@ public final class Interpreter {
                 // Push effect row context (null = unchecked/unannotated)
                 var effRow = lam.effectRow();
                 if (effRow != null) {
-                    AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
+                    AVAILABLE_EFFECTS.get().push(effectiveRow(effRow));
                 }
                 try {
                     var result = eval(lam.body(), callEnv);
@@ -3011,7 +3015,7 @@ public final class Interpreter {
                 // Push effect row context
                 var effRow = mf.effectRow();
                 if (effRow != null) {
-                    AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
+                    AVAILABLE_EFFECTS.get().push(effectiveRow(effRow));
                 }
                 try {
                     var scrutinee = validatedArgs.get(0);
@@ -3053,7 +3057,7 @@ public final class Interpreter {
                 // Push effect row context
                 var effRow = imf.effectRow();
                 if (effRow != null) {
-                    AVAILABLE_EFFECTS.get().push(new HashSet<>(effRow));
+                    AVAILABLE_EFFECTS.get().push(effectiveRow(effRow));
                 }
                 try {
                     var result = execStmtListReturn(imf.body(), callEnv);

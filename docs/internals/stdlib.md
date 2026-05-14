@@ -60,23 +60,16 @@ Real Irij code, parsed + compiled like user code:
 A Java BuiltinFn is **effect-transparent** by construction — the
 callback's effects are invisible at registration time, the callback
 runs in whatever effect row the caller has. Irij-side higher-order
-fns are **fixed-row** — declared `::: JVM` (or whatever), their
-callback must fit that row.
+fns gain the same transparency by declaring `::: Any` in their
+effect row (see `specs.md`).
 
-So: `fold (_ x -> println x) () v` works against the Java `fold`
-under `::: Console` because the BuiltinFn is transparent. The
-Irij-side `std.list.fold` is `::: JVM`-only — the same callback would
-fail the Console-not-available check.
+`std.list.fold` is declared `::: Any`, so `fold (_ x -> println x)
+() v` works under `::: Console` — the callback inherits the
+caller's effect row. The Java BuiltinFn fold was removed; the
+Irij-ported version is now the single source of truth.
 
-Both `fold` implementations co-exist:
-
-- Use the Java `fold` (global, ambient) for callbacks that perform
-  arbitrary effects.
-- Use `std.list.fold` (after `use std.list :open`) for tail-recursive
-  iteration where the callback is a `::: JVM`-row fn (or pure).
-
-The duplication will collapse once effect-row polymorphism for
-higher-order fns lands. Today: live with both.
+Callers do `use std.list :open` (already imported by std.collection
+and std.func; explicit elsewhere).
 
 ## Raw primitives wired into bytecode
 

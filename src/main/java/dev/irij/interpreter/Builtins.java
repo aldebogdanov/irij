@@ -145,7 +145,11 @@ public final class Builtins {
                 if (vec.elements().isEmpty()) throw new IrijRuntimeError("head of empty vector");
                 return vec.elements().get(0);
             }
-            throw new IrijRuntimeError("head expects a Vector, got " + Values.typeName(v));
+            if (v instanceof IrijRange r) {
+                if (r.size() == 0) throw new IrijRuntimeError("head of empty range");
+                return r.from();
+            }
+            throw new IrijRuntimeError("head expects a Vector or Range, got " + Values.typeName(v));
         }));
 
         env.define("tail", new BuiltinFn("tail", 1, args -> {
@@ -154,7 +158,11 @@ public final class Builtins {
                 if (vec.elements().isEmpty()) throw new IrijRuntimeError("tail of empty vector");
                 return new IrijVector(vec.elements().subList(1, vec.elements().size()));
             }
-            throw new IrijRuntimeError("tail expects a Vector, got " + Values.typeName(v));
+            if (v instanceof IrijRange r) {
+                if (r.size() == 0) return r;
+                return new IrijRange(r.from() + 1, r.to(), r.exclusive());
+            }
+            throw new IrijRuntimeError("tail expects a Vector or Range, got " + Values.typeName(v));
         }));
 
         env.define("length", new BuiltinFn("length", 1, args -> {
@@ -177,6 +185,7 @@ public final class Builtins {
             if (v instanceof IrijMap m) return m.entries().isEmpty();
             if (v instanceof IrijSet s) return s.elements().isEmpty();
             if (v instanceof IrijTuple t) return t.elements().length == 0;
+            if (v instanceof IrijRange r) return r.size() == 0;
             throw new IrijRuntimeError("empty? expects a collection, got " + Values.typeName(v));
         }));
 
@@ -318,14 +327,8 @@ public final class Builtins {
             return !Values.isTruthy(args.get(0));
         }));
 
-        env.define("empty?", new BuiltinFn("empty?", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof IrijVector vec) return vec.elements().isEmpty();
-            if (v instanceof IrijSet set) return set.elements().isEmpty();
-            if (v instanceof IrijMap map) return map.entries().isEmpty();
-            if (v instanceof String s) return s.isEmpty();
-            return false;
-        }));
+        // (`empty?` defined earlier with full collection coverage —
+        //  Vector / Map / Set / Tuple / Range / String / null.)
 
         // ── Error handling ─────────────────────────────────────────────
         env.define("error", new BuiltinFn("error", 1, args -> {
