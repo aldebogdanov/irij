@@ -280,6 +280,30 @@ public final class RuntimeSupport {
                 "empty?: expected Str/Vector/Map/Tuple, got " + typeTag(v));
     }
 
+    /** `fold f init coll` — left fold. Effect-transparent like the
+     *  interpreter BuiltinFn: callback runs in the caller's effect row
+     *  (no SM continuation, no row-restricted Irij stub). Bytecode
+     *  callers get the same semantics they have in the interpreter. */
+    public static Object fold(Object fn, Object init, Object coll) {
+        java.util.List<Object> list;
+        if (coll instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            list = vec.elements();
+        } else if (coll instanceof dev.irij.interpreter.Values.IrijRange r) {
+            list = new java.util.ArrayList<>();
+            long upper = r.exclusive() ? r.to() : r.to() + 1;
+            for (long i = r.from(); i < upper; i++) list.add(i);
+        } else if (coll instanceof java.util.List<?> raw) {
+            @SuppressWarnings("unchecked") var cast = (java.util.List<Object>) raw;
+            list = cast;
+        } else {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "fold: expected Vector/Range/List, got " + typeTag(coll));
+        }
+        Object acc = init;
+        for (Object elem : list) acc = callAny(fn, new Object[]{acc, elem});
+        return acc;
+    }
+
     /** `head v` — first element of a non-empty vector. */
     public static Object head(Object v) {
         if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {

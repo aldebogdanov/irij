@@ -1,6 +1,8 @@
 package dev.irij.nrepl;
 
 import dev.irij.ast.AstBuilder;
+import dev.irij.compiler.CompileOptions;
+import dev.irij.compiler.IrijCompiler;
 import dev.irij.interpreter.Interpreter;
 import dev.irij.interpreter.IrijRuntimeError;
 import dev.irij.interpreter.Values;
@@ -8,7 +10,9 @@ import dev.irij.parser.IrijParseDriver;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.lang.reflect.Method;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * An nREPL session: wraps an {@link Interpreter} instance with
@@ -69,11 +73,72 @@ public final class NReplSession {
         }
         return switch (op) {
             case "eval" -> evalOp(msg);
+            case "eval-bytecode" -> evalBytecodeOp(msg);
             case "background-out" -> backgroundOutOp();
             case "describe" -> describeOp();
             case "close" -> closeOp();
             default -> unknownOp(op);
         };
+    }
+
+    // ── eval-bytecode ──────────────────────────────────────────────────
+    //
+    // Compile the snippet to JVM bytecode (state-machine mode) and run
+    // it in a fresh class. Useful for benchmarking + verifying behaviour
+    // under the compiled back-end inside an interactive session.
+    //
+    // Limitation: does NOT share state with the interpreter session
+    // (no cross-eval `:=` or `fn` carry-over). Each eval-bytecode is a
+    // self-contained program. Full bytecode-backed sessions with
+    // cross-eval state require a "namespace" abstraction in the
+    // emitter — tracked tech debt; see docs/internals/hot-redef.md.
+
+    private static final AtomicInteger BYTECODE_EVAL_COUNTER = new AtomicInteger();
+
+    private static final class BytesLoader extends ClassLoader {
+        BytesLoader() { super(NReplSession.class.getClassLoader()); }
+        Class<?> define(String name, byte[] bytes) {
+            return defineClass(name, bytes, 0, bytes.length);
+        }
+    }
+
+    private Map<String, Object> evalBytecodeOp(Map<String, Object> msg) {
+        String code = (String) msg.get("code");
+        if (code == null) {
+            return errorResponse("Missing 'code' in eval-bytecode message");
+        }
+        String modeStr = (String) msg.getOrDefault("mode", "bytecode-sm");
+        CompileOptions opts = switch (modeStr) {
+            case "bytecode-threaded", "threaded" -> CompileOptions.threaded();
+            default -> CompileOptions.stateMachine();
+        };
+        String bgPrefix = backgroundOut.drain();
+        var capture = new ByteArrayOutputStream();
+        indirectOut.setTarget(capture);
+        PrintStream origOut = System.out;
+        System.setOut(new PrintStream(capture, true));
+        try {
+            String className = "irij.NReplEval$" + BYTECODE_EVAL_COUNTER.incrementAndGet();
+            byte[] bytes = IrijCompiler.compileSource(code, className, null, opts);
+            Class<?> cls = new BytesLoader().define(className, bytes);
+            Method main = cls.getMethod("main", String[].class);
+            main.invoke(null, (Object) new String[0]);
+
+            var resp = new LinkedHashMap<String, Object>();
+            String stdout = bgPrefix + capture.toString();
+            if (!stdout.isEmpty()) resp.put("out", stdout);
+            resp.put("value", "nil");  // top-level bytecode programs return via println
+            resp.put("status", List.of("done"));
+            return resp;
+        } catch (IrijCompiler.CompileException e) {
+            return errorResponseWithOut(bgPrefix, capture, "Compile error: " + e.getMessage());
+        } catch (Exception e) {
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            return errorResponseWithOut(bgPrefix, capture, "Bytecode runtime error: " + cause.getMessage());
+        } finally {
+            System.setOut(origOut);
+            indirectOut.setTarget(backgroundOut);
+        }
     }
 
     // ── eval ────────────────────────────────────────────────────────────
@@ -150,6 +215,7 @@ public final class NReplSession {
         var resp = new LinkedHashMap<String, Object>();
         resp.put("ops", Map.of(
                 "eval", Map.of(),
+                "eval-bytecode", Map.of(),
                 "background-out", Map.of(),
                 "describe", Map.of(),
                 "clone", Map.of(),

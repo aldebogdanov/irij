@@ -21,4 +21,5 @@ why something is the way it is.
 11. [Concurrency](concurrency.md) — virtual threads, structured concurrency, SM_STACK
 12. [JVM capability](jvm-capability.md) — `::: JVM`, why Java is impure
 13. [Stdlib](stdlib.md) — what lives in Irij vs Java, the boundary
-14. [Glossary](glossary.md) — terms used throughout
+14. [nREPL](nrepl.md) — protocol, sessions, eval vs eval-bytecode
+15. [Glossary](glossary.md) — terms used throughout

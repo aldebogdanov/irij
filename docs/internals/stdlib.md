@@ -80,8 +80,8 @@ higher-order fns lands. Today: live with both.
 
 ## Raw primitives wired into bytecode
 
-For bytecode mode, six collection / string primitives are wired
-directly into `ClassEmitter.emitBuiltinApp`:
+For bytecode mode, these collection / string ops are wired directly
+into `ClassEmitter.emitBuiltinApp`:
 
 | Name | Where |
 |---|---|
@@ -91,6 +91,7 @@ directly into `ClassEmitter.emitBuiltinApp`:
 | `empty?` | `INVOKESTATIC RT.isEmpty` |
 | `head` | `INVOKESTATIC RT.head` |
 | `tail` | `INVOKESTATIC RT.tail` |
+| `fold` | `INVOKESTATIC RT.fold` (effect-transparent — callback runs in caller's row) |
 
 These names match the interpreter convention. A single source
 compiles + interprets identically. Other builtins (e.g. `fold`,

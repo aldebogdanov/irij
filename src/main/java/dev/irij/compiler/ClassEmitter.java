@@ -927,6 +927,18 @@ final class ClassEmitter implements Opcodes {
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
+            // Effect-transparent higher-order builtin: callback runs in
+            // the caller's effect row (matches the interpreter
+            // BuiltinFn semantics).
+            case "fold" -> {
+                if (args.size() != 3) return false;
+                emitExpr(args.get(0), mv, locals);
+                emitExpr(args.get(1), mv, locals);
+                emitExpr(args.get(2), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "fold",
+                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
             default -> { return false; }
         }
     }

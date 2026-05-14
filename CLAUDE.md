@@ -23,3 +23,24 @@
 - `docs/irij-lang-spec.org` is the source of truth, you can't change it except if developer asked of that explicitly
 - Always update `TODO.md`, `README.md`, examples and other related files when steps are implemented
 - Create docs in `./docs/` after each phase
+
+## Internals docs — MANDATORY upkeep
+- `docs/internals/` documents how Irij works under the hood: pipeline,
+  parser, AST, interpreter, bytecode, effects, TCO, hot-redef, specs,
+  modules, concurrency, JVM capability, stdlib, glossary.
+- **Whenever you change Irij codebase, you HAVE TO update the matching
+  internals doc in the same commit.** Do this without being asked.
+  - New AST node → update `docs/internals/ast.md`.
+  - Changed effect lowering → update `docs/internals/effects.md`.
+  - New emitter pass / case → update `docs/internals/bytecode.md`.
+  - New stdlib primitive → update `docs/internals/stdlib.md`.
+  - New JVM-capability rule → update `docs/internals/jvm-capability.md`.
+  - Any concurrency change → update `docs/internals/concurrency.md`.
+  - New terms → update `docs/internals/glossary.md`.
+- The README in `docs/internals/` lists every page; if you add a new
+  page, add it to the README's reading order.
+- If a code change is large enough to break the doc's mental model
+  (e.g. a refactor that replaces a subsystem), rewrite the affected
+  page, don't just patch it.
+- The site at `irij.online/docs` surfaces these docs publicly. Out-of-
+  date pages are user-visible. Treat them as code, not afterthought.
