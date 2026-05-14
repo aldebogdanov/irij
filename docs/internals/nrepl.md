@@ -36,44 +36,60 @@ Each session owns:
 Bindings (`x := 5`, `fn foo ...`) made in one eval persist for
 subsequent evals in the same session — same as a Clojure REPL.
 
-## `eval-bytecode` — limitations and design
+## `eval-bytecode` — stateful via namespace
 
-The minimal bytecode-eval support compiles each snippet to a fresh
-class `irij.NReplEval$N` and invokes its `main`. **No cross-eval
-state**:
+Each snippet compiles to a fresh class `irij.NReplEval$N` in the
+session's shared classloader. **Top-level `:=` binds persist across
+evals** via a per-session namespace map shared on the thread.
 
-- Names defined in `eval` do not visible in `eval-bytecode`.
-- Names defined in `eval-bytecode` do not persist to the session.
-- Each `eval-bytecode` must be a self-contained program.
+Mechanism:
 
-Useful for:
+- `NReplSession` owns `bytecodeNamespace: ConcurrentHashMap<String, Object>`.
+- Before each invoke, the session sets `RuntimeSupport.NS` (a
+  ThreadLocal) to that map; restores on finally.
+- The emitter compiles with `CompileOptions.namespaceMode = true`.
+  In that mode:
+  - Top-level `Stmt.Bind` with a simple-name target emits an extra
+    `INVOKESTATIC RT.nsPut(name, value)` after the local-slot ASTORE.
+  - `emitVarLoad` falls back to `INVOKESTATIC RT.nsGet(name)` when
+    the name isn't in locals / lifted / handlers / user fns.
 
-- Benchmarking compiled performance inside an interactive session.
-- Verifying behaviour matches between modes (run the same snippet
-  with `eval` and `eval-bytecode`, compare outputs).
+Round-trip:
 
-Not useful for:
+```
+eval-bytecode "x := 5"        → nsPut("x", 5)
+eval-bytecode "println x"     → nsGet("x") = 5; prints "5"
+eval-bytecode "x := 100"      → nsPut("x", 100)  (overrides)
+eval-bytecode "println x"     → 100
+```
 
-- Stateful REPL-driven development. Use `eval` for that.
+Sessions isolate: each `NReplSession` has its own map; namespaces
+don't leak between sessions.
 
-## Why no shared state (yet)
+Tests: `NReplBytecodeStateTest`.
 
-A bytecode-backed stateful REPL needs a "namespace" abstraction in
-the emitter:
+## What's still not cross-eval
 
-- Top-level `:=` bindings stored in a per-session `Map<String, Object>`
-  (the namespace).
-- Each eval reads bound-var values from the namespace at the top of
-  its class.
-- New top-level binds get written back at the bottom.
-- Fns defined in one eval must be callable from later evals: requires
-  a stable indy site keyed by `(namespace, fn-name)` that
-  `MutableCallSite.setTarget`s as fns are redefined.
+Top-level **fn defs** in one eval can't be called from later evals
+yet. Each eval is its own class; `f$impl` from eval N is not
+visible in eval N+1. To support this, each `fn` decl would need:
 
-The infrastructure exists in pieces (hot-redef in
-`docs/internals/hot-redef.md`, classloader handling in
-`compileSource`) but assembling it into a coherent "namespace"
-abstraction is real work. Not blocking; tracked as future direction.
+- A registered `IrijFn` wrapper stored in the namespace map (keyed
+  by fn name).
+- Call sites in subsequent evals routed through `nsGet(name)` →
+  `IrijFn.apply(args)`. (Already done via the existing
+  user-fn-as-value path when `emitVarLoad` falls through to the
+  namespace.)
+
+The wrapper-registration piece is wired-up-but-not-shipped: when
+`emitFn` runs in namespaceMode, it would need to also emit code that
+runs at class-load time to register an IrijFn pointing at the
+emitted method. Possible via `LambdaMetafactory` + a static-init
+clinit block. Not yet implemented; tracked future direction.
+
+What works today: data values (`:=`), expressions reading prior
+state. Re-defining fns: only within a single eval (`fn` + caller in
+the same snippet).
 
 ## `mode` parameter
 

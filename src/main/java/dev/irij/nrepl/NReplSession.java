@@ -29,6 +29,17 @@ public final class NReplSession {
     private final BackgroundOutputStream backgroundOut;
     private volatile boolean closed;
 
+    /** Per-session shared namespace for `eval-bytecode` operations.
+     *  Top-level `:= name value` binds written here by the emitter
+     *  via {@code RT.nsPut}; reads fall back here via {@code RT.nsGet}.
+     *  Lets successive bytecode evals share state. */
+    private final java.util.Map<String, Object> bytecodeNamespace =
+            new java.util.concurrent.ConcurrentHashMap<>();
+    /** Shared classloader so every eval-bytecode class can refer to
+     *  each other's emitted helpers (e.g. user-fn IrijFn adapters)
+     *  if/when cross-eval fn defs become supported. */
+    private final BytesLoader bytecodeClassLoader = new BytesLoader();
+
     public NReplSession() {
         this(null);
     }
@@ -112,15 +123,23 @@ public final class NReplSession {
             case "bytecode-threaded", "threaded" -> CompileOptions.threaded();
             default -> CompileOptions.stateMachine();
         };
+        // Enable namespace mode so top-level binds share state across
+        // evals in this session.
+        opts = opts.withNamespaceMode(true);
+
         String bgPrefix = backgroundOut.drain();
         var capture = new ByteArrayOutputStream();
         indirectOut.setTarget(capture);
         PrintStream origOut = System.out;
         System.setOut(new PrintStream(capture, true));
+        // Install the session namespace on this thread so the emitted
+        // `nsGet`/`nsPut` calls hit the right map.
+        var prevNS = dev.irij.compiler.RuntimeSupport.NS.get();
+        dev.irij.compiler.RuntimeSupport.NS.set(bytecodeNamespace);
         try {
             String className = "irij.NReplEval$" + BYTECODE_EVAL_COUNTER.incrementAndGet();
             byte[] bytes = IrijCompiler.compileSource(code, className, null, opts);
-            Class<?> cls = new BytesLoader().define(className, bytes);
+            Class<?> cls = bytecodeClassLoader.define(className, bytes);
             Method main = cls.getMethod("main", String[].class);
             main.invoke(null, (Object) new String[0]);
 
@@ -136,6 +155,7 @@ public final class NReplSession {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             return errorResponseWithOut(bgPrefix, capture, "Bytecode runtime error: " + cause.getMessage());
         } finally {
+            dev.irij.compiler.RuntimeSupport.NS.set(prevNS);
             System.setOut(origOut);
             indirectOut.setTarget(backgroundOut);
         }

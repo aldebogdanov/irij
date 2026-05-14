@@ -43,6 +43,38 @@ public final class RuntimeSupport {
         return callAny(fn, args);
     }
 
+    // ── Namespace mode (nREPL eval-bytecode cross-eval state) ────────
+    //
+    // The nREPL session sets `NS` to a per-session map before invoking
+    // a compiled eval class's `main`. The emitter, when configured
+    // with `namespaceMode=true`, writes top-level `:= name value`
+    // bindings into the map via `nsPut`, and routes unresolved Var
+    // loads through `nsGet`. Result: a `:= x 5` in one eval, then a
+    // `println x` in the next eval, both work — bytecode-compiled.
+
+    /** Per-thread namespace map. nREPL sets this before each
+     *  eval-bytecode invocation and shares the same map across all
+     *  evals in the session. */
+    public static final ThreadLocal<java.util.Map<String, Object>> NS =
+            ThreadLocal.withInitial(java.util.HashMap::new);
+
+    /** Look up `name` in the current namespace. Throws if not bound. */
+    public static Object nsGet(String name) {
+        var ns = NS.get();
+        if (!ns.containsKey(name)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "Unbound variable: " + name);
+        }
+        return ns.get(name);
+    }
+
+    /** Store `name → value` in the current namespace. Returns the
+     *  value so call sites can chain (`var := nsPut(...)`). */
+    public static Object nsPut(String name, Object value) {
+        NS.get().put(name, value);
+        return value;
+    }
+
     /**
      * Dispatch a call against any runtime "callable": IrijFn (compiled
      * lambdas), interpreter BuiltinFn (Java interop refs from

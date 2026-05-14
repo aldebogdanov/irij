@@ -365,7 +365,24 @@ final class ClassEmitter implements Opcodes {
     private void emitTopLevel(Decl d, MethodVisitor mv, Locals locals) {
         switch (d) {
             case Decl.ExprDecl ed -> emitStmtExpr(ed.expr(), mv, locals);
-            case Decl.BindingDecl bd -> emitStmt(bd.stmt(), mv, locals);
+            case Decl.BindingDecl bd -> {
+                emitStmt(bd.stmt(), mv, locals);
+                // Namespace-mode write-through: after a top-level
+                // `name := value` runs, also store it into the session
+                // namespace so subsequent eval-bytecode calls see it.
+                if (options.namespaceMode()
+                        && bd.stmt() instanceof Stmt.Bind b
+                        && b.target() instanceof Stmt.BindTarget.Simple sm) {
+                    Integer slot = locals.lookup(sm.name());
+                    if (slot != null) {
+                        mv.visitLdcInsn(sm.name());
+                        mv.visitVarInsn(ALOAD, slot);
+                        mv.visitMethodInsn(INVOKESTATIC, RT, "nsPut",
+                                "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                        mv.visitInsn(POP);
+                    }
+                }
+            }
             case Decl.IfDecl id -> emitStmt(id.ifStmt(), mv, locals);
             case Decl.SpecDecl __ -> { /* structural only; constructors resolved via TypeRef */ }
             case Decl.ProtoDecl __ -> { /* no runtime rep; methods go through dispatchers */ }
@@ -576,6 +593,15 @@ final class ClassEmitter implements Opcodes {
         if (handlers.containsKey(name)) {
             mv.visitMethodInsn(INVOKESTATIC, internalName, handlerBuildName(name),
                     "()L" + COMP_HANDLER + ";", false);
+            return;
+        }
+        // Namespace-mode fallback for nREPL eval-bytecode: read the value
+        // from the session's shared namespace via RT.nsGet. Lets
+        // successive evals see each other's top-level `:=` bindings.
+        if (options.namespaceMode()) {
+            mv.visitLdcInsn(name);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "nsGet",
+                    "(Ljava/lang/String;)Ljava/lang/Object;", false);
             return;
         }
         // User fn referenced as a value (e.g. passed to a higher-order fn

@@ -107,6 +107,20 @@ first-class fns and for lambda-literal calls.
 
 See `hot-redef.md` for details.
 
+## Namespace mode (nREPL)
+
+`CompileOptions.namespaceMode = true` (only nREPL `eval-bytecode`
+sets this) extends the var-load fallback and bind emit:
+
+| Site | Emit when namespaceMode |
+|---|---|
+| `emitVarLoad`, after all lookups fail | `LDC name; INVOKESTATIC RT.nsGet` |
+| `emitTopLevel` for `Stmt.Bind` with Simple target | (after the local ASTORE) `LDC name; ALOAD slot; INVOKESTATIC RT.nsPut; POP` |
+
+`RT.NS` is a ThreadLocal map; the nREPL session installs it before
+invoking each compiled eval. Cross-eval state for top-level data
+binds works; cross-eval fn defs do not yet (see `nrepl.md`).
+
 ## Self-TCO
 
 See `tco.md`. Short version: at a tail-position call to the
