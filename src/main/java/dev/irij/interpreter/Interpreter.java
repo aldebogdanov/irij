@@ -85,12 +85,28 @@ public final class Interpreter {
     private void checkEffectsAvailable(List<String> required, String opName, SourceLoc loc) {
         Set<String> available = AVAILABLE_EFFECTS.get().peek();
         for (String eff : required) {
+            if (eff.equals("Any")) continue; // polymorphic marker — passes
             if (!available.contains(eff)) {
                 throw new IrijRuntimeError(
                     "Effect '" + eff + "' not declared: '" + opName
                     + "' requires ::: " + eff + " in enclosing function's effect row", loc);
             }
         }
+    }
+
+    /** Effect-row subsumption at a function-call site. The caller's
+     *  available effects must include every effect the callee declared.
+     *
+     *  Without this check, calling a `fn f ::: JVM` from a `fn g (...)`
+     *  with empty row would silently push {JVM} onto AVAILABLE_EFFECTS
+     *  for `f`'s body — `g`'s declared row would be a lie.
+     */
+    private void checkCalleeRow(List<String> calleeRow, String calleeName, SourceLoc loc) {
+        if (calleeRow == null || calleeRow.isEmpty()) return;
+        // `Any` callees are polymorphic — they impose no requirement on
+        // the caller's row beyond what their own body's calls expose.
+        if (calleeRow.size() == 1 && calleeRow.contains("Any")) return;
+        checkEffectsAvailable(calleeRow, "call to " + calleeName, loc);
     }
 
     /** Build the effect-row set a fn-call should push.
@@ -2994,6 +3010,7 @@ public final class Interpreter {
                 // Push effect row context (null = unchecked/unannotated)
                 var effRow = lam.effectRow();
                 if (effRow != null) {
+                    checkCalleeRow(effRow, lam.name(), loc);
                     AVAILABLE_EFFECTS.get().push(effectiveRow(effRow));
                 }
                 try {
@@ -3015,6 +3032,7 @@ public final class Interpreter {
                 // Push effect row context
                 var effRow = mf.effectRow();
                 if (effRow != null) {
+                    checkCalleeRow(effRow, mf.name(), loc);
                     AVAILABLE_EFFECTS.get().push(effectiveRow(effRow));
                 }
                 try {
@@ -3057,6 +3075,7 @@ public final class Interpreter {
                 // Push effect row context
                 var effRow = imf.effectRow();
                 if (effRow != null) {
+                    checkCalleeRow(effRow, imf.name(), loc);
                     AVAILABLE_EFFECTS.get().push(effectiveRow(effRow));
                 }
                 try {

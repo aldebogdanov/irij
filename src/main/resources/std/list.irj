@@ -8,11 +8,13 @@ mod std.list
 ;; JVM stack flat — `fold` over a million-element vector runs without
 ;; overflow.
 ;;
-;; All public fns carry `::: Any` — effect-row polymorphism: the
-;; callback can require any caller's effects (e.g.
-;; `fold (_ x -> println x) ()` works under `::: Console`). The
-;; body sees the caller's full effect row when invoking the callback.
-;; The `Any` marker is recognised by the effect-row checker.
+;; Effect-row policy:
+;;   - Fns whose body INVOKES a callback parameter carry `::: Any`
+;;     so the callback inherits the caller's full effect row.
+;;     This is the polymorphism marker; the runtime widens the
+;;     pushed effect set to include caller's available effects.
+;;   - Non-callback fns have no effect row — they're pure data ops.
+;;     A pure caller can call them; a `::: Console` caller can too.
 
 pub fn fold :: _ _ _ _ ::: Any
   (f acc v ->
@@ -22,8 +24,7 @@ pub fn fold :: _ _ _ _ ::: Any
 pub fn map :: _ _ _ ::: Any
   (f v -> map-step f v #[])
 
-;; Tail-recursive map driver. Accumulates into `acc` and returns it
-;; when the input is exhausted.
+;; Tail-recursive map driver. `::: Any` because the body calls `f`.
 fn map-step ::: Any
   (f v acc ->
     if (empty? v) acc
@@ -40,16 +41,23 @@ fn filter-step ::: Any
 fn filter-pick ::: Any
   (pred x acc -> if (pred x) (conj acc x) else acc)
 
-pub fn reverse-vec :: _ _ ::: Any
+;; ── Non-callback fns: no effect-row needed ──────────────────────
+
+pub fn reverse-vec :: _ _
   (v -> reverse-step v #[])
 
-fn reverse-step ::: Any
+fn reverse-step
   (v acc ->
     if (empty? v) acc
     else (reverse-step (tail v) (conj acc (head v))))
 
-pub fn sum :: _ _ ::: Any
-  (v -> fold (+) 0 v)
-
-pub fn count :: _ _ ::: Any
+pub fn count :: _ _
   (v -> length v)
+
+;; `sum` calls `fold` with `(+)`. `(+)` is a built-in numeric op with
+;; no effects; the fold passes through (Any). Sum itself doesn't
+;; introduce effects so callers don't need to declare anything.
+;; (`fold` is `::: Any` so it's polymorphic — caller's row is empty
+;; here, so the callback runs in empty too. (+) needs nothing.)
+pub fn sum :: _ _
+  (v -> fold (+) 0 v)

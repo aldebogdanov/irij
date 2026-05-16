@@ -3711,16 +3711,21 @@ class InterpreterTest {
             assertEquals(20L, result);
         }
 
-        @Test void pureFnCanCallAnnotatedConsoleFn() {
-            // Each fn establishes its own effect context.
-            // pure-caller is pure (unannotated), but say has its own ::: Console context
-            assertEquals("hello", run("""
+        @Test void pureFnCannotCallAnnotatedConsoleFn() {
+            // Effect-row subsumption at fn-call: caller must declare
+            // every effect the callee declared. Without it, `:::` would
+            // only constrain inside the callee — the caller's row
+            // would be a lie. So a pure fn calling `::: Console` say
+            // is rejected at the call site.
+            var ex = assertThrows(IrijRuntimeError.class, () -> run("""
                 fn say ::: Console
                   (x -> println x)
                 fn pure-caller
                   (x -> say x)
                 pure-caller "hello"
                 """));
+            assertTrue(ex.getMessage().contains("Console"),
+                "expected Console-effect error, got: " + ex.getMessage());
         }
 
         @Test void pureFnCannotDirectlyUsePrintln() {

@@ -29,6 +29,31 @@ declaration form:
 | Wildcard | `_` | accept anything |
 | Ref | `MyShape` | named spec defined elsewhere |
 
+## Effect-row subsumption at fn-call
+
+The effect row of a fn is a *contract on the caller*, not just a
+description of what the body does. At every fn-call site, the
+interpreter checks:
+
+  required effects of callee ⊆ available effects of caller
+
+If a fn declares `::: Console`, every caller must itself have
+Console in its effect row (or be top-level ambient, or be declared
+`::: Any` and inherit). Otherwise the call is rejected with:
+
+```
+Effect 'Console' not declared: 'call to f' requires ::: Console
+  in enclosing function's effect row
+```
+
+Implemented in `Interpreter.checkCalleeRow(calleeRow, calleeName,
+loc)`, invoked from each apply path (Lambda / MatchFn /
+ImperativeFn) before the row is pushed.
+
+Without subsumption, `:::` would only constrain inside the callee —
+a caller could call `::: Console` fns without declaring Console
+itself, defeating the row contract.
+
 ## Effect-row polymorphism via `Any`
 
 Higher-order fns whose callback may need effects unknown at

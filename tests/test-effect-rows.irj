@@ -7,7 +7,7 @@ use std.text {contains-substr?}
 fn greet ::: Console
   (name -> println ("Hello, " ++ name))
 
-fn run-greet
+fn run-greet ::: Console
   _ =>
     greet "world"
     true
@@ -132,7 +132,7 @@ r8 := test "calling effect not in row fails" (-> assert-true (check-missing-effe
 fn typed-greet :: Str () ::: Console
   (name -> println ("Typed: " ++ name))
 
-fn run-typed
+fn run-typed ::: Console
   _ =>
     typed-greet "world"
     true
@@ -145,7 +145,7 @@ fn imp-greet ::: Console
   => name
   println ("Imp: " ++ name)
 
-fn run-imp
+fn run-imp ::: Console
   _ =>
     imp-greet "test"
     true
@@ -158,7 +158,7 @@ fn describe ::: Console
   0 => println "zero"
   n => println ("num: " ++ to-str n)
 
-fn run-describe
+fn run-describe ::: Console
   _ =>
     describe 0
     describe 42
@@ -171,7 +171,7 @@ r11 := test "match fn with effect row" (-> assert-true (run-describe ()))
 fn greet2 ::: Console
   (prefix name -> println (prefix ++ name))
 
-fn run-partial
+fn run-partial ::: Console
   _ =>
     hi := greet2 "Hi, "
     hi "Irij"
@@ -185,7 +185,7 @@ fn safe-print ::: Console
   pre (x -> x /= "")
   (x -> println x)
 
-fn check-contract-effect
+fn check-contract-effect ::: Console
   _ =>
     safe-print "works"
     r := try (-> safe-print "")
