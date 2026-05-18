@@ -187,6 +187,44 @@ final class ClassEmitter implements Opcodes {
         return cw.toByteArray();
     }
 
+    /** Emit primitive-spec checks for a fn's declared input specs.
+     *
+     *  For each input position, if the spec is `Name(T)` where T is
+     *  a primitive type known to {@link RuntimeSupport#checkType},
+     *  emit:
+     *
+     *  <pre>
+     *    ALOAD param_i; LDC "T"; LDC fnName; ICONST i;
+     *    INVOKESTATIC RT.checkType; ASTORE param_i;
+     *  </pre>
+     *
+     *  Composite specs (App, Arrow, VecSpec, Wildcard, Var, Unit, etc.)
+     *  are skipped — bytecode mode validates the primitive subset.
+     *  Output spec also skipped (multi-exit-point complexity; planned
+     *  follow-up via single-exit refactor).
+     */
+    private void emitInputSpecChecks(Decl.FnDecl fn, MethodVisitor mv,
+                                      List<Pattern> params) {
+        List<dev.irij.ast.SpecExpr> specs = fn.specAnnotations();
+        if (specs == null || specs.size() < 2) return;
+        int inputCount = specs.size() - 1; // last is output
+        for (int i = 0; i < inputCount && i < params.size(); i++) {
+            dev.irij.ast.SpecExpr spec = specs.get(i);
+            if (!(spec instanceof dev.irij.ast.SpecExpr.Name n)) continue;
+            String typeName = n.name();
+            // Skip wildcard-equivalents and lowercase type vars
+            if (typeName.equals("_") || Character.isLowerCase(typeName.charAt(0))) continue;
+            mv.visitVarInsn(ALOAD, i);
+            mv.visitLdcInsn(typeName);
+            mv.visitLdcInsn(fn.name());
+            pushIconst(mv, i);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "checkType",
+                    "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
+                    false);
+            mv.visitVarInsn(ASTORE, i); // re-store validated value (still the same)
+        }
+    }
+
     private static Decl.FnDecl asFnDecl(Decl d) {
         if (d instanceof Decl.FnDecl fn) return fn;
         if (d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl.FnDecl fn) return fn;
@@ -222,6 +260,11 @@ final class ClassEmitter implements Opcodes {
             };
             locals.allocate(name);
         }
+
+        // Bytecode spec validation (input args, primitive specs only).
+        // Mirrors Interpreter.validateFnArgs for the subset of specs
+        // we can check at runtime without an Interpreter instance.
+        emitInputSpecChecks(fn, mv, params);
 
         // Self-TCO scaffolding: place an entry label right after param slot
         // setup. A self-recursive call in tail position GOTOs here after

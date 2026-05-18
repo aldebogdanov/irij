@@ -526,6 +526,18 @@ public final class IrijCli {
 
     /** Check if this JAR has a bundled entry point (built with irij build). */
     private static String getBundledEntryPoint() {
+        return readManifestAttr("Irij-Entry-Point");
+    }
+
+    /** Read the bundled `Irij-NRepl-Port` manifest attribute (set by
+     *  `irij build --nrepl-port=N`). Returns 0 if absent or invalid. */
+    private static int getBundledNReplPort() {
+        String v = readManifestAttr("Irij-NRepl-Port");
+        if (v == null) return 0;
+        try { return Integer.parseInt(v); } catch (NumberFormatException e) { return 0; }
+    }
+
+    private static String readManifestAttr(String key) {
         try {
             var url = IrijCli.class.getProtectionDomain().getCodeSource().getLocation();
             if (url != null) {
@@ -534,7 +546,7 @@ public final class IrijCli {
                     try (var jf = new java.util.jar.JarFile(jarPath.toFile())) {
                         var manifest = jf.getManifest();
                         if (manifest != null) {
-                            return manifest.getMainAttributes().getValue("Irij-Entry-Point");
+                            return manifest.getMainAttributes().getValue(key);
                         }
                     }
                 }
@@ -573,6 +585,34 @@ public final class IrijCli {
         }
 
         var ast = new AstBuilder().build(result.tree());
+
+        // If the manifest says `Irij-NRepl-Port=N`, start a co-resident
+        // nREPL server before running the entry. The server runs in a
+        // background virtual thread; the entry runs on main. After the
+        // entry completes, the JVM stays alive as long as the nREPL
+        // socket is open — operators can attach an editor and live-patch.
+        //
+        // NOTE: the embedded nREPL gets its OWN Interpreter instance
+        // (not the entry's), so it can't inspect the running app's
+        // bindings directly. Useful for live fn redefinition + ad-hoc
+        // eval against the bundled stdlib. Sharing the entry's
+        // interpreter is a future enhancement.
+        int nreplPort = getBundledNReplPort();
+        if (nreplPort > 0) {
+            try {
+                var server = new dev.irij.nrepl.NReplServer(nreplPort);
+                Thread.startVirtualThread(() -> {
+                    try { server.start(); }
+                    catch (Exception e) {
+                        System.err.println("nREPL server failed: " + e.getMessage());
+                    }
+                });
+                System.out.println("Embedded nREPL listening on " + nreplPort
+                        + " (connect with: irij nrepl-connect localhost:" + nreplPort + ")");
+            } catch (Exception e) {
+                System.err.println("Failed to start embedded nREPL: " + e.getMessage());
+            }
+        }
 
         try {
             var interpreter = new Interpreter();

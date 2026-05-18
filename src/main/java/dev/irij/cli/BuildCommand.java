@@ -42,6 +42,7 @@ public final class BuildCommand {
     private static final String DEPS_PREFIX = "__irij_deps/";
     private static final String RESOURCES_PREFIX = "__irij_resources/";
     private static final String MANIFEST_ENTRY = "Irij-Entry-Point";
+    private static final String MANIFEST_NREPL_PORT = "Irij-NRepl-Port";
     private static final String BYTECODE_CLASS_NAME = "irij.Program";
 
     /**
@@ -53,12 +54,14 @@ public final class BuildCommand {
         Path projectRoot = Path.of("").toAbsolutePath();
         Mode mode = parseMode(args);
         boolean directLinking = parseDirectLinking(args);
+        int nreplPort = parseNReplPort(args);
         String entryPoint = findEntryPoint(projectRoot, args);
         Path outputJar = resolveOutputPath(args, entryPoint);
 
         System.out.println("Building Irij application...");
         System.out.println("  mode:   " + modeLabel(mode));
         if (directLinking) System.out.println("  link:   direct (no hot-redef)");
+        if (nreplPort > 0) System.out.println("  nrepl:  embedded on port " + nreplPort);
         System.out.println("  entry:  " + entryPoint);
         System.out.println("  output: " + outputJar);
 
@@ -93,7 +96,8 @@ public final class BuildCommand {
             ? collectAllFiles(resourcesDir) : List.of();
 
         // Build the JAR
-        buildJar(runtimeJar, outputJar, projectRoot, entryPoint, appFiles, deps, resourcesDir, resourceFiles);
+        buildJar(runtimeJar, outputJar, projectRoot, entryPoint, appFiles, deps,
+                resourcesDir, resourceFiles, nreplPort);
 
         long sizeKb = Files.size(outputJar) / 1024;
         System.out.println();
@@ -200,7 +204,8 @@ public final class BuildCommand {
                                   List<Path> appFiles,
                                   Map<String, Path> deps,
                                   Path resourcesDir,
-                                  List<Path> resourceFiles) throws IOException {
+                                  List<Path> resourceFiles,
+                                  int nreplPort) throws IOException {
 
         // Read the runtime JAR's manifest and modify it
         Manifest manifest;
@@ -208,6 +213,10 @@ public final class BuildCommand {
             manifest = new Manifest(runtime.getManifest());
         }
         manifest.getMainAttributes().putValue(MANIFEST_ENTRY, entryPoint);
+        if (nreplPort > 0) {
+            manifest.getMainAttributes().putValue(MANIFEST_NREPL_PORT,
+                    Integer.toString(nreplPort));
+        }
 
         // Write the output JAR
         try (JarOutputStream jos = new JarOutputStream(
@@ -270,6 +279,26 @@ public final class BuildCommand {
                 }
             }
         }
+    }
+
+    // ── --nrepl-port parsing ────────────────────────────────────────────
+
+    /** Parse `--nrepl-port=N` or `--nrepl-port N`. Returns 0 if absent. */
+    private static int parseNReplPort(String[] args) {
+        for (int i = 0; i < args.length; i++) {
+            String a = args[i];
+            String value = null;
+            if (a.startsWith("--nrepl-port=")) value = a.substring("--nrepl-port=".length());
+            else if (a.equals("--nrepl-port") && i + 1 < args.length) value = args[i + 1];
+            if (value != null) {
+                try { return Integer.parseInt(value); }
+                catch (NumberFormatException e) {
+                    System.err.println("Invalid --nrepl-port: " + value);
+                    System.exit(1);
+                }
+            }
+        }
+        return 0;
     }
 
     // ── --direct-linking parsing ────────────────────────────────────────

@@ -205,17 +205,26 @@ under `--strict`). The recommendation:
 
 (See `CLAUDE.md` for the project policy.)
 
-## What bytecode mode doesn't do (yet)
+## Bytecode-mode spec validation
 
-Bytecode mode currently *parses* spec annotations but doesn't generate
-the `SpecContractFn`-wrapping code. So:
+The bytecode emitter validates **input args** against primitive
+type names. At each annotated `fn` decl, `emitInputSpecChecks` walks
+`fn.specAnnotations()` (last entry = return spec, earlier = inputs)
+and emits a `RuntimeSupport.checkType(value, "T", fnName, idx)` call
+per non-wildcard input whose spec is a `SpecExpr.Name`.
 
-- Bytecode-compiled programs run without runtime spec validation.
-- Effect-row enforcement (a related but separate check) also lives
-  only in the interpreter today.
+`RuntimeSupport.checkType` recognises: `Int`, `Float`, `Bool`, `Str`,
+`Vec`, `Map`, `Set`, `Tuple`, `Fn`, `Any`, `Unit`. Unknown spec
+names pass through (user-defined product/sum specs aren't yet wired
+into bytecode).
 
-Closing these gaps requires emitter changes — generate spec-check
-preludes/postludes around each annotated fn. Tracked tech debt.
+Output specs and composite specs (`Vec[Int]`, arrow types, etc.)
+remain interp-only. Output checks require single-exit refactoring of
+the emit pipeline; composite specs require a per-spec runtime
+validator (planned).
+
+Effect-row enforcement runs at compile time via
+`EffectRowChecker`; see the "Compile-time effect-row lint" section.
 
 ## Why runtime specs and not static types
 

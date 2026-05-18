@@ -103,19 +103,39 @@ emitter uses for any `with` blocks in the snippet.
  "mode": "bytecode-threaded"}
 ```
 
-## Connect-to-running-JAR — not yet shipped
+## Connect-to-running-JAR
 
-The deployed `irij.online` JAR doesn't currently expose an nREPL
-port. Plans:
+`irij build --nrepl-port=N entry.irj -o app.jar` writes an
+`Irij-NRepl-Port` manifest entry. When the bundled JAR boots,
+`IrijCli.runBundled` checks the manifest, starts an
+`NReplServer` on the configured port in a background vthread,
+then runs the entry on main. The JVM stays alive as long as the
+nREPL socket is open — attach an editor, send `eval` ops, live-patch
+fns.
 
-- Add `--nrepl-port N` to `irij build`'s manifest so deploys can boot
-  with a port.
-- Auth via shared-secret header (don't expose to public internet
-  without it).
-- Disable under `--direct-linking` builds (no hot-redef anyway).
+```
+irij build --nrepl-port=7888 server.irj -o server.jar
+java -jar server.jar
+# Embedded nREPL listening on 7888 (connect with: irij nrepl-connect localhost:7888)
+```
 
-Useful for: live patch deploy bots without redeploy. Documented
-roadmap, not yet implemented.
+Caveat: the embedded nREPL gets its OWN `Interpreter` instance, not
+the entry's. So it can't read the running app's bindings directly.
+What works:
+
+- Redefine top-level fns via `eval` — the nREPL's interp updates its
+  globalEnv; if the entry's interp uses hot-redef indy sites (which
+  it does by default), the swap propagates.
+- Ad-hoc eval against the bundled stdlib.
+
+What doesn't:
+
+- Inspect or mutate the entry's local state from nREPL. Need the
+  shared-interpreter refactor (`NReplSession.attach(existingInterp)`).
+  Future work.
+
+Auth: not implemented. Don't expose the port to the public internet
+without a TCP-level guard (firewall rule, SSH tunnel, etc.).
 
 ## Sessions + concurrency
 

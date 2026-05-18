@@ -63,6 +63,48 @@ public final class RuntimeSupport {
     //  subsumption violations fail the build. See
     //  docs/internals/specs.md for the model.)
 
+    // ── Bytecode spec validation (primitive types only) ──────────────
+    //
+    // Mirrors the interpreter's `validateFnArgs` for the *simple* case
+    // where a fn's input specs are primitive type names (`Int`, `Str`,
+    // `Vec`, `Map`, `Bool`, `Float`, `Tuple`, `Set`, `Fn`, `Any`/`_`).
+    // Composite specs (`Vec[Int]`, arrow types, user product/sum)
+    // are skipped — bytecode-mode coverage is a subset of interp's
+    // coverage. Documented gap.
+
+    /** Throw if `value` doesn't match `typeName`. Returns `value`
+     *  unchanged on success (for inline chaining in emitted bytecode). */
+    public static Object checkType(Object value, String typeName,
+                                    String fnName, int argIdx) {
+        boolean ok = switch (typeName) {
+            case "Int" -> value instanceof Long;
+            case "Float" -> value instanceof Double;
+            case "Bool" -> value instanceof Boolean;
+            case "Str" -> value instanceof String;
+            case "Vec" -> value instanceof dev.irij.interpreter.Values.IrijVector;
+            case "Map" -> value instanceof dev.irij.interpreter.Values.IrijMap;
+            case "Set" -> value instanceof dev.irij.interpreter.Values.IrijSet;
+            case "Tuple" -> value instanceof dev.irij.interpreter.Values.IrijTuple;
+            case "Fn" -> value instanceof IrijFn
+                    || value instanceof dev.irij.interpreter.Values.BuiltinFn;
+            case "Any" -> true;
+            case "Unit" -> value == null
+                    || value == dev.irij.interpreter.Values.UNIT;
+            default -> {
+                // Unknown spec name (user-defined product/sum, or a
+                // spec we don't yet handle in bytecode). Pass through;
+                // interpreter has full coverage if the user runs interp.
+                yield true;
+            }
+        };
+        if (!ok) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "Spec failure on input " + argIdx + " of " + fnName
+                            + ": expected " + typeName + ", got " + typeTag(value));
+        }
+        return value;
+    }
+
     /** Look up `name` in the current namespace. Throws if not bound. */
     public static Object nsGet(String name) {
         var ns = NS.get();
