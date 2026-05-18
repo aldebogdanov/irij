@@ -566,10 +566,37 @@ class StateMachineWithTest {
         assertEquals(nl("3"), runSM(src));
     }
 
-    @Test void tier_c_clause_implicit_foreign_perform() throws Exception {
-        // No `:::` annotation but clause body still performs Logger.log —
-        // the foreign-effect scan catches it and routes through native
-        // tier-c. Verifies we don't depend on the declarative annotation.
+    @Test void tier_c_clause_with_explicit_foreign_effect_annotation() throws Exception {
+        // Handler whose clause performs a foreign effect MUST declare
+        // that effect via `:::` — the compile-time effect-row checker
+        // rejects unannotated tier-c clauses. This test pins the
+        // annotated form (the previous "implicit" variant now fails at
+        // compile time, by design — see tier_c_clause_without_annotation_
+        // rejected for the negative case).
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            effect Greet
+              greet :: Str -> Str
+            handler quiet-log :: Logger
+              log msg => resume ()
+            handler chatty :: Greet ::: Logger
+              greet name =>
+                log ("greeting " ++ name)
+                resume ("Hi, " ++ name)
+            fn run
+              _ =>
+                with quiet-log >> chatty
+                  greet "World"
+            println (run ())
+            """;
+        assertEquals(nl("Hi, World"), runSM(src));
+    }
+
+    @Test void tier_c_clause_without_annotation_rejected() throws Exception {
+        // Negative test: clause body performs Logger.log without the
+        // handler declaring ::: Logger. The effect-row checker rejects
+        // this at compile time.
         String src = """
             effect Logger
               log :: Str -> ()
@@ -587,7 +614,8 @@ class StateMachineWithTest {
                   greet "World"
             println (run ())
             """;
-        assertEquals(nl("Hi, World"), runSM(src));
+        org.junit.jupiter.api.Assertions.assertThrows(
+                IrijCompiler.CompileException.class, () -> runSM(src));
     }
 
     // ── Step 8: nested `with` ────────────────────────────────────────
@@ -662,7 +690,7 @@ class StateMachineWithTest {
               log msg =>
                 println ("log: " ++ msg)
                 resume ()
-            fn fiber-body
+            fn fiber-body ::: Logger
               _ =>
                 log "from-fiber"
             with echo-log
@@ -715,13 +743,13 @@ class StateMachineWithTest {
               log msg =>
                 println ("log: " ++ msg)
                 resume ()
-            handler counted :: Counter
+            handler counted :: Counter ::: Logger
               state :! 0
               bump () =>
                 state <- state + 10
                 log "bumped"
                 resume state
-            fn run
+            fn run :: _ _ ::: Console
               _ =>
                 with echo-log
                   with counted

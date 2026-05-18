@@ -29,6 +29,41 @@ declaration form:
 | Wildcard | `_` | accept anything |
 | Ref | `MyShape` | named spec defined elsewhere |
 
+## Compile-time effect-row lint
+
+`dev.irij.compiler.EffectRowChecker` runs after module inlining and
+before either back-end (interp or bytecode emit). It catches three
+classes of violation at compile time:
+
+1. **Call-site subsumption:** caller calls a fn whose declared row
+   includes effects the caller doesn't declare.
+2. **Perform-site availability:** a fn body performs an effect op
+   not declared in its row.
+3. **JVM capability:** any Java interop site requires `JVM` in the
+   surrounding fn's row.
+
+Available-set semantics inside a fn body:
+
+| Declared row | Body's available set |
+|---|---|
+| `null` (unannotated) | empty (pure) |
+| Contains `Any` | ambient (everything OK; polymorphism marker) |
+| Otherwise | exactly the listed effects |
+
+`with X body` extends the available set with X's effect for the
+body's lexical extent. Handler expressions that are local-bound or
+opaque (App, Block, fn returning a handler) — checker treats the
+body as AMBIENT; runtime check is the safety net.
+
+`>>`-composed handlers contribute each operand's effect to the set.
+
+Top-level decls run under AMBIENT (not constrained — they ARE the
+caller). Handler decls walk under `requiredEffects + ownEffect`.
+
+Errors throw `IrijCompiler.CompileException` with source location.
+Both interp and bytecode builds fail at parse-and-lint time before
+any runtime.
+
 ## Effect-row subsumption at fn-call
 
 The effect row of a fn is a *contract on the caller*, not just a

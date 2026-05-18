@@ -44,6 +44,10 @@ public final class IrijCompiler {
         List<Decl> decls = new AstBuilder().build(parsed.tree());
         var inliner = new ModuleInliner(sourceRoot);
         List<Decl> inlined = inliner.inline(decls);
+        // Compile-time effect-row subsumption check (closes the bytecode
+        // mode gap: bytecode emission doesn't enforce rows at runtime,
+        // so the static lint must reject violations before emit).
+        EffectRowChecker.check(inlined);
         return new ClassEmitter(className, inliner.aliases(), opts).emit(inlined);
     }
 

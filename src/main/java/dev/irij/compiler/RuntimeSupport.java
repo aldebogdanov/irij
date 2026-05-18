@@ -58,6 +58,11 @@ public final class RuntimeSupport {
     public static final ThreadLocal<java.util.Map<String, Object>> NS =
             ThreadLocal.withInitial(java.util.HashMap::new);
 
+    // (Bytecode effect-row enforcement happens at compile time via
+    //  EffectRowChecker.check(decls). No runtime stack needed —
+    //  subsumption violations fail the build. See
+    //  docs/internals/specs.md for the model.)
+
     /** Look up `name` in the current namespace. Throws if not bound. */
     public static Object nsGet(String name) {
         var ns = NS.get();

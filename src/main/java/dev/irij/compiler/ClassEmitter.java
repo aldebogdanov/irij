@@ -40,6 +40,9 @@ final class ClassEmitter implements Opcodes {
 
     private final String internalName;
     private final Map<String, Integer> fnArity = new HashMap<>();
+    /** Each user fn's declared effect row (null = unannotated). Used
+     *  to emit caller-side subsumption checks at INVOKESTATIC sites. */
+    private final Map<String, List<String>> fnEffectRow = new HashMap<>();
     private final Map<String, List<String>> productFields = new HashMap<>();
     // method name → (forType → lambda expr)
     private final Map<String, Map<String, Expr.Lambda>> protoImpls = new HashMap<>();
@@ -99,7 +102,12 @@ final class ClassEmitter implements Opcodes {
         // Pass 1: register fn signatures, product-spec field names, proto impls.
         for (Decl d : decls) {
             Decl.FnDecl fn = asFnDecl(d);
-            if (fn != null) fnArity.put(fn.name(), fnParams(fn).size());
+            if (fn != null) {
+                fnArity.put(fn.name(), fnParams(fn).size());
+                if (fn.effectRow() != null) {
+                    fnEffectRow.put(fn.name(), fn.effectRow());
+                }
+            }
             Object inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
             if (inner instanceof Decl.SpecDecl sd
                     && sd.body() instanceof Decl.SpecBody.ProductSpec ps) {
