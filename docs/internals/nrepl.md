@@ -18,7 +18,7 @@ Standard ops:
 | Op | Effect |
 |---|---|
 | `eval` | Parse + interpret. Stateful — bindings persist in the session. |
-| `eval-bytecode` | Compile to JVM bytecode + run in a fresh class. **Stateless** — does not share bindings with the session. |
+| `eval-bytecode` | Compile to JVM bytecode + run in a fresh class. Stateful for top-level `:=` binds (per-session namespace map); fn defs do not yet cross evals (see "What's still not cross-eval" below). |
 | `background-out` | Drain output from spawned threads since last eval. |
 | `describe` | Lists supported ops + version. |
 | `clone` | Create a child session. |

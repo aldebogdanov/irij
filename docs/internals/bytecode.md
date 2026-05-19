@@ -130,23 +130,28 @@ JVM frame.
 
 ## What's NOT in bytecode mode (gaps)
 
-Honest list of what compiles in the interpreter but not (yet) in
-bytecode:
+Honest list, as of v0.5.0 — most early gaps closed; what remains:
 
-- Spec validation (input/output) — runs in interp via `SpecContractFn`,
-  not yet wired through the emitter.
-- Contracts (pre/post conditions, laws) — interp-only.
-- Match patterns more complex than `Tagged`/literal/var/wildcard — see
-  `emitMatchExpr` for the supported shapes.
-- Some operator section shapes — only binary infix `(+)`, not partial
-  application like `(_ + 1)`.
-- `each`, sort, group-by, distinct, flatten — these live as
-  interpreter `BuiltinFn`s. They work *transitively* via callAny
-  fallthrough but aren't optimised.
+- **Law verification** (`law name :: T  forall x. P x` /
+  QuickCheck-style). Needs an `Arbitrary` registry + sample loop in
+  `RuntimeSupport`; not wired through the emitter yet.
+- **Module-boundary blame** for `in`/`out` contracts. Bytecode emits
+  the generic "Input contract violated in 'f'" message; the
+  interpreter's caller-side / module-prefixed variant requires
+  call-site provenance the emitter doesn't yet thread through.
+- **Match patterns more complex than `Tagged`/literal/var/wildcard** —
+  see `emitMatchExpr` for the supported shapes.
+- **Operator-section partials** (e.g. `(_ + 1)`) — only the binary
+  infix form `(+)` is emitted.
+- **Builtins not in the emit table** — ~44 of the 91 interpreter
+  builtins lack a fast path. They still work transitively via stdlib
+  inlining + `RuntimeSupport.callAny` fallthrough, just not optimised.
 
-The interpreter is the more-complete back-end. Bytecode is more
-performant but feature-trails. Both follow the same AST so the gap can
-be closed feature-by-feature.
+Already at parity: input + output spec validation, user-declared
+product/sum specs (clinit-registered), pre/post + in/out contracts,
+effect-row subsumption (compile-time `EffectRowChecker`), per-ref
+JVM capability, hot redef via invokedynamic, structured concurrency,
+Java interop, modules. See `docs/STATE-2026-05-18.md` for full list.
 
 ## Adding a new emit case — checklist
 

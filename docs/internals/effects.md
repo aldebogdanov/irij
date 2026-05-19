@@ -161,9 +161,13 @@ row. Effect ops and capability-gated calls check that the required
 effect is in the current set. Throws `IrijRuntimeError` at the call
 site if not — *not* at the handler dispatch.
 
-The bytecode mode currently does **not** enforce effect rows at
-runtime (the interpreter does). Bytecode trusts. The dev → deploy
-loop runs interp checks first; mismatches surface there.
+Bytecode enforces effect rows at **compile time** via
+`EffectRowChecker.check(decls)` after module inlining and before
+emit (see `docs/internals/specs.md` § Compile-time effect-row lint).
+Both `--mode=bytecode-threaded` and `--mode=bytecode-sm` fail the
+build on subsumption violations; no runtime cost. The interpreter
+checks the same rule at apply-time. Per-ref JVM capability
+propagation (v0.5.0) refines the JVM tag at handle-binding sites.
 
 ## Concurrency parity
 
