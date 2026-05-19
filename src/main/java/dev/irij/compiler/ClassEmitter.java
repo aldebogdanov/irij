@@ -44,6 +44,14 @@ final class ClassEmitter implements Opcodes {
      *  to emit caller-side subsumption checks at INVOKESTATIC sites. */
     private final Map<String, List<String>> fnEffectRow = new HashMap<>();
     private final Map<String, List<String>> productFields = new HashMap<>();
+    /** Sum-spec variants, kept in declaration order for deterministic
+     *  emission. Each entry maps {@code variantName → arity}. */
+    private final Map<String, LinkedHashMap<String, Integer>> sumVariants = new LinkedHashMap<>();
+    /** Reverse lookup: variant/product tag → enclosing spec name. Used
+     *  by {@link #emitConstructorApp} to certify Tagged values with
+     *  their specName so {@link SpecValidator}'s O(1) fast-path
+     *  triggers (matches Interpreter behaviour). */
+    private final Map<String, String> tagToSpec = new HashMap<>();
     // method name → (forType → lambda expr)
     private final Map<String, Map<String, Expr.Lambda>> protoImpls = new HashMap<>();
     // method name → arity
@@ -74,6 +82,20 @@ final class ClassEmitter implements Opcodes {
      *  Pushed/popped around {@link #emitFn} so lambdas (which build
      *  their own methods) don't inherit the outer fn's output spec. */
     private String currentOutputSpec = null;
+
+    /** Post-condition slots (each holds a compiled post-lambda
+     *  IrijFn) for the surrounding fn. Each {@link #emitTailReturn}
+     *  applies them to the about-to-return value before output-spec
+     *  validation. Empty list when the fn has no posts.
+     *  Outer-fn slots are saved/restored around {@link #emitFn}. */
+    private List<Integer> currentPostSlots = List.of();
+    /** Temporary slot used to stash the result while running post
+     *  checks. -1 when no posts. */
+    private int currentPostTempSlot = -1;
+    /** Fail-blame text for each post slot (so out-contracts and
+     *  post-conditions distinguish in error output). Aligned with
+     *  {@link #currentPostSlots}. */
+    private List<String> currentPostBlame = List.of();
 
     // For each user fn `f` referenced as a value (not at an App call
     // site), we synthesise a single IrijFn-shape wrapper method
@@ -114,11 +136,23 @@ final class ClassEmitter implements Opcodes {
                 }
             }
             Object inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
-            if (inner instanceof Decl.SpecDecl sd
-                    && sd.body() instanceof Decl.SpecBody.ProductSpec ps) {
-                List<String> names = new ArrayList<>();
-                for (Decl.SpecField f : ps.fields()) names.add(f.name());
-                productFields.put(sd.name(), names);
+            if (inner instanceof Decl.SpecDecl sd) {
+                switch (sd.body()) {
+                    case Decl.SpecBody.ProductSpec ps -> {
+                        List<String> names = new ArrayList<>();
+                        for (Decl.SpecField f : ps.fields()) names.add(f.name());
+                        productFields.put(sd.name(), names);
+                        tagToSpec.put(sd.name(), sd.name());
+                    }
+                    case Decl.SpecBody.SumSpec ss -> {
+                        LinkedHashMap<String, Integer> vmap = new LinkedHashMap<>();
+                        for (Decl.Variant v : ss.variants()) {
+                            vmap.put(v.name(), v.arity());
+                            tagToSpec.put(v.name(), sd.name());
+                        }
+                        sumVariants.put(sd.name(), vmap);
+                    }
+                }
             }
             if (inner instanceof Decl.EffectDecl ed) {
                 for (Decl.EffectOp op : ed.ops()) {
@@ -188,8 +222,62 @@ final class ClassEmitter implements Opcodes {
         mv.visitMaxs(0, 0);
         mv.visitEnd();
 
+        // Pass 4: <clinit> for user-declared product/sum spec
+        // registration (SpecValidator registry). Empty bodies are
+        // skipped to avoid an unused method.
+        if (!productFields.isEmpty() || !sumVariants.isEmpty()) {
+            emitClinit(cw);
+        }
+
         cw.visitEnd();
         return cw.toByteArray();
+    }
+
+    /** Emit a {@code <clinit>} that registers every product / sum
+     *  spec with {@link SpecValidator}. Runs once per class load. */
+    private void emitClinit(ClassWriter cw) {
+        MethodVisitor cl = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
+        cl.visitCode();
+        for (var e : productFields.entrySet()) {
+            cl.visitLdcInsn(e.getKey());
+            // String[] fields
+            pushIconst(cl, e.getValue().size());
+            cl.visitTypeInsn(ANEWARRAY, "java/lang/String");
+            int i = 0;
+            for (String f : e.getValue()) {
+                cl.visitInsn(DUP);
+                pushIconst(cl, i++);
+                cl.visitLdcInsn(f);
+                cl.visitInsn(AASTORE);
+            }
+            cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerProduct",
+                    "(Ljava/lang/String;[Ljava/lang/String;)V", false);
+        }
+        for (var e : sumVariants.entrySet()) {
+            cl.visitLdcInsn(e.getKey());
+            // Object[] {name, arity, name, arity, ...}
+            pushIconst(cl, e.getValue().size() * 2);
+            cl.visitTypeInsn(ANEWARRAY, OBJ);
+            int i = 0;
+            for (var v : e.getValue().entrySet()) {
+                cl.visitInsn(DUP);
+                pushIconst(cl, i++);
+                cl.visitLdcInsn(v.getKey());
+                cl.visitInsn(AASTORE);
+                cl.visitInsn(DUP);
+                pushIconst(cl, i++);
+                // Box arity as java.lang.Integer
+                cl.visitLdcInsn(v.getValue());
+                cl.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "valueOf",
+                        "(I)Ljava/lang/Integer;", false);
+                cl.visitInsn(AASTORE);
+            }
+            cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerSum",
+                    "(Ljava/lang/String;[Ljava/lang/Object;)V", false);
+        }
+        cl.visitInsn(RETURN);
+        cl.visitMaxs(0, 0);
+        cl.visitEnd();
     }
 
     /** Emit full spec validation for a fn's declared input specs.
@@ -255,9 +343,11 @@ final class ClassEmitter implements Opcodes {
         return false;
     }
 
-    /** Emit a tail-position return. If the surrounding fn has an
-     *  output spec, validate the stack-top value first; then ARETURN. */
+    /** Emit a tail-position return. Runs post-condition + out-contract
+     *  checks (if any), validates the output spec (if any), then
+     *  ARETURNs the value left on top of the operand stack. */
     private void emitTailReturn(MethodVisitor mv) {
+        emitPostChecks(mv);
         if (currentOutputSpec != null) {
             mv.visitLdcInsn(currentOutputSpec);
             mv.visitLdcInsn(currentFnName);
@@ -267,6 +357,132 @@ final class ClassEmitter implements Opcodes {
                     false);
         }
         mv.visitInsn(ARETURN);
+    }
+
+    /** Compile each post / out lambda once and store the resulting
+     *  IrijFn in a fresh local slot. Also records a blame message per
+     *  slot so {@link #emitPostChecks} can throw the right text. */
+    private void installPostSlots(Decl.FnDecl fn, MethodVisitor mv, Locals locals) {
+        List<Integer> slots = new ArrayList<>();
+        List<String> blame = new ArrayList<>();
+        for (Expr p : fn.postConditions()) {
+            int slot = compilePostLambda(p, mv, locals);
+            if (slot >= 0) {
+                slots.add(slot);
+                blame.add("Post-condition violated in '" + fn.name()
+                        + "' (implementation's fault)");
+            }
+        }
+        for (Expr p : fn.outContracts()) {
+            int slot = compilePostLambda(p, mv, locals);
+            if (slot >= 0) {
+                slots.add(slot);
+                blame.add("Output contract violated in '" + fn.name()
+                        + "' (implementation's fault)");
+            }
+        }
+        if (slots.isEmpty()) {
+            currentPostSlots = List.of();
+            currentPostBlame = List.of();
+            currentPostTempSlot = -1;
+        } else {
+            currentPostSlots = List.copyOf(slots);
+            currentPostBlame = List.copyOf(blame);
+            currentPostTempSlot = locals.allocateAnon();
+        }
+    }
+
+    /** Compile a single post/out lambda into a local slot and return
+     *  the slot index, or -1 if {@code postExpr} isn't a lambda we
+     *  can handle. */
+    private int compilePostLambda(Expr postExpr, MethodVisitor mv, Locals locals) {
+        if (!(postExpr instanceof Expr.Lambda lam)) return -1;
+        emitLambda(lam, mv, locals);
+        int slot = locals.allocateAnon();
+        mv.visitVarInsn(ASTORE, slot);
+        return slot;
+    }
+
+    /** Apply each post lambda to the stack-top value. Leaves the
+     *  value on the stack unchanged after all checks pass; throws
+     *  IrijRuntimeError on the first failing check. */
+    private void emitPostChecks(MethodVisitor mv) {
+        if (currentPostSlots.isEmpty()) return;
+        // Stash result (still on stack after this).
+        mv.visitInsn(DUP);
+        mv.visitVarInsn(ASTORE, currentPostTempSlot);
+        for (int i = 0; i < currentPostSlots.size(); i++) {
+            int slot = currentPostSlots.get(i);
+            mv.visitVarInsn(ALOAD, slot);          // post fn
+            // build Object[] {result}
+            pushIconst(mv, 1);
+            mv.visitTypeInsn(ANEWARRAY, OBJ);
+            mv.visitInsn(DUP);
+            pushIconst(mv, 0);
+            mv.visitVarInsn(ALOAD, currentPostTempSlot);
+            mv.visitInsn(AASTORE);
+            mv.visitMethodInsn(INVOKEINTERFACE, IRIJ_FN, "apply",
+                    "([Ljava/lang/Object;)Ljava/lang/Object;", true);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "truthy",
+                    "(Ljava/lang/Object;)Z", false);
+            Label ok = new Label();
+            mv.visitJumpInsn(IFNE, ok);
+            emitThrowRuntimeError(mv, currentPostBlame.get(i));
+            mv.visitLabel(ok);
+        }
+    }
+
+    /** Emit pre-condition + in-contract checks just before the TCO
+     *  entry label. Lambda is applied to the current arg slots; on
+     *  falsy result, throws IrijRuntimeError with caller-blame text. */
+    private void emitPreContractChecks(Decl.FnDecl fn, MethodVisitor mv,
+                                        Locals locals, List<Pattern> params) {
+        emitPreList(fn.preConditions(), fn.name(), false,
+                mv, locals, params);
+        emitPreList(fn.inContracts(), fn.name(), true,
+                mv, locals, params);
+    }
+
+    private void emitPreList(List<Expr> preList, String fnName, boolean isIn,
+                              MethodVisitor mv, Locals locals, List<Pattern> params) {
+        if (preList == null || preList.isEmpty()) return;
+        String blame = isIn
+                ? "Input contract violated in '" + fnName + "' (caller's fault)"
+                : "Pre-condition violated in '" + fnName + "' (caller's fault)";
+        for (Expr p : preList) {
+            if (!(p instanceof Expr.Lambda lam)) continue;
+            emitLambda(lam, mv, locals);  // stack: IrijFn
+            // Build Object[] from param slots.
+            pushIconst(mv, params.size());
+            mv.visitTypeInsn(ANEWARRAY, OBJ);
+            for (int i = 0; i < params.size(); i++) {
+                mv.visitInsn(DUP);
+                pushIconst(mv, i);
+                mv.visitVarInsn(ALOAD, i);
+                mv.visitInsn(AASTORE);
+            }
+            mv.visitMethodInsn(INVOKEINTERFACE, IRIJ_FN, "apply",
+                    "([Ljava/lang/Object;)Ljava/lang/Object;", true);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "truthy",
+                    "(Ljava/lang/Object;)Z", false);
+            Label ok = new Label();
+            mv.visitJumpInsn(IFNE, ok);
+            emitThrowRuntimeError(mv, blame);
+            mv.visitLabel(ok);
+        }
+    }
+
+    /** Throw {@code new IrijRuntimeError(message)}. Leaves no value
+     *  on the stack — the verifier needs the next opcode to be
+     *  unreachable or a Label start. Callers place a Label after. */
+    private void emitThrowRuntimeError(MethodVisitor mv, String message) {
+        String ire = "dev/irij/interpreter/IrijRuntimeError";
+        mv.visitTypeInsn(NEW, ire);
+        mv.visitInsn(DUP);
+        mv.visitLdcInsn(message);
+        mv.visitMethodInsn(INVOKESPECIAL, ire, "<init>",
+                "(Ljava/lang/String;)V", false);
+        mv.visitInsn(ATHROW);
     }
 
     private static Decl.FnDecl asFnDecl(Decl d) {
@@ -309,14 +525,22 @@ final class ClassEmitter implements Opcodes {
         // via SpecValidator). Mirrors Interpreter.validateFnArgs.
         emitInputSpecChecks(fn, mv, params);
 
-        // Self-TCO scaffolding: place an entry label right after param slot
-        // setup. A self-recursive call in tail position GOTOs here after
-        // re-binding the param slots, instead of paying an INVOKESTATIC
-        // frame per recursion.
+        // Pre-condition + in-contract checks. Run once per outer call
+        // (placed BEFORE the TCO entry label, so self-tail recursion
+        // doesn't re-check — same as Interpreter's TCO bypass).
+        emitPreContractChecks(fn, mv, locals, params);
+
+        // Compile each post-condition / out-contract lambda once into
+        // a local slot. emitTailReturn applies them at every fn-body
+        // tail-return before validating the output spec.
         String savedFnName = currentFnName;
         int savedFnArity = currentFnArity;
         Label savedFnEntry = currentFnEntry;
         String savedOutputSpec = currentOutputSpec;
+        List<Integer> savedPostSlots = currentPostSlots;
+        int savedPostTemp = currentPostTempSlot;
+        List<String> savedPostBlame = currentPostBlame;
+
         currentFnName = fn.name();
         currentFnArity = params.size();
         currentFnEntry = new Label();
@@ -324,6 +548,7 @@ final class ClassEmitter implements Opcodes {
         // every tail-return validates against it. Non-validatable specs
         // (wildcard / lowercase var) → null, no per-return overhead.
         currentOutputSpec = outputSpecEncoded(fn);
+        installPostSlots(fn, mv, locals);
         mv.visitLabel(currentFnEntry);
         try {
             switch (fn.body()) {
@@ -364,6 +589,9 @@ final class ClassEmitter implements Opcodes {
             currentFnArity = savedFnArity;
             currentFnEntry = savedFnEntry;
             currentOutputSpec = savedOutputSpec;
+            currentPostSlots = savedPostSlots;
+            currentPostTempSlot = savedPostTemp;
+            currentPostBlame = savedPostBlame;
         }
 
         mv.visitMaxs(0, 0);
@@ -1121,24 +1349,38 @@ final class ClassEmitter implements Opcodes {
 
     private void emitConstructorApp(String tag, List<Expr> args, MethodVisitor mv, Locals locals) {
         List<String> fieldNames = productFields.get(tag);
+        String specName = tagToSpec.get(tag);
         if (fieldNames != null && fieldNames.size() == args.size()) {
-            // new Values$Tagged(tag, List.of(args...), Map.of(name -> arg, ...))
+            // new Values$Tagged(tag, List.of(args...), Map.of(name → arg, ...), specName)
             mv.visitTypeInsn(NEW, VALUES + "$Tagged");
             mv.visitInsn(DUP);
             mv.visitLdcInsn(tag);
             pushObjectList(args, mv, locals);
             pushNamedFieldMap(fieldNames, args, mv, locals);
-            mv.visitMethodInsn(INVOKESPECIAL, VALUES + "$Tagged", "<init>",
-                    "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;)V", false);
+            if (specName != null) {
+                mv.visitLdcInsn(specName);
+                mv.visitMethodInsn(INVOKESPECIAL, VALUES + "$Tagged", "<init>",
+                        "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;Ljava/lang/String;)V", false);
+            } else {
+                mv.visitMethodInsn(INVOKESPECIAL, VALUES + "$Tagged", "<init>",
+                        "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;)V", false);
+            }
             return;
         }
-        // Sum variant or unknown: positional only.
+        // Sum variant or unknown: positional only (+ specName when known).
         mv.visitTypeInsn(NEW, VALUES + "$Tagged");
         mv.visitInsn(DUP);
         mv.visitLdcInsn(tag);
         pushObjectList(args, mv, locals);
-        mv.visitMethodInsn(INVOKESPECIAL, VALUES + "$Tagged", "<init>",
-                "(Ljava/lang/String;Ljava/util/List;)V", false);
+        if (specName != null) {
+            mv.visitInsn(ACONST_NULL);  // namedFields = null
+            mv.visitLdcInsn(specName);
+            mv.visitMethodInsn(INVOKESPECIAL, VALUES + "$Tagged", "<init>",
+                    "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;Ljava/lang/String;)V", false);
+        } else {
+            mv.visitMethodInsn(INVOKESPECIAL, VALUES + "$Tagged", "<init>",
+                    "(Ljava/lang/String;Ljava/util/List;)V", false);
+        }
     }
 
     private void pushNamedFieldMap(List<String> names, List<Expr> args,

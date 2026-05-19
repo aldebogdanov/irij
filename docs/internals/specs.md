@@ -261,12 +261,58 @@ lookup + recursive record-walk.
 Blame: input errors read `Spec failure on input N of fn: …`; output
 errors read `Spec failure on output of fn: …`.
 
-Pre/post contracts (`in pre out post`) and user-declared
-product/sum specs remain interp-only — pre/post are arbitrary Irij
-Boolean predicates, not structural specs, and need runtime
-evaluation of user code at each call; product/sum specs need the
-interpreter's `specRegistry` to resolve named-field shapes. Both
-are tracked future work.
+Pre/post contracts (`pre/post/in/out`) and user-declared
+product/sum specs are also enforced in bytecode mode.
+
+**Pre/post emission** (`emitPreContractChecks`,
+`installPostSlots`, `emitPostChecks`):
+
+- For each `pre` / `in` lambda, emit it once at fn entry (before
+  the TCO label so self-tail recursion doesn't re-check), apply to
+  the param slots, truthy-check the result, throw an
+  `IrijRuntimeError` with the matching blame text on failure
+  (`"Pre-condition violated in 'f' (caller's fault)"` or
+  `"Input contract violated in 'f' (caller's fault)"`).
+- For each `post` / `out` lambda, compile once into a local slot.
+  At every tail-return site (via `emitTailReturn`) the result is
+  stashed in a temp slot, each post lambda is applied to
+  `[result]`, and a falsy result throws with implementation-blame
+  text (`Post-condition violated…` / `Output contract violated…`).
+  Post checks run before output-spec validation; both run before
+  ARETURN.
+
+The blame strings match the interpreter byte-for-byte so existing
+`tests/test-contracts.irj` assertions pass under both runtimes.
+
+**User-declared product/sum specs** (`SpecValidator.REGISTRY`):
+
+Populated by a generated `<clinit>` on every emitted class. For
+each `Decl.SpecDecl` the emitter records the variant arities (sum)
+or field names (product) and emits `clinit` calls:
+
+```
+SpecValidator.registerProduct("Point", new String[]{"x","y"});
+SpecValidator.registerSum("Shape",
+        new Object[]{"Circle", 1, "Rect", 2});
+```
+
+`SpecValidator.validateNamed` falls through unknown names into
+`validateUserDeclared`, which:
+
+1. Fast-paths Tagged values whose `specName` already matches (set
+   by `emitConstructorApp` — the bytecode emitter passes the
+   parent spec name through to `Values.Tagged`).
+2. Otherwise dispatches by descriptor:
+   - **Product**: requires `Tagged` with all required named fields,
+     or `IrijMap` with those keys (auto-certifies into Tagged).
+     Re-certifies the result with the matching `specName`.
+   - **Sum**: requires `Tagged` whose tag is a known variant of the
+     spec, and whose positional-field count matches the declared
+     arity. Re-certifies the result.
+
+This mirrors `Interpreter.validateProduct` /
+`Interpreter.validateSum` (including the O(1) tag-match
+short-circuit) so both runtimes accept/reject the same values.
 
 Effect-row enforcement runs at compile time via
 `EffectRowChecker`; see the "Compile-time effect-row lint" section.

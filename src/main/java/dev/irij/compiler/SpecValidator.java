@@ -44,6 +44,44 @@ public final class SpecValidator {
 
     private static final ConcurrentHashMap<String, SpecExpr> CACHE = new ConcurrentHashMap<>();
 
+    // ── User-declared product/sum spec registry ─────────────────────────
+    //
+    // Bytecode-mode parity for `spec MyShape { ... }` / sum specs.
+    // Populated at class-load time via {@code <clinit>} calls emitted
+    // by ClassEmitter, one per Decl.SpecDecl. validateNamed() consults
+    // this registry when the name isn't a primitive.
+
+    public sealed interface Descriptor {
+        record Product(List<String> fields) implements Descriptor {}
+        record Sum(java.util.LinkedHashMap<String, Integer> variants) implements Descriptor {}
+    }
+
+    private static final ConcurrentHashMap<String, Descriptor> REGISTRY = new ConcurrentHashMap<>();
+
+    /** Emitter-side: register a product spec (record-shaped). The
+     *  fields array carries field names in declaration order. */
+    public static void registerProduct(String name, String[] fields) {
+        REGISTRY.put(name, new Descriptor.Product(List.of(fields)));
+    }
+
+    /** Emitter-side: register a sum spec. The flat array alternates
+     *  {@code variantName, arity, variantName, arity, ...}. Order is
+     *  preserved for error-message determinism. */
+    public static void registerSum(String name, Object[] flatVariants) {
+        java.util.LinkedHashMap<String, Integer> map = new java.util.LinkedHashMap<>();
+        for (int i = 0; i + 1 < flatVariants.length; i += 2) {
+            String vname = (String) flatVariants[i];
+            int arity = ((Number) flatVariants[i + 1]).intValue();
+            map.put(vname, arity);
+        }
+        REGISTRY.put(name, new Descriptor.Sum(map));
+    }
+
+    /** Test/inspection helper. */
+    public static Descriptor lookup(String name) {
+        return REGISTRY.get(name);
+    }
+
     // ── Encode ──────────────────────────────────────────────────────────
 
     public static String encode(SpecExpr spec) {
@@ -307,8 +345,68 @@ public final class SpecValidator {
                 throw fail("expected Unit, got " + typeName(value));
             }
             case "Any" -> value;
-            default -> value; // user-declared spec: out of bytecode scope
+            default -> validateUserDeclared(value, name);
         };
+    }
+
+    /** Look up {@code name} in {@link #REGISTRY} and validate against
+     *  the descriptor. Falls through (returns value) if no descriptor
+     *  is registered — same behaviour as before product/sum specs
+     *  were wired into bytecode mode. */
+    private static Object validateUserDeclared(Object value, String name) {
+        // O(1) certification fast-path — Constructor sets specName at
+        // construction time, so a Tagged carrying the matching spec
+        // name is already known-good. Matches Interpreter's
+        // validateAgainstSpec short-circuit.
+        if (value instanceof Values.Tagged t && name.equals(t.specName())) {
+            return value;
+        }
+        Descriptor d = REGISTRY.get(name);
+        if (d == null) return value;
+        return switch (d) {
+            case Descriptor.Product p -> validateProductShape(value, name, p.fields());
+            case Descriptor.Sum s -> validateSumShape(value, name, s.variants());
+        };
+    }
+
+    private static Object validateProductShape(Object value, String specName,
+                                                List<String> requiredFields) {
+        if (value instanceof Values.Tagged t && t.namedFields() != null) {
+            for (var field : requiredFields) {
+                if (!t.namedFields().containsKey(field)) {
+                    throw fail(specName + " requires field '" + field + "'");
+                }
+            }
+            return new Values.Tagged(t.tag(), t.fields(), t.namedFields(), specName);
+        }
+        if (value instanceof Values.IrijMap m) {
+            for (var field : requiredFields) {
+                if (!m.entries().containsKey(field)) {
+                    throw fail(specName + " requires field '" + field + "'");
+                }
+            }
+            var named = new java.util.LinkedHashMap<>(m.entries());
+            List<Object> fields = new java.util.ArrayList<>(requiredFields.size());
+            for (var field : requiredFields) fields.add(named.get(field));
+            return new Values.Tagged(specName, fields, named, specName);
+        }
+        throw fail("cannot validate " + typeName(value) + " as " + specName);
+    }
+
+    private static Object validateSumShape(Object value, String specName,
+                                            java.util.Map<String, Integer> variants) {
+        if (!(value instanceof Values.Tagged t)) {
+            throw fail("expected " + specName + " variant, got " + typeName(value));
+        }
+        Integer arity = variants.get(t.tag());
+        if (arity == null) {
+            throw fail("'" + t.tag() + "' is not a variant of " + specName
+                    + " (expected one of: " + variants.keySet() + ")");
+        }
+        if (t.fields().size() != arity) {
+            throw fail(t.tag() + " expects " + arity + " fields, got " + t.fields().size());
+        }
+        return new Values.Tagged(t.tag(), t.fields(), t.namedFields(), specName);
     }
 
     private static Object validateApp(Object value, SpecExpr.App app) {
