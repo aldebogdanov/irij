@@ -18,20 +18,23 @@ pub fn route-prefix :: Str Str Fn Map
   (method prefix action ->
     {method= method path= prefix action= action prefix= true})
 
-pub fn router :: _ Fn
+;; The router family is effect-polymorphic: any user-registered
+;; action may perform arbitrary effects, so the router/find/apply
+;; fns inherit the caller's available effect row via `::: Any`.
+pub fn router :: _ Fn ::: Any
   (routes -> (req -> find-route routes req))
 
 fn match-route
   => r req
   if (r.prefix == true) ((r.method == req.method) && (starts-with? req.path r.path)) else ((r.method == req.method) && (r.path == req.path))
 
-fn apply-action
+fn apply-action ::: Any
   (r req -> r.action req)
 
-fn find-route ::: Console
+fn find-route ::: Any
   (routes req -> if (empty? routes) ({status= 404 body= (default-404 req.path) headers= {}}) else (try-first (head routes) (tail routes) req))
 
-fn try-first ::: Console
+fn try-first ::: Any
   (r rest req -> if (match-route r req) (apply-action r req) else (find-route rest req))
 
 ;; Extract path segments after a prefix.

@@ -66,7 +66,8 @@ public final class BuildCommand {
         System.out.println("  output: " + outputJar);
 
         if (mode != Mode.INTERP) {
-            buildBytecodeJar(projectRoot, entryPoint, outputJar, mode, directLinking);
+            Map<String, Path> bcDeps = resolveDeps(projectRoot);
+            buildBytecodeJar(projectRoot, entryPoint, outputJar, mode, directLinking, bcDeps);
             long sizeKbBc = Files.size(outputJar) / 1024;
             System.out.println();
             System.out.println("Built: " + outputJar + " (" + sizeKbBc + " KB)");
@@ -348,7 +349,8 @@ public final class BuildCommand {
 
     private static void buildBytecodeJar(Path projectRoot, String entryPoint,
                                           Path outputJar, Mode mode,
-                                          boolean directLinking) throws IOException {
+                                          boolean directLinking,
+                                          Map<String, Path> deps) throws IOException {
         CompileOptions opts = switch (mode) {
             case BYTECODE_THREADED -> CompileOptions.threaded();
             case BYTECODE_SM -> CompileOptions.stateMachine();
@@ -357,9 +359,13 @@ public final class BuildCommand {
         opts = opts.withDirectLinking(directLinking);
 
         Path entryFile = projectRoot.resolve(entryPoint);
+        // Hand resolved seed dirs to the compiler so `use mod.X` in the
+        // entry source can be inlined from `~/.irij/seeds/<name>/<ver>/`
+        // or any other resolved location DependencyResolver returned.
+        List<Path> seedRoots = new java.util.ArrayList<>(deps.values());
         byte[] classBytes;
         try {
-            classBytes = IrijCompiler.compileFile(entryFile, BYTECODE_CLASS_NAME, opts);
+            classBytes = IrijCompiler.compileFile(entryFile, BYTECODE_CLASS_NAME, opts, seedRoots);
         } catch (IrijCompiler.CompileException e) {
             System.err.println("Compile error: " + e.getMessage());
             System.exit(1);

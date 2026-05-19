@@ -37,12 +37,24 @@ public final class IrijCompiler {
      */
     public static byte[] compileSource(String source, String className,
                                         Path sourceRoot, CompileOptions opts) {
+        return compileSource(source, className, sourceRoot, opts, List.of());
+    }
+
+    /**
+     * Compile with extra module-search roots — typically resolved seed
+     * directories from {@link dev.irij.module.DependencyResolver}. Each
+     * root is searched after the classpath and {@code sourceRoot}, in
+     * order, until {@code use mod.X} matches.
+     */
+    public static byte[] compileSource(String source, String className,
+                                        Path sourceRoot, CompileOptions opts,
+                                        List<Path> seedRoots) {
         var parsed = IrijParseDriver.parse(source);
         if (parsed.hasErrors()) {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
         }
         List<Decl> decls = new AstBuilder().build(parsed.tree());
-        var inliner = new ModuleInliner(sourceRoot);
+        var inliner = new ModuleInliner(sourceRoot, seedRoots);
         List<Decl> inlined = inliner.inline(decls);
         // Compile-time effect-row subsumption check (closes the bytecode
         // mode gap: bytecode emission doesn't enforce rows at runtime,
@@ -58,8 +70,13 @@ public final class IrijCompiler {
 
     public static byte[] compileFile(Path path, String className, CompileOptions opts)
             throws IOException {
+        return compileFile(path, className, opts, List.of());
+    }
+
+    public static byte[] compileFile(Path path, String className, CompileOptions opts,
+                                      List<Path> seedRoots) throws IOException {
         return compileSource(Files.readString(path), className,
-                path.toAbsolutePath().getParent(), opts);
+                path.toAbsolutePath().getParent(), opts, seedRoots);
     }
 
     public static final class CompileException extends RuntimeException {

@@ -29,7 +29,7 @@ editors/emacs/                 — irij-mode.el (syntax + REPL) + irij-nrepl.el 
 6. **Test-driven.** Write the test (Irij source string → expected output) before implementing a feature.
 7. **Slow but confident.** It's better to do it slowly, but with full confidence that everything is correct. Run tests, check code in irij-nrepl. Better many times to iterate but do correct, then return later to fix.
 8. **TODO.md updates.** Always update TODO.md if you confident in step correct implementation. Also possible to mark incomplete/problematic steps.
-9. **Docs after milestone.** When some phase or important steps are implemented - describe everything you created in corresponding files inside ./docs folder (including architecture.html). I need to know how to use or/and test everything implemented.
+9. **Docs after milestone.** When a phase or important steps are implemented, update the matching page in `./docs/internals/` (the live, topic-organised reference). Avoid one-off single-page architecture docs — the irij.online website is where the public architecture view lives.
 10. **Wipe old things.** Completely purge any mentions of removed design patterns. If something changes, then spec, docs and examples must show like it always was so.
 
 ## Current implementation status

@@ -26,11 +26,22 @@ import java.util.Set;
 final class ModuleInliner {
 
     private final Path sourceRoot;
+    /** Extra roots to search for `use mod.X` after the classpath and
+     *  the primary {@link #sourceRoot}. Used to point at resolved
+     *  seed directories (e.g. {@code ~/.irij/seeds/vrata/0.1.3}) so a
+     *  bytecode build can inline `use vrata.html`. The list is
+     *  searched in declaration order; first match wins. */
+    private final List<Path> extraRoots;
     private final Set<String> loaded = new HashSet<>();
     private final Set<String> loading = new HashSet<>();
     private final Set<String> aliases = new HashSet<>();
 
-    ModuleInliner(Path sourceRoot) { this.sourceRoot = sourceRoot; }
+    ModuleInliner(Path sourceRoot) { this(sourceRoot, List.of()); }
+
+    ModuleInliner(Path sourceRoot, List<Path> extraRoots) {
+        this.sourceRoot = sourceRoot;
+        this.extraRoots = extraRoots == null ? List.of() : extraRoots;
+    }
 
     /** Short-name aliases registered via `use` (e.g. "json" for "std.json"). */
     Set<String> aliases() { return aliases; }
@@ -104,8 +115,40 @@ final class ModuleInliner {
                 }
             }
         }
+        // Extra roots — typically resolved seed directories. The
+        // module-prefix for a seed lives at <seedRoot>/<name>.irj
+        // (no per-seed dotted dir). For `use vrata.html` we try
+        // <root>/vrata/html.irj first; then, for single-segment
+        // seed roots like ~/.irij/seeds/vrata/0.1.3/, also try
+        // <root>/html.irj (stripping the leading "vrata.").
+        String relative = qualifiedName.replace('.', '/') + ".irj";
+        String[] parts = qualifiedName.split("\\.", 2);
+        String stripped = parts.length == 2 ? parts[1].replace('.', '/') + ".irj" : null;
+        for (Path root : extraRoots) {
+            Path p = root.resolve(relative);
+            if (Files.exists(p)) {
+                try {
+                    return Files.readString(p, StandardCharsets.UTF_8);
+                } catch (IOException e) {
+                    throw new IrijCompiler.CompileException(
+                            "Error reading module file '" + p + "': " + e.getMessage());
+                }
+            }
+            if (stripped != null) {
+                Path q = root.resolve(stripped);
+                if (Files.exists(q)) {
+                    try {
+                        return Files.readString(q, StandardCharsets.UTF_8);
+                    } catch (IOException e) {
+                        throw new IrijCompiler.CompileException(
+                                "Error reading module file '" + q + "': " + e.getMessage());
+                    }
+                }
+            }
+        }
         throw new IrijCompiler.CompileException(
                 "Module not found: " + qualifiedName
-                        + " (searched classpath + " + sourceRoot + ")");
+                        + " (searched classpath + " + sourceRoot
+                        + (extraRoots.isEmpty() ? "" : " + " + extraRoots) + ")");
     }
 }
