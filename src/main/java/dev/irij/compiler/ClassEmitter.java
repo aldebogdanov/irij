@@ -69,6 +69,11 @@ final class ClassEmitter implements Opcodes {
     private String currentFnName = null;
     private int currentFnArity = 0;
     private Label currentFnEntry = null;
+    /** Output spec for the fn currently being emitted. When non-null,
+     *  every tail-return site validates against this before ARETURN.
+     *  Pushed/popped around {@link #emitFn} so lambdas (which build
+     *  their own methods) don't inherit the outer fn's output spec. */
+    private String currentOutputSpec = null;
 
     // For each user fn `f` referenced as a value (not at an App call
     // site), we synthesise a single IrijFn-shape wrapper method
@@ -187,21 +192,21 @@ final class ClassEmitter implements Opcodes {
         return cw.toByteArray();
     }
 
-    /** Emit primitive-spec checks for a fn's declared input specs.
+    /** Emit full spec validation for a fn's declared input specs.
      *
-     *  For each input position, if the spec is `Name(T)` where T is
-     *  a primitive type known to {@link RuntimeSupport#checkType},
-     *  emit:
-     *
+     *  For each non-wildcard, non-typevar input position emit:
      *  <pre>
-     *    ALOAD param_i; LDC "T"; LDC fnName; ICONST i;
-     *    INVOKESTATIC RT.checkType; ASTORE param_i;
+     *    ALOAD param_i; LDC encodedSpec; LDC fnName; ICONST i;
+     *    INVOKESTATIC SpecValidator.validateEncoded; ASTORE param_i;
      *  </pre>
      *
-     *  Composite specs (App, Arrow, VecSpec, Wildcard, Var, Unit, etc.)
-     *  are skipped — bytecode mode validates the primitive subset.
-     *  Output spec also skipped (multi-exit-point complexity; planned
-     *  follow-up via single-exit refactor).
+     *  The encoded spec is the {@link SpecValidator#encode} string for
+     *  the {@code SpecExpr} — parsed + cached at runtime. Covers every
+     *  SpecExpr variant the interpreter validates (Name, App, Arrow,
+     *  Enum, VecSpec, SetSpec, TupleSpec, Unit). User-declared
+     *  product/sum specs fall through as accepted at runtime since
+     *  no specRegistry exists outside the interpreter — interp-mode
+     *  remains the full-coverage path for those.
      */
     private void emitInputSpecChecks(Decl.FnDecl fn, MethodVisitor mv,
                                       List<Pattern> params) {
@@ -210,19 +215,58 @@ final class ClassEmitter implements Opcodes {
         int inputCount = specs.size() - 1; // last is output
         for (int i = 0; i < inputCount && i < params.size(); i++) {
             dev.irij.ast.SpecExpr spec = specs.get(i);
-            if (!(spec instanceof dev.irij.ast.SpecExpr.Name n)) continue;
-            String typeName = n.name();
-            // Skip wildcard-equivalents and lowercase type vars
-            if (typeName.equals("_") || Character.isLowerCase(typeName.charAt(0))) continue;
+            if (skipSpec(spec)) continue;
+            String encoded = SpecValidator.encode(spec);
             mv.visitVarInsn(ALOAD, i);
-            mv.visitLdcInsn(typeName);
+            mv.visitLdcInsn(encoded);
             mv.visitLdcInsn(fn.name());
             pushIconst(mv, i);
-            mv.visitMethodInsn(INVOKESTATIC, RT, "checkType",
+            mv.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "validateEncoded",
                     "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
                     false);
-            mv.visitVarInsn(ASTORE, i); // re-store validated value (still the same)
+            mv.visitVarInsn(ASTORE, i);
         }
+    }
+
+    private static final String SPEC_VALIDATOR = "dev/irij/compiler/SpecValidator";
+
+    /** Return the encoded output spec for {@code fn}, or null if it
+     *  has no validatable output (no spec annotation, wildcard, or
+     *  lowercase type variable). The output spec is the last entry
+     *  in {@code specAnnotations()}. */
+    private static String outputSpecEncoded(Decl.FnDecl fn) {
+        List<dev.irij.ast.SpecExpr> specs = fn.specAnnotations();
+        if (specs == null || specs.isEmpty()) return null;
+        dev.irij.ast.SpecExpr out = specs.get(specs.size() - 1);
+        if (skipSpec(out)) return null;
+        return SpecValidator.encode(out);
+    }
+
+    /** Skip wildcards, lowercase type-vars, and explicit Var nodes. */
+    private static boolean skipSpec(dev.irij.ast.SpecExpr spec) {
+        if (spec == null) return true;
+        if (spec instanceof dev.irij.ast.SpecExpr.Wildcard) return true;
+        if (spec instanceof dev.irij.ast.SpecExpr.Var) return true;
+        if (spec instanceof dev.irij.ast.SpecExpr.Name n) {
+            String nm = n.name();
+            if (nm.equals("_")) return true;
+            if (!nm.isEmpty() && Character.isLowerCase(nm.charAt(0))) return true;
+        }
+        return false;
+    }
+
+    /** Emit a tail-position return. If the surrounding fn has an
+     *  output spec, validate the stack-top value first; then ARETURN. */
+    private void emitTailReturn(MethodVisitor mv) {
+        if (currentOutputSpec != null) {
+            mv.visitLdcInsn(currentOutputSpec);
+            mv.visitLdcInsn(currentFnName);
+            mv.visitInsn(ICONST_M1);
+            mv.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "validateEncoded",
+                    "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
+                    false);
+        }
+        mv.visitInsn(ARETURN);
     }
 
     private static Decl.FnDecl asFnDecl(Decl d) {
@@ -261,9 +305,8 @@ final class ClassEmitter implements Opcodes {
             locals.allocate(name);
         }
 
-        // Bytecode spec validation (input args, primitive specs only).
-        // Mirrors Interpreter.validateFnArgs for the subset of specs
-        // we can check at runtime without an Interpreter instance.
+        // Bytecode spec validation (input args, full SpecExpr coverage
+        // via SpecValidator). Mirrors Interpreter.validateFnArgs.
         emitInputSpecChecks(fn, mv, params);
 
         // Self-TCO scaffolding: place an entry label right after param slot
@@ -273,9 +316,14 @@ final class ClassEmitter implements Opcodes {
         String savedFnName = currentFnName;
         int savedFnArity = currentFnArity;
         Label savedFnEntry = currentFnEntry;
+        String savedOutputSpec = currentOutputSpec;
         currentFnName = fn.name();
         currentFnArity = params.size();
         currentFnEntry = new Label();
+        // Capture the output spec (last entry in specAnnotations) so
+        // every tail-return validates against it. Non-validatable specs
+        // (wildcard / lowercase var) → null, no per-return overhead.
+        currentOutputSpec = outputSpecEncoded(fn);
         mv.visitLabel(currentFnEntry);
         try {
             switch (fn.body()) {
@@ -286,13 +334,13 @@ final class ClassEmitter implements Opcodes {
                             mab.arms(),
                             null);
                     emitMatchExpr(me, mv, locals);
-                    mv.visitInsn(ARETURN);
+                    emitTailReturn(mv);
                 }
                 case Decl.FnBody.ImperativeBody ib -> {
                     List<Stmt> stmts = ib.stmts();
                     if (stmts.isEmpty()) {
                         mv.visitInsn(ACONST_NULL);
-                        mv.visitInsn(ARETURN);
+                        emitTailReturn(mv);
                         break;
                     }
                     for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
@@ -301,11 +349,11 @@ final class ClassEmitter implements Opcodes {
                         emitTailExpr(es.expr(), mv, locals);
                     } else if (last instanceof Stmt.With w) {
                         emitWith(w, mv, locals);
-                        mv.visitInsn(ARETURN);
+                        emitTailReturn(mv);
                     } else {
                         emitStmt(last, mv, locals);
                         mv.visitInsn(ACONST_NULL);
-                        mv.visitInsn(ARETURN);
+                        emitTailReturn(mv);
                     }
                 }
                 default -> throw new IrijCompiler.CompileException(
@@ -315,6 +363,7 @@ final class ClassEmitter implements Opcodes {
             currentFnName = savedFnName;
             currentFnArity = savedFnArity;
             currentFnEntry = savedFnEntry;
+            currentOutputSpec = savedOutputSpec;
         }
 
         mv.visitMaxs(0, 0);
@@ -364,7 +413,7 @@ final class ClassEmitter implements Opcodes {
             List<Stmt> stmts = blk.stmts();
             if (stmts.isEmpty()) {
                 mv.visitInsn(ACONST_NULL);
-                mv.visitInsn(ARETURN);
+                emitTailReturn(mv);
                 return;
             }
             for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
@@ -373,18 +422,18 @@ final class ClassEmitter implements Opcodes {
                 emitTailExpr(es.expr(), mv, locals);
             } else if (last instanceof Stmt.With w) {
                 emitWith(w, mv, locals);
-                mv.visitInsn(ARETURN);
+                emitTailReturn(mv);
             } else {
                 emitStmt(last, mv, locals);
                 mv.visitInsn(ACONST_NULL);
-                mv.visitInsn(ARETURN);
+                emitTailReturn(mv);
             }
             return;
         }
 
         // 4. Default: just compute the value and return.
         emitExpr(e, mv, locals);
-        mv.visitInsn(ARETURN);
+        emitTailReturn(mv);
     }
 
     private void emitBlock(Expr.Block blk, MethodVisitor mv, Locals outer) {

@@ -207,21 +207,66 @@ under `--strict`). The recommendation:
 
 ## Bytecode-mode spec validation
 
-The bytecode emitter validates **input args** against primitive
-type names. At each annotated `fn` decl, `emitInputSpecChecks` walks
-`fn.specAnnotations()` (last entry = return spec, earlier = inputs)
-and emits a `RuntimeSupport.checkType(value, "T", fnName, idx)` call
-per non-wildcard input whose spec is a `SpecExpr.Name`.
+The bytecode emitter validates **inputs and outputs** at full
+SpecExpr coverage via `SpecValidator`. At each annotated `fn` decl,
+`emitInputSpecChecks` walks `fn.specAnnotations()` (last entry =
+return spec, earlier = inputs) and for every non-wildcard /
+non-type-var spec emits:
 
-`RuntimeSupport.checkType` recognises: `Int`, `Float`, `Bool`, `Str`,
-`Vec`, `Map`, `Set`, `Tuple`, `Fn`, `Any`, `Unit`. Unknown spec
-names pass through (user-defined product/sum specs aren't yet wired
-into bytecode).
+```
+ALOAD param_i;
+LDC <encoded-spec>;
+LDC <fnName>;
+ICONST i;
+INVOKESTATIC SpecValidator.validateEncoded;
+ASTORE param_i;
+```
 
-Output specs and composite specs (`Vec[Int]`, arrow types, etc.)
-remain interp-only. Output checks require single-exit refactoring of
-the emit pipeline; composite specs require a per-spec runtime
-validator (planned).
+The output spec is captured into `currentOutputSpec` on entry to
+`emitFn` and consumed by `emitTailReturn`, which prepends the same
+`validateEncoded` call (with `argIdx = -1`) before every ARETURN at
+fn-body tail positions. Lambda bodies, SM continuations, handler-
+build methods and the like emit raw ARETURN — they don't inherit
+the outer fn's output spec.
+
+`SpecValidator` covers every `SpecExpr` variant the interpreter
+validates: primitive Names (`Int Float Bool Str Keyword Rational
+Vec Map Set Tuple Fn Any Unit`), `App` (`Vec Set Map Tuple Fn` with
+parametric args), `Arrow` (callable check), `Enum` (keyword
+membership), `VecSpec` / `SetSpec` / `TupleSpec` (element-wise
+recursion), `Wildcard` / `Var` / `Unit`. User-declared product/sum
+specs fall through as accepted — bytecode mode has no
+`specRegistry` to consult; interp mode remains the full-coverage
+path for those.
+
+Encoding (`SpecValidator.encode`):
+
+```
+Wildcard   →  _
+Var x      →  ?x
+Unit       →  ()
+Name N     →  N
+App H[..]  →  H[a,b,...]
+Arrow      →  (a,b->c)
+Enum       →  :a|:b|:c
+VecSpec    →  Vec[e]
+SetSpec    →  Set[e]
+TupleSpec  →  Tuple[a,b]
+```
+
+`SpecValidator.decode` parses + caches per encoded string in a
+`ConcurrentHashMap`, so the hot path after first call is one map
+lookup + recursive record-walk.
+
+Blame: input errors read `Spec failure on input N of fn: …`; output
+errors read `Spec failure on output of fn: …`.
+
+Pre/post contracts (`in pre out post`) and user-declared
+product/sum specs remain interp-only — pre/post are arbitrary Irij
+Boolean predicates, not structural specs, and need runtime
+evaluation of user code at each call; product/sum specs need the
+interpreter's `specRegistry` to resolve named-field shapes. Both
+are tracked future work.
 
 Effect-row enforcement runs at compile time via
 `EffectRowChecker`; see the "Compile-time effect-row lint" section.
