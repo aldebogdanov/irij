@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.4.0 &mdash; Phase 14c.3 (state-machine bytecode compiler) + JVM capability enforcement.
+0.5.0 &mdash; Effect-row soundness (subsumption + compile-time lint + per-ref JVM capability) and bytecode/interp spec parity (full SpecExpr coverage, pre/post contracts, user-declared product/sum specs, embedded nREPL in built JARs).
