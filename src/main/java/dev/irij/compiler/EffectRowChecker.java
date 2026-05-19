@@ -3,6 +3,7 @@ package dev.irij.compiler;
 import dev.irij.ast.Decl;
 import dev.irij.ast.Expr;
 import dev.irij.ast.Node.SourceLoc;
+import dev.irij.ast.SpecExpr;
 import dev.irij.ast.Stmt;
 
 import java.util.HashMap;
@@ -45,6 +46,16 @@ public final class EffectRowChecker {
     private final Map<String, List<String>> fnRows = new HashMap<>();
     private final Map<String, String> effectOps = new HashMap<>();
     private final Map<String, String> handlerEffect = new HashMap<>();
+    /** Set of declared effect names (from EffectDecl). Used to detect
+     *  capability binds: `rnd :: Random := java.util.Random/new 42`
+     *  binds `rnd` carrying the Random capability if Random is in this set. */
+    private final java.util.Set<String> effectNames = new java.util.HashSet<>();
+
+    /** Local-var-name → capability-effect map for the fn body currently
+     *  being walked. Populated by walking Stmt.Bind with an effect-name
+     *  spec annotation. Consulted at DotAccess sites to require the
+     *  capability in the caller's effect row. */
+    private java.util.Map<String, String> varCap = new java.util.HashMap<>();
 
     public static void check(List<Decl> decls) {
         new EffectRowChecker().run(decls);
@@ -56,6 +67,7 @@ public final class EffectRowChecker {
             if (inner instanceof Decl.FnDecl fn) {
                 fnRows.put(fn.name(), fn.effectRow());
             } else if (inner instanceof Decl.EffectDecl ed) {
+                effectNames.add(ed.name());
                 for (var op : ed.ops()) effectOps.put(op.name(), ed.name());
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 handlerEffect.put(hd.name(), hd.effectName());
@@ -74,6 +86,9 @@ public final class EffectRowChecker {
     private void checkFn(Decl.FnDecl fn) {
         Set<String> avail = available(fn.effectRow());
         String ctx = "fn " + fn.name();
+        // Reset per-fn local-var-capability map. Each fn has its own
+        // scope; bindings don't leak between fns.
+        varCap = new java.util.HashMap<>();
         switch (fn.body()) {
             case Decl.FnBody.LambdaBody lb -> walkExpr(lb.body(), avail, ctx);
             case Decl.FnBody.MatchArmsBody mab -> {
@@ -131,7 +146,10 @@ public final class EffectRowChecker {
     private void walkStmt(Stmt s, Set<String> avail, String ctx) {
         switch (s) {
             case Stmt.ExprStmt es -> walkExpr(es.expr(), avail, ctx);
-            case Stmt.Bind b -> walkExpr(b.value(), avail, ctx);
+            case Stmt.Bind b -> {
+                walkExpr(b.value(), avail, ctx);
+                recordCapability(b);
+            }
             case Stmt.MutBind mb -> walkExpr(mb.value(), avail, ctx);
             case Stmt.Assign a -> walkExpr(a.value(), avail, ctx);
             case Stmt.IfStmt ifs -> {
@@ -193,7 +211,19 @@ public final class EffectRowChecker {
             }
             case Expr.JavaRef jr ->
                     requireEffect("JVM", "java-interop:" + jr.ref(), ctx, avail, jr.loc());
-            case Expr.DotAccess da -> walkExpr(da.target(), avail, ctx);
+            case Expr.DotAccess da -> {
+                // Per-ref capability: if the receiver is a local var
+                // whose Bind spec named a declared effect, calling a
+                // method/field on it requires that effect — even if the
+                // caller has JVM. This lets effect rows track which
+                // declared resource the call touches.
+                if (da.target() instanceof Expr.Var v && varCap.containsKey(v.name())) {
+                    String eff = varCap.get(v.name());
+                    requireEffect(eff, "method '" + da.field() + "' on " + v.name(),
+                            ctx, avail, da.loc());
+                }
+                walkExpr(da.target(), avail, ctx);
+            }
             case Expr.IfExpr ie -> {
                 walkExpr(ie.cond(), avail, ctx);
                 walkExpr(ie.thenBranch(), avail, ctx);
@@ -243,6 +273,18 @@ public final class EffectRowChecker {
         if (calleeRow == null || calleeRow.isEmpty()) return;
         if (calleeRow.contains("Any")) return;
         for (String e : calleeRow) requireEffect(e, opName, inCtx, avail, loc);
+    }
+
+    /** Inspect a Stmt.Bind: if its spec annotation names a declared
+     *  effect (from an EffectDecl), record the bound variable as
+     *  carrying that capability. Later DotAccess sites whose receiver
+     *  is this variable require the effect in the caller's row. */
+    private void recordCapability(Stmt.Bind b) {
+        if (b.specAnnotation() == null) return;
+        if (!(b.specAnnotation() instanceof SpecExpr.Name n)) return;
+        if (!effectNames.contains(n.name())) return;
+        if (!(b.target() instanceof Stmt.BindTarget.Simple s)) return;
+        varCap.put(s.name(), n.name());
     }
 
     private Set<String> merge(Set<String> base, String extra) {

@@ -88,17 +88,17 @@ callers see `::: Random`, the implementation deals with `::: JVM`.
 
 ## What this doesn't catch
 
-- **Reference aliasing.** A `with unsafe-jvm` block can return a
-  `java.util.Random` ref. Calls `.nextInt()` on that ref outside any
-  `with` would still bypass tracking. Per-ref capability propagation
-  is a possible v2 enhancement (spec annotates the ref's capability
-  row; method calls inherit). Not shipped.
 - **Java methods that call back into Irij.** A `Runnable` impl passed
   to Java that internally performs effects — capability info is
   erased crossing the FFI boundary. Same problem every FFI has.
-- **Bytecode-mode enforcement.** The interpreter enforces; bytecode
-  trusts. The intended dev flow is interp-during-development to catch
-  violations, then `irij build` for deploy.
+- **Reference aliasing across handler boundaries.** A `with unsafe-jvm`
+  block can return a `java.util.Random` ref without spec annotation;
+  calls on that ref still flow through the plain `JVM` check. The
+  per-ref propagation below catches the *annotated* case.
+
+Bytecode-mode enforcement is no longer trust-only: `EffectRowChecker`
+runs at compile time (`docs/internals/specs.md` — "Compile-time
+effect-row lint") and fails the build for both modes.
 
 ## Why not granular Java effects
 
@@ -127,17 +127,43 @@ without breaking this baseline.
   functions. Programmer-declared, trusted. Irij's `::: JVM` is the
   same pattern coarsened to a single tag.
 
-## Future direction
+## Per-ref capability propagation
 
-Per-ref capability propagation (v2):
+A bind whose spec annotation names a declared effect promotes the
+bound variable into a capability handle. Subsequent dot-access on
+that variable demands the named effect from the caller's row — in
+addition to `JVM`.
 
 ```
-rnd :: Random! := java.util.Random/new 42
-;; rnd carries the Random capability in its spec
-with java-random rnd
-  x := rnd.nextInt 100
+effect Random
+  next-int :: Int Int
+
+fn use-rnd :: Int Int ::: JVM Random
+  => seed
+  rnd := java.util.Random/new seed :: Random
+  rnd.nextInt 100
 ```
 
-Implementation: spec annotations gain effect rows; spec-checker
-propagates from constructors through dot-accesses. Significant
-spec-system work; future direction, not v1.
+Without `:: Random` on the bind, only `JVM` is required. With it,
+`use-rnd` must declare `::: Random` too — letting the type author
+mark which logical resource a Java handle represents and forcing
+callers to acknowledge it.
+
+Implementation (`EffectRowChecker`):
+
+- Pass 1 collects `effectNames` from every `EffectDecl`.
+- Per-fn `varCap: Map<String, String>` is reset on entry.
+- `Stmt.Bind` walker records `target → effectName` when
+  `b.specAnnotation()` is a `SpecExpr.Name` matching an effect.
+- `Expr.DotAccess` walker, if its target is a `Var` present in
+  `varCap`, calls `requireEffect(effect, ..., avail, loc)` before
+  recursing.
+
+The check is purely lexical — no flow analysis. Reassigning the var
+or aliasing through another bind drops the capability. Adequate for
+the common case (allocate handle once, call methods on it nearby);
+not adequate for capability laundering by indirection. Tighter
+tracking is future work.
+
+Tests: `EffectRowLintTest.dotAccessOnEffectTaggedRefRequiresEffect`
++ accept/plain-jvm variants.
