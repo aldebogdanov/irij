@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.6.5 &mdash; **Breaking**: `use mod.path` requires an explicit modifier. The old implicit-last-segment alias (`use std.math` → bare `math.X` access) is gone — it collided silently when two imports ended in the same name. Choose: `:open` (flatten), `:as <alias>` (rename), or `{ name … }` (selective). The `:as` form is what you want for qualified access; the previous `use std.math` now writes as `use std.math :as math`. Plus 0.6.4's std.math re-exports + doc refresh.
+0.6.6 &mdash; R5a preparation: bytecode emitter now handles `Expr.Range` (`0 ..< 10`) and exposes 16 common builtins as first-class IrijFn values (length/head/tail/empty?/to-str/not/type-of/abs/sqrt/floor/ceil/round/reverse/sort/println/print) so `sort-by length #[…]` and similar pass-by-name patterns compile. New `BytecodeRunner` helper (in `dev.irij.cli`) compiles + runs source files through a fresh classloader — wired into nothing yet, but ready for the full `irij run`/`test` flip once the remaining builtin-as-value gap is closed via a runtime registry. Plus 0.6.5's `:as` modifier requirement.

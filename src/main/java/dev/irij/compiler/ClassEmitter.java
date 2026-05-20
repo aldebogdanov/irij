@@ -188,6 +188,7 @@ final class ClassEmitter implements Opcodes {
             case Expr.Compose n -> n.loc();
             case Expr.SeqOp n -> n.loc();
             case Expr.OpSection n -> n.loc();
+            case Expr.Range n -> n.loc();
             case Stmt.ExprStmt n -> n.loc();
             case Stmt.Bind n -> n.loc();
             case Stmt.MutBind n -> n.loc();
@@ -987,6 +988,14 @@ final class ClassEmitter implements Opcodes {
             }
             case Expr.Compose c -> emitCompose(c, mv, locals);
             case Expr.OpSection os -> emitOpSection(os.op(), mv);
+            case Expr.Range r -> {
+                emitExpr(r.from(), mv, locals);
+                emitExpr(r.to(), mv, locals);
+                mv.visitInsn(r.exclusive() ? ICONST_1 : ICONST_0);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "rangeOf",
+                        "(Ljava/lang/Object;Ljava/lang/Object;Z)Ljava/lang/Object;",
+                        false);
+            }
             // Pipe: `a |> f` ≡ `f a`, `a <| f` ≡ `f a` (reversed at parse).
             // Lower to an App so the existing apply-path handles arity,
             // effect rows, callable kinds (IrijFn / user fn / builtin).
@@ -1027,6 +1036,24 @@ final class ClassEmitter implements Opcodes {
                 mv.visitFieldInsn(GETSTATIC, RT, "CONST", IRIJ_FN_DESC);
                 return;
             }
+            // Builtins passed as values (sort-by length #[…], etc.)
+            // Each maps to a static IrijFn in RuntimeSupport.
+            case "length"   -> { mv.visitFieldInsn(GETSTATIC, RT, "LENGTH", IRIJ_FN_DESC); return; }
+            case "head"     -> { mv.visitFieldInsn(GETSTATIC, RT, "HEAD", IRIJ_FN_DESC); return; }
+            case "tail"     -> { mv.visitFieldInsn(GETSTATIC, RT, "TAIL", IRIJ_FN_DESC); return; }
+            case "empty?"   -> { mv.visitFieldInsn(GETSTATIC, RT, "EMPTY_Q", IRIJ_FN_DESC); return; }
+            case "to-str"   -> { mv.visitFieldInsn(GETSTATIC, RT, "TO_STR", IRIJ_FN_DESC); return; }
+            case "not"      -> { mv.visitFieldInsn(GETSTATIC, RT, "NOT_FN", IRIJ_FN_DESC); return; }
+            case "type-of"  -> { mv.visitFieldInsn(GETSTATIC, RT, "TYPE_OF", IRIJ_FN_DESC); return; }
+            case "abs"      -> { mv.visitFieldInsn(GETSTATIC, RT, "ABS_FN", IRIJ_FN_DESC); return; }
+            case "sqrt"     -> { mv.visitFieldInsn(GETSTATIC, RT, "SQRT_FN", IRIJ_FN_DESC); return; }
+            case "floor"    -> { mv.visitFieldInsn(GETSTATIC, RT, "FLOOR_FN", IRIJ_FN_DESC); return; }
+            case "ceil"     -> { mv.visitFieldInsn(GETSTATIC, RT, "CEIL_FN", IRIJ_FN_DESC); return; }
+            case "round"    -> { mv.visitFieldInsn(GETSTATIC, RT, "ROUND_FN", IRIJ_FN_DESC); return; }
+            case "reverse"  -> { mv.visitFieldInsn(GETSTATIC, RT, "REVERSE_FN", IRIJ_FN_DESC); return; }
+            case "sort"     -> { mv.visitFieldInsn(GETSTATIC, RT, "SORT_FN", IRIJ_FN_DESC); return; }
+            case "println"  -> { mv.visitFieldInsn(GETSTATIC, RT, "PRINTLN_FN", IRIJ_FN_DESC); return; }
+            case "print"    -> { mv.visitFieldInsn(GETSTATIC, RT, "PRINT_FN", IRIJ_FN_DESC); return; }
             default -> {}
         }
         Integer slot = locals.lookup(name);

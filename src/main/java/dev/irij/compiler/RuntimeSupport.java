@@ -789,6 +789,19 @@ public final class RuntimeSupport {
         return System.currentTimeMillis();
     }
 
+    /** Construct an IrijRange. Args are Long-typed; `exclusive`
+     *  controls whether the upper bound is included (`0 ..< 10` is
+     *  exclusive, `0 .. 10` is inclusive). Used by the bytecode
+     *  emitter's `Expr.Range` lowering. */
+    public static Object rangeOf(Object fromArg, Object toArg, boolean exclusive) {
+        if (!(fromArg instanceof Long lf) || !(toArg instanceof Long lt)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "Range requires Int endpoints, got "
+                            + typeTag(fromArg) + " .. " + typeTag(toArg));
+        }
+        return new dev.irij.interpreter.Values.IrijRange(lf, lt, exclusive);
+    }
+
     // ── Math primitives (Phase R3) ────────────────────────────────────
 
     public static Object sqrt(Object x) { return Math.sqrt(asDoubleArg(x, "sqrt")); }
@@ -933,6 +946,32 @@ public final class RuntimeSupport {
 
     public static final IrijFn IDENTITY = args -> args[0];
     public static final IrijFn CONST    = args -> args[0];  // const x y → x
+
+    // ── Builtins exposed as IrijFn values ────────────────────────────
+    //
+    // Users sometimes pass a builtin by name to a HOF: `sort-by length
+    // #[...]`. The emitter's per-call emit cases only fire at App
+    // sites; for Var loads we need a first-class function value. Each
+    // of the IrijFn statics below wraps one builtin so the bytecode
+    // can push it as a value via GETSTATIC. emitVarLoad consults this
+    // table when a Var name matches.
+
+    public static final IrijFn LENGTH      = args -> length(args[0]);
+    public static final IrijFn HEAD        = args -> head(args[0]);
+    public static final IrijFn TAIL        = args -> tail(args[0]);
+    public static final IrijFn EMPTY_Q     = args -> isEmpty(args[0]);
+    public static final IrijFn TO_STR      = args -> toStr(args[0]);
+    public static final IrijFn NOT_FN      = args -> !truthy(args[0]);
+    public static final IrijFn TYPE_OF     = args -> typeTag(args[0]);
+    public static final IrijFn ABS_FN      = args -> abs(args[0]);
+    public static final IrijFn SQRT_FN     = args -> sqrt(args[0]);
+    public static final IrijFn FLOOR_FN    = args -> floor(args[0]);
+    public static final IrijFn CEIL_FN     = args -> ceil(args[0]);
+    public static final IrijFn ROUND_FN    = args -> round(args[0]);
+    public static final IrijFn REVERSE_FN  = args -> reverseVal(args[0]);
+    public static final IrijFn SORT_FN     = args -> sortVal(args[0]);
+    public static final IrijFn PRINTLN_FN  = args -> { println(args[0]); return dev.irij.interpreter.Values.UNIT; };
+    public static final IrijFn PRINT_FN    = args -> { print(args[0]); return dev.irij.interpreter.Values.UNIT; };
 
     // ── Misc ─────────────────────────────────────────────────────────
 
