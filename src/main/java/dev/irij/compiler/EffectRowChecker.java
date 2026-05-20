@@ -44,12 +44,67 @@ import java.util.Set;
 public final class EffectRowChecker {
 
     private final Map<String, List<String>> fnRows = new HashMap<>();
+    /** fn-name → spec annotations (inputs..., output). Used at call
+     *  sites to find which input positions carry parametric row-var
+     *  bindings (e.g. the {@code (_ -> _):eff} in fold's signature). */
+    private final Map<String, List<SpecExpr>> fnSpecs = new HashMap<>();
     private final Map<String, String> effectOps = new HashMap<>();
     private final Map<String, String> handlerEffect = new HashMap<>();
     /** Set of declared effect names (from EffectDecl). Used to detect
      *  capability binds: `rnd :: Random := java.util.Random/new 42`
      *  binds `rnd` carrying the Random capability if Random is in this set. */
     private final java.util.Set<String> effectNames = new java.util.HashSet<>();
+
+    /** Builtin name → effect required to call it. Mirrors the
+     *  effectRow metadata each BuiltinFn carries in Interpreter / Builtins
+     *  Java code. The static checker needs this registry because
+     *  builtins aren't user fns (so they're not in {@link #fnRows})
+     *  and aren't effect ops (not in {@link #effectOps}), yet they
+     *  do require an effect in the caller's row at runtime.
+     *
+     *  <p>Single-effect builtins for now. If a builtin requires
+     *  multiple effects, extend the map's value type. */
+    private static final java.util.Map<String, String> BUILTIN_EFFECTS;
+    static {
+        var m = new java.util.HashMap<String, String>();
+        // Console — stdout/stderr/dbg
+        for (String n : java.util.List.of("println", "print", "dbg", "read-line")) {
+            m.put(n, "Console");
+        }
+        // Time
+        for (String n : java.util.List.of("sleep", "now-ms")) m.put(n, "Time");
+        // FileIO — read/write/list/delete/make-dir/append-file/file-exists?
+        for (String n : java.util.List.of(
+                "read-file", "write-file", "make-dir", "list-dir",
+                "delete-file", "append-file", "file-exists?",
+                "raw-multipart-save")) {
+            m.put(n, "FileIO");
+        }
+        // Env
+        for (String n : java.util.List.of("get-env", "env")) m.put(n, "Env");
+        // Http (client)
+        for (String n : java.util.List.of("raw-http-request")) m.put(n, "Http");
+        // Db
+        for (String n : java.util.List.of(
+                "raw-db-open", "raw-db-close", "raw-db-query",
+                "raw-db-exec", "raw-db-transaction")) {
+            m.put(n, "Db");
+        }
+        // Serve (HTTP server + SSE)
+        for (String n : java.util.List.of(
+                "raw-http-serve", "raw-sse-response", "raw-sse-send",
+                "raw-sse-close", "raw-sse-closed?")) {
+            m.put(n, "Serve");
+        }
+        // Session (Playground sandbox)
+        for (String n : java.util.List.of(
+                "raw-session-create", "raw-session-eval", "raw-session-destroy",
+                "raw-session-subscribe", "raw-session-unsubscribe",
+                "raw-session-cleanup")) {
+            m.put(n, "Session");
+        }
+        BUILTIN_EFFECTS = java.util.Map.copyOf(m);
+    }
 
     /** Local-var-name → capability-effect map for the fn body currently
      *  being walked. Populated by walking Stmt.Bind with an effect-name
@@ -66,6 +121,9 @@ public final class EffectRowChecker {
             Object inner = (d instanceof Decl.PubDecl pd) ? pd.inner() : d;
             if (inner instanceof Decl.FnDecl fn) {
                 fnRows.put(fn.name(), fn.effectRow());
+                if (fn.specAnnotations() != null) {
+                    fnSpecs.put(fn.name(), fn.specAnnotations());
+                }
             } else if (inner instanceof Decl.EffectDecl ed) {
                 effectNames.add(ed.name());
                 for (var op : ed.ops()) effectOps.put(op.name(), ed.name());
@@ -122,14 +180,28 @@ public final class EffectRowChecker {
      *    contract is "pure" so the body sees no effects available).
      *    Matches interpreter semantics: `fn.effectRow() != null ? ... :
      *    List.<String>of()`.
-     *  - Row containing {@code "Any"} → ambient (everything OK);
-     *    polymorphism marker, runtime widens.
+     *  - Row containing {@code "Any"} → ambient (legacy polymorphism
+     *    marker; being replaced by parametric row variables).
+     *  - Row containing a parametric row-variable (lowercase entry
+     *    like {@code eff}) → ambient. The body can't be checked
+     *    precisely because the variable's binding is only known at
+     *    each call site. Precision lives at the call-site
+     *    substitution.
      *  - Otherwise → exactly the listed effects.
      */
     private Set<String> available(List<String> declared) {
         if (declared == null) return new HashSet<>();
         if (declared.contains("Any")) return AMBIENT;
+        for (String e : declared) {
+            if (isRowVar(e)) return AMBIENT;
+        }
         return new HashSet<>(declared);
+    }
+
+    /** Lowercase first character = parametric row-variable. */
+    private static boolean isRowVar(String name) {
+        return name != null && !name.isEmpty()
+                && Character.isLowerCase(name.charAt(0));
     }
 
     /** Identity-comparable ambient sentinel — `contains` always true. */
@@ -202,9 +274,25 @@ public final class EffectRowChecker {
                     for (Expr a : app.args()) walkExpr(a, avail, ctx);
                     return;
                 }
+                // NB: builtins (println, log, raw-*, …) are NOT enforced
+                // at the call site here. Pre-existing static gap — the
+                // interpreter catches them at runtime via BuiltinFn
+                // effect-row metadata. {@link #BUILTIN_EFFECTS} is used
+                // only by {@link #collectInto} to bind row-vars from
+                // callback lambdas. Tightening the call-site check is a
+                // separate commit that needs every existing test
+                // fixture without {@code :::} to be migrated.
                 if (app.fn() instanceof Expr.Var v && fnRows.containsKey(v.name())) {
-                    requireRow(fnRows.get(v.name()), "call to " + v.name(),
-                            ctx, avail, app.loc());
+                    List<String> calleeRow = fnRows.get(v.name());
+                    if (hasRowVar(calleeRow)) {
+                        // Parametric — substitute from actual arg
+                        // effects then check.
+                        checkParametricCall(v.name(), calleeRow, app.args(),
+                                ctx, avail, app.loc());
+                    } else {
+                        requireRow(calleeRow, "call to " + v.name(),
+                                ctx, avail, app.loc());
+                    }
                 }
                 walkExpr(app.fn(), avail, ctx);
                 for (Expr a : app.args()) walkExpr(a, avail, ctx);
@@ -273,6 +361,204 @@ public final class EffectRowChecker {
         if (calleeRow == null || calleeRow.isEmpty()) return;
         if (calleeRow.contains("Any")) return;
         for (String e : calleeRow) requireEffect(e, opName, inCtx, avail, loc);
+    }
+
+    /** True if any entry in {@code row} is a parametric row-variable
+     *  (lowercase first letter). */
+    private static boolean hasRowVar(List<String> row) {
+        if (row == null) return false;
+        for (String e : row) if (isRowVar(e)) return true;
+        return false;
+    }
+
+    /** Parametric call-site check. Walks the callee's spec annotations
+     *  to find row-variable bindings on input positions, computes the
+     *  effects of each corresponding actual argument expression,
+     *  unions them into the bindings, then substitutes into the
+     *  callee's declared row to get the concrete effective row.
+     *  Finally checks every concrete effect in that row against the
+     *  caller's available set, with a chain-tracked error message on
+     *  failure: "row-var `eff` bound to {Log} at arg position N". */
+    private void checkParametricCall(String fnName, List<String> calleeRow,
+                                      List<Expr> args, String ctx,
+                                      Set<String> callerAvail, SourceLoc loc) {
+        List<SpecExpr> specs = fnSpecs.get(fnName);
+        Map<String, Set<String>> bindings = new HashMap<>();
+        Map<String, Integer> bindingArgIdx = new HashMap<>();
+        if (specs != null) {
+            // Last spec is the return spec; earlier are inputs in order.
+            int inputCount = specs.size() - 1;
+            for (int i = 0; i < inputCount && i < args.size(); i++) {
+                String rv = rowVarOf(specs.get(i));
+                if (rv == null) continue;
+                Set<String> argEffects = collectExprEffects(args.get(i));
+                bindings.merge(rv, argEffects, (a, b) -> {
+                    Set<String> u = new HashSet<>(a);
+                    u.addAll(b);
+                    return u;
+                });
+                bindingArgIdx.putIfAbsent(rv, i);
+            }
+        }
+        // Substitute the callee's row using the collected bindings.
+        Set<String> effective = new HashSet<>();
+        for (String entry : calleeRow) {
+            if (isRowVar(entry)) {
+                Set<String> bound = bindings.get(entry);
+                if (bound != null) effective.addAll(bound);
+                // else: unbound — the callee declared `::: eff` but no
+                // arg position carries that variable. Skip (defensive).
+            } else {
+                effective.add(entry);
+            }
+        }
+        // Verify caller's avail ⊇ effective.
+        for (String eff : effective) {
+            if (callerAvail.contains(eff)) continue;
+            String origin = effectOrigin(eff, bindings, bindingArgIdx);
+            throw new IrijCompiler.CompileException(
+                    "Effect '" + eff + "' not declared in " + ctx
+                            + ": propagated to '" + fnName + "' call"
+                            + (origin != null ? " " + origin : "")
+                            + " — add ::: " + eff + " to enclosing fn's row"
+                            + (loc != null ? " at " + loc.line() + ":" + loc.col() : ""));
+        }
+    }
+
+    /** Extract the row-var name from a function-shaped spec, if any. */
+    private static String rowVarOf(SpecExpr s) {
+        return switch (s) {
+            case SpecExpr.Arrow a -> a.rowVar();
+            case SpecExpr.App a -> a.rowVar();
+            default -> null;
+        };
+    }
+
+    /** Render a "propagated via row-var X at arg N" suffix for error
+     *  messages, pointing at which arg position bound a row-var that
+     *  contributed the missing effect. */
+    private static String effectOrigin(String eff,
+                                        Map<String, Set<String>> bindings,
+                                        Map<String, Integer> argIdx) {
+        for (var e : bindings.entrySet()) {
+            if (e.getValue().contains(eff)) {
+                Integer idx = argIdx.get(e.getKey());
+                return "via row-variable `" + e.getKey() + "` "
+                        + "(bound from arg " + (idx != null ? idx : "?") + ")";
+            }
+        }
+        return null;
+    }
+
+    /** Collect the effects an expression might perform. Used at call
+     *  sites of row-var-parameterised fns to bind the variable from
+     *  the actual argument's row. Best-effort: opaque expressions
+     *  (App returning an unknown fn, complex shapes) produce no
+     *  binding contribution — the substitution silently treats the
+     *  variable as empty for that position. */
+    private Set<String> collectExprEffects(Expr e) {
+        Set<String> out = new HashSet<>();
+        collectInto(e, out);
+        return out;
+    }
+
+    private void collectInto(Expr e, Set<String> out) {
+        if (e == null) return;
+        switch (e) {
+            case Expr.Lambda lam -> collectInto(lam.body(), out);
+            case Expr.App app -> {
+                if (app.fn() instanceof Expr.Var v) {
+                    String eff = effectOps.get(v.name());
+                    if (eff != null) out.add(eff);
+                    String builtinEff = BUILTIN_EFFECTS.get(v.name());
+                    if (builtinEff != null) out.add(builtinEff);
+                    List<String> row = fnRows.get(v.name());
+                    if (row != null) {
+                        for (String r : row) if (!isRowVar(r)) out.add(r);
+                    }
+                }
+                collectInto(app.fn(), out);
+                for (Expr a : app.args()) collectInto(a, out);
+            }
+            case Expr.Var v -> {
+                // User-fn-as-value: include its row.
+                List<String> row = fnRows.get(v.name());
+                if (row != null) {
+                    for (String r : row) if (!isRowVar(r)) out.add(r);
+                }
+            }
+            case Expr.JavaRef jr -> out.add("JVM");
+            case Expr.DotAccess da -> {
+                collectInto(da.target(), out);
+                if (da.target() instanceof Expr.Var v
+                        && varCap.containsKey(v.name())) {
+                    out.add(varCap.get(v.name()));
+                }
+            }
+            case Expr.IfExpr ie -> {
+                collectInto(ie.cond(), out);
+                collectInto(ie.thenBranch(), out);
+                collectInto(ie.elseBranch(), out);
+            }
+            case Expr.MatchExpr me -> {
+                collectInto(me.scrutinee(), out);
+                for (var arm : me.arms()) {
+                    if (arm.guard() != null) collectInto(arm.guard(), out);
+                    collectInto(arm.body(), out);
+                }
+            }
+            case Expr.BinaryOp bo -> {
+                collectInto(bo.left(), out);
+                collectInto(bo.right(), out);
+            }
+            case Expr.UnaryOp uo -> collectInto(uo.operand(), out);
+            case Expr.Block blk -> {
+                for (Stmt s : blk.stmts()) collectStmtInto(s, out);
+            }
+            case Expr.VectorLit vl -> { for (Expr x : vl.elements()) collectInto(x, out); }
+            case Expr.SetLit sl -> { for (Expr x : sl.elements()) collectInto(x, out); }
+            case Expr.TupleLit tl -> { for (Expr x : tl.elements()) collectInto(x, out); }
+            case Expr.MapLit ml -> {
+                for (var me : ml.entries()) {
+                    if (me instanceof Expr.MapEntry.Field f) collectInto(f.value(), out);
+                }
+            }
+            case Expr.Pipe p -> { collectInto(p.left(), out); collectInto(p.right(), out); }
+            case Expr.Compose c -> { collectInto(c.left(), out); collectInto(c.right(), out); }
+            default -> {}
+        }
+    }
+
+    private void collectStmtInto(Stmt s, Set<String> out) {
+        switch (s) {
+            case Stmt.ExprStmt es -> collectInto(es.expr(), out);
+            case Stmt.Bind b -> collectInto(b.value(), out);
+            case Stmt.MutBind mb -> collectInto(mb.value(), out);
+            case Stmt.Assign a -> collectInto(a.value(), out);
+            case Stmt.IfStmt ifs -> {
+                collectInto(ifs.cond(), out);
+                for (Stmt sub : ifs.thenBranch()) collectStmtInto(sub, out);
+                if (ifs.elseBranch() != null) {
+                    for (Stmt sub : ifs.elseBranch()) collectStmtInto(sub, out);
+                }
+            }
+            case Stmt.MatchStmt ms -> {
+                collectInto(ms.scrutinee(), out);
+                for (var arm : ms.arms()) collectInto(arm.body(), out);
+            }
+            case Stmt.With w -> {
+                // Inside the `with`, the handler's effect is discharged.
+                // We collect effects from the body but remove the
+                // handled effect — those don't escape the with block.
+                Set<String> inner = new HashSet<>();
+                for (Stmt sub : w.body()) collectStmtInto(sub, inner);
+                Set<String> handled = new HashSet<>();
+                collectHandlerEffects(w.handler(), handled);
+                inner.removeAll(handled);
+                out.addAll(inner);
+            }
+            default -> {}
+        }
     }
 
     /** Inspect a Stmt.Bind: if its spec annotation names a declared
