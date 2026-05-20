@@ -1565,6 +1565,48 @@ final class ClassEmitter implements Opcodes {
                 mv.visitInsn(POP);
                 return true;
             }
+            // ── R3 final batch: toml-parse, println, raw-http-request,
+            //    flip handled below ───────────────────────────────────
+            case "toml-parse"       -> { return emitRT1(args, mv, locals, "tomlParse"); }
+            case "raw-http-request" -> { return emitRT1(args, mv, locals, "rawHttpRequest"); }
+            case "flip" -> {
+                // flip f a b → f b a. Three-arg call form. The
+                // interpreter's BuiltinFn version errors because of
+                // missing partial-app support; bytecode just emits
+                // the rewrite directly.
+                if (args.size() != 3) return false;
+                emitExpr(args.get(0), mv, locals);  // f
+                emitExpr(args.get(2), mv, locals);  // b
+                emitExpr(args.get(1), mv, locals);  // a
+                // Stack: f, b, a — build [b, a] array, call f.apply
+                pushIconst(mv, 2);
+                mv.visitTypeInsn(ANEWARRAY, OBJ);
+                // Array on top; need to populate from below-the-arr items.
+                // Easier: push args in order, store in array via swap-y dance.
+                // Simpler approach: stash into temp slots, then build.
+                // Fall through: undo the above and rebuild cleanly via temps.
+                mv.visitInsn(POP);
+                int aSlot = locals.allocateAnon();
+                int bSlot = locals.allocateAnon();
+                int fSlot = locals.allocateAnon();
+                mv.visitVarInsn(ASTORE, aSlot);
+                mv.visitVarInsn(ASTORE, bSlot);
+                mv.visitVarInsn(ASTORE, fSlot);
+                mv.visitVarInsn(ALOAD, fSlot);
+                pushIconst(mv, 2);
+                mv.visitTypeInsn(ANEWARRAY, OBJ);
+                mv.visitInsn(DUP);
+                pushIconst(mv, 0);
+                mv.visitVarInsn(ALOAD, bSlot);
+                mv.visitInsn(AASTORE);
+                mv.visitInsn(DUP);
+                pushIconst(mv, 1);
+                mv.visitVarInsn(ALOAD, aSlot);
+                mv.visitInsn(AASTORE);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "callAny",
+                        "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
             // ── R3 batch 6: sandboxed-interpreter tier ───────────────
             case "raw-session-create" -> {
                 if (!isZeroArgCall(args)) return false;

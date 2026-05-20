@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.6.1 &mdash; R1 + R2: nREPL `eval` op now routes to bytecode by default. Cross-eval fn definitions land: each emitted class registers its user fns as `IrijFn` instances in the session's namespace map via `RT.nsPut`; subsequent evals' compilations resolve unknown user-fn names through `RT.nsGet`. Defining `fn double …` in one eval and calling `double 21` from the next now works exactly as it does in interpreter mode. Legacy interpreter path moved behind the explicit `eval-interp` op name. Plus 0.6.0's parametric effect rows.
+0.6.2 &mdash; R3: last 30+ builtins migrated to RuntimeSupport. Math (sqrt/sin/cos/tan/log/exp/floor/ceil/round/abs/pow/min/max/div/mod), random (random-int/random-float), string parsing (parse-int/parse-float/char-at/char-code/from-char-code), vec ops (reverse/sort/take/drop/concat), functional combinators (identity/const/flip), misc (dbg/read-line/toml-parse/raw-http-request), constants (pi/e). `std.math` and friends now compile cleanly via bytecode. `log` carefully falls through to effect-op dispatch when `effect Log` is declared. Plus 0.6.1's R1+R2.

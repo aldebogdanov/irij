@@ -709,43 +709,8 @@ public final class Builtins {
         }));
 
         // ── HTTP primitives ─────────────────────────────────────────────
-        env.define("raw-http-request", new BuiltinFn("raw-http-request", 1, List.of("Http"), args -> {
-            if (!(args.get(0) instanceof IrijMap opts))
-                throw new IrijRuntimeError("raw-http-request: expects Map argument");
-            var entries = opts.entries();
-            var url = entries.get("url");
-            if (!(url instanceof String urlStr))
-                throw new IrijRuntimeError("raw-http-request: missing or invalid 'url' field");
-            var method = entries.getOrDefault("method", "GET").toString();
-            var body = entries.get("body");
-            var headers = entries.get("headers");
-            try {
-                var client = java.net.http.HttpClient.newHttpClient();
-                var reqBuilder = java.net.http.HttpRequest.newBuilder(java.net.URI.create(urlStr));
-                if (headers instanceof IrijMap hm) {
-                    for (var e : hm.entries().entrySet()) {
-                        reqBuilder.header(e.getKey(), Values.toIrijString(e.getValue()));
-                    }
-                }
-                if (body instanceof String bodyStr) {
-                    reqBuilder.method(method, java.net.http.HttpRequest.BodyPublishers.ofString(bodyStr));
-                } else {
-                    reqBuilder.method(method, java.net.http.HttpRequest.BodyPublishers.noBody());
-                }
-                var resp = client.send(reqBuilder.build(),
-                    java.net.http.HttpResponse.BodyHandlers.ofString());
-                var respHeaders = new LinkedHashMap<String, Object>();
-                resp.headers().map().forEach((k, v) ->
-                    respHeaders.put(k, v.size() == 1 ? v.get(0) : String.join(", ", v)));
-                var result = new LinkedHashMap<String, Object>();
-                result.put("status", (long) resp.statusCode());
-                result.put("body", resp.body());
-                result.put("headers", new IrijMap(respHeaders));
-                return new IrijMap(result);
-            } catch (Exception e) {
-                throw new IrijRuntimeError("raw-http-request: " + e.getMessage());
-            }
-        }));
+        env.define("raw-http-request", new BuiltinFn("raw-http-request", 1, List.of("Http"),
+                args -> rawHttpRequestImpl(args.get(0))));
 
         // ── Multipart parsing ──────────────────────────────────────────────
 
@@ -907,7 +872,7 @@ public final class Builtins {
     // ── JSON conversion helpers ────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
-    static Object tomlValueToIrij(Object val) {
+    public static Object tomlValueToIrij(Object val) {
         if (val == null) return Values.UNIT;
         if (val instanceof String s) return s;
         if (val instanceof Boolean b) return b;
@@ -928,6 +893,46 @@ public final class Builtins {
             return new IrijMap(out);
         }
         return val.toString();
+    }
+
+    /** raw-http-request implementation, shared between interpreter
+     *  closure and bytecode runtime (RuntimeSupport.rawHttpRequest). */
+    public static Object rawHttpRequestImpl(Object arg) {
+        if (!(arg instanceof IrijMap opts))
+            throw new IrijRuntimeError("raw-http-request: expects Map argument");
+        var entries = opts.entries();
+        var url = entries.get("url");
+        if (!(url instanceof String urlStr))
+            throw new IrijRuntimeError("raw-http-request: missing or invalid 'url' field");
+        var method = entries.getOrDefault("method", "GET").toString();
+        var body = entries.get("body");
+        var headers = entries.get("headers");
+        try {
+            var client = java.net.http.HttpClient.newHttpClient();
+            var reqBuilder = java.net.http.HttpRequest.newBuilder(java.net.URI.create(urlStr));
+            if (headers instanceof IrijMap hm) {
+                for (var e : hm.entries().entrySet()) {
+                    reqBuilder.header(e.getKey(), Values.toIrijString(e.getValue()));
+                }
+            }
+            if (body instanceof String bodyStr) {
+                reqBuilder.method(method, java.net.http.HttpRequest.BodyPublishers.ofString(bodyStr));
+            } else {
+                reqBuilder.method(method, java.net.http.HttpRequest.BodyPublishers.noBody());
+            }
+            var resp = client.send(reqBuilder.build(),
+                    java.net.http.HttpResponse.BodyHandlers.ofString());
+            var respHeaders = new LinkedHashMap<String, Object>();
+            resp.headers().map().forEach((k, v) ->
+                    respHeaders.put(k, v.size() == 1 ? v.get(0) : String.join(", ", v)));
+            var result = new LinkedHashMap<String, Object>();
+            result.put("status", (long) resp.statusCode());
+            result.put("body", resp.body());
+            result.put("headers", new IrijMap(respHeaders));
+            return new IrijMap(result);
+        } catch (Exception e) {
+            throw new IrijRuntimeError("raw-http-request: " + e.getMessage());
+        }
     }
 
     public static Object jsonToIrij(JsonElement el) {

@@ -939,6 +939,27 @@ public final class RuntimeSupport {
     public static void dbg(Object v) {
         System.err.println("[dbg] " + display(v));
     }
+    public static Object tomlParse(Object strArg) {
+        String s = asStr(strArg, "toml-parse");
+        try {
+            return dev.irij.interpreter.Builtins.tomlValueToIrij(
+                    new com.moandjiezana.toml.Toml().read(s).toMap());
+        } catch (IllegalStateException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("toml-parse: " + e.getMessage());
+        }
+    }
+
+    public static Object printlnVal(Object v) {
+        System.out.println(display(v));
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object rawHttpRequest(Object optsArg) {
+        // Delegate to interp's BuiltinFn via a single direct call.
+        // Move to standalone impl post-R5 (interp deletion).
+        return dev.irij.interpreter.Builtins.rawHttpRequestImpl(optsArg);
+    }
+
     public static Object readLine() {
         try {
             return new java.io.BufferedReader(new java.io.InputStreamReader(System.in)).readLine();
