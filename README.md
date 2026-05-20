@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.5.2 &mdash; Phase R3 first batch: 22 heavy-hitter builtins ported to bytecode (`replace`, `substring`, `split`, `join`, `trim`, `upper/lower-case`, `starts/ends-with?`, `index-of`, `url-encode/decode`, `get`, `assoc`, `dissoc`, `merge`, `keys`, `vals`, `contains?`, `last`, `to-vec`, `not`, `type-of`) + `/=` operator. Plus 0.5.1's bytecode-mode seed resolution and `std.serve` effect-row fix. Patch on 0.5.0.
+0.5.3 &mdash; Phase R3 batches 2-5: SQLite raw-db-* / SSE raw-sse-* / multipart raw-multipart-* / raw-http-serve / JSON / FileIO / env / time ported to bytecode. Sequence operators (`@`, `/?`, `/!`, `@i`, `/^`, `/$`, `/+`, `/*`, `/#`, `/&`, `/|`) and `|>` / `<|` pipe lowered. Partial application of user fns (`f a` when arity > 1 yields an IrijFn). Top-level `:=` binds hoisted to static fields. Plus 0.5.2's heavy-hitter ports.

@@ -44,6 +44,11 @@ final class ClassEmitter implements Opcodes {
      *  to emit caller-side subsumption checks at INVOKESTATIC sites. */
     private final Map<String, List<String>> fnEffectRow = new HashMap<>();
     private final Map<String, List<String>> productFields = new HashMap<>();
+    /** Top-level `:=` bindings get hoisted to static fields on the
+     *  emitted class so user-fn methods can read them (interpreter
+     *  semantics: globalEnv lookup). Maps Irij name → JVM field name.
+     *  Populated lazily on first emitTopLevel BindingDecl write. */
+    private final Map<String, String> topLevelFields = new HashMap<>();
     /** Sum-spec variants, kept in declaration order for deterministic
      *  emission. Each entry maps {@code variantName → arity}. */
     private final Map<String, LinkedHashMap<String, Integer>> sumVariants = new LinkedHashMap<>();
@@ -126,7 +131,10 @@ final class ClassEmitter implements Opcodes {
         this.classWriter = cw;
         cw.visit(V21, ACC_PUBLIC | ACC_FINAL, internalName, null, OBJ, null);
 
-        // Pass 1: register fn signatures, product-spec field names, proto impls.
+        // Pass 1: register fn signatures, product-spec field names,
+        // proto impls. Also declare static fields for top-level `:=`
+        // binds so user-fn methods (emitted in pass 2) can resolve
+        // references to them via GETSTATIC.
         for (Decl d : decls) {
             Decl.FnDecl fn = asFnDecl(d);
             if (fn != null) {
@@ -134,6 +142,11 @@ final class ClassEmitter implements Opcodes {
                 if (fn.effectRow() != null) {
                     fnEffectRow.put(fn.name(), fn.effectRow());
                 }
+            }
+            if (d instanceof Decl.BindingDecl bd
+                    && bd.stmt() instanceof Stmt.Bind b
+                    && b.target() instanceof Stmt.BindTarget.Simple sm) {
+                ensureTopLevelField(sm.name());
             }
             Object inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
             if (inner instanceof Decl.SpecDecl sd) {
@@ -694,20 +707,29 @@ final class ClassEmitter implements Opcodes {
         switch (d) {
             case Decl.ExprDecl ed -> emitStmtExpr(ed.expr(), mv, locals);
             case Decl.BindingDecl bd -> {
+                // Top-level binds with a simple target also get hoisted
+                // to a static field so user-fns can read them (mirrors
+                // the interpreter's globalEnv lookup). The original
+                // local-slot store still happens (via emitStmt) so the
+                // rest of main()'s code sees the binding.
                 emitStmt(bd.stmt(), mv, locals);
-                // Namespace-mode write-through: after a top-level
-                // `name := value` runs, also store it into the session
-                // namespace so subsequent eval-bytecode calls see it.
-                if (options.namespaceMode()
-                        && bd.stmt() instanceof Stmt.Bind b
+                if (bd.stmt() instanceof Stmt.Bind b
                         && b.target() instanceof Stmt.BindTarget.Simple sm) {
                     Integer slot = locals.lookup(sm.name());
                     if (slot != null) {
-                        mv.visitLdcInsn(sm.name());
+                        String field = ensureTopLevelField(sm.name());
                         mv.visitVarInsn(ALOAD, slot);
-                        mv.visitMethodInsn(INVOKESTATIC, RT, "nsPut",
-                                "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
-                        mv.visitInsn(POP);
+                        mv.visitFieldInsn(PUTSTATIC, internalName, field, OBJ_DESC);
+                        // Namespace-mode write-through: also store into
+                        // the session namespace so subsequent
+                        // eval-bytecode calls see it.
+                        if (options.namespaceMode()) {
+                            mv.visitLdcInsn(sm.name());
+                            mv.visitVarInsn(ALOAD, slot);
+                            mv.visitMethodInsn(INVOKESTATIC, RT, "nsPut",
+                                    "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                            mv.visitInsn(POP);
+                        }
                     }
                 }
             }
@@ -883,6 +905,15 @@ final class ClassEmitter implements Opcodes {
             }
             case Expr.Compose c -> emitCompose(c, mv, locals);
             case Expr.OpSection os -> emitOpSection(os.op(), mv);
+            // Pipe: `a |> f` ≡ `f a`, `a <| f` ≡ `f a` (reversed at parse).
+            // Lower to an App so the existing apply-path handles arity,
+            // effect rows, callable kinds (IrijFn / user fn / builtin).
+            case Expr.Pipe p -> {
+                Expr fn = p.forward() ? p.right() : p.left();
+                Expr arg = p.forward() ? p.left() : p.right();
+                emitExpr(new Expr.App(fn, java.util.List.of(arg), p.loc()), mv, locals);
+            }
+            case Expr.SeqOp so -> emitSeqOp(so, mv, locals);
             default -> throw new IrijCompiler.CompileException(
                     "MVP: unsupported expression: " + e.getClass().getSimpleName());
         }
@@ -930,6 +961,13 @@ final class ClassEmitter implements Opcodes {
             mv.visitLdcInsn(name);
             mv.visitMethodInsn(INVOKESTATIC, RT, "nsGet",
                     "(Ljava/lang/String;)Ljava/lang/Object;", false);
+            return;
+        }
+        // Top-level binding hoisted to a static field (interpreter
+        // semantics: visible from any user-fn body).
+        String topField = topLevelFields.get(name);
+        if (topField != null) {
+            mv.visitFieldInsn(GETSTATIC, internalName, topField, OBJ_DESC);
             return;
         }
         // User fn referenced as a value (e.g. passed to a higher-order fn
@@ -1321,7 +1359,115 @@ final class ClassEmitter implements Opcodes {
             case "to-vec"       -> { return emitRT1(args, mv, locals, "toVec"); }
             case "not"          -> { return emitRT1(args, mv, locals, "notOp"); }
             case "type-of"      -> { return emitRT1(args, mv, locals, "typeOf"); }
+            // ── R3 batch 2: SQLite raw-db-* ──────────────────────────
+            case "raw-db-open"        -> { return emitRT1(args, mv, locals, "rawDbOpen"); }
+            case "raw-db-close"       -> { return emitRT1(args, mv, locals, "rawDbClose"); }
+            case "raw-db-query"       -> { return emitRT3(args, mv, locals, "rawDbQuery"); }
+            case "raw-db-exec"        -> { return emitRT3(args, mv, locals, "rawDbExec"); }
+            case "raw-db-transaction" -> { return emitRT2(args, mv, locals, "rawDbTransaction"); }
+            // ── R3 batch 3: SSE + multipart + raw-http-serve ─────────
+            case "raw-sse-response"   -> { return emitRT1(args, mv, locals, "rawSseResponse"); }
+            case "raw-sse-send"       -> { return emitRT3(args, mv, locals, "rawSseSend"); }
+            case "raw-sse-close"      -> { return emitRT1(args, mv, locals, "rawSseClose"); }
+            case "raw-sse-closed?"    -> { return emitRT1(args, mv, locals, "rawSseClosedQ"); }
+            case "raw-multipart-field" -> { return emitRT2(args, mv, locals, "rawMultipartField"); }
+            case "raw-multipart-save"  -> { return emitRT3(args, mv, locals, "rawMultipartSave"); }
+            case "raw-http-serve"      -> { return emitRT2(args, mv, locals, "rawHttpServe"); }
+            // ── R3 batch 4: JSON + FileIO + env / time ───────────────
+            case "json-parse"          -> { return emitRT1(args, mv, locals, "jsonParse"); }
+            case "json-encode"         -> { return emitRT1(args, mv, locals, "jsonEncode"); }
+            case "json-encode-pretty"  -> { return emitRT1(args, mv, locals, "jsonEncodePretty"); }
+            case "make-dir"            -> { return emitRT1(args, mv, locals, "makeDir"); }
+            case "list-dir"            -> { return emitRT1(args, mv, locals, "listDir"); }
+            case "delete-file"         -> { return emitRT1(args, mv, locals, "deleteFile"); }
+            case "read-file"           -> { return emitRT1(args, mv, locals, "readFile"); }
+            case "write-file"          -> { return emitRT2(args, mv, locals, "writeFile"); }
+            case "append-file"         -> { return emitRT2(args, mv, locals, "appendFile"); }
+            case "file-exists?"        -> { return emitRT1(args, mv, locals, "fileExistsQ"); }
+            case "get-env"             -> { return emitRT1(args, mv, locals, "getEnv"); }
+            case "now-ms"              -> {
+                if (!args.isEmpty()) return false;
+                mv.visitMethodInsn(INVOKESTATIC, RT, "nowMs", "()Ljava/lang/Object;", false);
+                return true;
+            }
+            case "env" -> {
+                pushObjectArray(args, mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "envBuiltin",
+                        "([Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
             default -> { return false; }
+        }
+    }
+
+    /** Emit an Expr.SeqOp. Two cases:
+     *
+     *   1. {@code arg == null} — the operator appears in value position
+     *      (e.g. `(fold (+) 0 v)` passing `+` as a value, or
+     *      `/+` standalone). Push the shared IrijFn instance from
+     *      RuntimeSupport.
+     *
+     *   2. {@code arg != null} — the operator was applied to one
+     *      operand. For HOF ops (`@`, `/?`, `/!`, `@i`, `/^`, `/$`)
+     *      the operand is the function to map/filter; the SeqOp itself
+     *      evaluates to a curried IrijFn awaiting the collection. For
+     *      reduce ops (`/+`, `/*`, `/#`, `/&`, `/|`) the operand is
+     *      the collection and we compute directly.
+     */
+    private void emitSeqOp(Expr.SeqOp so, MethodVisitor mv, Locals locals) {
+        String op = so.op();
+        Expr arg = so.arg();
+        if (arg == null) {
+            // Value position: push the shared IrijFn for this op.
+            String field = switch (op) {
+                case "/+" -> "SEQ_SUM";
+                case "/*" -> "SEQ_PRODUCT";
+                case "/#" -> "SEQ_COUNT";
+                case "/&" -> "SEQ_ALL";
+                case "/|" -> "SEQ_ANY";
+                default -> null;
+            };
+            if (field != null) {
+                mv.visitFieldInsn(GETSTATIC, RT, field, IRIJ_FN_DESC);
+                return;
+            }
+            // HOF ops standalone aren't useful as bare values; throw.
+            throw new IrijCompiler.CompileException(
+                    "MVP: seq op '" + op + "' requires an operand at " + so.loc());
+        }
+        // With operand — either curry (HOF) or compute (reduce).
+        switch (op) {
+            case "@", "/?", "/!", "@i", "/^", "/$" -> {
+                // Partial application: emit RT.seq<X>Partial(arg) → IrijFn
+                emitExpr(arg, mv, locals);
+                String method = switch (op) {
+                    case "@"  -> "seqMapPartial";
+                    case "@i" -> "seqMapIndexedPartial";
+                    case "/?" -> "seqFilterPartial";
+                    case "/!" -> "seqFindFirstPartial";
+                    case "/^" -> "seqReducePartial";
+                    case "/$" -> "seqScanPartial";
+                    default -> throw new IllegalStateException();
+                };
+                mv.visitMethodInsn(INVOKESTATIC, RT, method,
+                        "(Ljava/lang/Object;)" + IRIJ_FN_DESC, false);
+            }
+            case "/+", "/*", "/#", "/&", "/|" -> {
+                // Reduce in place.
+                emitExpr(arg, mv, locals);
+                String method = switch (op) {
+                    case "/+" -> "seqSum";
+                    case "/*" -> "seqProduct";
+                    case "/#" -> "seqCount";
+                    case "/&" -> "seqAll";
+                    case "/|" -> "seqAny";
+                    default -> throw new IllegalStateException();
+                };
+                mv.visitMethodInsn(INVOKESTATIC, RT, method,
+                        "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+            }
+            default -> throw new IrijCompiler.CompileException(
+                    "MVP: unsupported seq op: " + op);
         }
     }
 
@@ -3101,6 +3247,51 @@ final class ClassEmitter implements Opcodes {
                 samType, wrapperHandle, samType);
     }
 
+    /** Lazily declare a static field for a top-level binding. Field
+     *  name is mangled to avoid collisions; type is Object. */
+    private String ensureTopLevelField(String irijName) {
+        return topLevelFields.computeIfAbsent(irijName, n -> {
+            String field = "top$" + mangle(n);
+            classWriter.visitField(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                    field, OBJ_DESC, null, null).visitEnd();
+            return field;
+        });
+    }
+
+    /** Build an IrijFn that captures the supplied {@code partialArgs}
+     *  and delegates to {@code fnName} once the remaining arity is
+     *  filled. Evaluates each partial arg eagerly into a fresh local
+     *  (so side-effects fire at the partial-application site, matching
+     *  the interpreter's evalApp semantics).
+     */
+    private void emitPartialApp(String fnName, int arity, List<Expr> partialArgs,
+                                 Expr.SourceLoc loc, MethodVisitor mv, Locals outerLocals) {
+        // Stash each partial arg in a fresh outer local.
+        List<String> captureNames = new ArrayList<>();
+        for (int i = 0; i < partialArgs.size(); i++) {
+            emitExpr(partialArgs.get(i), mv, outerLocals);
+            String name = "$partial$" + (partialCounter++) + "$" + i;
+            int slot = outerLocals.allocate(name);
+            mv.visitVarInsn(ASTORE, slot);
+            captureNames.add(name);
+        }
+        // Build the synthetic lambda.
+        int missing = arity - partialArgs.size();
+        List<Pattern> params = new ArrayList<>();
+        List<Expr> bodyArgs = new ArrayList<>();
+        for (String cn : captureNames) bodyArgs.add(new Expr.Var(cn, loc));
+        for (int j = 0; j < missing; j++) {
+            String pn = "$pp$" + partialCounter + "$" + j;
+            params.add(new Pattern.VarPat(pn, loc));
+            bodyArgs.add(new Expr.Var(pn, loc));
+        }
+        Expr body = new Expr.App(new Expr.Var(fnName, loc), bodyArgs, loc);
+        Expr.Lambda lam = new Expr.Lambda(params, null, body, loc);
+        emitLambda(lam, mv, outerLocals);
+    }
+
+    private int partialCounter = 0;
+
     private void emitLambda(Expr.Lambda lam, MethodVisitor mv, Locals outerLocals) {
         // 1. Collect parameter names (VarPat/WildcardPat only for MVP).
         List<String> paramNames = new ArrayList<>();
@@ -3330,6 +3521,15 @@ final class ClassEmitter implements Opcodes {
         // Unit-only arg → zero-arg call.
         if (arity == 0 && args.size() == 1 && args.get(0) instanceof Expr.UnitLit) {
             args = List.of();
+        }
+        if (args.size() < arity) {
+            // Partial application — synthesize a Lambda that captures
+            // the supplied args (via fresh locals) and takes the
+            // remaining params. emitLambda's free-var discovery picks
+            // up the captures and the resulting IrijFn delegates to
+            // the underlying static method when fully applied.
+            emitPartialApp(fnName, arity, args, app.loc(), mv, locals);
+            return;
         }
         if (args.size() != arity) {
             throw new IrijCompiler.CompileException(

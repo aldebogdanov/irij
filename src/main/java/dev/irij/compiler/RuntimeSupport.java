@@ -667,6 +667,785 @@ public final class RuntimeSupport {
         return typeTag(v);
     }
 
+    // ── JSON (delegates to interp's Builtins helpers; same semantics) ──
+
+    public static Object jsonParse(Object strArg) {
+        String str = asStr(strArg, "json-parse");
+        try {
+            return dev.irij.interpreter.Builtins.jsonToIrij(
+                    com.google.gson.JsonParser.parseString(str));
+        } catch (com.google.gson.JsonSyntaxException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("json-parse: " + e.getMessage());
+        }
+    }
+
+    public static Object jsonEncode(Object v) {
+        return dev.irij.interpreter.Builtins.irijToJson(v).toString();
+    }
+
+    public static Object jsonEncodePretty(Object v) {
+        com.google.gson.Gson gson = new com.google.gson.GsonBuilder()
+                .setPrettyPrinting().create();
+        return gson.toJson(dev.irij.interpreter.Builtins.irijToJson(v));
+    }
+
+    // ── FileIO ───────────────────────────────────────────────────────
+
+    public static Object makeDir(Object pathArg) {
+        String path = asStr(pathArg, "make-dir");
+        try {
+            java.nio.file.Files.createDirectories(java.nio.file.Path.of(path));
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("make-dir: " + e.getMessage());
+        }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object listDir(Object pathArg) {
+        String path = asStr(pathArg, "list-dir");
+        try (java.util.stream.Stream<java.nio.file.Path> stream =
+                java.nio.file.Files.list(java.nio.file.Path.of(path))) {
+            java.util.List<Object> names = new java.util.ArrayList<>();
+            stream.forEach(p -> names.add(p.getFileName().toString()));
+            return new dev.irij.interpreter.Values.IrijVector(names);
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("list-dir: " + e.getMessage());
+        }
+    }
+
+    public static Object deleteFile(Object pathArg) {
+        String path = asStr(pathArg, "delete-file");
+        try { java.nio.file.Files.deleteIfExists(java.nio.file.Path.of(path)); }
+        catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("delete-file: " + e.getMessage());
+        }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object readFile(Object pathArg) {
+        String path = asStr(pathArg, "read-file");
+        try {
+            return java.nio.file.Files.readString(java.nio.file.Path.of(path),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("read-file: " + e.getMessage());
+        }
+    }
+
+    public static Object writeFile(Object pathArg, Object content) {
+        String path = asStr(pathArg, "write-file");
+        String text = asStr(content, "write-file");
+        try {
+            java.nio.file.Files.writeString(java.nio.file.Path.of(path), text,
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("write-file: " + e.getMessage());
+        }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object appendFile(Object pathArg, Object content) {
+        String path = asStr(pathArg, "append-file");
+        String text = asStr(content, "append-file");
+        try {
+            java.nio.file.Files.writeString(java.nio.file.Path.of(path), text,
+                    java.nio.charset.StandardCharsets.UTF_8,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.APPEND);
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("append-file: " + e.getMessage());
+        }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object fileExistsQ(Object pathArg) {
+        return java.nio.file.Files.exists(
+                java.nio.file.Path.of(asStr(pathArg, "file-exists?")));
+    }
+
+    // ── Env / time / misc ────────────────────────────────────────────
+
+    public static Object getEnv(Object nameArg) {
+        String name = asStr(nameArg, "get-env");
+        String v = System.getenv(name);
+        return v != null ? v : dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object nowMs() {
+        return System.currentTimeMillis();
+    }
+
+    public static Object envBuiltin(Object[] args) {
+        // env "NAME"            -> value or null
+        // env "NAME" "default"  -> value or default
+        if (args.length == 0) {
+            throw new dev.irij.interpreter.IrijRuntimeError("env requires at least one argument");
+        }
+        String name = asStr(args[0], "env");
+        String v = System.getenv(name);
+        if (v != null) return v;
+        if (args.length >= 2) return asStr(args[args.length - 1], "env");
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    // ── Sequence ops (Phase R3 batch 5) ──────────────────────────────
+    //
+    // The Irij sequence operators (`@`, `/?`, `/!`, `@i`, `/^`, `/$`,
+    // `/+`, `/*`, `/#`, `/&`, `/|`) are kebab-cased into camelCase here.
+    // Each one has two emit forms:
+    //   - directly applied (`coll |> /+` → `seqSum(coll)`)
+    //   - partially applied (`@ f` → an IrijFn that takes coll)
+    //
+    // The interpreter implements all of these in evalSeqOp; this is the
+    // bytecode counterpart with identical semantics.
+
+    private static java.util.List<Object> seqList(Object v) {
+        return asListAny(v);
+    }
+
+    public static Object seqMap(Object f, Object coll) {
+        java.util.List<Object> in = seqList(coll);
+        java.util.List<Object> out = new java.util.ArrayList<>(in.size());
+        for (Object x : in) out.add(callAny(f, new Object[]{x}));
+        return new dev.irij.interpreter.Values.IrijVector(out);
+    }
+
+    public static Object seqMapIndexed(Object f, Object coll) {
+        java.util.List<Object> in = seqList(coll);
+        java.util.List<Object> out = new java.util.ArrayList<>(in.size());
+        for (int i = 0; i < in.size(); i++) {
+            out.add(callAny(f, new Object[]{(long) i, in.get(i)}));
+        }
+        return new dev.irij.interpreter.Values.IrijVector(out);
+    }
+
+    public static Object seqFilter(Object pred, Object coll) {
+        java.util.List<Object> in = seqList(coll);
+        java.util.List<Object> out = new java.util.ArrayList<>();
+        for (Object x : in) {
+            if (truthy(callAny(pred, new Object[]{x}))) out.add(x);
+        }
+        return new dev.irij.interpreter.Values.IrijVector(out);
+    }
+
+    public static Object seqFindFirst(Object pred, Object coll) {
+        for (Object x : seqList(coll)) {
+            if (truthy(callAny(pred, new Object[]{x}))) return x;
+        }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object seqReduce(Object f, Object coll) {
+        java.util.List<Object> list = seqList(coll);
+        if (list.isEmpty()) {
+            throw new dev.irij.interpreter.IrijRuntimeError("Cannot reduce empty collection");
+        }
+        Object acc = list.get(0);
+        for (int i = 1; i < list.size(); i++) {
+            acc = callAny(f, new Object[]{acc, list.get(i)});
+        }
+        return acc;
+    }
+
+    public static Object seqScan(Object f, Object coll) {
+        java.util.List<Object> list = seqList(coll);
+        java.util.List<Object> out = new java.util.ArrayList<>(list.size());
+        if (list.isEmpty()) return new dev.irij.interpreter.Values.IrijVector(out);
+        Object acc = list.get(0);
+        out.add(acc);
+        for (int i = 1; i < list.size(); i++) {
+            acc = callAny(f, new Object[]{acc, list.get(i)});
+            out.add(acc);
+        }
+        return new dev.irij.interpreter.Values.IrijVector(out);
+    }
+
+    public static Object seqSum(Object coll) {
+        java.util.List<Object> list = seqList(coll);
+        if (list.isEmpty()) {
+            throw new dev.irij.interpreter.IrijRuntimeError("Cannot reduce empty collection");
+        }
+        Object acc = list.get(0);
+        for (int i = 1; i < list.size(); i++) acc = add(acc, list.get(i));
+        return acc;
+    }
+
+    public static Object seqProduct(Object coll) {
+        java.util.List<Object> list = seqList(coll);
+        if (list.isEmpty()) {
+            throw new dev.irij.interpreter.IrijRuntimeError("Cannot reduce empty collection");
+        }
+        Object acc = list.get(0);
+        for (int i = 1; i < list.size(); i++) acc = mul(acc, list.get(i));
+        return acc;
+    }
+
+    public static Object seqCount(Object coll) {
+        return (long) seqList(coll).size();
+    }
+
+    public static Object seqAll(Object coll) {
+        for (Object x : seqList(coll)) if (!truthy(x)) return Boolean.FALSE;
+        return Boolean.TRUE;
+    }
+
+    public static Object seqAny(Object coll) {
+        for (Object x : seqList(coll)) if (truthy(x)) return Boolean.TRUE;
+        return Boolean.FALSE;
+    }
+
+    // ── SeqOp as values (partial application) ────────────────────────
+    //
+    // Emitted when a SeqOp expression appears in value position (e.g.
+    // `cards |> @ f` lowers to `(SeqOp(@, f))(cards)`). The result is
+    // an IrijFn awaiting the collection.
+
+    public static IrijFn seqMapPartial(Object f)      { return args -> seqMap(f, args[0]); }
+    public static IrijFn seqMapIndexedPartial(Object f) { return args -> seqMapIndexed(f, args[0]); }
+    public static IrijFn seqFilterPartial(Object p)   { return args -> seqFilter(p, args[0]); }
+    public static IrijFn seqFindFirstPartial(Object p) { return args -> seqFindFirst(p, args[0]); }
+    public static IrijFn seqReducePartial(Object f)   { return args -> seqReduce(f, args[0]); }
+    public static IrijFn seqScanPartial(Object f)     { return args -> seqScan(f, args[0]); }
+
+    // SeqOps that don't take a captured fn — single shared instances.
+    public static final IrijFn SEQ_SUM     = args -> seqSum(args[0]);
+    public static final IrijFn SEQ_PRODUCT = args -> seqProduct(args[0]);
+    public static final IrijFn SEQ_COUNT   = args -> seqCount(args[0]);
+    public static final IrijFn SEQ_ALL     = args -> seqAll(args[0]);
+    public static final IrijFn SEQ_ANY     = args -> seqAny(args[0]);
+
+    // ── SQLite raw-db-* (Phase R3 batch 2) ─────────────────────────────
+    //
+    // Mirrors the interpreter's `raw-db-*` builtins exactly: same
+    // jdbc:sqlite URL, same WAL pragma, same Tagged("DbConn", [conn])
+    // wrapper, same value coercion in/out. Both back-ends use the
+    // same Tagged wrapper, so a connection opened in interp mode can
+    // be passed to bytecode code and vice versa (within a JVM).
+
+    public static Object rawDbOpen(Object pathArg) {
+        String path = asStr(pathArg, "raw-db-open");
+        try {
+            java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + path);
+            try (var stmt = conn.createStatement()) {
+                stmt.execute("PRAGMA journal_mode=WAL");
+            }
+            return new dev.irij.interpreter.Values.Tagged(
+                    "DbConn", java.util.List.of(conn), null, null);
+        } catch (java.sql.SQLException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-open: " + e.getMessage());
+        }
+    }
+
+    public static Object rawDbClose(Object connArg) {
+        java.sql.Connection conn = extractConnection(connArg, "raw-db-close");
+        try { conn.close(); }
+        catch (java.sql.SQLException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-close: " + e.getMessage());
+        }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object rawDbQuery(Object connArg, Object sqlArg, Object paramsArg) {
+        java.sql.Connection conn = extractConnection(connArg, "raw-db-query");
+        String sql = asStr(sqlArg, "raw-db-query");
+        java.util.List<Object> params = extractParams(paramsArg, "raw-db-query");
+        try {
+            synchronized (conn) {
+                java.sql.PreparedStatement ps = conn.prepareStatement(sql);
+                bindParams(ps, params);
+                java.sql.ResultSet rs = ps.executeQuery();
+                java.sql.ResultSetMetaData meta = rs.getMetaData();
+                int cols = meta.getColumnCount();
+                java.util.List<Object> rows = new java.util.ArrayList<>();
+                while (rs.next()) {
+                    java.util.LinkedHashMap<String, Object> row = new java.util.LinkedHashMap<>();
+                    for (int i = 1; i <= cols; i++) {
+                        row.put(meta.getColumnLabel(i),
+                                sqlToIrij(rs, i, meta.getColumnType(i)));
+                    }
+                    rows.add(new dev.irij.interpreter.Values.IrijMap(row));
+                }
+                rs.close();
+                ps.close();
+                return new dev.irij.interpreter.Values.IrijVector(rows);
+            }
+        } catch (java.sql.SQLException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-query: " + e.getMessage());
+        }
+    }
+
+    public static Object rawDbExec(Object connArg, Object sqlArg, Object paramsArg) {
+        java.sql.Connection conn = extractConnection(connArg, "raw-db-exec");
+        String sql = asStr(sqlArg, "raw-db-exec");
+        java.util.List<Object> params = extractParams(paramsArg, "raw-db-exec");
+        try {
+            synchronized (conn) {
+                java.sql.PreparedStatement ps = conn.prepareStatement(sql);
+                bindParams(ps, params);
+                long affected = ps.executeUpdate();
+                ps.close();
+                return affected;
+            }
+        } catch (java.sql.SQLException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-exec: " + e.getMessage());
+        }
+    }
+
+    public static Object rawDbTransaction(Object connArg, Object thunk) {
+        java.sql.Connection conn = extractConnection(connArg, "raw-db-transaction");
+        try {
+            synchronized (conn) {
+                boolean savedAutoCommit = conn.getAutoCommit();
+                conn.setAutoCommit(false);
+                try {
+                    Object result = callAny(thunk, new Object[0]);
+                    conn.commit();
+                    return result;
+                } catch (Throwable t) {
+                    try { conn.rollback(); } catch (java.sql.SQLException ignored) {}
+                    if (t instanceof dev.irij.interpreter.IrijRuntimeError ire) throw ire;
+                    if (t instanceof RuntimeException re) throw re;
+                    throw new dev.irij.interpreter.IrijRuntimeError(
+                            "raw-db-transaction: " + t.getMessage());
+                } finally {
+                    try { conn.setAutoCommit(savedAutoCommit); } catch (java.sql.SQLException ignored) {}
+                }
+            }
+        } catch (java.sql.SQLException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-transaction: " + e.getMessage());
+        }
+    }
+
+    private static java.sql.Connection extractConnection(Object value, String op) {
+        if (value instanceof dev.irij.interpreter.Values.Tagged t
+                && "DbConn".equals(t.tag())
+                && !t.fields().isEmpty()
+                && t.fields().get(0) instanceof java.sql.Connection c) {
+            return c;
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                op + ": first argument must be a database connection (from db-open)");
+    }
+
+    private static java.util.List<Object> extractParams(Object value, String op) {
+        if (value instanceof dev.irij.interpreter.Values.IrijVector v) return v.elements();
+        throw new dev.irij.interpreter.IrijRuntimeError(op + ": params must be a vector #[...]");
+    }
+
+    private static void bindParams(java.sql.PreparedStatement ps, java.util.List<Object> params)
+            throws java.sql.SQLException {
+        for (int i = 0; i < params.size(); i++) {
+            Object p = params.get(i);
+            if (p instanceof Long l)         ps.setLong(i + 1, l);
+            else if (p instanceof Double d)  ps.setDouble(i + 1, d);
+            else if (p instanceof String s)  ps.setString(i + 1, s);
+            else if (p instanceof Boolean b) ps.setBoolean(i + 1, b);
+            else if (p == dev.irij.interpreter.Values.UNIT || p == null) {
+                ps.setNull(i + 1, java.sql.Types.NULL);
+            } else {
+                ps.setString(i + 1, dev.irij.interpreter.Values.toIrijString(p));
+            }
+        }
+    }
+
+    private static Object sqlToIrij(java.sql.ResultSet rs, int col, int sqlType)
+            throws java.sql.SQLException {
+        Object val = rs.getObject(col);
+        if (val == null) return dev.irij.interpreter.Values.UNIT;
+        return switch (sqlType) {
+            case java.sql.Types.INTEGER, java.sql.Types.BIGINT,
+                 java.sql.Types.SMALLINT, java.sql.Types.TINYINT ->
+                rs.getLong(col);
+            case java.sql.Types.REAL, java.sql.Types.FLOAT, java.sql.Types.DOUBLE,
+                 java.sql.Types.DECIMAL, java.sql.Types.NUMERIC ->
+                rs.getDouble(col);
+            case java.sql.Types.BOOLEAN -> rs.getBoolean(col);
+            case java.sql.Types.BLOB -> {
+                byte[] bytes = rs.getBytes(col);
+                yield java.util.Base64.getEncoder().encodeToString(bytes);
+            }
+            default -> {
+                String s = rs.getString(col);
+                yield s != null ? s : dev.irij.interpreter.Values.UNIT;
+            }
+        };
+    }
+
+    // ── SSE raw-sse-* (Phase R3 batch 3) ───────────────────────────────
+
+    public static Object rawSseResponse(Object reqArg) {
+        if (!(reqArg instanceof dev.irij.interpreter.Values.IrijMap reqMap)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "raw-sse-response: expected request map");
+        }
+        Object exchange = reqMap.entries().get("__exchange");
+        if (!(exchange instanceof com.sun.net.httpserver.HttpExchange ex)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "raw-sse-response: no __exchange in request (only works inside raw-http-serve handler)");
+        }
+        try {
+            ex.getResponseHeaders().set("Content-Type", "text/event-stream");
+            ex.getResponseHeaders().set("Cache-Control", "no-cache");
+            ex.getResponseHeaders().set("Connection", "keep-alive");
+            ex.getResponseHeaders().set("X-Accel-Buffering", "no");
+            ex.sendResponseHeaders(200, 0);
+            return new dev.irij.interpreter.Values.SseWriter(ex, ex.getResponseBody());
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-sse-response: " + e.getMessage());
+        }
+    }
+
+    public static Object rawSseSend(Object sseArg, Object evtArg, Object dataArg) {
+        if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "raw-sse-send: first arg must be SseWriter");
+        }
+        String evt = asStr(evtArg, "raw-sse-send");
+        String data = asStr(dataArg, "raw-sse-send");
+        try { sse.send(evt, data); }
+        catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-sse-send: " + e.getMessage());
+        }
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object rawSseClose(Object sseArg) {
+        if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "raw-sse-close: first arg must be SseWriter");
+        }
+        sse.close();
+        return dev.irij.interpreter.Values.UNIT;
+    }
+
+    public static Object rawSseClosedQ(Object sseArg) {
+        if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "raw-sse-closed?: first arg must be SseWriter");
+        }
+        return sse.isClosed();
+    }
+
+    // ── Multipart raw-multipart-* (Phase R3 batch 3) ───────────────────
+
+    public static Object rawMultipartField(Object reqArg, Object fieldArg) {
+        byte[] body = mpRequestBytes(reqArg, "raw-multipart-field");
+        String boundary = mpBoundary(reqArg, "raw-multipart-field");
+        String field = asStr(fieldArg, "raw-multipart-field");
+        int[] range = mpFindPartBody(body, boundary, field);
+        if (range == null) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "raw-multipart-field: field '" + field + "' not found");
+        }
+        return new String(body, range[0], range[1] - range[0],
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    public static Object rawMultipartSave(Object reqArg, Object fieldArg, Object pathArg) {
+        byte[] body = mpRequestBytes(reqArg, "raw-multipart-save");
+        String boundary = mpBoundary(reqArg, "raw-multipart-save");
+        String field = asStr(fieldArg, "raw-multipart-save");
+        String savePath = asStr(pathArg, "raw-multipart-save");
+        int[] range = mpFindPartBody(body, boundary, field);
+        if (range == null) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "raw-multipart-save: field '" + field + "' not found");
+        }
+        try {
+            java.nio.file.Path target = java.nio.file.Path.of(savePath);
+            if (target.getParent() != null) {
+                java.nio.file.Files.createDirectories(target.getParent());
+            }
+            java.nio.file.Files.write(target,
+                    java.util.Arrays.copyOfRange(body, range[0], range[1]));
+            return savePath;
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-multipart-save: " + e.getMessage());
+        }
+    }
+
+    private static byte[] mpRequestBytes(Object reqArg, String op) {
+        if (!(reqArg instanceof dev.irij.interpreter.Values.IrijMap req)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(op + ": expects request Map");
+        }
+        Object bodyBytes = req.entries().get("__body_bytes");
+        if (!(bodyBytes instanceof byte[] bytes)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(op + ": no raw body bytes in request");
+        }
+        return bytes;
+    }
+
+    private static String mpBoundary(Object reqArg, String op) {
+        dev.irij.interpreter.Values.IrijMap req = (dev.irij.interpreter.Values.IrijMap) reqArg;
+        String contentType = "";
+        Object headers = req.entries().get("headers");
+        if (headers instanceof dev.irij.interpreter.Values.IrijMap hm) {
+            Object ct = hm.entries().get("content-type");
+            if (ct instanceof String s) contentType = s;
+        }
+        String boundary = mpExtractBoundary(contentType);
+        if (boundary == null) {
+            throw new dev.irij.interpreter.IrijRuntimeError(op + ": no boundary in content-type");
+        }
+        return boundary;
+    }
+
+    private static String mpExtractBoundary(String contentType) {
+        if (contentType == null) return null;
+        for (String part : contentType.split(";")) {
+            String t = part.trim();
+            if (t.startsWith("boundary=")) return t.substring("boundary=".length()).trim();
+        }
+        return null;
+    }
+
+    private static int[] mpFindPartBody(byte[] data, String boundary, String fieldName) {
+        byte[] delim = ("--" + boundary).getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] namePat = ("name=\"" + fieldName + "\"").getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] crlfcrlf = "\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        int pos = 0;
+        while (pos < data.length) {
+            int delimPos = mpIndexOf(data, delim, pos);
+            if (delimPos < 0) break;
+            int nextDelim = mpIndexOf(data, delim, delimPos + delim.length);
+            if (nextDelim < 0) nextDelim = data.length;
+            int namePos = mpIndexOf(data, namePat, delimPos);
+            if (namePos >= 0 && namePos < nextDelim) {
+                int bodyStart = mpIndexOf(data, crlfcrlf, delimPos);
+                if (bodyStart >= 0) {
+                    bodyStart += crlfcrlf.length;
+                    int bodyEnd = nextDelim - 2;
+                    if (bodyEnd > bodyStart) return new int[]{bodyStart, bodyEnd};
+                }
+            }
+            pos = delimPos + delim.length;
+        }
+        return null;
+    }
+
+    private static int mpIndexOf(byte[] haystack, byte[] needle, int from) {
+        outer:
+        for (int i = from; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
+    }
+
+    // ── HTTP server raw-http-serve (Phase R3 batch 3) ──────────────────
+    //
+    // Bytecode-mode HTTP server. Mirrors Interpreter.raw-http-serve's
+    // behaviour: static-file serving (classpath __irij_resources/ +
+    // __irij_app/ + script-relative resources/), request-map building,
+    // SSE-handler passthrough, response writing. Differences vs interp:
+    //
+    //  - Handler invocation goes through {@link #callAny} so an IrijFn
+    //    (bytecode lambda) works exactly like the interpreter's apply()
+    //    on a BuiltinFn/Lambda; both back-ends can host the same
+    //    `handler` value.
+    //  - sourcePath is taken from the JVM working dir; bundled mode is
+    //    detected by probing for __irij_resources/ on the classpath.
+
+    public static Object rawHttpServe(Object portArg, Object handler) {
+        long port = asLongArg(portArg, "raw-http-serve");
+        try {
+            com.sun.net.httpserver.HttpServer server =
+                    com.sun.net.httpserver.HttpServer.create(
+                            new java.net.InetSocketAddress((int) port), 0);
+
+            java.nio.file.Path scriptDir = java.nio.file.Path.of("").toAbsolutePath();
+            final boolean isBundled = RuntimeSupport.class
+                    .getClassLoader().getResource("__irij_resources/") != null
+                    || RuntimeSupport.class
+                    .getClassLoader().getResource("__irij_app/") != null;
+
+            server.createContext("/", exchange -> {
+                try {
+                    if (httpServeStatic(exchange, scriptDir, isBundled)) return;
+
+                    dev.irij.interpreter.Values.IrijMap req = buildRequestMap(exchange);
+                    Object resp = callAny(handler, new Object[]{req});
+
+                    if (resp instanceof dev.irij.interpreter.Values.SseWriter sse) {
+                        // Handler took over the exchange via SSE — block this
+                        // dispatch thread until SSE writer closes so the
+                        // connection stays open.
+                        while (!sse.isClosed()) {
+                            try { Thread.sleep(500); }
+                            catch (InterruptedException ie) { sse.close(); break; }
+                        }
+                        return;
+                    }
+
+                    writeResponse(exchange, resp);
+                } catch (Exception e) {
+                    System.err.println("HTTP 500 " + exchange.getRequestMethod()
+                            + " " + exchange.getRequestURI() + ": " + e.getMessage());
+                    e.printStackTrace(System.err);
+                    try {
+                        String errMsg = "Internal Server Error: " + e.getMessage();
+                        byte[] errBytes = errMsg.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                        exchange.sendResponseHeaders(500, errBytes.length);
+                        try (var os = exchange.getResponseBody()) { os.write(errBytes); }
+                    } catch (Exception ignored) {}
+                }
+            });
+
+            server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+            server.start();
+            System.out.println("Irij HTTP server listening on http://localhost:" + port);
+            try { Thread.currentThread().join(); }
+            catch (InterruptedException e) { server.stop(0); }
+            return dev.irij.interpreter.Values.UNIT;
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("raw-http-serve: " + e.getMessage());
+        }
+    }
+
+    private static boolean httpServeStatic(com.sun.net.httpserver.HttpExchange exchange,
+                                            java.nio.file.Path scriptDir,
+                                            boolean isBundled) throws java.io.IOException {
+        String reqPath = exchange.getRequestURI().getPath();
+        if (reqPath.length() <= 1 || reqPath.contains("..")) return false;
+
+        if (isBundled) {
+            if (serveClasspathResource(exchange, "__irij_resources/" + reqPath.substring(1), reqPath)) return true;
+            if (serveClasspathResource(exchange, "__irij_app/" + reqPath.substring(1), reqPath)) return true;
+        }
+        java.nio.file.Path resourcesPath = scriptDir.resolve("resources")
+                .resolve(reqPath.substring(1)).normalize();
+        java.nio.file.Path resourcesRoot = scriptDir.resolve("resources").normalize();
+        if (resourcesPath.startsWith(resourcesRoot)
+                && java.nio.file.Files.isRegularFile(resourcesPath)) {
+            return sendFile(exchange, resourcesPath, reqPath);
+        }
+        java.nio.file.Path filePath = scriptDir.resolve(reqPath.substring(1)).normalize();
+        if (filePath.startsWith(scriptDir) && java.nio.file.Files.isRegularFile(filePath)) {
+            return sendFile(exchange, filePath, reqPath);
+        }
+        return false;
+    }
+
+    private static boolean serveClasspathResource(com.sun.net.httpserver.HttpExchange exchange,
+                                                    String resourcePath, String reqPath) throws java.io.IOException {
+        java.io.InputStream is = RuntimeSupport.class.getClassLoader().getResourceAsStream(resourcePath);
+        if (is == null) return false;
+        try (is) {
+            byte[] bytes = is.readAllBytes();
+            exchange.getResponseHeaders().set("Content-Type", httpGuessMime(reqPath));
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (var os = exchange.getResponseBody()) { os.write(bytes); }
+            return true;
+        }
+    }
+
+    private static boolean sendFile(com.sun.net.httpserver.HttpExchange exchange,
+                                     java.nio.file.Path path, String reqPath) throws java.io.IOException {
+        byte[] bytes = java.nio.file.Files.readAllBytes(path);
+        String mime = java.nio.file.Files.probeContentType(path);
+        if (mime == null) mime = httpGuessMime(reqPath);
+        exchange.getResponseHeaders().set("Content-Type", mime);
+        exchange.sendResponseHeaders(200, bytes.length);
+        try (var os = exchange.getResponseBody()) { os.write(bytes); }
+        return true;
+    }
+
+    private static dev.irij.interpreter.Values.IrijMap buildRequestMap(
+            com.sun.net.httpserver.HttpExchange exchange) throws java.io.IOException {
+        java.util.LinkedHashMap<String, Object> reqMap = new java.util.LinkedHashMap<>();
+        reqMap.put("method", exchange.getRequestMethod());
+        java.net.URI uri = exchange.getRequestURI();
+        reqMap.put("path", uri.getPath());
+        String rawQuery = uri.getQuery() != null ? uri.getQuery() : "";
+        reqMap.put("query", rawQuery);
+        reqMap.put("params", new dev.irij.interpreter.Values.IrijMap(httpParseQueryParams(rawQuery)));
+        java.util.LinkedHashMap<String, Object> headers = new java.util.LinkedHashMap<>();
+        exchange.getRequestHeaders().forEach((k, v) ->
+                headers.put(k.toLowerCase(),
+                        v.size() == 1 ? v.get(0) : String.join(", ", v)));
+        reqMap.put("headers", new dev.irij.interpreter.Values.IrijMap(headers));
+        byte[] bodyBytes = exchange.getRequestBody().readAllBytes();
+        reqMap.put("body", new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8));
+        reqMap.put("__body_bytes", bodyBytes);
+        reqMap.put("__exchange", exchange);
+        return new dev.irij.interpreter.Values.IrijMap(reqMap);
+    }
+
+    private static void writeResponse(com.sun.net.httpserver.HttpExchange exchange, Object resp)
+            throws java.io.IOException {
+        long status = 200;
+        String respBody = "";
+        String filePath = null;
+        java.util.Map<String, Object> respHeaders = java.util.Map.of();
+        if (resp instanceof dev.irij.interpreter.Values.IrijMap rm) {
+            java.util.Map<String, Object> e = rm.entries();
+            if (e.get("status") instanceof Long s) status = s;
+            if (e.get("body") instanceof String b) respBody = b;
+            if (e.get("file") instanceof String f) filePath = f;
+            if (e.get("headers") instanceof dev.irij.interpreter.Values.IrijMap hm) {
+                respHeaders = hm.entries();
+            }
+        } else if (resp instanceof String s) {
+            respBody = s;
+        }
+        for (java.util.Map.Entry<String, Object> h : respHeaders.entrySet()) {
+            exchange.getResponseHeaders().set(h.getKey(),
+                    dev.irij.interpreter.Values.toIrijString(h.getValue()));
+        }
+        if (!respHeaders.containsKey("content-type") && !respHeaders.containsKey("Content-Type")) {
+            exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
+        }
+        if (filePath != null) {
+            byte[] bytes = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(filePath));
+            exchange.sendResponseHeaders((int) status, bytes.length);
+            try (var os = exchange.getResponseBody()) { os.write(bytes); }
+        } else {
+            byte[] bytes = respBody.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            if (bytes.length > 0) {
+                exchange.sendResponseHeaders((int) status, bytes.length);
+            }
+            try (var os = exchange.getResponseBody()) { os.write(bytes); }
+        }
+    }
+
+    private static String httpGuessMime(String path) {
+        if (path.endsWith(".html") || path.endsWith(".htm")) return "text/html; charset=utf-8";
+        if (path.endsWith(".css"))  return "text/css; charset=utf-8";
+        if (path.endsWith(".js"))   return "application/javascript; charset=utf-8";
+        if (path.endsWith(".json")) return "application/json; charset=utf-8";
+        if (path.endsWith(".png"))  return "image/png";
+        if (path.endsWith(".jpg") || path.endsWith(".jpeg")) return "image/jpeg";
+        if (path.endsWith(".gif"))  return "image/gif";
+        if (path.endsWith(".svg"))  return "image/svg+xml";
+        if (path.endsWith(".ico"))  return "image/x-icon";
+        if (path.endsWith(".woff2")) return "font/woff2";
+        if (path.endsWith(".woff")) return "font/woff";
+        if (path.endsWith(".ttf"))  return "font/ttf";
+        if (path.endsWith(".txt"))  return "text/plain; charset=utf-8";
+        if (path.endsWith(".xml"))  return "application/xml";
+        return "application/octet-stream";
+    }
+
+    private static java.util.LinkedHashMap<String, Object> httpParseQueryParams(String query) {
+        java.util.LinkedHashMap<String, Object> out = new java.util.LinkedHashMap<>();
+        if (query == null || query.isEmpty()) return out;
+        for (String pair : query.split("&")) {
+            if (pair.isEmpty()) continue;
+            int eq = pair.indexOf('=');
+            String k, v;
+            if (eq < 0) { k = pair; v = ""; }
+            else { k = pair.substring(0, eq); v = pair.substring(eq + 1); }
+            try {
+                k = java.net.URLDecoder.decode(k, java.nio.charset.StandardCharsets.UTF_8);
+                v = java.net.URLDecoder.decode(v, java.nio.charset.StandardCharsets.UTF_8);
+            } catch (Exception ignored) {}
+            out.put(k, v);
+        }
+        return out;
+    }
+
     /** Runtime type tag used for protocol dispatch. */
     public static String typeTag(Object v) {
         if (v == null || v == dev.irij.interpreter.Values.UNIT) return "Unit";

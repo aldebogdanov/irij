@@ -930,7 +930,7 @@ public final class Builtins {
         return val.toString();
     }
 
-    static Object jsonToIrij(JsonElement el) {
+    public static Object jsonToIrij(JsonElement el) {
         if (el == null || el.isJsonNull()) return Values.UNIT;
         if (el.isJsonPrimitive()) {
             var p = el.getAsJsonPrimitive();
@@ -963,7 +963,7 @@ public final class Builtins {
         return Values.UNIT;
     }
 
-    static JsonElement irijToJson(Object value) {
+    public static JsonElement irijToJson(Object value) {
         if (value == null || value == Values.UNIT) return JsonNull.INSTANCE;
         if (value instanceof String s) return new JsonPrimitive(s);
         if (value instanceof Long l) return new JsonPrimitive(l);
