@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "dev.irij"
-version = "0.5.5"
+version = "0.5.6"
 
 java {
     toolchain {

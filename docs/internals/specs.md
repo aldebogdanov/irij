@@ -25,9 +25,24 @@ declaration form:
 | Composite | `Vec[Int]`, `Map[Str, Int]` | container + element specs |
 | Tuple | `#(Int Str)` | fixed-shape tuple |
 | Arrow | `Int Str -> Bool` | a function with that signature |
-| Enum | `:: ok :: error` | one of the listed values |
+| Enum | `(Enum :ok :error)` | a keyword whose name is one of the listed values |
 | Wildcard | `_` | accept anything |
 | Ref | `MyShape` | named spec defined elsewhere |
+
+Enum specs validate a `Keyword` value. The syntax inside the parens
+is the `Enum` head followed by one or more keyword literals:
+
+```
+fn classify :: Str (Enum :ok :error)
+  (s -> if (s == "ok") :ok else :error)
+```
+
+The bare-identifier form `(Enum ok error)` is also accepted by the
+parser as a convenience; the AST builder strips the leading colon
+either way, so both forms produce the same `SpecExpr.Enum(["ok",
+"error"])`. Passing a non-keyword or a keyword outside the listed
+names raises:
+`Spec validation failed: expected Keyword (one of [ok, error]), got …`.
 
 ## Compile-time effect-row lint
 

@@ -259,6 +259,7 @@ specApp
 specAtom
     : upperName                               // Int, Str, Result
     | IDENT                                   // spec variable: a, b
+    | KEYWORD                                 // enum value: :admin, :ok
     | UNDERSCORE                              // spec hole: _
     | LPAREN RPAREN                           // unit: ()
     | LPAREN specExpr RPAREN                  // grouped: (A -> B)
