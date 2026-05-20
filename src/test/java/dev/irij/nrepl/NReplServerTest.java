@@ -54,7 +54,7 @@ class NReplServerTest {
 
             // Step 2: Eval an expression
             var evalMsg = new LinkedHashMap<String, Object>();
-            evalMsg.put("op", "eval");
+            evalMsg.put("op", "eval-interp");
             evalMsg.put("code", "1 + 2");
             evalMsg.put("session", sessionId);
             evalMsg.put("id", "2");
@@ -67,7 +67,7 @@ class NReplServerTest {
 
             // Step 3: Eval with state
             var bindMsg = new LinkedHashMap<String, Object>();
-            bindMsg.put("op", "eval");
+            bindMsg.put("op", "eval-interp");
             bindMsg.put("code", "x := 42");
             bindMsg.put("session", sessionId);
             bindMsg.put("id", "3");
@@ -76,7 +76,7 @@ class NReplServerTest {
             Bencode.decodeMap(in); // consume response
 
             var lookupMsg = new LinkedHashMap<String, Object>();
-            lookupMsg.put("op", "eval");
+            lookupMsg.put("op", "eval-interp");
             lookupMsg.put("code", "x * 2");
             lookupMsg.put("session", sessionId);
             lookupMsg.put("id", "4");

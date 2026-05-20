@@ -12,7 +12,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class NReplSessionTest {
 
     private Map<String, Object> eval(NReplSession session, String code) {
-        return session.handleOp(Map.of("op", "eval", "code", code));
+        // R1: default `eval` now routes to bytecode mode. These tests
+        // assert interpreter semantics (`value` is the last expr's
+        // result), so they use the back-compat `eval-interp` op.
+        return session.handleOp(Map.of("op", "eval-interp", "code", code));
     }
 
     @Test void evalSimpleExpression() {

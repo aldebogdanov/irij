@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.6.0 &mdash; Parametric effect rows. Higher-order fns declare row variables (`(Fn):eff` / `(_ -> Bool):eff` / `::: eff`) that bind from the actual callback's effect row at each call site. `std.list` (fold, map, filter, …) ported off `::: Any` to the parametric form; `::: Any` removed from user code (stdlib keeps it as a transitional escape hatch for opaque-record dispatch). Multi-line error chains point at the row-var binding site. Interpreter is now officially deprecated; bytecode is the source of truth. Plus 0.5.6's Enum-keyword-only syntax.
+0.6.1 &mdash; R1 + R2: nREPL `eval` op now routes to bytecode by default. Cross-eval fn definitions land: each emitted class registers its user fns as `IrijFn` instances in the session's namespace map via `RT.nsPut`; subsequent evals' compilations resolve unknown user-fn names through `RT.nsGet`. Defining `fn double …` in one eval and calling `double 21` from the next now works exactly as it does in interpreter mode. Legacy interpreter path moved behind the explicit `eval-interp` op name. Plus 0.6.0's parametric effect rows.

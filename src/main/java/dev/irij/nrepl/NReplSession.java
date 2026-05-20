@@ -83,8 +83,13 @@ public final class NReplSession {
             return errorResponse("Missing 'op' in message");
         }
         return switch (op) {
-            case "eval" -> evalOp(msg);
+            // R1: the default `eval` op now dispatches to bytecode mode.
+            // The interpreter remains available under `eval-interp`
+            // for emergency back-compat / debugging during the
+            // interpreter-removal transition (Phases R*-series).
+            case "eval" -> evalBytecodeOp(msg);
             case "eval-bytecode" -> evalBytecodeOp(msg);
+            case "eval-interp" -> evalOp(msg);
             case "background-out" -> backgroundOutOp();
             case "describe" -> describeOp();
             case "close" -> closeOp();
@@ -234,8 +239,9 @@ public final class NReplSession {
     private Map<String, Object> describeOp() {
         var resp = new LinkedHashMap<String, Object>();
         resp.put("ops", Map.of(
-                "eval", Map.of(),
-                "eval-bytecode", Map.of(),
+                "eval", Map.of(),               // bytecode-mode (R1)
+                "eval-bytecode", Map.of(),      // explicit alias
+                "eval-interp", Map.of(),        // legacy interpreter
                 "background-out", Map.of(),
                 "describe", Map.of(),
                 "clone", Map.of(),

@@ -317,7 +317,11 @@ final class ClassEmitter implements Opcodes {
         // Pass 4: <clinit> for user-declared product/sum spec
         // registration (SpecValidator registry). Empty bodies are
         // skipped to avoid an unused method.
-        if (!productFields.isEmpty() || !sumVariants.isEmpty()) {
+        // Emit <clinit> if we have anything to do at class load:
+        // spec registry entries, or namespace-mode fn registrations
+        // for cross-eval nREPL.
+        if (!productFields.isEmpty() || !sumVariants.isEmpty()
+                || (options.namespaceMode() && !fnArity.isEmpty())) {
             emitClinit(cw);
         }
 
@@ -326,10 +330,42 @@ final class ClassEmitter implements Opcodes {
     }
 
     /** Emit a {@code <clinit>} that registers every product / sum
-     *  spec with {@link SpecValidator}. Runs once per class load. */
+     *  spec with {@link SpecValidator}. Runs once per class load.
+     *
+     *  In namespace mode (nREPL eval-bytecode), also registers each
+     *  top-level fn as an IrijFn in the session's namespace map via
+     *  {@code RT.nsPut}. Subsequent evals' compilations call
+     *  {@code RT.nsGet(name)} to retrieve the fn — cross-eval fn
+     *  definition works the same way cross-eval `:=` binds do. */
     private void emitClinit(ClassWriter cw) {
         MethodVisitor cl = cw.visitMethod(ACC_STATIC, "<clinit>", "()V", null, null);
         cl.visitCode();
+        if (options.namespaceMode()) {
+            for (var e : fnArity.entrySet()) {
+                String fnName = e.getKey();
+                int arity = e.getValue();
+                ensureUserFnWrapper(fnName, arity);
+                // RT.nsPut(name, IrijFn) — IrijFn built via LMF
+                // targeting the wrapper, mirroring the fn-as-value
+                // path in emitVarLoad.
+                cl.visitLdcInsn(fnName);
+                Handle bsm = new Handle(H_INVOKESTATIC,
+                        "java/lang/invoke/LambdaMetafactory", "metafactory",
+                        "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;"
+                                + "Ljava/lang/invoke/MethodType;Ljava/lang/invoke/MethodType;"
+                                + "Ljava/lang/invoke/MethodHandle;Ljava/lang/invoke/MethodType;)"
+                                + "Ljava/lang/invoke/CallSite;",
+                        false);
+                Type samType = Type.getMethodType(APPLY_DESC);
+                Handle implHandle = new Handle(H_INVOKESTATIC, internalName,
+                        userFnWrapperName(fnName), APPLY_DESC, false);
+                cl.visitInvokeDynamicInsn("apply", "()" + IRIJ_FN_DESC, bsm,
+                        samType, implHandle, samType);
+                cl.visitMethodInsn(INVOKESTATIC, RT, "nsPut",
+                        "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                cl.visitInsn(POP);
+            }
+        }
         for (var e : productFields.entrySet()) {
             cl.visitLdcInsn(e.getKey());
             // String[] fields
@@ -3673,6 +3709,14 @@ final class ClassEmitter implements Opcodes {
         }
         Integer arity = fnArity.get(fnName);
         if (arity == null) {
+            // Namespace-mode (nREPL eval-bytecode): unknown user-fn
+            // names may refer to fns defined in a previous eval. Fall
+            // through to nsGet(name) → IrijFn → callAny. The IrijFn
+            // wrapper was registered in that earlier eval's clinit.
+            if (options.namespaceMode()) {
+                emitIrijFnCall(app.fn(), app.args(), mv, locals);
+                return;
+            }
             throw new IrijCompiler.CompileException("Unknown function: " + fnName);
         }
         List<Expr> args = app.args();

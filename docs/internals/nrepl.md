@@ -17,8 +17,9 @@ Standard ops:
 
 | Op | Effect |
 |---|---|
-| `eval` | Parse + interpret. Stateful — bindings persist in the session. |
-| `eval-bytecode` | Compile to JVM bytecode + run in a fresh class. Stateful for top-level `:=` binds (per-session namespace map); fn defs do not yet cross evals (see "What's still not cross-eval" below). |
+| `eval` | Compile to JVM bytecode + run. Stateful: top-level `:=` binds AND `fn` definitions carry across evals via a per-session namespace map. **R1 default since v0.6.x.** |
+| `eval-bytecode` | Explicit alias for `eval`. Kept for editor clients that send the older op name. |
+| `eval-interp` | Legacy path: parse + interpret via the deprecated tree-walking interpreter. Kept during the interp-removal transition; will be removed with `dev.irij.interpreter`. |
 | `background-out` | Drain output from spawned threads since last eval. |
 | `describe` | Lists supported ops + version. |
 | `clone` | Create a child session. |
