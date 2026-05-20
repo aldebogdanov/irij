@@ -212,12 +212,9 @@ public final class RuntimeSupport {
     public static boolean neq(Object a, Object b) { return !eq(a, b); }
 
     private static int cmp(Object a, Object b) {
-        if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
-        if (a instanceof Number && b instanceof Number) {
-            return Double.compare(asDouble(a), asDouble(b));
-        }
-        if (a instanceof String sa && b instanceof String sb) return sa.compareTo(sb);
-        throw new IllegalArgumentException("Cannot compare: " + a + " and " + b);
+        // Delegate to the canonical comparator in Builtins — handles
+        // Long/Double/String/Keyword/Tuple/Vector recursively.
+        return dev.irij.interpreter.Builtins.compare(a, b);
     }
 
     private static double asDouble(Object v) {
@@ -298,14 +295,30 @@ public final class RuntimeSupport {
     }
 
     /** `nth coll i` — element at index (works on Vector or String). */
-    public static Object nth(Object v, Object iBoxed) {
-        int i = (int) ((Long) iBoxed).longValue();
+    /** Irij convention: {@code nth idx coll}. Matches Builtins.nth
+     *  arg order (idx is arg-0 in user code, coll is arg-1). Handles
+     *  Vector, Tuple, String. */
+    public static Object nth(Object iBoxed, Object v) {
+        long idx = ((Long) iBoxed).longValue();
         if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
-            return vec.elements().get(i);
+            if (idx < 0 || idx >= vec.elements().size()) {
+                throw new dev.irij.interpreter.IrijRuntimeError(
+                        "nth: index " + idx + " out of bounds (size "
+                                + vec.elements().size() + ")");
+            }
+            return vec.elements().get((int) idx);
         }
-        if (v instanceof String s) return String.valueOf(s.charAt(i));
+        if (v instanceof dev.irij.interpreter.Values.IrijTuple tup) {
+            if (idx < 0 || idx >= tup.elements().length) {
+                throw new dev.irij.interpreter.IrijRuntimeError(
+                        "nth: index " + idx + " out of bounds (size "
+                                + tup.elements().length + ")");
+            }
+            return tup.elements()[(int) idx];
+        }
+        if (v instanceof String s) return String.valueOf(s.charAt((int) idx));
         throw new dev.irij.interpreter.IrijRuntimeError(
-                "nth: expected Vector or Str, got " + typeTag(v));
+                "nth: expected Vector / Tuple / Str, got " + typeTag(v));
     }
 
     /** `conj v x` — append x, return new vector (immutable semantics). */
@@ -972,6 +985,70 @@ public final class RuntimeSupport {
     public static final IrijFn SORT_FN     = args -> sortVal(args[0]);
     public static final IrijFn PRINTLN_FN  = args -> { println(args[0]); return dev.irij.interpreter.Values.UNIT; };
     public static final IrijFn PRINT_FN    = args -> { print(args[0]); return dev.irij.interpreter.Values.UNIT; };
+
+    // ── Generic builtin-fn-by-name registry ──────────────────────────
+    //
+    // For builtins not covered by an explicit static IrijFn above —
+    // and for fully open coverage as the interpreter package recedes
+    // — emitVarLoad's "Unbound variable" fallback emits
+    //   INVOKESTATIC RT.builtinFn("name")
+    // which returns an IrijFn wrapping the BuiltinFn registered by
+    // `Builtins.install`. The registry is lazily materialised on
+    // first call by spinning up a throwaway Environment, running
+    // `Builtins.install`, and wrapping each BuiltinFn cell value.
+    //
+    // This bridge keeps the static interpreter-package dependency
+    // (Builtins, Environment) until R5b ports the closures' content
+    // into RuntimeSupport directly. At that point the registry stays
+    // but stops touching the interpreter package.
+
+    private static volatile java.util.Map<String, IrijFn> BUILTIN_REGISTRY;
+
+    public static IrijFn builtinFn(String name) {
+        java.util.Map<String, IrijFn> r = BUILTIN_REGISTRY;
+        if (r == null) {
+            synchronized (RuntimeSupport.class) {
+                r = BUILTIN_REGISTRY;
+                if (r == null) {
+                    r = initBuiltinRegistry();
+                    BUILTIN_REGISTRY = r;
+                }
+            }
+        }
+        IrijFn fn = r.get(name);
+        if (fn == null) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "Unbound variable: " + name);
+        }
+        return fn;
+    }
+
+    private static java.util.Map<String, IrijFn> initBuiltinRegistry() {
+        java.util.Map<String, IrijFn> out = new java.util.HashMap<>();
+        dev.irij.interpreter.Environment env =
+                new dev.irij.interpreter.Environment(null);
+        dev.irij.interpreter.Builtins.install(env, System.out, null);
+        for (var entry : env.getBindings().entrySet()) {
+            String name = entry.getKey();
+            var cell = entry.getValue();
+            Object value = unwrapCell(cell);
+            if (value instanceof dev.irij.interpreter.Values.BuiltinFn bf) {
+                out.put(name, args ->
+                        bf.apply(java.util.Arrays.asList(args)));
+            }
+        }
+        return out;
+    }
+
+    private static Object unwrapCell(dev.irij.interpreter.Environment.Cell c) {
+        if (c instanceof dev.irij.interpreter.Environment.ImmutableCell ic) {
+            return ic.value();
+        }
+        if (c instanceof dev.irij.interpreter.Environment.MutableCell mc) {
+            return mc.get();
+        }
+        return null;
+    }
 
     // ── Misc ─────────────────────────────────────────────────────────
 

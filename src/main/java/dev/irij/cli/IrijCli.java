@@ -191,6 +191,12 @@ public final class IrijCli {
             return;
         }
 
+        // R5a in progress: BytecodeRunner exists and works for
+        // simple programs, but several bytecode gaps remain
+        // (top-level MutBind, builtins like zip that don't accept
+        // IrijRange, spec-output failures in some else-if chains).
+        // Until those are closed, `irij run` and `irij test` stay
+        // on the interpreter. Tracked as v0.7 work.
         try {
             var interpreter = new Interpreter();
             var projectRoot = path.toAbsolutePath().getParent();
@@ -286,7 +292,7 @@ public final class IrijCli {
                 // Parse
                 var result = IrijParseDriver.parseFile(file);
                 if (result.hasErrors()) {
-                    System.out.println("\u2717 " + fileName + " (PARSE ERROR)");
+                    System.out.println("✗ " + fileName + " (PARSE ERROR)");
                     for (var err : result.errors()) {
                         System.out.println("    " + file + ":" + err);
                     }
@@ -297,7 +303,7 @@ public final class IrijCli {
 
                 var ast = new AstBuilder().build(result.tree());
 
-                // Run in fresh interpreter with captured output
+                // Same R5a hold: interpreter for now.
                 var baos = new ByteArrayOutputStream();
                 var ps = new PrintStream(baos, true, StandardCharsets.UTF_8);
                 var interpreter = new Interpreter(ps);

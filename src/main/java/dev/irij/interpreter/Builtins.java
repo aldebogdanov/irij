@@ -1091,7 +1091,7 @@ public final class Builtins {
         return Path.of(path);
     }
 
-    static int compare(Object a, Object b) {
+    public static int compare(Object a, Object b) {
         if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
         if (a instanceof Double da && b instanceof Double db) return Double.compare(da, db);
         if (a instanceof Long la && b instanceof Double db) return Double.compare(la, db);

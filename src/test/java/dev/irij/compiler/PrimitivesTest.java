@@ -46,8 +46,11 @@ class PrimitivesTest {
     }
 
     @Test void nth_indexes_vector_and_string() throws Exception {
-        assertEquals("20", run("println (nth #[10 20 30] 1)"));
-        assertEquals("e", run("println (nth \"hello\" 1)"));
+        // Irij convention: `nth idx coll` (idx first, coll second) —
+        // matches std.collection's `(nth i v1)` usage and the
+        // Builtins.nth registration order.
+        assertEquals("20", run("println (nth 1 #[10 20 30])"));
+        assertEquals("e", run("println (nth 1 \"hello\")"));
     }
 
     @Test void conj_appends_to_vector() throws Exception {

@@ -1115,7 +1115,14 @@ final class ClassEmitter implements Opcodes {
                     samType, implHandle, samType);
             return;
         }
-        throw new IrijCompiler.CompileException("Unbound variable: " + name);
+        // Final fallback: resolve as a builtin via the runtime
+        // registry. Lets any name registered by Builtins.install
+        // be used as a first-class value (`sort-by length #[…]`,
+        // `@ to-str v`, etc.) without enumerating each one as a
+        // static IrijFn here.
+        mv.visitLdcInsn(name);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "builtinFn",
+                "(Ljava/lang/String;)" + IRIJ_FN_DESC, false);
     }
 
     private static String userFnWrapperName(String fnName) {
