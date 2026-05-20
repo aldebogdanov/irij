@@ -249,17 +249,18 @@ public class AstBuilder {
             var values = new ArrayList<String>();
             for (int i = 1; i < atoms.size(); i++) {
                 var atom = atoms.get(i);
-                if (atom.KEYWORD() != null) {
-                    // `:admin` token — strip leading ':' to keep the
-                    // SpecExpr.Enum values aligned with Keyword.name().
-                    String text = atom.KEYWORD().getText();
-                    values.add(text.startsWith(":") ? text.substring(1) : text);
-                } else if (atom.IDENT() != null) {
-                    // Bare identifier form: `(Enum admin user guest)`.
-                    values.add(atom.IDENT().getText());
-                } else if (atom.upperName() != null) {
-                    values.add(atom.upperName().UPPER_NAME().getText());
+                if (atom.KEYWORD() == null) {
+                    throw new IllegalArgumentException(
+                            "Enum spec values must be keyword literals "
+                                    + "(`:ok`, `:error`, …), got '"
+                                    + atom.getText() + "' at "
+                                    + atom.getStart().getLine() + ":"
+                                    + atom.getStart().getCharPositionInLine());
                 }
+                String text = atom.KEYWORD().getText();
+                // Strip the leading ':' so the value aligns with
+                // Keyword.name() at validate time.
+                values.add(text.startsWith(":") ? text.substring(1) : text);
             }
             return new SpecExpr.Enum(values);
         }

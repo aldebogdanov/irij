@@ -37,11 +37,12 @@ fn classify :: Str (Enum :ok :error)
   (s -> if (s == "ok") :ok else :error)
 ```
 
-The bare-identifier form `(Enum ok error)` is also accepted by the
-parser as a convenience; the AST builder strips the leading colon
-either way, so both forms produce the same `SpecExpr.Enum(["ok",
-"error"])`. Passing a non-keyword or a keyword outside the listed
-names raises:
+Each Enum value must be a keyword literal (`:foo`). Bare identifiers
+in that position are rejected so the source can't drift from the
+spec.org documented form. The AST builder strips the leading `:` so
+`SpecExpr.Enum(["ok", "error"])` stores the bare names — aligned
+with `Keyword.name()` at validate time. Passing a non-keyword or a
+keyword outside the listed names raises:
 `Spec validation failed: expected Keyword (one of [ok, error]), got …`.
 
 ## Compile-time effect-row lint

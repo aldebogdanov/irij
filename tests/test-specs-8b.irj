@@ -81,7 +81,7 @@ r18 := test "Fn spec rejects non-function" (->
 
 ;; ── Enum spec ───────────────────────────────────────────
 
-fn check-role :: (Enum admin user guest) (Enum admin user guest)
+fn check-role :: (Enum :admin :user :guest) (Enum :admin :user :guest)
   (r -> r)
 
 r19 := test "Enum spec accepts valid keyword" (->

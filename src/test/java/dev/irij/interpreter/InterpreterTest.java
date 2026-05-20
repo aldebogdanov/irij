@@ -931,21 +931,21 @@ class InterpreterTest {
 
         @Test void enumSpecAcceptsValidKeyword() {
             assertEquals(":admin", run("""
-                fn check-role :: (Enum admin user guest) (Enum admin user guest)
+                fn check-role :: (Enum :admin :user :guest) (Enum :admin :user :guest)
                   (r -> r)
                 println (check-role :admin)"""));
         }
 
         @Test void enumSpecRejectsInvalidKeyword() {
             assertRuntimeError("""
-                fn check-role :: (Enum admin user guest) (Enum admin user guest)
+                fn check-role :: (Enum :admin :user :guest) (Enum :admin :user :guest)
                   (r -> r)
                 check-role :superadmin""");
         }
 
         @Test void enumSpecRejectsNonKeyword() {
             assertRuntimeError("""
-                fn check-role :: (Enum admin user guest) (Enum admin user guest)
+                fn check-role :: (Enum :admin :user :guest) (Enum :admin :user :guest)
                   (r -> r)
                 check-role "admin"
                 """);
