@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.5.1 &mdash; Bytecode-mode seed resolution (`irij build --mode=bytecode-sm` now inlines seeds from `~/.irij/seeds/`) and `std.serve` effect-row fix (router family is now effect-polymorphic via `::: Any`). Patch on 0.5.0's effect-row soundness + bytecode/interp spec parity work.
+0.5.2 &mdash; Phase R3 first batch: 22 heavy-hitter builtins ported to bytecode (`replace`, `substring`, `split`, `join`, `trim`, `upper/lower-case`, `starts/ends-with?`, `index-of`, `url-encode/decode`, `get`, `assoc`, `dissoc`, `merge`, `keys`, `vals`, `contains?`, `last`, `to-vec`, `not`, `type-of`) + `/=` operator. Plus 0.5.1's bytecode-mode seed resolution and `std.serve` effect-row fix. Patch on 0.5.0.
