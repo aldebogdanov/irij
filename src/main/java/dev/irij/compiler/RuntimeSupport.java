@@ -789,6 +789,170 @@ public final class RuntimeSupport {
         return System.currentTimeMillis();
     }
 
+    // ── Math primitives (Phase R3) ────────────────────────────────────
+
+    public static Object sqrt(Object x) { return Math.sqrt(asDoubleArg(x, "sqrt")); }
+    public static Object sin(Object x)  { return Math.sin(asDoubleArg(x, "sin")); }
+    public static Object cos(Object x)  { return Math.cos(asDoubleArg(x, "cos")); }
+    public static Object tan(Object x)  { return Math.tan(asDoubleArg(x, "tan")); }
+    public static Object log(Object x)  { return Math.log(asDoubleArg(x, "log")); }
+    public static Object exp(Object x)  { return Math.exp(asDoubleArg(x, "exp")); }
+    public static Object floor(Object x) { return (long) Math.floor(asDoubleArg(x, "floor")); }
+    public static Object ceil(Object x)  { return (long) Math.ceil(asDoubleArg(x, "ceil")); }
+    public static Object round(Object x) { return Math.round(asDoubleArg(x, "round")); }
+    public static Object pow(Object a, Object b) {
+        return Math.pow(asDoubleArg(a, "pow"), asDoubleArg(b, "pow"));
+    }
+    public static Object abs(Object v) {
+        if (v instanceof Long l) return Math.abs(l);
+        if (v instanceof Double d) return Math.abs(d);
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "abs expects a number, got " + typeTag(v));
+    }
+    public static Object min(Object a, Object b) {
+        return cmp(a, b) <= 0 ? a : b;
+    }
+    public static Object max(Object a, Object b) {
+        return cmp(a, b) >= 0 ? a : b;
+    }
+    public static Object divInt(Object a, Object b) {
+        long la = asLongArg(a, "div");
+        long lb = asLongArg(b, "div");
+        if (lb == 0) throw new dev.irij.interpreter.IrijRuntimeError("Division by zero");
+        return la / lb;
+    }
+    public static Object modInt(Object a, Object b) {
+        long la = asLongArg(a, "mod");
+        long lb = asLongArg(b, "mod");
+        if (lb == 0) throw new dev.irij.interpreter.IrijRuntimeError("Division by zero");
+        return la % lb;
+    }
+
+    // Math constants — boxed once. Bytecode emitVarLoad sees `pi`
+    // and `e` Var references and emits GETSTATIC against these
+    // fields. Interpreter binds them as raw doubles in globalEnv.
+    public static final Object PI_BOXED = Double.valueOf(Math.PI);
+    public static final Object E_BOXED  = Double.valueOf(Math.E);
+
+    // ── Random ────────────────────────────────────────────────────────
+
+    public static Object randomInt(Object boundArg) {
+        long bound = asLongArg(boundArg, "random-int");
+        return java.util.concurrent.ThreadLocalRandom.current().nextLong(bound);
+    }
+    public static Object randomFloat() {
+        return java.util.concurrent.ThreadLocalRandom.current().nextDouble();
+    }
+
+    // ── String parsing / chars ────────────────────────────────────────
+
+    public static Object parseInt(Object strArg) {
+        String s = asStr(strArg, "parse-int");
+        try { return Long.parseLong(s.strip()); }
+        catch (NumberFormatException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "parse-int: cannot parse '" + s + "' as Int");
+        }
+    }
+    public static Object parseFloat(Object strArg) {
+        String s = asStr(strArg, "parse-float");
+        try { return Double.parseDouble(s.strip()); }
+        catch (NumberFormatException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "parse-float: cannot parse '" + s + "' as Float");
+        }
+    }
+    public static Object charAt(Object strArg, Object idxArg) {
+        String s = asStr(strArg, "char-at");
+        int i = (int) asLongArg(idxArg, "char-at");
+        if (i < 0 || i >= s.length()) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "char-at: index " + i + " out of bounds (length " + s.length() + ")");
+        }
+        return String.valueOf(s.charAt(i));
+    }
+    public static Object charCode(Object strArg) {
+        String s = asStr(strArg, "char-code");
+        if (s.isEmpty()) {
+            throw new dev.irij.interpreter.IrijRuntimeError("char-code: empty string");
+        }
+        return (long) s.codePointAt(0);
+    }
+    public static Object fromCharCode(Object cpArg) {
+        int cp = (int) asLongArg(cpArg, "from-char-code");
+        return String.valueOf(Character.toChars(cp));
+    }
+
+    // ── Vec ops not yet emitted ──────────────────────────────────────
+
+    public static Object reverseVal(Object v) {
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            java.util.List<Object> rev = new java.util.ArrayList<>(vec.elements());
+            java.util.Collections.reverse(rev);
+            return new dev.irij.interpreter.Values.IrijVector(rev);
+        }
+        if (v instanceof String s) return new StringBuilder(s).reverse().toString();
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "reverse expects Vector or Str, got " + typeTag(v));
+    }
+    public static Object sortVal(Object v) {
+        if (!(v instanceof dev.irij.interpreter.Values.IrijVector vec)) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "sort expects Vector, got " + typeTag(v));
+        }
+        java.util.List<Object> out = new java.util.ArrayList<>(vec.elements());
+        out.sort((a, b) -> cmp(a, b));
+        return new dev.irij.interpreter.Values.IrijVector(out);
+    }
+    public static Object takeVal(Object nArg, Object collArg) {
+        long n = asLongArg(nArg, "take");
+        java.util.List<Object> list = asListAny(collArg);
+        return new dev.irij.interpreter.Values.IrijVector(
+                new java.util.ArrayList<>(list.subList(0, (int) Math.min(n, list.size()))));
+    }
+    public static Object dropVal(Object nArg, Object collArg) {
+        long n = asLongArg(nArg, "drop");
+        java.util.List<Object> list = asListAny(collArg);
+        return new dev.irij.interpreter.Values.IrijVector(
+                new java.util.ArrayList<>(list.subList((int) Math.min(n, list.size()), list.size())));
+    }
+    public static Object concatTwo(Object a, Object b) {
+        // Match Builtins.concatValues semantics: Vec+Vec→Vec, Str+Str→Str.
+        if (a instanceof String sa && b instanceof String sb) return sa + sb;
+        if (a instanceof dev.irij.interpreter.Values.IrijVector va
+                && b instanceof dev.irij.interpreter.Values.IrijVector vb) {
+            java.util.List<Object> out = new java.util.ArrayList<>(va.elements());
+            out.addAll(vb.elements());
+            return new dev.irij.interpreter.Values.IrijVector(out);
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "concat: type mismatch (" + typeTag(a) + ", " + typeTag(b) + ")");
+    }
+
+    // ── Functional combinators ───────────────────────────────────────
+
+    public static final IrijFn IDENTITY = args -> args[0];
+    public static final IrijFn CONST    = args -> args[0];  // const x y → x
+
+    // ── Misc ─────────────────────────────────────────────────────────
+
+    public static void dbg(Object v) {
+        System.err.println("[dbg] " + display(v));
+    }
+    public static Object readLine() {
+        try {
+            return new java.io.BufferedReader(new java.io.InputStreamReader(System.in)).readLine();
+        } catch (java.io.IOException e) {
+            throw new dev.irij.interpreter.IrijRuntimeError("read-line: " + e.getMessage());
+        }
+    }
+
+    private static double asDoubleArg(Object v, String op) {
+        if (v instanceof Number n) return n.doubleValue();
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                op + " expects a number, got " + typeTag(v));
+    }
+
     public static Object envBuiltin(Object[] args) {
         // env "NAME"            -> value or null
         // env "NAME" "default"  -> value or default

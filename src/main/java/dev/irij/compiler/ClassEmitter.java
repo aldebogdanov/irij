@@ -1011,6 +1011,22 @@ final class ClassEmitter implements Opcodes {
                 mv.visitFieldInsn(GETSTATIC, "java/lang/Boolean", "FALSE", "Ljava/lang/Boolean;");
                 return;
             }
+            case "pi" -> {
+                mv.visitFieldInsn(GETSTATIC, RT, "PI_BOXED", OBJ_DESC);
+                return;
+            }
+            case "e" -> {
+                mv.visitFieldInsn(GETSTATIC, RT, "E_BOXED", OBJ_DESC);
+                return;
+            }
+            case "identity" -> {
+                mv.visitFieldInsn(GETSTATIC, RT, "IDENTITY", IRIJ_FN_DESC);
+                return;
+            }
+            case "const" -> {
+                mv.visitFieldInsn(GETSTATIC, RT, "CONST", IRIJ_FN_DESC);
+                return;
+            }
             default -> {}
         }
         Integer slot = locals.lookup(name);
@@ -1476,6 +1492,77 @@ final class ClassEmitter implements Opcodes {
                 pushObjectArray(args, mv, locals);
                 mv.visitMethodInsn(INVOKESTATIC, RT, "envBuiltin",
                         "([Ljava/lang/Object;)Ljava/lang/Object;", false);
+                return true;
+            }
+            // ── R3: math primitives ──────────────────────────────────
+            case "sqrt"  -> { return emitRT1(args, mv, locals, "sqrt"); }
+            case "sin"   -> { return emitRT1(args, mv, locals, "sin"); }
+            case "cos"   -> { return emitRT1(args, mv, locals, "cos"); }
+            case "tan"   -> { return emitRT1(args, mv, locals, "tan"); }
+            case "log"   -> {
+                // `log` collides with a common effect op name
+                // (`effect Log { log :: Str -> () }`). When the user
+                // has declared such an effect, fall through to the
+                // effect-op dispatch path instead of math.log.
+                if (effectOps.containsKey("log")) return false;
+                return emitRT1(args, mv, locals, "log");
+            }
+            case "exp"   -> { return emitRT1(args, mv, locals, "exp"); }
+            case "floor" -> { return emitRT1(args, mv, locals, "floor"); }
+            case "ceil"  -> { return emitRT1(args, mv, locals, "ceil"); }
+            case "round" -> { return emitRT1(args, mv, locals, "round"); }
+            case "abs"   -> { return emitRT1(args, mv, locals, "abs"); }
+            case "pow"   -> { return emitRT2(args, mv, locals, "pow"); }
+            case "min"   -> { return emitRT2(args, mv, locals, "min"); }
+            case "max"   -> { return emitRT2(args, mv, locals, "max"); }
+            case "div"   -> { return emitRT2(args, mv, locals, "divInt"); }
+            case "mod"   -> { return emitRT2(args, mv, locals, "modInt"); }
+            // ── R3: random ───────────────────────────────────────────
+            case "random-int"   -> { return emitRT1(args, mv, locals, "randomInt"); }
+            case "random-float" -> {
+                if (!isZeroArgCall(args)) return false;
+                mv.visitMethodInsn(INVOKESTATIC, RT, "randomFloat",
+                        "()Ljava/lang/Object;", false);
+                return true;
+            }
+            // ── R3: string parsing / chars ───────────────────────────
+            case "parse-int"      -> { return emitRT1(args, mv, locals, "parseInt"); }
+            case "parse-float"    -> { return emitRT1(args, mv, locals, "parseFloat"); }
+            case "char-at"        -> { return emitRT2(args, mv, locals, "charAt"); }
+            case "char-code"      -> { return emitRT1(args, mv, locals, "charCode"); }
+            case "from-char-code" -> { return emitRT1(args, mv, locals, "fromCharCode"); }
+            // ── R3: vec ops not yet emitted ──────────────────────────
+            case "reverse" -> { return emitRT1(args, mv, locals, "reverseVal"); }
+            case "sort"    -> { return emitRT1(args, mv, locals, "sortVal"); }
+            case "take"    -> { return emitRT2(args, mv, locals, "takeVal"); }
+            case "drop"    -> { return emitRT2(args, mv, locals, "dropVal"); }
+            case "concat"  -> { return emitRT2(args, mv, locals, "concatTwo"); }
+            // ── R3: misc ─────────────────────────────────────────────
+            case "dbg" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RT, "dbg",
+                        "(Ljava/lang/Object;)V", false);
+                mv.visitFieldInsn(GETSTATIC, VALUES, "UNIT", OBJ_DESC);
+                return true;
+            }
+            case "read-line" -> {
+                if (!isZeroArgCall(args)) return false;
+                mv.visitMethodInsn(INVOKESTATIC, RT, "readLine",
+                        "()Ljava/lang/Object;", false);
+                return true;
+            }
+            case "identity" -> {
+                if (args.size() != 1) return false;
+                emitExpr(args.get(0), mv, locals);
+                return true; // x → x
+            }
+            case "const" -> {
+                // const x y → x — emit x, evaluate-and-discard y
+                if (args.size() != 2) return false;
+                emitExpr(args.get(0), mv, locals);
+                emitExpr(args.get(1), mv, locals);
+                mv.visitInsn(POP);
                 return true;
             }
             // ── R3 batch 6: sandboxed-interpreter tier ───────────────
