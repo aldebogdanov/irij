@@ -1063,7 +1063,7 @@ final class ClassEmitter implements Opcodes {
             case ">"  -> cmpToBoxedBool(mv, "gt");
             case ">=" -> cmpToBoxedBool(mv, "ge");
             case "==" -> cmpToBoxedBool(mv, "eq");
-            case "!=" -> cmpToBoxedBool(mv, "neq");
+            case "!=", "/=" -> cmpToBoxedBool(mv, "neq");
             case "++" -> mv.visitMethodInsn(INVOKESTATIC, RT, "concat", BINOP_DESC, false);
             case "&&" -> {
                 mv.visitMethodInsn(INVOKESTATIC, RT, "and", CMPOP_DESC, false);
@@ -1293,8 +1293,67 @@ final class ClassEmitter implements Opcodes {
                         "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
+            // ── Phase R3 ports: strings + maps + misc ────────────────
+            // Each case shape: emit args left-to-right, then a single
+            // static call into RuntimeSupport. The RT method names are
+            // Java-safe (containsP, getOp, etc.) since Irij names can
+            // include `?` and `-`.
+            case "replace"      -> { return emitRT3(args, mv, locals, "replace"); }
+            case "substring"    -> { return emitRT3(args, mv, locals, "substring"); }
+            case "split"        -> { return emitRT2(args, mv, locals, "split"); }
+            case "join"         -> { return emitRT2(args, mv, locals, "join"); }
+            case "trim"         -> { return emitRT1(args, mv, locals, "trimStr"); }
+            case "upper-case"   -> { return emitRT1(args, mv, locals, "upperCase"); }
+            case "lower-case"   -> { return emitRT1(args, mv, locals, "lowerCase"); }
+            case "starts-with?" -> { return emitRT2(args, mv, locals, "startsWithP"); }
+            case "ends-with?"   -> { return emitRT2(args, mv, locals, "endsWithP"); }
+            case "index-of"     -> { return emitRT2(args, mv, locals, "indexOf"); }
+            case "url-encode"   -> { return emitRT1(args, mv, locals, "urlEncode"); }
+            case "url-decode"   -> { return emitRT1(args, mv, locals, "urlDecode"); }
+            case "get"          -> { return emitRT2(args, mv, locals, "getOp"); }
+            case "assoc"        -> { return emitRT3(args, mv, locals, "assoc"); }
+            case "dissoc"       -> { return emitRT2(args, mv, locals, "dissoc"); }
+            case "merge"        -> { return emitRT2(args, mv, locals, "merge"); }
+            case "keys"         -> { return emitRT1(args, mv, locals, "keys"); }
+            case "vals"         -> { return emitRT1(args, mv, locals, "vals"); }
+            case "contains?"    -> { return emitRT2(args, mv, locals, "containsP"); }
+            case "last"         -> { return emitRT1(args, mv, locals, "last"); }
+            case "to-vec"       -> { return emitRT1(args, mv, locals, "toVec"); }
+            case "not"          -> { return emitRT1(args, mv, locals, "notOp"); }
+            case "type-of"      -> { return emitRT1(args, mv, locals, "typeOf"); }
             default -> { return false; }
         }
+    }
+
+    /** Emit a 1-arg call to RT.<method>(Object): Object. */
+    private boolean emitRT1(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
+        if (args.size() != 1) return false;
+        emitExpr(args.get(0), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, method,
+                "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+        return true;
+    }
+
+    /** Emit a 2-arg call to RT.<method>(Object, Object): Object. */
+    private boolean emitRT2(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
+        if (args.size() != 2) return false;
+        emitExpr(args.get(0), mv, locals);
+        emitExpr(args.get(1), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, method,
+                "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+        return true;
+    }
+
+    /** Emit a 3-arg call to RT.<method>(Object, Object, Object): Object. */
+    private boolean emitRT3(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
+        if (args.size() != 3) return false;
+        emitExpr(args.get(0), mv, locals);
+        emitExpr(args.get(1), mv, locals);
+        emitExpr(args.get(2), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, method,
+                "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                false);
+        return true;
     }
 
     // ── Scope { fork ... } ─────────────────────────────────────────────

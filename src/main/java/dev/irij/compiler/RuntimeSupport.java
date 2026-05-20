@@ -439,6 +439,234 @@ public final class RuntimeSupport {
         return new IllegalStateException("No match arm for: " + display(v));
     }
 
+    // ── Heavy-hitter builtins ported from Builtins.java (Phase R3) ──────
+    //
+    // These exist so `irij build --mode=bytecode-sm` can compile real
+    // programs without falling through to an interpreter-installed
+    // BuiltinFn. Semantics match Interpreter exactly (same coercions,
+    // same error messages). Names are Java-friendly; the emitter maps
+    // Irij names like `replace` / `index-of` / `contains?` to these.
+
+    private static String asStr(Object v, String op) {
+        if (v instanceof String s) return s;
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                op + " expects a String, got " + typeTag(v));
+    }
+
+    private static long asLongArg(Object v, String op) {
+        if (v instanceof Long l) return l;
+        if (v instanceof Number n) return n.longValue();
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                op + " expects an Int, got " + typeTag(v));
+    }
+
+    private static java.util.List<Object> asListAny(Object v) {
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) return vec.elements();
+        if (v instanceof dev.irij.interpreter.Values.IrijSet set) {
+            return new java.util.ArrayList<>(set.elements());
+        }
+        if (v instanceof dev.irij.interpreter.Values.IrijMap map) {
+            return new java.util.ArrayList<>(map.entries().values());
+        }
+        if (v instanceof dev.irij.interpreter.Values.IrijTuple tup) {
+            return java.util.Arrays.asList(tup.elements());
+        }
+        if (v instanceof java.util.List<?> raw) {
+            @SuppressWarnings("unchecked")
+            java.util.List<Object> cast = (java.util.List<Object>) raw;
+            return cast;
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "expected a collection, got " + typeTag(v));
+    }
+
+    // ── Strings ────────────────────────────────────────────────────────
+
+    public static Object replace(Object str, Object from, Object to) {
+        return asStr(str, "replace").replace(
+                asStr(from, "replace"), asStr(to, "replace"));
+    }
+
+    public static Object substring(Object str, Object startArg, Object endArg) {
+        String s = asStr(str, "substring");
+        int start = (int) asLongArg(startArg, "substring");
+        int end = (int) asLongArg(endArg, "substring");
+        if (start < 0 || end > s.length() || start > end) {
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "substring: index out of bounds (start=" + start
+                            + ", end=" + end + ", length=" + s.length() + ")");
+        }
+        return s.substring(start, end);
+    }
+
+    public static Object split(Object str, Object sep) {
+        String s = asStr(str, "split");
+        String sp = asStr(sep, "split");
+        java.util.List<Object> parts = new java.util.ArrayList<>();
+        if (sp.isEmpty()) {
+            for (int i = 0; i < s.length(); i++) parts.add(String.valueOf(s.charAt(i)));
+        } else {
+            for (String p : s.split(java.util.regex.Pattern.quote(sp), -1)) parts.add(p);
+        }
+        return new dev.irij.interpreter.Values.IrijVector(parts);
+    }
+
+    public static Object join(Object sep, Object coll) {
+        String sp = asStr(sep, "join");
+        java.util.List<Object> list = asListAny(coll);
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < list.size(); i++) {
+            if (i > 0) sb.append(sp);
+            sb.append(dev.irij.interpreter.Values.toIrijString(list.get(i)));
+        }
+        return sb.toString();
+    }
+
+    public static Object trimStr(Object v) {
+        return asStr(v, "trim").strip();
+    }
+
+    public static Object upperCase(Object v) {
+        return asStr(v, "upper-case").toUpperCase();
+    }
+
+    public static Object lowerCase(Object v) {
+        return asStr(v, "lower-case").toLowerCase();
+    }
+
+    public static Object startsWithP(Object str, Object prefix) {
+        return asStr(str, "starts-with?").startsWith(asStr(prefix, "starts-with?"));
+    }
+
+    public static Object endsWithP(Object str, Object suffix) {
+        return asStr(str, "ends-with?").endsWith(asStr(suffix, "ends-with?"));
+    }
+
+    public static Object indexOf(Object str, Object sub) {
+        return (long) asStr(str, "index-of").indexOf(asStr(sub, "index-of"));
+    }
+
+    public static Object urlEncode(Object s) {
+        return java.net.URLEncoder.encode(asStr(s, "url-encode"),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    public static Object urlDecode(Object s) {
+        return java.net.URLDecoder.decode(asStr(s, "url-decode"),
+                java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    // ── Map / collection ───────────────────────────────────────────────
+
+    public static Object getOp(Object key, Object coll) {
+        if (coll instanceof dev.irij.interpreter.Values.IrijMap map) {
+            Object v = map.entries().get(dev.irij.interpreter.Values.toIrijString(key));
+            return v != null ? v : dev.irij.interpreter.Values.UNIT;
+        }
+        if (coll instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            long idx = asLongArg(key, "get");
+            if (idx < 0 || idx >= vec.elements().size()) return dev.irij.interpreter.Values.UNIT;
+            return vec.elements().get((int) idx);
+        }
+        if (coll instanceof dev.irij.interpreter.Values.IrijTuple tup) {
+            long idx = asLongArg(key, "get");
+            if (idx < 0 || idx >= tup.elements().length) return dev.irij.interpreter.Values.UNIT;
+            return tup.elements()[(int) idx];
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "get expects a Map, Vector, or Tuple as second argument");
+    }
+
+    public static Object assoc(Object m, Object key, Object val) {
+        if (m instanceof dev.irij.interpreter.Values.IrijMap map) {
+            java.util.LinkedHashMap<String, Object> entries =
+                    new java.util.LinkedHashMap<>(map.entries());
+            entries.put(dev.irij.interpreter.Values.toIrijString(key), val);
+            return new dev.irij.interpreter.Values.IrijMap(entries);
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "assoc expects a Map as first argument, got " + typeTag(m));
+    }
+
+    public static Object dissoc(Object m, Object key) {
+        if (m instanceof dev.irij.interpreter.Values.IrijMap map) {
+            java.util.LinkedHashMap<String, Object> entries =
+                    new java.util.LinkedHashMap<>(map.entries());
+            entries.remove(dev.irij.interpreter.Values.toIrijString(key));
+            return new dev.irij.interpreter.Values.IrijMap(entries);
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "dissoc expects a Map as first argument, got " + typeTag(m));
+    }
+
+    public static Object merge(Object a, Object b) {
+        if (a instanceof dev.irij.interpreter.Values.IrijMap m1
+                && b instanceof dev.irij.interpreter.Values.IrijMap m2) {
+            java.util.LinkedHashMap<String, Object> entries =
+                    new java.util.LinkedHashMap<>(m1.entries());
+            entries.putAll(m2.entries());
+            return new dev.irij.interpreter.Values.IrijMap(entries);
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "merge expects two Maps, got " + typeTag(a) + " and " + typeTag(b));
+    }
+
+    public static Object keys(Object v) {
+        if (v instanceof dev.irij.interpreter.Values.IrijMap map) {
+            return new dev.irij.interpreter.Values.IrijVector(
+                    new java.util.ArrayList<>(map.entries().keySet()));
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError("keys expects a Map");
+    }
+
+    public static Object vals(Object v) {
+        if (v instanceof dev.irij.interpreter.Values.IrijMap map) {
+            return new dev.irij.interpreter.Values.IrijVector(
+                    new java.util.ArrayList<>(map.entries().values()));
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError("vals expects a Map");
+    }
+
+    public static Object containsP(Object coll, Object elem) {
+        if (coll instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            return vec.elements().contains(elem);
+        }
+        if (coll instanceof dev.irij.interpreter.Values.IrijSet set) {
+            return set.elements().contains(elem);
+        }
+        if (coll instanceof dev.irij.interpreter.Values.IrijMap map) {
+            return map.entries().containsKey(
+                    dev.irij.interpreter.Values.toIrijString(elem));
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "contains? expects a collection, got " + typeTag(coll));
+    }
+
+    public static Object last(Object v) {
+        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+            if (vec.elements().isEmpty()) {
+                throw new dev.irij.interpreter.IrijRuntimeError("last of empty vector");
+            }
+            return vec.elements().get(vec.elements().size() - 1);
+        }
+        throw new dev.irij.interpreter.IrijRuntimeError(
+                "last expects a Vector, got " + typeTag(v));
+    }
+
+    public static Object toVec(Object v) {
+        return new dev.irij.interpreter.Values.IrijVector(asListAny(v));
+    }
+
+    // ── Misc ───────────────────────────────────────────────────────────
+
+    public static Object notOp(Object v) {
+        return !truthy(v);
+    }
+
+    public static Object typeOf(Object v) {
+        return typeTag(v);
+    }
+
     /** Runtime type tag used for protocol dispatch. */
     public static String typeTag(Object v) {
         if (v == null || v == dev.irij.interpreter.Values.UNIT) return "Unit";
