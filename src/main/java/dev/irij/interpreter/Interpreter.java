@@ -106,6 +106,12 @@ public final class Interpreter {
         // `Any` callees are polymorphic — they impose no requirement on
         // the caller's row beyond what their own body's calls expose.
         if (calleeRow.size() == 1 && calleeRow.contains("Any")) return;
+        // Parametric row-variables: same treatment as `Any`. The
+        // bytecode-mode checker does precise substitution; the
+        // deprecated interpreter trusts the static check.
+        for (String e : calleeRow) {
+            if (isRowVarRuntime(e)) return;
+        }
         checkEffectsAvailable(calleeRow, "call to " + calleeName, loc);
     }
 
@@ -126,6 +132,14 @@ public final class Interpreter {
      * With {@code Any}: body sees declared row UNION caller's row.
      */
     private Set<String> effectiveRow(List<String> declared) {
+        // Parametric row-variable (lowercase entry like `eff`) →
+        // treat as ambient. The precise call-site substitution lives
+        // in the bytecode-mode EffectRowChecker; the interpreter is
+        // deprecated and skips the check rather than implementing a
+        // parallel substitution.
+        for (String e : declared) {
+            if (isRowVarRuntime(e)) return AMBIENT_EFFECTS;
+        }
         boolean polymorphic = declared.contains("Any");
         if (!polymorphic) return new HashSet<>(declared);
         Set<String> base = AVAILABLE_EFFECTS.get().peek();
@@ -133,6 +147,14 @@ public final class Interpreter {
         Set<String> merged = new HashSet<>(base);
         for (String e : declared) if (!e.equals("Any")) merged.add(e);
         return merged;
+    }
+
+    /** Mirror of EffectRowChecker.isRowVar — lowercase first char =
+     *  parametric row variable. The interpreter is deprecated, so it
+     *  just treats row-vars as ambient instead of substituting. */
+    private static boolean isRowVarRuntime(String name) {
+        return name != null && !name.isEmpty()
+                && Character.isLowerCase(name.charAt(0));
     }
 
     /** Get the effect row from a function value, or null if not annotated. */
