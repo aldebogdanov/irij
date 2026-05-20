@@ -74,8 +74,12 @@ fnDecl
     : FN fnName specAnnotation? effectAnnotation? fnBody?
     ;
 
+// Effect annotation: lists effects after `:::`. Each entry is
+// either a concrete effect name (UPPER_NAME like `Console`,
+// `FileIO`) or a lowercase row-variable bound by the function's
+// signature (IDENT like `eff`, `e1`, `e2`).
 effectAnnotation
-    : EFFECT_SEP upperName+
+    : EFFECT_SEP (upperName | IDENT)+
     ;
 
 fnName
@@ -262,7 +266,7 @@ specAtom
     | KEYWORD                                 // enum value: :admin, :ok
     | UNDERSCORE                              // spec hole: _
     | LPAREN RPAREN                           // unit: ()
-    | LPAREN specExpr RPAREN                  // grouped: (A -> B)
+    | LPAREN specExpr RPAREN KEYWORD?         // grouped: (A -> B), optional row-var: (_ -> _):eff
     | VEC_OPEN specExpr RBRACKET              // #[a]
     | SET_OPEN specExpr RBRACE                // #{a}
     | TUPLE_OPEN specExpr specExpr* RPAREN    // #(a b)

@@ -1,6 +1,7 @@
 package dev.irij.ast;
 
 import dev.irij.ast.Node.SourceLoc;
+import dev.irij.parser.IrijLexer;
 import dev.irij.parser.IrijParser;
 import dev.irij.parser.IrijParser.*;
 import dev.irij.parser.IrijParseDriver;
@@ -103,10 +104,7 @@ public class AstBuilder {
         // Extract effect row from ::: annotation: fn name ::: Console IO
         List<String> effectRow = null;
         if (ctx.effectAnnotation() != null) {
-            effectRow = new ArrayList<>();
-            for (var tn : ctx.effectAnnotation().upperName()) {
-                effectRow.add(tn.getText());
-            }
+            effectRow = collectEffectRowEntries(ctx.effectAnnotation());
         }
 
         // Extract spec annotations from :: annotation: fn name :: Person Str
@@ -296,8 +294,16 @@ public class AstBuilder {
         }
         if (atom.LPAREN() != null && atom.RPAREN() != null) {
             if (atom.specExpr() != null && !atom.specExpr().isEmpty()) {
-                // Grouped: (specExpr) — build the inner spec
-                return buildSpecExpr(atom.specExpr(0));
+                // Grouped: (specExpr), optionally with a row-var suffix
+                // `:eff` that binds a parametric effect row on the
+                // inner Fn/Arrow.
+                SpecExpr inner = buildSpecExpr(atom.specExpr(0));
+                if (atom.KEYWORD() != null) {
+                    String kw = atom.KEYWORD().getText();
+                    String rowVar = kw.startsWith(":") ? kw.substring(1) : kw;
+                    return attachRowVar(inner, rowVar);
+                }
+                return inner;
             }
             // Unit: ()
             return new SpecExpr.Unit();
@@ -331,6 +337,48 @@ public class AstBuilder {
         }
         // Fallback: wildcard for unsupported forms (refinement, located)
         return new SpecExpr.Wildcard();
+    }
+
+    /** Collect entries from an `effectAnnotation` in source order,
+     *  mixing upper-name effect names (`Console`) and lowercase
+     *  row-variable names (`eff`, `e1`). Order matters for display;
+     *  the row checker treats the list as a set. */
+    private List<String> collectEffectRowEntries(
+            IrijParser.EffectAnnotationContext ctx) {
+        var out = new ArrayList<String>();
+        for (int i = 0; i < ctx.getChildCount(); i++) {
+            var ch = ctx.getChild(i);
+            if (ch instanceof IrijParser.UpperNameContext un) {
+                out.add(un.UPPER_NAME().getText());
+            } else if (ch instanceof org.antlr.v4.runtime.tree.TerminalNode tn
+                    && tn.getSymbol().getType() == IrijLexer.IDENT) {
+                out.add(tn.getText());
+            }
+        }
+        return out;
+    }
+
+    /** Attach a parametric row-variable to a function-shaped spec.
+     *  Promotes a bare {@code Name("Fn")} into {@code App("Fn", [],
+     *  rowVar)} so the binding lives on a node with a {@code rowVar}
+     *  field. Rejects attachment on non-function specs. */
+    private SpecExpr attachRowVar(SpecExpr inner, String rowVar) {
+        return switch (inner) {
+            case SpecExpr.Arrow a ->
+                    new SpecExpr.Arrow(a.inputs(), a.output(), rowVar);
+            case SpecExpr.App a ->
+                    new SpecExpr.App(a.head(), a.args(), rowVar);
+            case SpecExpr.Name n -> {
+                // `Fn:eff` — promote the Name to an App so the row-var
+                // has a carrier. Same shape the parser would emit if
+                // the source wrote `(Fn):eff` and Fn took no args.
+                yield new SpecExpr.App(n.name(), List.of(), rowVar);
+            }
+            default -> throw new IllegalArgumentException(
+                    "Row variable ':" + rowVar + "' may only be attached "
+                            + "to a function-shaped spec (Fn, Arrow), got "
+                            + inner.getClass().getSimpleName());
+        };
     }
 
     /**
@@ -454,10 +502,7 @@ public class AstBuilder {
         // Extract required effects from optional effect annotation
         List<String> requiredEffects = null;
         if (ctx.effectAnnotation() != null) {
-            requiredEffects = new ArrayList<>();
-            for (var tn : ctx.effectAnnotation().upperName()) {
-                requiredEffects.add(tn.getText());
-            }
+            requiredEffects = collectEffectRowEntries(ctx.effectAnnotation());
         }
 
         var clauses = new ArrayList<Decl.HandlerClause>();

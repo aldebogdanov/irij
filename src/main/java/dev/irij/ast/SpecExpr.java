@@ -36,12 +36,22 @@ public sealed interface SpecExpr {
     /**
      * Parameterized spec application: {@code Vec Int}, {@code Map Str Int}, {@code Fn 2}.
      * The head is the spec name; args are the parameters.
+     *
+     * <p>{@code rowVar} (nullable) carries a parametric effect-row
+     * binding when the spec position is function-shaped: {@code Fn:eff}
+     * parses to {@code App("Fn", [], "eff")}. The variable is bound
+     * by the enclosing fn signature and substituted at each call
+     * site against the actual argument's effect row. Null on
+     * non-function specs and on Fn specs that don't track a row.
      */
-    record App(String head, List<SpecExpr> args) implements SpecExpr {
+    record App(String head, List<SpecExpr> args, String rowVar) implements SpecExpr {
+        public App(String head, List<SpecExpr> args) { this(head, args, null); }
         @Override public String toString() {
             var sb = new StringBuilder("(").append(head);
             for (var a : args) sb.append(' ').append(a);
-            return sb.append(')').toString();
+            sb.append(')');
+            if (rowVar != null) sb.append(':').append(rowVar);
+            return sb.toString();
         }
     }
 
@@ -49,8 +59,14 @@ public sealed interface SpecExpr {
      * Arrow (function) spec: {@code (Int -> Str)}, {@code (Person -> Str -> Bool)}.
      * Concrete arrow specs get wrapped in validating contracts at fn boundaries.
      * inputs = all types before the last arrow; output = the type after the last arrow.
+     *
+     * <p>{@code rowVar} (nullable) carries a parametric effect-row
+     * binding when the arrow appears in a spec annotation, e.g.
+     * {@code (_ -> Bool):eff}. Same substitution semantics as
+     * {@link App#rowVar}.
      */
-    record Arrow(List<SpecExpr> inputs, SpecExpr output) implements SpecExpr {
+    record Arrow(List<SpecExpr> inputs, SpecExpr output, String rowVar) implements SpecExpr {
+        public Arrow(List<SpecExpr> inputs, SpecExpr output) { this(inputs, output, null); }
         @Override public String toString() {
             var sb = new StringBuilder("(");
             for (int i = 0; i < inputs.size(); i++) {
@@ -58,6 +74,7 @@ public sealed interface SpecExpr {
                 sb.append(inputs.get(i));
             }
             sb.append(" -> ").append(output).append(')');
+            if (rowVar != null) sb.append(':').append(rowVar);
             return sb.toString();
         }
     }
