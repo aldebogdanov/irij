@@ -1386,7 +1386,7 @@ final class ClassEmitter implements Opcodes {
             case "file-exists?"        -> { return emitRT1(args, mv, locals, "fileExistsQ"); }
             case "get-env"             -> { return emitRT1(args, mv, locals, "getEnv"); }
             case "now-ms"              -> {
-                if (!args.isEmpty()) return false;
+                if (!isZeroArgCall(args)) return false;
                 mv.visitMethodInsn(INVOKESTATIC, RT, "nowMs", "()Ljava/lang/Object;", false);
                 return true;
             }
@@ -1396,8 +1396,67 @@ final class ClassEmitter implements Opcodes {
                         "([Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
+            // ── R3 batch 6: sandboxed-interpreter tier ───────────────
+            case "raw-session-create" -> {
+                if (!isZeroArgCall(args)) return false;
+                mv.visitMethodInsn(INVOKESTATIC, SESSIONS, "rawSessionCreate",
+                        "()Ljava/lang/Object;", false);
+                return true;
+            }
+            case "raw-session-eval" -> {
+                if (args.size() != 3) return false;
+                emitExpr(args.get(0), mv, locals);
+                emitExpr(args.get(1), mv, locals);
+                emitExpr(args.get(2), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, SESSIONS, "rawSessionEval",
+                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                        false);
+                return true;
+            }
+            case "raw-session-destroy" -> {
+                return emitSessions1(args, mv, locals, "rawSessionDestroy");
+            }
+            case "raw-session-subscribe" -> {
+                return emitSessions2(args, mv, locals, "rawSessionSubscribe");
+            }
+            case "raw-session-unsubscribe" -> {
+                return emitSessions1(args, mv, locals, "rawSessionUnsubscribe");
+            }
+            case "raw-session-cleanup" -> {
+                return emitSessions1(args, mv, locals, "rawSessionCleanup");
+            }
+            case "raw-nrepl-eval-sandboxed" -> {
+                return emitSessions2(args, mv, locals, "rawNreplEvalSandboxed");
+            }
             default -> { return false; }
         }
+    }
+
+    private static final String SESSIONS = "dev/irij/compiler/RuntimeSessions";
+
+    /** True if the call site is a zero-arg invocation OR a one-arg
+     *  call where the single arg is the Unit literal — the idiomatic
+     *  Irij way to write "no args" (e.g. `now-ms ()`). */
+    private static boolean isZeroArgCall(List<Expr> args) {
+        if (args.isEmpty()) return true;
+        return args.size() == 1 && args.get(0) instanceof Expr.UnitLit;
+    }
+
+    private boolean emitSessions1(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
+        if (args.size() != 1) return false;
+        emitExpr(args.get(0), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, SESSIONS, method,
+                "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+        return true;
+    }
+
+    private boolean emitSessions2(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
+        if (args.size() != 2) return false;
+        emitExpr(args.get(0), mv, locals);
+        emitExpr(args.get(1), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, SESSIONS, method,
+                "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
+        return true;
     }
 
     /** Emit an Expr.SeqOp. Two cases:

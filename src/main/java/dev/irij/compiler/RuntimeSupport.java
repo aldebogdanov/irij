@@ -112,6 +112,20 @@ public final class RuntimeSupport {
         if (recv == null) {
             throw new IllegalArgumentException("Cannot access ." + member + " on null");
         }
+        // Match Interpreter.evalDotAccess: check Irij record-shaped
+        // values first so `map.key` and `tagged.field` work in
+        // bytecode mode without falling through to JavaInterop.
+        if (recv instanceof dev.irij.interpreter.Values.IrijMap m) {
+            Object v = m.entries().get(member);
+            return v != null ? v : dev.irij.interpreter.Values.UNIT;
+        }
+        if (recv instanceof dev.irij.interpreter.Values.Tagged t
+                && t.namedFields() != null) {
+            Object v = t.namedFields().get(member);
+            if (v != null) return v;
+            throw new dev.irij.interpreter.IrijRuntimeError(
+                    "No field '" + member + "' on " + t.tag());
+        }
         return dev.irij.interpreter.JavaInterop.resolveInstanceRef(recv, member);
     }
 

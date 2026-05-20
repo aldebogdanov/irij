@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.5.3 &mdash; Phase R3 batches 2-5: SQLite raw-db-* / SSE raw-sse-* / multipart raw-multipart-* / raw-http-serve / JSON / FileIO / env / time ported to bytecode. Sequence operators (`@`, `/?`, `/!`, `@i`, `/^`, `/$`, `/+`, `/*`, `/#`, `/&`, `/|`) and `|>` / `<|` pipe lowered. Partial application of user fns (`f a` when arity > 1 yields an IrijFn). Top-level `:=` binds hoisted to static fields. Plus 0.5.2's heavy-hitter ports.
+0.5.4 &mdash; Phase R3 complete: sandboxed-interpreter tier ported (raw-session-* + raw-nrepl-eval-sandboxed via new `RuntimeSessions`). Bytecode mode now handles dot-access on IrijMap / Tagged before falling to JVM interop. SQLite native libraries + META-INF/services bundled in bytecode JARs. `irij build --mode=bytecode-sm` on the full irij.online website builds and runs end-to-end.

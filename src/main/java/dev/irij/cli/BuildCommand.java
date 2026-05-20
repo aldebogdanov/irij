@@ -434,7 +434,14 @@ public final class BuildCommand {
                         // Classes pulled in as dependencies of RuntimeSupport (ASM, gson, …)
                         // are already in dev/irij/** space? No — they live under their own
                         // packages. Copy them too so emitted classes resolve at runtime.
-                        || name.endsWith(".class") && isRuntimeDep(name);
+                        || (name.endsWith(".class") && isRuntimeDep(name))
+                        // SQLite ships native libraries under org/sqlite/native/
+                        // (.so/.dylib/.dll for each platform); bundle them
+                        // so the JDBC driver can self-load on start.
+                        || name.startsWith("org/sqlite/native/")
+                        // Service loader files — java.sql.Driver discovers
+                        // org.sqlite.JDBC via META-INF/services.
+                        || name.startsWith("META-INF/services/");
                 if (!keep) continue;
                 if (!written.add(name)) continue;
                 jos.putNextEntry(new JarEntry(name));
@@ -449,7 +456,14 @@ public final class BuildCommand {
         return name.startsWith("com/google/gson/")
                 || name.startsWith("com/moandjiezana/toml/")
                 || name.startsWith("org/antlr/v4/runtime/")
-                || name.startsWith("org/objectweb/asm/");
+                || name.startsWith("org/objectweb/asm/")
+                // SQLite JDBC driver — needed by RuntimeSupport.rawDbOpen
+                // and any program using std.db.
+                || name.startsWith("org/sqlite/")
+                // JLine — needed by the REPL surface that builtins
+                // can transitively reach (e.g. when stdlib functions
+                // print prompts). Cheap to bundle.
+                || name.startsWith("org/jline/");
     }
 
     private static List<Path> collectIrjFilesRecursive(Path dir) throws IOException {
