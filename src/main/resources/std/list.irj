@@ -18,17 +18,17 @@ mod std.list
 ;;   - Non-callback fns have no effect row — they're pure data ops.
 ;;     A pure caller can call them; a `::: Console` caller can too.
 
-pub fn fold :: (_ _ -> _):eff _ _ _ ::: eff
+pub fn fold :: (Fn):eff _ _ _ ::: eff
   (f acc v ->
     if (empty? v) acc
     else (fold f (f acc (head v)) (tail v)))
 
-pub fn map :: (_ -> _):eff _ _ ::: eff
+pub fn map :: (Fn):eff _ _ ::: eff
   (f v -> map-step f v #[])
 
 ;; Tail-recursive map driver. Same row-var so it inherits the
 ;; callback's effects.
-fn map-step :: (_ -> _):eff _ _ _ ::: eff
+fn map-step :: (Fn):eff _ _ _ ::: eff
   (f v acc ->
     if (empty? v) acc
     else (map-step f (tail v) (conj acc (f (head v)))))
