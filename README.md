@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.6.3 &mdash; R4: `irij build` default mode flipped from `interp` to `bytecode-sm`. The interpreter is now reachable via the explicit `--mode=interp` opt-in during the v0.6.x transition. Builtin-vs-user-fn / builtin-vs-effect-op name conflicts now resolve in the documented order **user fn > effect op > builtin** (so `div` resolves to vrata.html's element builder before the math primitive; raw Math.log accessible via `java.lang.Math/log`). Plus 0.6.2's last builtins.
+0.6.4 &mdash; Qualified builtin access. `std.math` now re-exports `div` (in addition to existing sqrt/sin/cos/abs/min/max/etc.) so a shadowed math primitive stays reachable via `math.div`. `internals/stdlib.md` documents the name-resolution order (user fn → effect op → builtin) and the escape hatches (`math.X` qualified path, `java.lang.X` JVM interop). New `QualifiedUseTest` covers bytecode-mode qualified-use semantics. Interpreter doc carries an explicit deprecation banner. Website roadmap + feature blurbs refreshed to reflect v0.6.x reality.

@@ -1,8 +1,19 @@
-# Interpreter
+# Interpreter (DEPRECATED — scheduled for removal in v0.7.0)
 
-`dev.irij.interpreter.Interpreter` — tree-walking evaluator. Spec
-authority during development; bytecode follows the same semantics but
-some checks (specs, effect rows) currently live only here.
+`dev.irij.interpreter.Interpreter` — tree-walking evaluator. **No
+longer the source of truth.** Bytecode is the primary execution
+mode as of v0.6.x; the interpreter remains reachable via:
+
+- `irij build --mode=interp` — legacy bundling
+- nREPL `eval-interp` op — legacy eval
+
+Both go away when the `dev.irij.interpreter` package is deleted
+(Phase R5). New code should target the bytecode emitter; reach
+for `Interpreter` only to track down a bug that the bytecode mode
+inherited from the historical reference impl.
+
+The text below documents the historical design for archival; it
+is not maintained as a contract going forward.
 
 ## Core loop
 

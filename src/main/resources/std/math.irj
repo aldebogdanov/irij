@@ -16,6 +16,14 @@ pub pow := pow
 pub abs := abs
 pub min := min
 pub max := max
+pub div := div    ;; integer division (re-exports the math builtin;
+                  ;; gives a qualified path like `math.div` when a
+                  ;; user-level fn or seed shadows `div` at the
+                  ;; top level — e.g. vrata.html's element builder).
+;; NB: `mod` is a reserved word (the module-decl keyword), so it
+;; can't be re-exported as an identifier. Reach the modulo
+;; primitive via `(a % b)` (the `%` operator) or the JVM interop
+;; `(java.lang.Math/floorMod a b)`.
 pub pi := pi
 pub e := e
 pub random-int := random-int
