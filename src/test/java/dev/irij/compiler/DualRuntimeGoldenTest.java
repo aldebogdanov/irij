@@ -535,7 +535,7 @@ class DualRuntimeGoldenTest {
               (x -> x * 2)
             """);
         String source = """
-            use mymod.util
+            use mymod.util :as util
 
             print (util.inc 41)
             print (util.twice 21)

@@ -151,5 +151,10 @@ public sealed interface Decl extends Node {
     sealed interface UseModifier {
         record Open(String keyword) implements UseModifier {}
         record Selective(List<String> names) implements UseModifier {}
+        /** `use mod.path :as alias` — explicit single-segment alias.
+         *  Replaces the old "implicit last-segment alias" default,
+         *  which collided silently across modules ending in the
+         *  same short name. */
+        record As(String alias) implements UseModifier {}
     }
 }

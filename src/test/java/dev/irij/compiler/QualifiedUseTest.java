@@ -42,7 +42,7 @@ class QualifiedUseTest {
     @Test
     void qualifiedSqrtFromStdMath() throws Exception {
         assertEquals("4.0", run("""
-                use std.math
+                use std.math :as math
                 println (math.sqrt 16)
                 """));
     }
@@ -52,7 +52,7 @@ class QualifiedUseTest {
         // `std.math` re-exports `div`. Qualified access works even
         // if the global `div` is shadowed by a local fn.
         assertEquals("3", run("""
-                use std.math
+                use std.math :as math
                 println (math.div 10 3)
                 """));
     }
@@ -67,7 +67,7 @@ class QualifiedUseTest {
     @Test
     void qualifiedPiConstant() throws Exception {
         assertEquals("true", run("""
-                use std.math
+                use std.math :as math
                 println (math.pi > 3.14)
                 """));
     }

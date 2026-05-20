@@ -1810,20 +1810,24 @@ public final class Interpreter {
 
     private Object evalUseDecl(Decl.UseDecl ud, Environment env) {
         var mod = moduleRegistry.resolve(ud.qualifiedName(), ud.loc());
-        // Extract short name (last segment after final dot)
-        var parts = ud.qualifiedName().split("\\.");
-        var shortName = parts[parts.length - 1];
 
         if (ud.modifier() == null) {
-            // Qualified: bind short name → ModuleValue (dot-access only)
-            defineInScope(env, shortName, mod);
+            // v0.6.4+: bare `use mod.path` is rejected. The implicit
+            // last-segment alias was ambiguous when two imports ended
+            // in the same name. Require an explicit modifier.
+            throw new IrijRuntimeError(
+                "`use " + ud.qualifiedName() + "` requires an explicit "
+                + "modifier: `:open` (flatten), `:as <alias>` (rename), or "
+                + "`{ name name ... }` (selective)", ud.loc());
+        } else if (ud.modifier() instanceof Decl.UseModifier.As asMod) {
+            // :as alias — bind only under the chosen alias
+            defineInScope(env, asMod.alias(), mod);
         } else if (ud.modifier() instanceof Decl.UseModifier.Open) {
-            // :open — bind short name AND copy all exports
-            defineInScope(env, shortName, mod);
+            // :open — copy all exports into current scope. No alias is
+            // bound; user reaches exports as bare names.
             env.copyAllFrom(mod.exports());
         } else if (ud.modifier() instanceof Decl.UseModifier.Selective sel) {
-            // {name1 name2} — bind short name AND copy only named exports
-            defineInScope(env, shortName, mod);
+            // {name1 name2} — copy only named exports into current scope
             for (var name : sel.names()) {
                 if (!mod.exports().isDefined(name)) {
                     throw new IrijRuntimeError(

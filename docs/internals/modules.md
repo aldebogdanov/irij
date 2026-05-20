@@ -6,17 +6,43 @@ linkage.
 ## Declaration shapes
 
 ```
-mod my.app                ;; first non-comment line declares the module
-use std.list :open        ;; pulls every pub into scope
-use std.text              ;; qualified access: text.trim
-use std.text :open        ;; opens text into scope
-use mymod.helpers :inc :twice   ;; just `inc` and `twice`
+mod my.app                       ;; first non-comment line declares the module
+use std.list :open               ;; flatten every pub into the current scope
+use std.text :as text            ;; alias: text.trim, text.split, …
+use std.math :as math            ;; alias: math.sqrt, math.div, …
+use mymod.helpers {inc twice}    ;; selective: just `inc` and `twice`
 
 pub fn greet
   (name -> "Hi, " ++ name)
 
 fn helper
   (x -> x * 2)            ;; not pub — invisible to importers
+```
+
+**Modifier required** (v0.6.4+). `use mod.path` without a
+modifier is rejected at compile time:
+
+```
+`use std.math` requires an explicit modifier: `:open` (flatten),
+`:as <alias>` (rename), or `{ name name ... }` (selective)
+```
+
+Before v0.6.4 the bare form created an implicit alias from the
+last segment of the qualified name (`use std.math` → `math.X`).
+That broke silently when two imports ended in the same name
+(`use std.math` + `use third-party.math` both bound `math`).
+Explicit `:as` resolves the ambiguity by making the alias choice
+the programmer's responsibility.
+
+The shadowed-builtin escape pattern uses `:as` directly:
+
+```
+use std.math :as math
+
+fn div :: Map Vec Map
+  (attrs children -> el "div" attrs children)
+
+result := math.div 10 3   ;; bare `div` is the local user fn
 ```
 
 ## Resolution

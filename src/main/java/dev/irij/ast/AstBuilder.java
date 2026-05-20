@@ -72,7 +72,16 @@ public class AstBuilder {
         Decl.UseModifier mod = null;
         if (ctx.useModifier() != null) {
             var mc = ctx.useModifier();
-            if (mc.KEYWORD() != null) {
+            if (mc.KEYWORD() != null && mc.IDENT() != null) {
+                // `:as alias` — KEYWORD then IDENT.
+                String kw = mc.KEYWORD().getText();
+                if (!":as".equals(kw)) {
+                    throw new IllegalArgumentException(
+                            "use modifier `" + kw + "` doesn't take an "
+                                    + "argument; did you mean `:as`?");
+                }
+                mod = new Decl.UseModifier.As(mc.IDENT().getText());
+            } else if (mc.KEYWORD() != null) {
                 mod = new Decl.UseModifier.Open(mc.KEYWORD().getText());
             } else if (mc.nameList() != null) {
                 var names = new ArrayList<String>();

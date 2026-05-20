@@ -64,9 +64,27 @@ final class ModuleInliner {
                 continue;
             }
             if (inner instanceof Decl.UseDecl ud) {
-                // Register alias (last segment).
-                String[] parts = ud.qualifiedName().split("\\.");
-                aliases.add(parts[parts.length - 1]);
+                // Register alias based on the use modifier.
+                //
+                //   use mod.path :open       → no alias; flatten exports
+                //   use mod.path :as foo     → alias `foo`
+                //   use mod.path {names}     → no alias; selective
+                //   use mod.path             → REJECTED — was the
+                //     implicit last-segment alias; ambiguous when
+                //     two modules end in the same name. v0.6.4+
+                //     requires an explicit modifier.
+                Decl.UseModifier um = ud.modifier();
+                if (um == null) {
+                    throw new IrijCompiler.CompileException(
+                            "`use " + ud.qualifiedName() + "` requires an "
+                                    + "explicit modifier: `:open` (flatten), "
+                                    + "`:as <alias>` (rename), or "
+                                    + "`{ name name ... }` (selective)");
+                }
+                if (um instanceof Decl.UseModifier.As asMod) {
+                    aliases.add(asMod.alias());
+                }
+                // `:open` and `:selective` paths don't register an alias.
                 loadAndInline(ud.qualifiedName(), out);
                 continue;
             }

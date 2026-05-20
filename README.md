@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.6.4 &mdash; Qualified builtin access. `std.math` now re-exports `div` (in addition to existing sqrt/sin/cos/abs/min/max/etc.) so a shadowed math primitive stays reachable via `math.div`. `internals/stdlib.md` documents the name-resolution order (user fn → effect op → builtin) and the escape hatches (`math.X` qualified path, `java.lang.X` JVM interop). New `QualifiedUseTest` covers bytecode-mode qualified-use semantics. Interpreter doc carries an explicit deprecation banner. Website roadmap + feature blurbs refreshed to reflect v0.6.x reality.
+0.6.5 &mdash; **Breaking**: `use mod.path` requires an explicit modifier. The old implicit-last-segment alias (`use std.math` → bare `math.X` access) is gone — it collided silently when two imports ended in the same name. Choose: `:open` (flatten), `:as <alias>` (rename), or `{ name … }` (selective). The `:as` form is what you want for qualified access; the previous `use std.math` now writes as `use std.math :as math`. Plus 0.6.4's std.math re-exports + doc refresh.

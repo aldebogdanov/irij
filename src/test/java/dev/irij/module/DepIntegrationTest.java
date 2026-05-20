@@ -52,7 +52,7 @@ class DepIntegrationTest {
                 """);
 
             var output = runWithDeps(tmp, """
-                use mylib
+                use mylib :as mylib
                 println ~ mylib.greet "world"
                 """);
             assertEquals("hello world", output);

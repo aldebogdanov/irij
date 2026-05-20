@@ -44,7 +44,8 @@ useDecl
     ;
 
 useModifier
-    : KEYWORD                                // use std.json :open
+    : KEYWORD IDENT                          // use std.math :as m  → m.sqrt
+    | KEYWORD                                // use std.json :open
     | LBRACE nameList RBRACE                 // use std.http {get post}
     ;
 

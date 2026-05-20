@@ -2268,7 +2268,7 @@ class InterpreterTest {
     class Modules {
         @Test void useStdMathQualified() {
             assertEquals("4.0", run("""
-                use std.math
+                use std.math :as math
                 println ~ math.sqrt 16
                 """));
         }
@@ -2459,7 +2459,7 @@ class InterpreterTest {
 
         @Test void qualifiedAndDotAccess() {
             assertEquals("3.0", run("""
-                use std.math
+                use std.math :as math
                 println ~ math.sqrt 9
                 """));
         }
