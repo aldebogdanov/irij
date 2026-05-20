@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.5.0 &mdash; Effect-row soundness (subsumption + compile-time lint + per-ref JVM capability) and bytecode/interp spec parity (full SpecExpr coverage, pre/post contracts, user-declared product/sum specs, embedded nREPL in built JARs).
+0.5.1 &mdash; Bytecode-mode seed resolution (`irij build --mode=bytecode-sm` now inlines seeds from `~/.irij/seeds/`) and `std.serve` effect-row fix (router family is now effect-polymorphic via `::: Any`). Patch on 0.5.0's effect-row soundness + bytecode/interp spec parity work.
