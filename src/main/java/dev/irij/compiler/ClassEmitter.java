@@ -2,6 +2,7 @@ package dev.irij.compiler;
 
 import dev.irij.ast.Decl;
 import dev.irij.ast.Expr;
+import dev.irij.ast.Node;
 import dev.irij.ast.Pattern;
 import dev.irij.ast.Stmt;
 import org.objectweb.asm.ClassWriter;
@@ -113,23 +114,101 @@ final class ClassEmitter implements Opcodes {
     private final CompileOptions options;
 
     ClassEmitter(String className) {
-        this(className, Set.of(), CompileOptions.defaults());
+        this(className, Set.of(), CompileOptions.defaults(), null);
     }
 
     ClassEmitter(String className, Set<String> moduleAliases) {
-        this(className, moduleAliases, CompileOptions.defaults());
+        this(className, moduleAliases, CompileOptions.defaults(), null);
     }
 
     ClassEmitter(String className, Set<String> moduleAliases, CompileOptions options) {
+        this(className, moduleAliases, options, null);
+    }
+
+    ClassEmitter(String className, Set<String> moduleAliases,
+                  CompileOptions options, String sourceFile) {
         this.internalName = className.replace('.', '/');
         this.moduleAliases = moduleAliases;
         this.options = options;
+        // Default to a synthesized name so JVM stack traces show
+        // "Program.irj" instead of "Unknown Source" when the build
+        // path didn't pass a real filename through.
+        this.sourceFile = sourceFile != null ? sourceFile
+                : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
+    }
+
+    /** Irij source filename for the JVM SourceFile attribute. Set
+     *  once at construction; appears in every stack frame from the
+     *  emitted class as {@code at irij.Program.main(server.irj:42)}. */
+    private final String sourceFile;
+
+    /** Emit a JVM LineNumber attribute mapping the next instruction
+     *  to {@code loc}'s Irij source line. Skips zero/negative lines
+     *  (synthetic / unknown). One attribute per Expr/Stmt entry is
+     *  acceptable; ASM compacts duplicates per LineNumberTable. */
+    private void emitLine(org.objectweb.asm.MethodVisitor mv, Node.SourceLoc loc) {
+        if (loc == null) return;
+        int line = loc.line();
+        if (line <= 0) return;
+        org.objectweb.asm.Label l = new org.objectweb.asm.Label();
+        mv.visitLabel(l);
+        mv.visitLineNumber(line, l);
+    }
+
+    /** Best-effort SourceLoc lookup on any AST node. Most Expr / Stmt
+     *  records expose a {@code loc()} accessor; the few that don't
+     *  return null and skip the line attribute. */
+    private static Node.SourceLoc locOf(Object node) {
+        return switch (node) {
+            case Expr.IntLit n -> n.loc();
+            case Expr.FloatLit n -> n.loc();
+            case Expr.BoolLit n -> n.loc();
+            case Expr.StrLit n -> n.loc();
+            case Expr.UnitLit n -> n.loc();
+            case Expr.KeywordLit n -> n.loc();
+            case Expr.HexLit n -> n.loc();
+            case Expr.RationalLit n -> n.loc();
+            case Expr.Var n -> n.loc();
+            case Expr.TypeRef n -> n.loc();
+            case Expr.RoleRef n -> n.loc();
+            case Expr.JavaRef n -> n.loc();
+            case Expr.BinaryOp n -> n.loc();
+            case Expr.UnaryOp n -> n.loc();
+            case Expr.App n -> n.loc();
+            case Expr.Lambda n -> n.loc();
+            case Expr.IfExpr n -> n.loc();
+            case Expr.MatchExpr n -> n.loc();
+            case Expr.Block n -> n.loc();
+            case Expr.DotAccess n -> n.loc();
+            case Expr.VectorLit n -> n.loc();
+            case Expr.SetLit n -> n.loc();
+            case Expr.TupleLit n -> n.loc();
+            case Expr.MapLit n -> n.loc();
+            case Expr.Pipe n -> n.loc();
+            case Expr.Compose n -> n.loc();
+            case Expr.SeqOp n -> n.loc();
+            case Expr.OpSection n -> n.loc();
+            case Stmt.ExprStmt n -> n.loc();
+            case Stmt.Bind n -> n.loc();
+            case Stmt.MutBind n -> n.loc();
+            case Stmt.Assign n -> n.loc();
+            case Stmt.IfStmt n -> n.loc();
+            case Stmt.MatchStmt n -> n.loc();
+            case Stmt.With n -> n.loc();
+            case Stmt.Scope n -> n.loc();
+            default -> null;
+        };
     }
 
     byte[] emit(List<Decl> decls) {
         ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
         this.classWriter = cw;
         cw.visit(V21, ACC_PUBLIC | ACC_FINAL, internalName, null, OBJ, null);
+        // Write SourceFile attribute: JVM stack traces use it to
+        // render frames as "irij.Program.main(server.irj:42)" rather
+        // than "Unknown Source". Per-expression LineNumber attributes
+        // (emitted in emitExpr/emitStmt) supply the line numbers.
+        cw.visitSource(sourceFile, null);
 
         // Pass 1: register fn signatures, product-spec field names,
         // proto impls. Also declare static fields for top-level `:=`
@@ -574,26 +653,7 @@ final class ClassEmitter implements Opcodes {
                     emitMatchExpr(me, mv, locals);
                     emitTailReturn(mv);
                 }
-                case Decl.FnBody.ImperativeBody ib -> {
-                    List<Stmt> stmts = ib.stmts();
-                    if (stmts.isEmpty()) {
-                        mv.visitInsn(ACONST_NULL);
-                        emitTailReturn(mv);
-                        break;
-                    }
-                    for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
-                    Stmt last = stmts.get(stmts.size() - 1);
-                    if (last instanceof Stmt.ExprStmt es) {
-                        emitTailExpr(es.expr(), mv, locals);
-                    } else if (last instanceof Stmt.With w) {
-                        emitWith(w, mv, locals);
-                        emitTailReturn(mv);
-                    } else {
-                        emitStmt(last, mv, locals);
-                        mv.visitInsn(ACONST_NULL);
-                        emitTailReturn(mv);
-                    }
-                }
+                case Decl.FnBody.ImperativeBody ib -> emitImperativeTail(ib.stmts(), mv, locals);
                 default -> throw new IrijCompiler.CompileException(
                         "MVP: unsupported fn body: " + fn.body().getClass().getSimpleName());
             }
@@ -651,24 +711,7 @@ final class ClassEmitter implements Opcodes {
 
         // 3. Block: earlier stmts non-tail, last expr tail.
         if (e instanceof Expr.Block blk) {
-            List<Stmt> stmts = blk.stmts();
-            if (stmts.isEmpty()) {
-                mv.visitInsn(ACONST_NULL);
-                emitTailReturn(mv);
-                return;
-            }
-            for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
-            Stmt last = stmts.get(stmts.size() - 1);
-            if (last instanceof Stmt.ExprStmt es) {
-                emitTailExpr(es.expr(), mv, locals);
-            } else if (last instanceof Stmt.With w) {
-                emitWith(w, mv, locals);
-                emitTailReturn(mv);
-            } else {
-                emitStmt(last, mv, locals);
-                mv.visitInsn(ACONST_NULL);
-                emitTailReturn(mv);
-            }
+            emitImperativeTail(blk.stmts(), mv, locals);
             return;
         }
 
@@ -750,6 +793,7 @@ final class ClassEmitter implements Opcodes {
     }
 
     private void emitStmt(Stmt s, MethodVisitor mv, Locals locals) {
+        emitLine(mv, locOf(s));
         switch (s) {
             case Stmt.ExprStmt es -> emitStmtExpr(es.expr(), mv, locals);
             case Stmt.Bind b -> emitBind(b, mv, locals);
@@ -860,6 +904,7 @@ final class ClassEmitter implements Opcodes {
     // ── Expressions (produce one Object on stack) ───────────────────────
 
     private void emitExpr(Expr e, MethodVisitor mv, Locals locals) {
+        emitLine(mv, locOf(e));
         switch (e) {
             case Expr.IntLit i -> {
                 pushLong(mv, i.value());
@@ -3304,6 +3349,59 @@ final class ClassEmitter implements Opcodes {
                 wrapperName, wrapperDesc, false);
         mv.visitInvokeDynamicInsn("apply", "()" + IRIJ_FN_DESC, bsm,
                 samType, wrapperHandle, samType);
+    }
+
+    /** Emit a sequence of statements where the last one supplies the
+     *  fn body's return value. Used by ImperativeBody fns and any
+     *  if-branch in tail position. Mirrors the interpreter's
+     *  execStmtListReturn: the last ExprStmt or With's value bubbles
+     *  out; a trailing IfStmt is treated as an if-expression so its
+     *  branches' values bubble out too. Anything else (Bind, Assign,
+     *  MatchStmt without a value) returns Unit, matching interp. */
+    private void emitImperativeTail(List<Stmt> stmts, MethodVisitor mv, Locals locals) {
+        if (stmts.isEmpty()) {
+            mv.visitInsn(ACONST_NULL);
+            emitTailReturn(mv);
+            return;
+        }
+        for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, locals);
+        Stmt last = stmts.get(stmts.size() - 1);
+        if (last instanceof Stmt.ExprStmt es) {
+            emitTailExpr(es.expr(), mv, locals);
+        } else if (last instanceof Stmt.With w) {
+            emitWith(w, mv, locals);
+            emitTailReturn(mv);
+        } else if (last instanceof Stmt.IfStmt ifs) {
+            emitTailIfStmt(ifs, mv, locals);
+        } else if (last instanceof Stmt.MatchStmt ms) {
+            // Match in tail position: emit as expression so each
+            // arm's last expression bubbles out.
+            emitMatchExpr(new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc()),
+                    mv, locals);
+            emitTailReturn(mv);
+        } else {
+            emitStmt(last, mv, locals);
+            mv.visitInsn(ACONST_NULL);
+            emitTailReturn(mv);
+        }
+    }
+
+    /** Emit an IfStmt at tail position. Each branch's last statement
+     *  supplies the fn's return value via {@link #emitImperativeTail}. */
+    private void emitTailIfStmt(Stmt.IfStmt ifs, MethodVisitor mv, Locals locals) {
+        emitExpr(ifs.cond(), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "truthy",
+                "(Ljava/lang/Object;)Z", false);
+        Label elseL = new Label();
+        mv.visitJumpInsn(IFEQ, elseL);
+        emitImperativeTail(ifs.thenBranch(), mv, locals);
+        mv.visitLabel(elseL);
+        if (ifs.elseBranch() != null) {
+            emitImperativeTail(ifs.elseBranch(), mv, locals);
+        } else {
+            mv.visitInsn(ACONST_NULL);
+            emitTailReturn(mv);
+        }
     }
 
     /** Lazily declare a static field for a top-level binding. Field

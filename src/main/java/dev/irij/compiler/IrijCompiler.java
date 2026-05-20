@@ -49,6 +49,16 @@ public final class IrijCompiler {
     public static byte[] compileSource(String source, String className,
                                         Path sourceRoot, CompileOptions opts,
                                         List<Path> seedRoots) {
+        return compileSource(source, className, sourceRoot, opts, seedRoots, null);
+    }
+
+    /** Compile with an explicit Irij source-file name for the JVM
+     *  {@code SourceFile} attribute. When supplied, stack traces from
+     *  the emitted class show as
+     *  {@code at irij.Program.main(server.irj:42)}. */
+    public static byte[] compileSource(String source, String className,
+                                        Path sourceRoot, CompileOptions opts,
+                                        List<Path> seedRoots, String sourceFile) {
         var parsed = IrijParseDriver.parse(source);
         if (parsed.hasErrors()) {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
@@ -60,7 +70,7 @@ public final class IrijCompiler {
         // mode gap: bytecode emission doesn't enforce rows at runtime,
         // so the static lint must reject violations before emit).
         EffectRowChecker.check(inlined);
-        return new ClassEmitter(className, inliner.aliases(), opts).emit(inlined);
+        return new ClassEmitter(className, inliner.aliases(), opts, sourceFile).emit(inlined);
     }
 
     /** Compile an Irij file to a classfile byte[]. */
@@ -76,7 +86,8 @@ public final class IrijCompiler {
     public static byte[] compileFile(Path path, String className, CompileOptions opts,
                                       List<Path> seedRoots) throws IOException {
         return compileSource(Files.readString(path), className,
-                path.toAbsolutePath().getParent(), opts, seedRoots);
+                path.toAbsolutePath().getParent(), opts, seedRoots,
+                path.getFileName().toString());
     }
 
     public static final class CompileException extends RuntimeException {

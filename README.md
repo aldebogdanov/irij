@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.5.4 &mdash; Phase R3 complete: sandboxed-interpreter tier ported (raw-session-* + raw-nrepl-eval-sandboxed via new `RuntimeSessions`). Bytecode mode now handles dot-access on IrijMap / Tagged before falling to JVM interop. SQLite native libraries + META-INF/services bundled in bytecode JARs. `irij build --mode=bytecode-sm` on the full irij.online website builds and runs end-to-end.
+0.5.5 &mdash; Block-style if / match in tail position now bubbles the chosen branch's value out (previously returned Unit, causing destructure failures like `#[sql params] := compose-query-data q`). JVM stack traces from compiled bytecode now show `irij.Program.method(server.irj:42)` instead of `Unknown Source`: per-expression LineNumber attributes + SourceFile attribute carry Irij source coordinates into the JVM debug info. Plus 0.5.4's sandboxed-interpreter tier and full bytecode-mode irij.online support.
