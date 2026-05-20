@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.5.5 &mdash; Block-style if / match in tail position now bubbles the chosen branch's value out (previously returned Unit, causing destructure failures like `#[sql params] := compose-query-data q`). JVM stack traces from compiled bytecode now show `irij.Program.method(server.irj:42)` instead of `Unknown Source`: per-expression LineNumber attributes + SourceFile attribute carry Irij source coordinates into the JVM debug info. Plus 0.5.4's sandboxed-interpreter tier and full bytecode-mode irij.online support.
+0.6.0 &mdash; Parametric effect rows. Higher-order fns declare row variables (`(Fn):eff` / `(_ -> Bool):eff` / `::: eff`) that bind from the actual callback's effect row at each call site. `std.list` (fold, map, filter, …) ported off `::: Any` to the parametric form; `::: Any` removed from user code (stdlib keeps it as a transitional escape hatch for opaque-record dispatch). Multi-line error chains point at the row-var binding site. Interpreter is now officially deprecated; bytecode is the source of truth. Plus 0.5.6's Enum-keyword-only syntax.

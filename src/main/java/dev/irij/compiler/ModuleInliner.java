@@ -55,7 +55,14 @@ final class ModuleInliner {
     private void expand(List<Decl> decls, List<Decl> out) {
         for (Decl d : decls) {
             Decl inner = d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di ? di : d;
-            if (inner instanceof Decl.ModDecl) continue;
+            // ModDecls are preserved so downstream passes (notably
+            // EffectRowChecker) can determine which module each fn
+            // came from — needed for stdlib-only escape hatches like
+            // `::: Any`. The emitter skips them.
+            if (inner instanceof Decl.ModDecl) {
+                out.add(inner);
+                continue;
+            }
             if (inner instanceof Decl.UseDecl ud) {
                 // Register alias (last segment).
                 String[] parts = ud.qualifiedName().split("\\.");

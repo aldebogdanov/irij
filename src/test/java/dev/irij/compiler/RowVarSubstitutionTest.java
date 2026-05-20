@@ -113,6 +113,18 @@ class RowVarSubstitutionTest {
     }
 
     @Test
+    void anyRejectedInUserCode() {
+        // Phase 5: `::: Any` is no longer allowed in user-level fns.
+        // Stdlib still uses it as a transitional escape hatch.
+        var e = expectFail("""
+                fn pretend :: _ _ _ ::: Any
+                  (f x -> f x)
+                """);
+        assertTrue(e.getMessage().contains("Any"),
+                () -> "expected Any-removal error, got: " + e.getMessage());
+    }
+
+    @Test
     void pureCallbackBindsRowVarToEmptySet() {
         // Callback performs no effects. Row-var binds to {}.
         // Callee's effective row = {} ∪ {} = empty. Caller passes

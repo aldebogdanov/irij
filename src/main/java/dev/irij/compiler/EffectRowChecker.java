@@ -117,10 +117,20 @@ public final class EffectRowChecker {
     }
 
     private void run(List<Decl> decls) {
+        // Module-track in pass 1: each fn gets stamped with the
+        // qualified module name from the most-recent preceding
+        // ModDecl. Required for the stdlib-only `::: Any` escape
+        // hatch (Phase 5).
+        String currentMod = null;
         for (Decl d : decls) {
+            if (d instanceof Decl.ModDecl md) {
+                currentMod = md.qualifiedName();
+                continue;
+            }
             Object inner = (d instanceof Decl.PubDecl pd) ? pd.inner() : d;
             if (inner instanceof Decl.FnDecl fn) {
                 fnRows.put(fn.name(), fn.effectRow());
+                fnModule.put(fn.name(), currentMod);
                 if (fn.specAnnotations() != null) {
                     fnSpecs.put(fn.name(), fn.specAnnotations());
                 }
@@ -131,7 +141,25 @@ public final class EffectRowChecker {
                 handlerEffect.put(hd.name(), hd.effectName());
             }
         }
+        // Phase 5: reject `::: Any` in user code (non-stdlib modules).
+        // Stdlib keeps it as the transitional escape hatch for
+        // dispatch through opaque records (e.g. std.serve router).
+        for (var e : fnRows.entrySet()) {
+            List<String> row = e.getValue();
+            if (row == null) continue;
+            if (!row.contains("Any")) continue;
+            String mod = fnModule.get(e.getKey());
+            if (mod == null || !mod.startsWith("std.")) {
+                throw new IrijCompiler.CompileException(
+                        "`::: Any` is no longer allowed in user code "
+                                + "(use a parametric row variable like "
+                                + "`:eff` / `::: eff` instead). "
+                                + "Fn: '" + e.getKey() + "'"
+                                + (mod != null ? " in module '" + mod + "'" : ""));
+            }
+        }
         for (Decl d : decls) {
+            if (d instanceof Decl.ModDecl) continue;
             Object inner = (d instanceof Decl.PubDecl pd) ? pd.inner() : d;
             if (inner instanceof Decl.FnDecl fn) {
                 checkFn(fn);
@@ -140,6 +168,11 @@ public final class EffectRowChecker {
             }
         }
     }
+
+    /** fn-name → originating module qualified name. Used for the
+     *  stdlib-only `::: Any` allowance. {@code null} means the fn
+     *  lives in the program's top-level script (no `mod` decl). */
+    private final Map<String, String> fnModule = new HashMap<>();
 
     private void checkFn(Decl.FnDecl fn) {
         Set<String> avail = available(fn.effectRow());
@@ -415,13 +448,8 @@ public final class EffectRowChecker {
         // Verify caller's avail ⊇ effective.
         for (String eff : effective) {
             if (callerAvail.contains(eff)) continue;
-            String origin = effectOrigin(eff, bindings, bindingArgIdx);
             throw new IrijCompiler.CompileException(
-                    "Effect '" + eff + "' not declared in " + ctx
-                            + ": propagated to '" + fnName + "' call"
-                            + (origin != null ? " " + origin : "")
-                            + " — add ::: " + eff + " to enclosing fn's row"
-                            + (loc != null ? " at " + loc.line() + ":" + loc.col() : ""));
+                    formatChainError(eff, fnName, ctx, bindings, bindingArgIdx, loc));
         }
     }
 
@@ -434,20 +462,65 @@ public final class EffectRowChecker {
         };
     }
 
-    /** Render a "propagated via row-var X at arg N" suffix for error
-     *  messages, pointing at which arg position bound a row-var that
-     *  contributed the missing effect. */
-    private static String effectOrigin(String eff,
-                                        Map<String, Set<String>> bindings,
-                                        Map<String, Integer> argIdx) {
+    /** Render a multi-line error chain that points at the row-var
+     *  binding site, the propagation point, and the enclosing fn
+     *  that's missing the effect. Format mirrors what an IDE / LSP
+     *  would surface as inline diagnostics.
+     *
+     *  Example output:
+     *
+     *  <pre>
+     *  Effect 'Console' not declared in fn `process`
+     *    at 4:9
+     *    propagated to call 'fold' via row-variable `eff`,
+     *    bound from arg 0 (the callback's effect row = {Console})
+     *  Fix: add ::: Console to fn `process`, or pass a callback
+     *       that doesn't perform Console, or wrap the call in a
+     *       `with` for a Console-handling handler.
+     *  </pre>
+     */
+    private static String formatChainError(String eff, String fnName, String ctx,
+                                            Map<String, Set<String>> bindings,
+                                            Map<String, Integer> argIdx,
+                                            SourceLoc loc) {
+        // Find which row-var contributed `eff`, and which arg bound it.
+        String rowVar = null;
+        Integer idx = null;
+        Set<String> rowBinding = null;
         for (var e : bindings.entrySet()) {
             if (e.getValue().contains(eff)) {
-                Integer idx = argIdx.get(e.getKey());
-                return "via row-variable `" + e.getKey() + "` "
-                        + "(bound from arg " + (idx != null ? idx : "?") + ")";
+                rowVar = e.getKey();
+                idx = argIdx.get(rowVar);
+                rowBinding = e.getValue();
+                break;
             }
         }
-        return null;
+        StringBuilder sb = new StringBuilder();
+        sb.append("Effect '").append(eff).append("' not declared in ")
+                .append(ctx).append('\n');
+        if (loc != null) {
+            sb.append("  at ").append(loc.line()).append(':').append(loc.col()).append('\n');
+        }
+        if (rowVar != null) {
+            sb.append("  propagated to call '").append(fnName)
+                    .append("' via row-variable `").append(rowVar).append("`,\n");
+            if (idx != null) {
+                sb.append("  bound from arg ").append(idx);
+                if (rowBinding != null && !rowBinding.isEmpty()) {
+                    sb.append(" (callback's effect row = ").append(rowBinding).append(")");
+                }
+                sb.append('\n');
+            }
+        } else {
+            sb.append("  via call to '").append(fnName).append("'\n");
+        }
+        sb.append("Fix: add ::: ").append(eff).append(" to ")
+                .append(ctx)
+                .append(", or pass a callback without ::: ")
+                .append(eff)
+                .append(", or wrap the call in `with` for a handler\n     of ")
+                .append(eff).append(".");
+        return sb.toString();
     }
 
     /** Collect the effects an expression might perform. Used at call

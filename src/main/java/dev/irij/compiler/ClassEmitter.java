@@ -781,6 +781,7 @@ final class ClassEmitter implements Opcodes {
             case Decl.ProtoDecl __ -> { /* no runtime rep; methods go through dispatchers */ }
             case Decl.ImplDecl __ -> { /* bindings hoisted to static methods in pass 2b */ }
             case Decl.EffectDecl __ -> { /* ops registered in pass 1 */ }
+            case Decl.ModDecl __ -> { /* preserved by inliner for EffectRowChecker; emitter skips */ }
             case Decl.HandlerDecl hd -> emitHandlerStateInit(hd, mv, locals);
             case Decl.WithDecl wd -> emitStmt(wd.with(), mv, locals);
             case Decl.ScopeDecl sd -> {
