@@ -96,6 +96,41 @@ is to either (a) wire each into `emitBuiltinApp`, or (b) port to
 The general direction: stdlib is real Irij; Java provides the bare-
 metal building blocks.
 
+## Name conflicts: effect ops win over builtins
+
+When a user declares `effect Log { log :: Str -> () }`, the symbol
+`log` becomes an effect op in scope. It collides with the math
+builtin `log` (= `Math.log`). **The effect op wins**: the emitter
+checks `effectOps.containsKey(name)` before routing to a math
+builtin, so `log "hello"` dispatches via `perform` and the
+matching handler clause, never via `Math.log`.
+
+If a program needs both `Math.log` and a `Log` effect in the same
+module, the math one is reachable via Java interop:
+
+```
+use std.math :open
+
+effect Log
+  log :: Str -> ()
+
+handler default-log :: Log
+  log msg => resume ()
+
+fn entropy :: Vec Float ::: Log
+  (probs ->
+    log "computing entropy"
+    sum-of (@ (p -> p * (java.lang.Math/log p)) probs))
+;;                  ^^^^^^^^^^^^^^^^^^^^ Math.log via interop;
+;;                  the `log` effect op handles the perform above.
+```
+
+`Math/log` (the JVM static-ref form) bypasses the name-resolution
+table entirely and goes straight to the JDK method. This pattern
+generalises: any name collision between a stdlib builtin and a
+user-declared effect op is resolved by qualifying the builtin via
+its Java home.
+
 ## Why the split persists
 
 Mostly historical + practical:

@@ -94,4 +94,4 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.6.2 &mdash; R3: last 30+ builtins migrated to RuntimeSupport. Math (sqrt/sin/cos/tan/log/exp/floor/ceil/round/abs/pow/min/max/div/mod), random (random-int/random-float), string parsing (parse-int/parse-float/char-at/char-code/from-char-code), vec ops (reverse/sort/take/drop/concat), functional combinators (identity/const/flip), misc (dbg/read-line/toml-parse/raw-http-request), constants (pi/e). `std.math` and friends now compile cleanly via bytecode. `log` carefully falls through to effect-op dispatch when `effect Log` is declared. Plus 0.6.1's R1+R2.
+0.6.3 &mdash; R4: `irij build` default mode flipped from `interp` to `bytecode-sm`. The interpreter is now reachable via the explicit `--mode=interp` opt-in during the v0.6.x transition. Builtin-vs-user-fn / builtin-vs-effect-op name conflicts now resolve in the documented order **user fn > effect op > builtin** (so `div` resolves to vrata.html's element builder before the math primitive; raw Math.log accessible via `java.lang.Math/log`). Plus 0.6.2's last builtins.

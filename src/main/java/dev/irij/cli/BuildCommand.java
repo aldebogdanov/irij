@@ -30,7 +30,7 @@ public final class BuildCommand {
 
     /** How the entry program is packaged into the output JAR. */
     public enum Mode {
-        /** Bundle the interpreter + source (pre-14 behaviour, current default). */
+        /** Bundle the interpreter + source (legacy; deprecated). */
         INTERP,
         /** Bytecode compile with 14c.2 threaded handlers. */
         BYTECODE_THREADED,
@@ -329,12 +329,16 @@ public final class BuildCommand {
                         System.err.println("Unknown --mode value: " + value
                                 + " (expected: interp | bytecode-threaded | bytecode-sm)");
                         System.exit(1);
-                        yield Mode.INTERP;
+                        yield Mode.BYTECODE_SM;
                     }
                 };
             }
         }
-        return Mode.INTERP;
+        // R4: default flipped from INTERP to BYTECODE_SM. The
+        // interpreter is deprecated and will be removed in R5.
+        // Pass `--mode=interp` explicitly to opt back during the
+        // transition period.
+        return Mode.BYTECODE_SM;
     }
 
     private static String modeLabel(Mode m) {

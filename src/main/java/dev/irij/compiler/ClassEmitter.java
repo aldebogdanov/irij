@@ -3808,8 +3808,19 @@ final class ClassEmitter implements Opcodes {
         String fnName = null;
         if (app.fn() instanceof Expr.Var v) fnName = v.name();
         if (fnName != null) {
-            // Built-in intercepts
-            if (emitBuiltinApp(fnName, app.args(), mv, locals)) return;
+            // Name-resolution priority: user fn > effect op > builtin.
+            // A user-declared fn or effect op of the same name as a
+            // stdlib builtin (e.g. `div` is vrata.html's element
+            // builder; `log` is a typical effect op name) wins. The
+            // builtin is only reached when neither shadows it.
+            // The fully-qualified Java form (`java.lang.Math/log`)
+            // is the escape hatch for raw access to the JVM method.
+            boolean shadowed = fnArity.containsKey(fnName)
+                    || effectOps.containsKey(fnName);
+            if (!shadowed
+                    && emitBuiltinApp(fnName, app.args(), mv, locals)) {
+                return;
+            }
             // Effect op → perform (throws EffectException)
             if (effectOps.containsKey(fnName)) {
                 emitPerform(fnName, app.args(), mv, locals);

@@ -633,9 +633,10 @@ public final class IrijCli {
             Usage:
               irij                       start interactive REPL
               irij <file.irj>            run a source file
-              irij build                 package app into self-contained JAR
+              irij build                 package app into self-contained JAR (bytecode-sm, default since v0.6.x)
               irij build <file.irj>      build with explicit entry point
               irij build -o out.jar      build with custom output path
+              irij build --mode=interp   build with legacy interpreter bundling (deprecated)
               irij compile <file.irj>    (experimental) compile to .class
               irij compile <file> -o j.jar  (experimental) compile to runnable jar
               irij install               fetch seeds from irij.toml (alias: seed)
