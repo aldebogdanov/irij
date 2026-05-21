@@ -88,6 +88,52 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 
 - `split string sep` (string first, separator second).
 - `assoc map key value`.
+- `fold (acc next -> ...) init coll` — accumulator FIRST in the lambda
+  args, current element second. Mismatching that order silently
+  produces nonsense (no type-check to save you).
+
+## Top-level expression statements (App-as-decl)
+
+- A bare top-level `fn-name arg1 arg2` works ONLY for `Var args+`
+  shapes the parser disambiguates eagerly. A top-level
+  `fold (acc n -> ...) 0 #[1 2 3]` fails: after `fold` the parser
+  expects `<EOF>` or `<NEWLINE>` and chokes on the `(`. Wrap the
+  expression — either in a binding `total := fold ...` or a call
+  `println (fold ...)`. Same gotcha applies to any App whose first
+  argument starts with `(`.
+
+## Function body forms — imperative `=>`
+
+Three function body forms; only the imperative one uses `=>`.
+
+```
+;; Lambda body:
+fn add (a b -> a + b)
+
+;; Match-arms body — `pattern => expr`:
+fn describe
+  0 => "zero"
+  n => "other"
+
+;; Imperative body — `=> args; statements`:
+fn greet ::: Console
+  => name
+  println ("Hello, " ++ name)
+
+;; 0-arity imperative — `=>` alone on its line, NO underscore:
+fn boot ::: Console
+  =>
+  println "ready"
+```
+
+**Common mistake:** writing `_ =>` for a 0-arg imperative fn. That's
+a match-arm body (wildcard pattern → expression), not an imperative
+body. Use bare `=>` on its own line for 0 args.
+
+**Indentation:** the body lines after the `=> args` row sit at the
+SAME indent as `=>`, NOT one level deeper. The parser uses INDENT to
+open the body scope at the `=>` line; subsequent lines must dedent
+back to the same column.
 
 ## Fixed in recent versions (0.2.7+)
 

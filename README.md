@@ -94,6 +94,14 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.6.21 &mdash; Parser-gotchas doc update + irij.online ex-parametric-effects card fixed (was unparseable). Three things documented in `docs/parser-gotchas.md`:
+
+- **Top-level `App`-as-decl restriction:** a bare top-level expression whose first argument starts with `(` (typical of `fold (lambda) init coll`) fails because the parser closes the expression at the trailing `fold` Var and chokes on the open paren. Wrap in a binding or `println (…)`.
+- **Three function-body forms.** Only the imperative body uses `=>`. The 0-arity imperative form is `=>` alone on its line — NOT `_ =>` (that's a match-arm wildcard).
+- **Indentation:** body lines after `=> args` sit at the SAME indent as `=>`, not one level deeper.
+
+Also: `fold` lambda arg order is `(acc next -> …)` — accumulator first, current element second. Wrong order silently produces wrong results.
+
 0.6.20 &mdash; Emacs nREPL: stop the `.nrepl-port` walk at Irij project root.
 
 The walk-up `irij-nrepl--find-port-file` would keep walking past the project root and pick up stale `.nrepl-port` files left by unrelated tools — typically Clojure CIDER files in `~/dev/.nrepl-port` or `~/.nrepl-port`. Symptom: `irij --nrepl-server` reports port 7888, user runs Emacs connect, Emacs tries port 53013 (some Clojure REPL's old port) and fails with "Connection refused".
