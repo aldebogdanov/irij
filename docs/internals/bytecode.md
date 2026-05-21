@@ -49,8 +49,8 @@ elimination at hot sites.
 | `emitBuiltinApp` | Hardcoded knowledge of built-in fns (`+`, `++`, `println`, `spawn`, `length`, `head`, `tail`, `nth`, `conj`, `empty?`, ...). |
 | `emitLambda` | Lambda literal → private static method + LambdaMetafactory indy at call site. |
 | `emitMatchExpr` | Pattern match → if-chain + bind on success. |
-| `emitWith` | `Stmt.With` dispatch — picks between threaded and SM lowering. |
-| `emitWithSM` / `emitWithThreaded` | The two effect lowerings. See `effects.md`. |
+| `emitWith` | `Stmt.With` — runs `smCanHandle` + `classifyWithBody`, then `emitWithSM`. Unsupported shapes are compile-time errors. |
+| `emitWithSM` | The (sole) effect lowering. See `effects.md`. |
 | `emitTierCClauseLambda` | Compile a clause body as an SM continuation. |
 | `emitHandlerBuilder` | `handler X :: Eff` → static method building a `CompiledHandler`. |
 | `emitScope` | `scope { fork ... }` → `CompiledScopeHandle` allocation + body. |
@@ -132,9 +132,6 @@ JVM frame.
 
 Honest list, as of v0.5.0 — most early gaps closed; what remains:
 
-- **Law verification** (`law name :: T  forall x. P x` /
-  QuickCheck-style). Needs an `Arbitrary` registry + sample loop in
-  `RuntimeSupport`; not wired through the emitter yet.
 - **Module-boundary blame** for `in`/`out` contracts. Bytecode emits
   the generic "Input contract violated in 'f'" message; the
   interpreter's caller-side / module-prefixed variant requires
@@ -146,6 +143,26 @@ Honest list, as of v0.5.0 — most early gaps closed; what remains:
 - **Builtins not in the emit table** — ~44 of the 91 interpreter
   builtins lack a fast path. They still work transitively via stdlib
   inlining + `RuntimeSupport.callAny` fallthrough, just not optimised.
+
+### R5a fixes (v0.6.7)
+
+R5a groundwork closed three gaps that previously blocked flipping
+`irij run` to bytecode:
+
+- **Top-level `MutBind`** — `mut x := …` at module scope now hoists
+  to a static field; `emitAssign` routes top-level mutation through
+  `PUTSTATIC` (mirrors top-level `Bind`).
+- **`IrijRange` accepted by HOF runtime helpers** — `asListAny`
+  (used by every `seq*` op) and `length` / `nth` materialise a
+  `Range` into a `List<Object>` on demand. Stdlib HOFs that take a
+  range (`zip`, `zip-with`, `enumerate`, `partition`, `interleave`,
+  `window`) work in bytecode without a `to-vec` coercion.
+- **Module-export dedupe on emit** — `ClassEmitter` collects
+  top-level `FnDecl`s into a `LinkedHashMap` keyed by name before
+  emitting JVM methods. When `:open` brings in a name the opener
+  also defines (e.g. `std.collection` re-exporting `sum` from
+  `std.list`), the last definition wins and only one method is
+  emitted, avoiding `ClassFormatError: Duplicate method name`.
 
 Already at parity: input + output spec validation, user-declared
 product/sum specs (clinit-registered), pre/post + in/out contracts,
@@ -163,5 +180,5 @@ Java interop, modules. See `docs/STATE-2026-05-18.md` for full list.
    jumps directly.
 4. Update `emitTailExpr` if the new shape can host a tail position
    (e.g. a new conditional construct).
-5. Test in both interpreter and bytecode modes (both with `--mode=
-   bytecode-threaded` and `--mode=bytecode-sm`).
+5. Test via integration tests (`irij test`) — bytecode-SM is the only
+   execution path since v0.6.13.

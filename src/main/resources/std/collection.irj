@@ -4,17 +4,20 @@ use std.list :open
 
 ;; Collection combinators built on existing builtins.
 
-pub fn zip :: Vec Vec Vec
+;; `zip` / `zip-with` / `enumerate` accept any indexable collection
+;; (Vec, Range, Tuple, ...). Irij has no `Seq` super-spec yet, so the
+;; collection positions are typed as `_`.
+pub fn zip :: _ _ Vec
   => v1 v2
   n := min (length v1) (length v2)
   to-vec ~ (0 ..< n) |> @ (i -> #((nth i v1) (nth i v2)))
 
-pub fn zip-with :: Fn Vec Vec Vec
+pub fn zip-with :: Fn _ _ Vec
   => f v1 v2
   n := min (length v1) (length v2)
   to-vec ~ (0 ..< n) |> @ (i -> f (nth i v1) (nth i v2))
 
-pub fn enumerate :: Vec Vec
+pub fn enumerate :: _ Vec
   => vec
   to-vec ~ (0 ..< length vec) |> @ (i -> #(i (nth i vec)))
 
@@ -37,7 +40,7 @@ fn freq-step
 pub fn frequencies :: Vec Map
   (vec -> fold freq-step {} vec)
 
-pub fn partition :: Int Vec Vec
+pub fn partition :: Int _ Vec
   => n vec
   total := length vec
   chunks := div (total + n - 1) n
@@ -98,7 +101,7 @@ pub fn count-by :: Fn Vec Int
   filtered := /? pred
   length (filtered vec)
 
-pub fn interleave :: Vec Vec Vec
+pub fn interleave :: _ _ Vec
   => v1 v2
   n := min (length v1) (length v2)
   result := to-vec ~ (0 ..< n) |> @ (i -> #[(nth i v1) (nth i v2)])
@@ -112,7 +115,7 @@ pub fn take-while :: Fn Vec Vec
   else
     take idx vec
 
-pub fn window :: Int Vec Vec
+pub fn window :: Int _ Vec
   => n vec
   total := length vec
   if (n > total)

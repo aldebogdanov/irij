@@ -47,8 +47,8 @@
    - *Keywords are short words, not digraphs.* A small set of reserved
      words (=fn=, =do=, =if=, =else=, =match=, =spec=, =newtype=,
      =mod=, =use=, =pub=, =with=, =scope=, =effect=, =role=, =cap=,
-     =handler=, =impl=, =proto=, =pre=, =post=, =law=, =contract=,
-     =select=, =enclave=, =forall=, =par-each=, =on-failure=) are
+     =handler=, =impl=, =proto=, =pre=, =post=, =contract=,
+     =select=, =enclave=, =par-each=, =on-failure=) are
      2–10 characters each —
      typically one BPE token. These are distinct from operators:
      operators act on values, keywords introduce structural forms.
@@ -892,16 +892,12 @@
    fn transform :: Data -> _    ;; return shape unspecified
      (data -> ...)
 
-   ;; specs power Arbitrary generation for law checking
-   fn sort
-     law idempotent = forall (xs : #[Int]). sort (sort xs) == sort xs
-     ...
    #+end_example
 
    Note: Level 0 and Level 1 have the same function *body* (a lambda).
    The only difference is the optional =:: Data -> Result= annotation.
    Schemas are checked at runtime, not compile time. No HM inference —
-   the language relies on contracts, laws, and effects for verification.
+   the language relies on contracts and effects for verification.
 
 ** 6.3 Level 2 — Contracts (Runtime Checks)
 
@@ -942,37 +938,24 @@
        out (r -> r.status < 500)          ;; our fault if violated
    #+end_example
 
-** 6.4 Level 3 — Property Testing (Algebraic Laws)
+** 6.4 Level 3 — Property Testing (REMOVED in v0.6.12)
 
-   This is the *key innovation*: first-class law declarations that are
-   automatically tested via property-based testing and optionally
-   verified via SMT.
+   First-class =law= declarations + QuickCheck-style =verify-laws=
+   used to live here. They were removed in v0.6.12 because:
 
-   #+begin_example
-   ;; declaring a typeclass/protocol with laws
-   proto Monoid a
-     empty :: a
-     append :: a -> a -> a
+   - QuickCheck-style sampling (100/1000/10000 random cases) is *not*
+     proof; subtle edge cases are exactly what random generation
+     misses.
+   - Property testing is well-served by a library — Haskell QuickCheck,
+     Rust proptest, Scala ScalaCheck all sit outside their host
+     language proper. Putting it in the language surface promised more
+     than it delivered.
+   - The bytecode rewrite (R-phases) exposed the cost: full AST
+     retention + Arbitrary registry just to support the niche.
 
-     law identity-left  = forall x. append empty x == x
-     law identity-right = forall x. append x empty == x
-     law associative    = forall x y z.
-       append (append x y) z == append x (append y z)
-
-   ;; implementing with automatic law checking
-   impl Monoid for Str
-     empty := ""
-     append := (++)
-     ;; compiler runs QuickCheck-style tests on all three laws
-     ;; at compile time or in CI
-
-   ;; custom laws on any function
-   fn sort :: Ord a => #[a] -> #[a]
-     law idempotent   = forall xs. sort (sort xs) == sort xs
-     law permutation  = forall xs. (sort xs |> /# ) == (xs |> /#)
-     law ordered      = forall xs. sorted? (sort xs)
-     ...
-   #+end_example
+   Property-based testing belongs in a future =std.quickcheck= library
+   (no special syntax, regular Irij). See =docs/internals/effects.md=
+   for the broader R5c removal note.
 
 ** 6.5 Level 4 — Refinement Types
 
@@ -1122,7 +1105,7 @@
    ;; LLM refactors to make Http effect explicit
 
    > :test-gen factorial
-   ;; LLM generates property tests from type signature and laws
+   ;; LLM generates property tests from type signature
    #+end_example
 
 * Part IX: JVM Interop & Platform
@@ -1222,7 +1205,7 @@
   std.async       ;; scope, fiber, channel, flow, stream
   std.choreo      ;; located types, EPP, transport backends
                   ;; includes: census (role-set membership query)
-  std.test        ;; property testing, generators, law checking
+  std.test        ;; assert-eq / assert-true / test / summarize
   std.check       ;; contracts, refinement, SMT integration
   std.ffi         ;; JVM interop utilities
   std.log         ;; structured logging effect
@@ -1312,7 +1295,7 @@
    | Task                         | Details                         | Tool      | Priority  |
    |------------------------------+---------------------------------+-----------+-----------|
    | Schemas (L1) + Contracts (L2) | Malli-like specs + contracts    | Custom    | MUST      |
-   | Property testing (L3)        | Laws, QuickCheck-style          | Custom    | MUST      |
+   | Property testing (lib only)  | Removed from lang in v0.6.12    | std lib   | WONT      |
    | Content-addressed store      | Hash-based codebase DB          | SQLite    | SHOULD    |
    | Located types + EPP          | Choreographic core              | Custom    | MUST      |
    | Communication backends       | TCP, HTTP, in-process           | Netty     | SHOULD    |
@@ -1489,7 +1472,7 @@
       The fine-tuned model generates directly in Irij indented form.
 
    4. *Phase D (RLHF/DPO):* Use compiler feedback as reward signal.
-      Code that type-checks, effect-checks, and passes law verification
+      Code that type-checks, effect-checks, and passes contract checks
       gets positive reward. This creates a model that inherently respects
       the type system.
 
@@ -1518,7 +1501,6 @@
   ║  CHOREO SEND    val ~> $ROLE     val ~*> #[$R1 $R2]         ║
   ║  LOCATED        expr @$ROLE      val :: T @$ROLE            ║
   ║  CONTRACT       pre P  post Q    contract (in P) (out Q)   ║
-  ║  LAW            law name = forall x. P x                    ║
   ║  REFINEMENT     spec T := {x :: U | pred x}              ║
   ║  ARRAY OPS      @ map  /? filter  /! find  /+ /* /^ /$ /#  ║
   ║  COLLECTIONS    #[1 2]  #{:a}  #(1 2)  {k= v}              ║

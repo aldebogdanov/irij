@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024  Irij Contributors
 ;; Author: Irij Contributors
-;; Version: 0.2.0
+;; Version: 0.3.1
 ;; Keywords: languages irij nrepl
 ;; URL: https://github.com/irij-lang/irij
 ;; Package-Requires: ((emacs "27.1") (cl-lib "0.5"))
@@ -310,18 +310,35 @@ Signals an error if not connected."
 ;; ────────────────────────────────────────────────────────────────────
 
 (defun irij-nrepl--find-port-file ()
-  "Walk from `default-directory' upward, return port from .nrepl-port or nil."
+  "Walk from `default-directory' upward to the Irij project root, return
+port from .nrepl-port or nil.
+
+The walk stops at the FIRST directory containing an `irij.toml` (the
+Irij project marker). This avoids picking up stale `.nrepl-port`
+files from unrelated tools (Clojure CIDER, etc.) living in parent
+directories like `~/dev/` or `~/`."
   (let ((dir (expand-file-name default-directory)))
     (catch 'found
       (while t
-        (let ((f (expand-file-name ".nrepl-port" dir)))
-          (when (file-exists-p f)
+        ;; Check current dir for an Irij project root.
+        (let ((toml (expand-file-name "irij.toml" dir))
+              (port-file (expand-file-name ".nrepl-port" dir)))
+          (cond
+           ;; Have a .nrepl-port AT this level — use it regardless of
+           ;; whether toml is here (project root might be deeper but
+           ;; the user started the server in this dir).
+           ((file-exists-p port-file)
             (throw 'found
                    (string-to-number
                     (string-trim
                      (with-temp-buffer
-                       (insert-file-contents f)
-                       (buffer-string)))))))
+                       (insert-file-contents port-file)
+                       (buffer-string))))))
+           ;; Hit Irij project root without a port file — stop the
+           ;; walk so we don't fall through to unrelated tools' files
+           ;; in parent dirs.
+           ((file-exists-p toml)
+            (throw 'found nil))))
         (let ((parent (file-name-directory (directory-file-name dir))))
           (when (string= parent dir) (throw 'found nil))
           (setq dir parent))))))

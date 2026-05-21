@@ -20,6 +20,61 @@ public final class RuntimeSupport {
         Object apply(Object[] args);
     }
 
+    /** Wrap a raw {@link IrijFn} (typically produced by an
+     *  invokedynamic-bootstrapped lambda) with arity metadata + the
+     *  curry-friendly {@link CurriedFn#apply} logic. Used at every
+     *  user-lambda creation site. */
+    public static IrijFn curry(IrijFn impl, int arity) {
+        return new CurriedFn(impl, arity, new Object[0]);
+    }
+
+    /** Curried wrapper: applying it with fewer args than {@code arity}
+     *  returns a new {@link CurriedFn} with the partial application
+     *  accumulated; applying with exactly {@code arity} args invokes
+     *  the underlying impl; applying with more than {@code arity}
+     *  invokes the impl with the first arity-many args and passes the
+     *  remainder to whatever the impl returned (mirrors the
+     *  interpreter's apply()-with-arity semantics). */
+    public static final class CurriedFn implements IrijFn {
+        final IrijFn impl;
+        public final int arity;
+        final Object[] captured;
+
+        CurriedFn(IrijFn impl, int arity, Object[] captured) {
+            this.impl = impl;
+            this.arity = arity;
+            this.captured = captured;
+        }
+
+        @Override
+        public Object apply(Object[] args) {
+            // Variadic (arity == -1): pass every arg straight to impl.
+            if (arity < 0) {
+                if (captured.length == 0) return impl.apply(args);
+                Object[] combined = new Object[captured.length + args.length];
+                System.arraycopy(captured, 0, combined, 0, captured.length);
+                System.arraycopy(args, 0, combined, captured.length, args.length);
+                return impl.apply(combined);
+            }
+            int total = captured.length + args.length;
+            if (total < arity) {
+                Object[] combined = new Object[total];
+                System.arraycopy(captured, 0, combined, 0, captured.length);
+                System.arraycopy(args, 0, combined, captured.length, args.length);
+                return new CurriedFn(impl, arity, combined);
+            }
+            int take = arity - captured.length;
+            Object[] satisfied = new Object[arity];
+            System.arraycopy(captured, 0, satisfied, 0, captured.length);
+            System.arraycopy(args, 0, satisfied, captured.length, take);
+            Object result = impl.apply(satisfied);
+            if (total == arity) return result;
+            Object[] rest = new Object[total - arity];
+            System.arraycopy(args, take, rest, 0, rest.length);
+            return callAny(result, rest);
+        }
+    }
+
     // ── Operator sections — (+), (-), (*), etc. as first-class values ──
     //
     // Emitter lowers `Expr.OpSection(op)` to GETSTATIC of one of these
@@ -54,9 +109,20 @@ public final class RuntimeSupport {
 
     /** Per-thread namespace map. nREPL sets this before each
      *  eval-bytecode invocation and shares the same map across all
-     *  evals in the session. */
+     *  evals in the session. Inherited by virtual-thread fibers /
+     *  spawned tasks so cross-eval fn refs survive into background
+     *  work. */
     public static final ThreadLocal<java.util.Map<String, Object>> NS =
             ThreadLocal.withInitial(java.util.HashMap::new);
+
+    /** Per-thread PrintStream override for sandboxed sessions. When
+     *  set (non-null), every {@link #sessionPrintln} / {@link
+     *  #sessionPrint} call routes there instead of {@code System.out}.
+     *  Inherited by spawned virtual threads so a Playground session's
+     *  spawn captures its stdout into the session buffer rather than
+     *  leaking to the server's process stdout. */
+    public static final ThreadLocal<java.io.PrintStream> SESSION_OUT =
+            new ThreadLocal<>();
 
     // (Bytecode effect-row enforcement happens at compile time via
     //  EffectRowChecker.check(decls). No runtime stack needed —
@@ -72,7 +138,7 @@ public final class RuntimeSupport {
     public static Object nsGet(String name) {
         var ns = NS.get();
         if (!ns.containsKey(name)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "Unbound variable: " + name);
         }
         return ns.get(name);
@@ -91,6 +157,12 @@ public final class RuntimeSupport {
      * Class/member or obj.method), or interpreter Closure.
      */
     public static Object callAny(Object fn, Object[] args) {
+        // `f ()` calling a zero-arg curried lambda: strip the unit so
+        // CurriedFn doesn't think this is an over-application.
+        if (fn instanceof CurriedFn cf && cf.arity == 0
+                && args.length == 1 && args[0] == dev.irij.interpreter.Values.UNIT) {
+            return cf.apply(new Object[0]);
+        }
         if (fn instanceof IrijFn f) return f.apply(args);
         if (fn instanceof dev.irij.interpreter.Values.BuiltinFn bf) {
             return bf.apply(java.util.Arrays.asList(args));
@@ -123,18 +195,22 @@ public final class RuntimeSupport {
                 && t.namedFields() != null) {
             Object v = t.namedFields().get(member);
             if (v != null) return v;
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "No field '" + member + "' on " + t.tag());
         }
         return dev.irij.interpreter.JavaInterop.resolveInstanceRef(recv, member);
     }
 
     public static void print(Object v) {
-        System.out.print(display(v));
+        java.io.PrintStream out = SESSION_OUT.get();
+        if (out == null) out = System.out;
+        out.print(display(v));
     }
 
     public static void println(Object v) {
-        System.out.println(display(v));
+        java.io.PrintStream out = SESSION_OUT.get();
+        if (out == null) out = System.out;
+        out.println(display(v));
     }
 
     public static String display(Object v) {
@@ -290,8 +366,14 @@ public final class RuntimeSupport {
         if (v instanceof dev.irij.interpreter.Values.IrijTuple t) {
             return (long) t.elements().length;
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
-                "len: expected Str/Vector/Map/Tuple, got " + typeTag(v));
+        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+            return (long) r.size();
+        }
+        if (v instanceof dev.irij.interpreter.Values.IrijSet s) {
+            return (long) s.elements().size();
+        }
+        throw new dev.irij.IrijRuntimeError(
+                "len: expected Str/Vector/Map/Tuple/Range/Set, got " + typeTag(v));
     }
 
     /** `nth coll i` — element at index (works on Vector or String). */
@@ -302,7 +384,7 @@ public final class RuntimeSupport {
         long idx = ((Long) iBoxed).longValue();
         if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
             if (idx < 0 || idx >= vec.elements().size()) {
-                throw new dev.irij.interpreter.IrijRuntimeError(
+                throw new dev.irij.IrijRuntimeError(
                         "nth: index " + idx + " out of bounds (size "
                                 + vec.elements().size() + ")");
             }
@@ -310,15 +392,23 @@ public final class RuntimeSupport {
         }
         if (v instanceof dev.irij.interpreter.Values.IrijTuple tup) {
             if (idx < 0 || idx >= tup.elements().length) {
-                throw new dev.irij.interpreter.IrijRuntimeError(
+                throw new dev.irij.IrijRuntimeError(
                         "nth: index " + idx + " out of bounds (size "
                                 + tup.elements().length + ")");
             }
             return tup.elements()[(int) idx];
         }
         if (v instanceof String s) return String.valueOf(s.charAt((int) idx));
-        throw new dev.irij.interpreter.IrijRuntimeError(
-                "nth: expected Vector / Tuple / Str, got " + typeTag(v));
+        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+            long size = r.size();
+            if (idx < 0 || idx >= size) {
+                throw new dev.irij.IrijRuntimeError(
+                        "nth: index " + idx + " out of bounds (size " + size + ")");
+            }
+            return r.from() + idx;
+        }
+        throw new dev.irij.IrijRuntimeError(
+                "nth: expected Vector / Tuple / Str / Range, got " + typeTag(v));
     }
 
     /** `conj v x` — append x, return new vector (immutable semantics). */
@@ -328,7 +418,7 @@ public final class RuntimeSupport {
             out.add(x);
             return new dev.irij.interpreter.Values.IrijVector(out);
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "conj: expected Vector, got " + typeTag(v));
     }
 
@@ -349,7 +439,7 @@ public final class RuntimeSupport {
             long upper = r.exclusive() ? r.to() : r.to() + 1;
             return r.from() >= upper;
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "empty?: expected Str/Vector/Map/Tuple/Range, got " + typeTag(v));
     }
 
@@ -369,7 +459,7 @@ public final class RuntimeSupport {
             @SuppressWarnings("unchecked") var cast = (java.util.List<Object>) raw;
             list = cast;
         } else {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "fold: expected Vector/Range/List, got " + typeTag(coll));
         }
         Object acc = init;
@@ -383,18 +473,18 @@ public final class RuntimeSupport {
         if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
             var es = vec.elements();
             if (es.isEmpty()) {
-                throw new dev.irij.interpreter.IrijRuntimeError("head: empty vector");
+                throw new dev.irij.IrijRuntimeError("head: empty vector");
             }
             return es.get(0);
         }
         if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
             long upper = r.exclusive() ? r.to() : r.to() + 1;
             if (r.from() >= upper) {
-                throw new dev.irij.interpreter.IrijRuntimeError("head: empty range");
+                throw new dev.irij.IrijRuntimeError("head: empty range");
             }
             return r.from();
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "head: expected Vector or Range, got " + typeTag(v));
     }
 
@@ -415,7 +505,7 @@ public final class RuntimeSupport {
             return new dev.irij.interpreter.Values.IrijRange(
                     r.from() + 1, r.to(), r.exclusive());
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "tail: expected Vector or Range, got " + typeTag(v));
     }
 
@@ -476,14 +566,14 @@ public final class RuntimeSupport {
 
     private static String asStr(Object v, String op) {
         if (v instanceof String s) return s;
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 op + " expects a String, got " + typeTag(v));
     }
 
     private static long asLongArg(Object v, String op) {
         if (v instanceof Long l) return l;
         if (v instanceof Number n) return n.longValue();
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 op + " expects an Int, got " + typeTag(v));
     }
 
@@ -498,12 +588,22 @@ public final class RuntimeSupport {
         if (v instanceof dev.irij.interpreter.Values.IrijTuple tup) {
             return java.util.Arrays.asList(tup.elements());
         }
+        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+            java.util.List<Object> out = new java.util.ArrayList<>(r.size());
+            for (Object x : r) out.add(x);
+            return out;
+        }
+        if (v instanceof dev.irij.interpreter.Builtins.LazyIterable li) {
+            java.util.List<Object> out = new java.util.ArrayList<>();
+            for (Object x : li) out.add(x);
+            return out;
+        }
         if (v instanceof java.util.List<?> raw) {
             @SuppressWarnings("unchecked")
             java.util.List<Object> cast = (java.util.List<Object>) raw;
             return cast;
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "expected a collection, got " + typeTag(v));
     }
 
@@ -519,7 +619,7 @@ public final class RuntimeSupport {
         int start = (int) asLongArg(startArg, "substring");
         int end = (int) asLongArg(endArg, "substring");
         if (start < 0 || end > s.length() || start > end) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "substring: index out of bounds (start=" + start
                             + ", end=" + end + ", length=" + s.length() + ")");
         }
@@ -600,7 +700,7 @@ public final class RuntimeSupport {
             if (idx < 0 || idx >= tup.elements().length) return dev.irij.interpreter.Values.UNIT;
             return tup.elements()[(int) idx];
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "get expects a Map, Vector, or Tuple as second argument");
     }
 
@@ -611,7 +711,7 @@ public final class RuntimeSupport {
             entries.put(dev.irij.interpreter.Values.toIrijString(key), val);
             return new dev.irij.interpreter.Values.IrijMap(entries);
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "assoc expects a Map as first argument, got " + typeTag(m));
     }
 
@@ -622,7 +722,7 @@ public final class RuntimeSupport {
             entries.remove(dev.irij.interpreter.Values.toIrijString(key));
             return new dev.irij.interpreter.Values.IrijMap(entries);
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "dissoc expects a Map as first argument, got " + typeTag(m));
     }
 
@@ -634,7 +734,7 @@ public final class RuntimeSupport {
             entries.putAll(m2.entries());
             return new dev.irij.interpreter.Values.IrijMap(entries);
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "merge expects two Maps, got " + typeTag(a) + " and " + typeTag(b));
     }
 
@@ -643,7 +743,7 @@ public final class RuntimeSupport {
             return new dev.irij.interpreter.Values.IrijVector(
                     new java.util.ArrayList<>(map.entries().keySet()));
         }
-        throw new dev.irij.interpreter.IrijRuntimeError("keys expects a Map");
+        throw new dev.irij.IrijRuntimeError("keys expects a Map");
     }
 
     public static Object vals(Object v) {
@@ -651,7 +751,7 @@ public final class RuntimeSupport {
             return new dev.irij.interpreter.Values.IrijVector(
                     new java.util.ArrayList<>(map.entries().values()));
         }
-        throw new dev.irij.interpreter.IrijRuntimeError("vals expects a Map");
+        throw new dev.irij.IrijRuntimeError("vals expects a Map");
     }
 
     public static Object containsP(Object coll, Object elem) {
@@ -665,18 +765,18 @@ public final class RuntimeSupport {
             return map.entries().containsKey(
                     dev.irij.interpreter.Values.toIrijString(elem));
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "contains? expects a collection, got " + typeTag(coll));
     }
 
     public static Object last(Object v) {
         if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
             if (vec.elements().isEmpty()) {
-                throw new dev.irij.interpreter.IrijRuntimeError("last of empty vector");
+                throw new dev.irij.IrijRuntimeError("last of empty vector");
             }
             return vec.elements().get(vec.elements().size() - 1);
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "last expects a Vector, got " + typeTag(v));
     }
 
@@ -694,6 +794,39 @@ public final class RuntimeSupport {
         return typeTag(v);
     }
 
+    /** `validate spec-name value` — returns Ok(v) on pass, Err(msg)
+     *  on failure. Mirrors the interpreter's `validate` builtin. */
+    public static Object validate(Object specNameArg, Object value) {
+        String name = asStr(specNameArg, "validate");
+        try {
+            Object result = dev.irij.compiler.SpecValidator.validate(
+                    value, new dev.irij.ast.SpecExpr.Name(name));
+            return new dev.irij.interpreter.Values.Tagged(
+                    "Ok", java.util.List.of(result));
+        } catch (dev.irij.IrijRuntimeError e) {
+            return new dev.irij.interpreter.Values.Tagged(
+                    "Err", java.util.List.of(e.getMessage() == null ? "" : e.getMessage()));
+        }
+    }
+
+    /** `validate! spec-name value` — returns value on pass, throws on fail. */
+    /** Start a record-update: clone base IrijMap's entries into a new
+     *  LinkedHashMap, returning that. Bytecode emitter then puts each
+     *  updated field and wraps in IrijMap. */
+    public static java.util.LinkedHashMap<String, Object> recordUpdateBegin(Object base) {
+        if (!(base instanceof dev.irij.interpreter.Values.IrijMap bm)) {
+            throw new dev.irij.IrijRuntimeError(
+                    "Record update requires a Map, got " + typeTag(base));
+        }
+        return new java.util.LinkedHashMap<>(bm.entries());
+    }
+
+    public static Object validateBang(Object specNameArg, Object value) {
+        String name = asStr(specNameArg, "validate!");
+        return dev.irij.compiler.SpecValidator.validate(
+                value, new dev.irij.ast.SpecExpr.Name(name));
+    }
+
     // ── JSON (delegates to interp's Builtins helpers; same semantics) ──
 
     public static Object jsonParse(Object strArg) {
@@ -702,7 +835,7 @@ public final class RuntimeSupport {
             return dev.irij.interpreter.Builtins.jsonToIrij(
                     com.google.gson.JsonParser.parseString(str));
         } catch (com.google.gson.JsonSyntaxException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("json-parse: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("json-parse: " + e.getMessage());
         }
     }
 
@@ -723,7 +856,7 @@ public final class RuntimeSupport {
         try {
             java.nio.file.Files.createDirectories(java.nio.file.Path.of(path));
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("make-dir: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("make-dir: " + e.getMessage());
         }
         return dev.irij.interpreter.Values.UNIT;
     }
@@ -736,7 +869,7 @@ public final class RuntimeSupport {
             stream.forEach(p -> names.add(p.getFileName().toString()));
             return new dev.irij.interpreter.Values.IrijVector(names);
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("list-dir: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("list-dir: " + e.getMessage());
         }
     }
 
@@ -744,7 +877,7 @@ public final class RuntimeSupport {
         String path = asStr(pathArg, "delete-file");
         try { java.nio.file.Files.deleteIfExists(java.nio.file.Path.of(path)); }
         catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("delete-file: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("delete-file: " + e.getMessage());
         }
         return dev.irij.interpreter.Values.UNIT;
     }
@@ -755,7 +888,7 @@ public final class RuntimeSupport {
             return java.nio.file.Files.readString(java.nio.file.Path.of(path),
                     java.nio.charset.StandardCharsets.UTF_8);
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("read-file: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("read-file: " + e.getMessage());
         }
     }
 
@@ -766,7 +899,7 @@ public final class RuntimeSupport {
             java.nio.file.Files.writeString(java.nio.file.Path.of(path), text,
                     java.nio.charset.StandardCharsets.UTF_8);
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("write-file: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("write-file: " + e.getMessage());
         }
         return dev.irij.interpreter.Values.UNIT;
     }
@@ -780,7 +913,7 @@ public final class RuntimeSupport {
                     java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.APPEND);
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("append-file: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("append-file: " + e.getMessage());
         }
         return dev.irij.interpreter.Values.UNIT;
     }
@@ -808,7 +941,7 @@ public final class RuntimeSupport {
      *  emitter's `Expr.Range` lowering. */
     public static Object rangeOf(Object fromArg, Object toArg, boolean exclusive) {
         if (!(fromArg instanceof Long lf) || !(toArg instanceof Long lt)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "Range requires Int endpoints, got "
                             + typeTag(fromArg) + " .. " + typeTag(toArg));
         }
@@ -827,12 +960,23 @@ public final class RuntimeSupport {
     public static Object ceil(Object x)  { return (long) Math.ceil(asDoubleArg(x, "ceil")); }
     public static Object round(Object x) { return Math.round(asDoubleArg(x, "round")); }
     public static Object pow(Object a, Object b) {
-        return Math.pow(asDoubleArg(a, "pow"), asDoubleArg(b, "pow"));
+        double da = asDoubleArg(a, "pow");
+        double db = asDoubleArg(b, "pow");
+        double result = Math.pow(da, db);
+        // If both operands were Long and result fits a long without loss,
+        // return Long (matches interp's powOp narrowing).
+        if (a instanceof Long && b instanceof Long
+                && result == Math.floor(result)
+                && !Double.isInfinite(result)
+                && result >= Long.MIN_VALUE && result <= Long.MAX_VALUE) {
+            return (long) result;
+        }
+        return result;
     }
     public static Object abs(Object v) {
         if (v instanceof Long l) return Math.abs(l);
         if (v instanceof Double d) return Math.abs(d);
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "abs expects a number, got " + typeTag(v));
     }
     public static Object min(Object a, Object b) {
@@ -844,13 +988,13 @@ public final class RuntimeSupport {
     public static Object divInt(Object a, Object b) {
         long la = asLongArg(a, "div");
         long lb = asLongArg(b, "div");
-        if (lb == 0) throw new dev.irij.interpreter.IrijRuntimeError("Division by zero");
+        if (lb == 0) throw new dev.irij.IrijRuntimeError("Division by zero");
         return la / lb;
     }
     public static Object modInt(Object a, Object b) {
         long la = asLongArg(a, "mod");
         long lb = asLongArg(b, "mod");
-        if (lb == 0) throw new dev.irij.interpreter.IrijRuntimeError("Division by zero");
+        if (lb == 0) throw new dev.irij.IrijRuntimeError("Division by zero");
         return la % lb;
     }
 
@@ -876,7 +1020,7 @@ public final class RuntimeSupport {
         String s = asStr(strArg, "parse-int");
         try { return Long.parseLong(s.strip()); }
         catch (NumberFormatException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "parse-int: cannot parse '" + s + "' as Int");
         }
     }
@@ -884,7 +1028,7 @@ public final class RuntimeSupport {
         String s = asStr(strArg, "parse-float");
         try { return Double.parseDouble(s.strip()); }
         catch (NumberFormatException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "parse-float: cannot parse '" + s + "' as Float");
         }
     }
@@ -892,7 +1036,7 @@ public final class RuntimeSupport {
         String s = asStr(strArg, "char-at");
         int i = (int) asLongArg(idxArg, "char-at");
         if (i < 0 || i >= s.length()) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "char-at: index " + i + " out of bounds (length " + s.length() + ")");
         }
         return String.valueOf(s.charAt(i));
@@ -900,7 +1044,7 @@ public final class RuntimeSupport {
     public static Object charCode(Object strArg) {
         String s = asStr(strArg, "char-code");
         if (s.isEmpty()) {
-            throw new dev.irij.interpreter.IrijRuntimeError("char-code: empty string");
+            throw new dev.irij.IrijRuntimeError("char-code: empty string");
         }
         return (long) s.codePointAt(0);
     }
@@ -918,12 +1062,12 @@ public final class RuntimeSupport {
             return new dev.irij.interpreter.Values.IrijVector(rev);
         }
         if (v instanceof String s) return new StringBuilder(s).reverse().toString();
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "reverse expects Vector or Str, got " + typeTag(v));
     }
     public static Object sortVal(Object v) {
         if (!(v instanceof dev.irij.interpreter.Values.IrijVector vec)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "sort expects Vector, got " + typeTag(v));
         }
         java.util.List<Object> out = new java.util.ArrayList<>(vec.elements());
@@ -951,7 +1095,7 @@ public final class RuntimeSupport {
             out.addAll(vb.elements());
             return new dev.irij.interpreter.Values.IrijVector(out);
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 "concat: type mismatch (" + typeTag(a) + ", " + typeTag(b) + ")");
     }
 
@@ -1017,7 +1161,7 @@ public final class RuntimeSupport {
         }
         IrijFn fn = r.get(name);
         if (fn == null) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "Unbound variable: " + name);
         }
         return fn;
@@ -1061,12 +1205,12 @@ public final class RuntimeSupport {
             return dev.irij.interpreter.Builtins.tomlValueToIrij(
                     new com.moandjiezana.toml.Toml().read(s).toMap());
         } catch (IllegalStateException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("toml-parse: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("toml-parse: " + e.getMessage());
         }
     }
 
     public static Object printlnVal(Object v) {
-        System.out.println(display(v));
+        println(v);
         return dev.irij.interpreter.Values.UNIT;
     }
 
@@ -1080,13 +1224,13 @@ public final class RuntimeSupport {
         try {
             return new java.io.BufferedReader(new java.io.InputStreamReader(System.in)).readLine();
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("read-line: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("read-line: " + e.getMessage());
         }
     }
 
     private static double asDoubleArg(Object v, String op) {
         if (v instanceof Number n) return n.doubleValue();
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 op + " expects a number, got " + typeTag(v));
     }
 
@@ -1094,7 +1238,7 @@ public final class RuntimeSupport {
         // env "NAME"            -> value or null
         // env "NAME" "default"  -> value or default
         if (args.length == 0) {
-            throw new dev.irij.interpreter.IrijRuntimeError("env requires at least one argument");
+            throw new dev.irij.IrijRuntimeError("env requires at least one argument");
         }
         String name = asStr(args[0], "env");
         String v = System.getenv(name);
@@ -1153,7 +1297,7 @@ public final class RuntimeSupport {
     public static Object seqReduce(Object f, Object coll) {
         java.util.List<Object> list = seqList(coll);
         if (list.isEmpty()) {
-            throw new dev.irij.interpreter.IrijRuntimeError("Cannot reduce empty collection");
+            throw new dev.irij.IrijRuntimeError("Cannot reduce empty collection");
         }
         Object acc = list.get(0);
         for (int i = 1; i < list.size(); i++) {
@@ -1178,7 +1322,7 @@ public final class RuntimeSupport {
     public static Object seqSum(Object coll) {
         java.util.List<Object> list = seqList(coll);
         if (list.isEmpty()) {
-            throw new dev.irij.interpreter.IrijRuntimeError("Cannot reduce empty collection");
+            throw new dev.irij.IrijRuntimeError("Cannot reduce empty collection");
         }
         Object acc = list.get(0);
         for (int i = 1; i < list.size(); i++) acc = add(acc, list.get(i));
@@ -1188,7 +1332,7 @@ public final class RuntimeSupport {
     public static Object seqProduct(Object coll) {
         java.util.List<Object> list = seqList(coll);
         if (list.isEmpty()) {
-            throw new dev.irij.interpreter.IrijRuntimeError("Cannot reduce empty collection");
+            throw new dev.irij.IrijRuntimeError("Cannot reduce empty collection");
         }
         Object acc = list.get(0);
         for (int i = 1; i < list.size(); i++) acc = mul(acc, list.get(i));
@@ -1247,7 +1391,7 @@ public final class RuntimeSupport {
             return new dev.irij.interpreter.Values.Tagged(
                     "DbConn", java.util.List.of(conn), null, null);
         } catch (java.sql.SQLException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-open: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-db-open: " + e.getMessage());
         }
     }
 
@@ -1255,7 +1399,7 @@ public final class RuntimeSupport {
         java.sql.Connection conn = extractConnection(connArg, "raw-db-close");
         try { conn.close(); }
         catch (java.sql.SQLException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-close: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-db-close: " + e.getMessage());
         }
         return dev.irij.interpreter.Values.UNIT;
     }
@@ -1285,7 +1429,7 @@ public final class RuntimeSupport {
                 return new dev.irij.interpreter.Values.IrijVector(rows);
             }
         } catch (java.sql.SQLException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-query: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-db-query: " + e.getMessage());
         }
     }
 
@@ -1302,7 +1446,7 @@ public final class RuntimeSupport {
                 return affected;
             }
         } catch (java.sql.SQLException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-exec: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-db-exec: " + e.getMessage());
         }
     }
 
@@ -1318,16 +1462,16 @@ public final class RuntimeSupport {
                     return result;
                 } catch (Throwable t) {
                     try { conn.rollback(); } catch (java.sql.SQLException ignored) {}
-                    if (t instanceof dev.irij.interpreter.IrijRuntimeError ire) throw ire;
+                    if (t instanceof dev.irij.IrijRuntimeError ire) throw ire;
                     if (t instanceof RuntimeException re) throw re;
-                    throw new dev.irij.interpreter.IrijRuntimeError(
+                    throw new dev.irij.IrijRuntimeError(
                             "raw-db-transaction: " + t.getMessage());
                 } finally {
                     try { conn.setAutoCommit(savedAutoCommit); } catch (java.sql.SQLException ignored) {}
                 }
             }
         } catch (java.sql.SQLException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-db-transaction: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-db-transaction: " + e.getMessage());
         }
     }
 
@@ -1338,13 +1482,13 @@ public final class RuntimeSupport {
                 && t.fields().get(0) instanceof java.sql.Connection c) {
             return c;
         }
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 op + ": first argument must be a database connection (from db-open)");
     }
 
     private static java.util.List<Object> extractParams(Object value, String op) {
         if (value instanceof dev.irij.interpreter.Values.IrijVector v) return v.elements();
-        throw new dev.irij.interpreter.IrijRuntimeError(op + ": params must be a vector #[...]");
+        throw new dev.irij.IrijRuntimeError(op + ": params must be a vector #[...]");
     }
 
     private static void bindParams(java.sql.PreparedStatement ps, java.util.List<Object> params)
@@ -1390,12 +1534,12 @@ public final class RuntimeSupport {
 
     public static Object rawSseResponse(Object reqArg) {
         if (!(reqArg instanceof dev.irij.interpreter.Values.IrijMap reqMap)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "raw-sse-response: expected request map");
         }
         Object exchange = reqMap.entries().get("__exchange");
         if (!(exchange instanceof com.sun.net.httpserver.HttpExchange ex)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "raw-sse-response: no __exchange in request (only works inside raw-http-serve handler)");
         }
         try {
@@ -1406,27 +1550,27 @@ public final class RuntimeSupport {
             ex.sendResponseHeaders(200, 0);
             return new dev.irij.interpreter.Values.SseWriter(ex, ex.getResponseBody());
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-sse-response: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-sse-response: " + e.getMessage());
         }
     }
 
     public static Object rawSseSend(Object sseArg, Object evtArg, Object dataArg) {
         if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "raw-sse-send: first arg must be SseWriter");
         }
         String evt = asStr(evtArg, "raw-sse-send");
         String data = asStr(dataArg, "raw-sse-send");
         try { sse.send(evt, data); }
         catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-sse-send: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-sse-send: " + e.getMessage());
         }
         return dev.irij.interpreter.Values.UNIT;
     }
 
     public static Object rawSseClose(Object sseArg) {
         if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "raw-sse-close: first arg must be SseWriter");
         }
         sse.close();
@@ -1435,7 +1579,7 @@ public final class RuntimeSupport {
 
     public static Object rawSseClosedQ(Object sseArg) {
         if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "raw-sse-closed?: first arg must be SseWriter");
         }
         return sse.isClosed();
@@ -1449,7 +1593,7 @@ public final class RuntimeSupport {
         String field = asStr(fieldArg, "raw-multipart-field");
         int[] range = mpFindPartBody(body, boundary, field);
         if (range == null) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "raw-multipart-field: field '" + field + "' not found");
         }
         return new String(body, range[0], range[1] - range[0],
@@ -1463,7 +1607,7 @@ public final class RuntimeSupport {
         String savePath = asStr(pathArg, "raw-multipart-save");
         int[] range = mpFindPartBody(body, boundary, field);
         if (range == null) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "raw-multipart-save: field '" + field + "' not found");
         }
         try {
@@ -1475,17 +1619,17 @@ public final class RuntimeSupport {
                     java.util.Arrays.copyOfRange(body, range[0], range[1]));
             return savePath;
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-multipart-save: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-multipart-save: " + e.getMessage());
         }
     }
 
     private static byte[] mpRequestBytes(Object reqArg, String op) {
         if (!(reqArg instanceof dev.irij.interpreter.Values.IrijMap req)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(op + ": expects request Map");
+            throw new dev.irij.IrijRuntimeError(op + ": expects request Map");
         }
         Object bodyBytes = req.entries().get("__body_bytes");
         if (!(bodyBytes instanceof byte[] bytes)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(op + ": no raw body bytes in request");
+            throw new dev.irij.IrijRuntimeError(op + ": no raw body bytes in request");
         }
         return bytes;
     }
@@ -1500,7 +1644,7 @@ public final class RuntimeSupport {
         }
         String boundary = mpExtractBoundary(contentType);
         if (boundary == null) {
-            throw new dev.irij.interpreter.IrijRuntimeError(op + ": no boundary in content-type");
+            throw new dev.irij.IrijRuntimeError(op + ": no boundary in content-type");
         }
         return boundary;
     }
@@ -1615,7 +1759,7 @@ public final class RuntimeSupport {
             catch (InterruptedException e) { server.stop(0); }
             return dev.irij.interpreter.Values.UNIT;
         } catch (java.io.IOException e) {
-            throw new dev.irij.interpreter.IrijRuntimeError("raw-http-serve: " + e.getMessage());
+            throw new dev.irij.IrijRuntimeError("raw-http-serve: " + e.getMessage());
         }
     }
 
@@ -1808,18 +1952,31 @@ public final class RuntimeSupport {
         }
     }
 
-    /** Flatten and build a composed handler from two operand values. */
+    /** Flatten and build a composed handler from two operand values, OR
+     *  build a function composition `(x -> right(left(x)))` when both
+     *  operands are callable (lambdas, builtins). Used by the `>>`
+     *  operator at the runtime level. */
     public static Object compose(Object left, Object right) {
-        java.util.List<CompiledHandler> all = new java.util.ArrayList<>();
-        appendHandlers(left, all);
-        appendHandlers(right, all);
-        return new CompiledComposedHandler(java.util.List.copyOf(all));
+        boolean leftIsHandler = left instanceof CompiledHandler
+                || left instanceof CompiledComposedHandler;
+        boolean rightIsHandler = right instanceof CompiledHandler
+                || right instanceof CompiledComposedHandler;
+        if (leftIsHandler && rightIsHandler) {
+            java.util.List<CompiledHandler> all = new java.util.ArrayList<>();
+            appendHandlers(left, all);
+            appendHandlers(right, all);
+            return new CompiledComposedHandler(java.util.List.copyOf(all));
+        }
+        // Function composition: (f >> g)(x) ≡ g(f(x))
+        return new CurriedFn(
+                args -> callAny(right, new Object[]{ callAny(left, args) }),
+                1, new Object[0]);
     }
 
     private static void appendHandlers(Object v, java.util.List<CompiledHandler> out) {
         if (v instanceof CompiledHandler h) out.add(h);
         else if (v instanceof CompiledComposedHandler c) out.addAll(c.handlers);
-        else throw new dev.irij.interpreter.IrijRuntimeError(
+        else throw new dev.irij.IrijRuntimeError(
                 ">> requires handler operands, got " + typeTag(v));
     }
 
@@ -1831,7 +1988,7 @@ public final class RuntimeSupport {
 
     /** `error "msg"` builtin — throws IrijRuntimeError, caught by `on-failure`. */
     public static Object errorBuiltin(Object msg) {
-        throw new dev.irij.interpreter.IrijRuntimeError(
+        throw new dev.irij.IrijRuntimeError(
                 msg == null ? "error" : dev.irij.interpreter.Values.toIrijString(msg));
     }
 
@@ -1850,7 +2007,7 @@ public final class RuntimeSupport {
             return runWithComposed(cc.handlers, 0, body);
         }
         if (!(handlerObj instanceof CompiledHandler h)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "with requires a handler, got " + typeTag(handlerObj));
         }
         var opChannel = new java.util.concurrent.SynchronousQueue<
@@ -1900,7 +2057,7 @@ public final class RuntimeSupport {
             try { msg = opChannel.take(); }
             catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                throw new dev.irij.interpreter.IrijRuntimeError("Handler loop interrupted");
+                throw new dev.irij.IrijRuntimeError("Handler loop interrupted");
             }
             switch (msg) {
                 case dev.irij.interpreter.EffectSystem.EffectMessage.Done d -> {
@@ -1908,21 +2065,21 @@ public final class RuntimeSupport {
                 }
                 case dev.irij.interpreter.EffectSystem.EffectMessage.Err e -> {
                     Throwable t = e.error();
-                    if (t instanceof dev.irij.interpreter.IrijRuntimeError ire) throw ire;
+                    if (t instanceof dev.irij.IrijRuntimeError ire) throw ire;
                     if (t instanceof RuntimeException re) throw re;
-                    throw new dev.irij.interpreter.IrijRuntimeError(
+                    throw new dev.irij.IrijRuntimeError(
                             "Effect body error: " + t.getMessage());
                 }
                 case dev.irij.interpreter.EffectSystem.EffectMessage.Op op -> {
                     IrijFn clause = h.clauses.get(op.opName());
                     if (clause == null) {
-                        throw new dev.irij.interpreter.IrijRuntimeError(
+                        throw new dev.irij.IrijRuntimeError(
                                 "Handler " + h.name + " has no clause for " + op.opName());
                     }
                     var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
                     IrijFn resumeFn = (resumeArgs) -> {
                         if (!resumed.compareAndSet(false, true)) {
-                            throw new dev.irij.interpreter.IrijRuntimeError(
+                            throw new dev.irij.IrijRuntimeError(
                                     "resume called twice (one-shot continuation)");
                         }
                         try {
@@ -1932,7 +2089,7 @@ public final class RuntimeSupport {
                             return runHandlerLoop(h, opChannel);
                         } catch (InterruptedException e2) {
                             Thread.currentThread().interrupt();
-                            throw new dev.irij.interpreter.IrijRuntimeError(
+                            throw new dev.irij.IrijRuntimeError(
                                     "Interrupted during resume");
                         }
                     };
@@ -2143,14 +2300,14 @@ public final class RuntimeSupport {
                 if (h.effectName.equals(effectName)) {
                     IrijFn clause = h.clauses.get(opName);
                     if (clause == null) {
-                        throw new dev.irij.interpreter.IrijRuntimeError(
+                        throw new dev.irij.IrijRuntimeError(
                                 "Handler " + h.name + " has no clause for " + opName);
                     }
                     final Object[] resumeBox = {null};
                     final boolean[] resumed = {false};
                     IrijFn resumeFn = (resumeArgs) -> {
                         if (resumed[0]) {
-                            throw new dev.irij.interpreter.IrijRuntimeError(
+                            throw new dev.irij.IrijRuntimeError(
                                     "resume called twice (one-shot)");
                         }
                         resumed[0] = true;
@@ -2169,7 +2326,7 @@ public final class RuntimeSupport {
                     // synchronously is propagate the abort value as a
                     // RuntimeException so the calling fn (or fiber)
                     // can decide what to do.
-                    throw new dev.irij.interpreter.IrijRuntimeError(
+                    throw new dev.irij.IrijRuntimeError(
                             "SM clause aborted from synchronous-perform context: "
                                     + clauseRet);
                 }
@@ -2193,7 +2350,7 @@ public final class RuntimeSupport {
         } else if (handlerObj instanceof CompiledHandler h) {
             hs = java.util.List.of(h);
         } else {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "with requires a handler, got " + typeTag(handlerObj));
         }
         return dispatchLoopSM(hs, k, reentryValue);
@@ -2309,7 +2466,7 @@ public final class RuntimeSupport {
 
             IrijFn clause = h.clauses.get(sig.opName);
             if (clause == null) {
-                throw new dev.irij.interpreter.IrijRuntimeError(
+                throw new dev.irij.IrijRuntimeError(
                         "Handler " + h.name + " has no clause for " + sig.opName);
             }
 
@@ -2322,7 +2479,7 @@ public final class RuntimeSupport {
             final var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
             IrijFn resumeFn = (resumeArgs) -> {
                 if (!resumed.compareAndSet(false, true)) {
-                    throw new dev.irij.interpreter.IrijRuntimeError(
+                    throw new dev.irij.IrijRuntimeError(
                             "resume called twice (one-shot continuation)");
                 }
                 Object v = resumeArgs.length > 0
@@ -2375,7 +2532,10 @@ public final class RuntimeSupport {
      *  effect-handling context (both 14c.2 threaded and 14c.3 SM frames). */
     private record ParentSnapshot(
             java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> effectStack,
-            java.util.Deque<java.util.List<CompiledHandler>> smStack) {}
+            java.util.Deque<java.util.List<CompiledHandler>> smStack,
+            java.util.Deque<java.util.Set<String>> effectRow,
+            java.util.Map<String, Object> namespace,
+            java.io.PrintStream sessionOut) {}
 
     /** Snapshot the current effect stack + push onto the child fiber's stack. */
     private static void inheritEffectStack(java.util.Deque<
@@ -2401,7 +2561,26 @@ public final class RuntimeSupport {
     private static ParentSnapshot snapParent() {
         return new ParentSnapshot(
                 new java.util.ArrayDeque<>(dev.irij.interpreter.EffectSystem.STACK.get()),
-                new java.util.ArrayDeque<>(SM_STACK.get()));
+                new java.util.ArrayDeque<>(SM_STACK.get()),
+                new java.util.ArrayDeque<>(EFFECT_ROW.get()),
+                NS.get(),
+                SESSION_OUT.get());
+    }
+
+    /** Replace the child fiber's effect-row stack with the parent's
+     *  snapshot. Run before any other fiber-side code so {@code perform}
+     *  and effect-aware builtins see the inherited row. */
+    private static void inheritEffectRow(java.util.Deque<java.util.Set<String>> parentRow) {
+        var fiberRow = EFFECT_ROW.get();
+        fiberRow.clear();
+        // parentRow.iterator() returns top-first; we need bottom-first to
+        // push correctly. Reverse via toArray.
+        var arr = parentRow.toArray(new Object[0]);
+        for (int i = arr.length - 1; i >= 0; i--) {
+            @SuppressWarnings("unchecked")
+            var frame = (java.util.Set<String>) arr[i];
+            fiberRow.push(frame);
+        }
     }
 
     private static java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> snapStack() {
@@ -2415,6 +2594,9 @@ public final class RuntimeSupport {
         var t = Thread.startVirtualThread(() -> {
             inheritEffectStack(parent.effectStack());
             inheritSMStack(parent.smStack());
+            inheritEffectRow(parent.effectRow());
+            if (parent.namespace() != null) NS.set(parent.namespace());
+            if (parent.sessionOut() != null) SESSION_OUT.set(parent.sessionOut());
             try {
                 future.complete(callAny(thunk, new Object[0]));
             } catch (Throwable ex) {
@@ -2430,8 +2612,15 @@ public final class RuntimeSupport {
         return Thread.startVirtualThread(() -> {
             inheritEffectStack(parent.effectStack());
             inheritSMStack(parent.smStack());
+            inheritEffectRow(parent.effectRow());
+            if (parent.namespace() != null) NS.set(parent.namespace());
+            if (parent.sessionOut() != null) SESSION_OUT.set(parent.sessionOut());
             try { callAny(thunk, new Object[0]); }
-            catch (Throwable t) { System.err.println("[spawn] error: " + t.getMessage()); }
+            catch (Throwable t) {
+                java.io.PrintStream err = parent.sessionOut() != null
+                        ? parent.sessionOut() : System.err;
+                err.println("[spawn] error: " + t.getMessage());
+            }
         });
     }
 
@@ -2448,7 +2637,7 @@ public final class RuntimeSupport {
     /** `await fiber` — block until fiber completes. */
     public static Object await(Object fiberArg) {
         if (!(fiberArg instanceof Fiber f)) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "await expects a Fiber, got " + typeTag(fiberArg));
         }
         try { return f.result.join(); }
@@ -2460,7 +2649,7 @@ public final class RuntimeSupport {
     /** `par combiner thunk1 thunk2 ...` → combiner result1 result2 ... */
     public static Object par(Object[] args) {
         if (args.length < 2) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "par requires a combiner function and at least one thunk");
         }
         Object combiner = args[0];
@@ -2481,7 +2670,7 @@ public final class RuntimeSupport {
     /** `race thunk1 thunk2 ...` — first to succeed wins; others interrupted. */
     public static Object race(Object[] args) {
         if (args.length == 0) {
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "race requires at least one thunk");
         }
         var parent = snapParent();
@@ -2523,15 +2712,90 @@ public final class RuntimeSupport {
             return f.result.get(ms, java.util.concurrent.TimeUnit.MILLISECONDS);
         } catch (java.util.concurrent.TimeoutException e) {
             f.thread.interrupt();
-            throw new dev.irij.interpreter.IrijRuntimeError(
+            throw new dev.irij.IrijRuntimeError(
                     "timeout: operation exceeded " + ms + "ms");
         } catch (java.util.concurrent.ExecutionException e) {
             throw runtimeFrom(e.getCause(), "timeout");
         } catch (InterruptedException e) {
             f.thread.interrupt();
             Thread.currentThread().interrupt();
-            throw new dev.irij.interpreter.IrijRuntimeError("timeout: interrupted");
+            throw new dev.irij.IrijRuntimeError("timeout: interrupted");
         }
+    }
+
+    // ── Effect-row runtime enforcement ──────────────────────────────
+    //
+    // Mirrors the interpreter's AVAILABLE_EFFECTS stack so bytecode-mode
+    // honors declared fn rows at runtime. Pushed/popped at fn entry
+    // and at `with` block entry; checked at every `perform`. An
+    // AMBIENT sentinel (identity-comparable, contains-always-true)
+    // sits at the bottom so top-level statements see all effects.
+    private static final java.util.Set<String> EFFECT_AMBIENT = new java.util.HashSet<>() {
+        @Override public boolean contains(Object o) { return true; }
+    };
+
+    private static final ThreadLocal<java.util.Deque<java.util.Set<String>>> EFFECT_ROW =
+            ThreadLocal.withInitial(() -> {
+                var d = new java.util.ArrayDeque<java.util.Set<String>>();
+                d.push(EFFECT_AMBIENT);
+                return d;
+            });
+
+    /** Push a fn's declared effect row. {@code declared==null} means
+     *  unannotated → strict pure (empty set). Pass an empty array for
+     *  explicit `::: ` (also pure). Use {@link #enterFnAmbient()} when
+     *  the row contains {@code Any} or a row-variable. */
+    public static void enterFn(String[] declared) {
+        var top = EFFECT_ROW.get().peek();
+        if (top == EFFECT_AMBIENT && declared != null) {
+            // Inside ambient context: still respect the declared row
+            // (this is how the interpreter restricts inner fns).
+        }
+        java.util.Set<String> next = new java.util.HashSet<>();
+        if (declared != null) {
+            for (String e : declared) next.add(e);
+        }
+        EFFECT_ROW.get().push(next);
+    }
+
+    /** Push an ambient frame — fn body inherits caller's effects. Used
+     *  for {@code ::: Any} and parametric row-variables. */
+    public static void enterFnAmbient() {
+        EFFECT_ROW.get().push(EFFECT_AMBIENT);
+    }
+
+    public static void exitFn() {
+        EFFECT_ROW.get().pop();
+    }
+
+    /** Push a new frame that's the top frame ∪ the named effect. Used
+     *  by every {@code with handler} body so its statements see the
+     *  effect the handler provides. */
+    public static void enterWith(String effectName) {
+        var top = EFFECT_ROW.get().peek();
+        if (top == EFFECT_AMBIENT) {
+            EFFECT_ROW.get().push(EFFECT_AMBIENT);
+            return;
+        }
+        java.util.Set<String> expanded = new java.util.HashSet<>(top);
+        if (effectName != null) expanded.add(effectName);
+        EFFECT_ROW.get().push(expanded);
+    }
+
+    public static void exitWith() {
+        EFFECT_ROW.get().pop();
+    }
+
+    /** Called at every {@code perform} site. Throws if the effect
+     *  isn't in the enclosing fn's declared row. */
+    public static void checkPerformEffect(String effectName, String opName) {
+        if (effectName == null) return;
+        var top = EFFECT_ROW.get().peek();
+        if (top.contains(effectName)) return;
+        throw new dev.irij.IrijRuntimeError(
+                "Effect '" + effectName + "' not declared: '" + opName
+                        + "' requires ::: " + effectName
+                        + " in enclosing function's effect row");
     }
 
     /** `try thunk` — return Ok(result) / Err(msg). */
@@ -2539,16 +2803,16 @@ public final class RuntimeSupport {
         try {
             Object r = callAny(thunk, new Object[0]);
             return new dev.irij.interpreter.Values.Tagged("Ok", java.util.List.of(r));
-        } catch (dev.irij.interpreter.IrijRuntimeError ex) {
+        } catch (dev.irij.IrijRuntimeError ex) {
             return new dev.irij.interpreter.Values.Tagged("Err",
                     java.util.List.of(ex.getMessage() == null ? "" : ex.getMessage()));
         }
     }
 
-    private static dev.irij.interpreter.IrijRuntimeError runtimeFrom(Throwable cause, String prefix) {
-        if (cause instanceof dev.irij.interpreter.IrijRuntimeError ire) return ire;
+    private static dev.irij.IrijRuntimeError runtimeFrom(Throwable cause, String prefix) {
+        if (cause instanceof dev.irij.IrijRuntimeError ire) return ire;
         String msg = cause == null ? prefix : (prefix + ": " + cause.getMessage());
-        return new dev.irij.interpreter.IrijRuntimeError(msg);
+        return new dev.irij.IrijRuntimeError(msg);
     }
 
     /**
@@ -2579,7 +2843,7 @@ public final class RuntimeSupport {
             return switch (modifier) {
                 case "race" -> joinRace(bodyResult);
                 case "supervised" -> joinSupervised(bodyResult);
-                default -> throw new dev.irij.interpreter.IrijRuntimeError(
+                default -> throw new dev.irij.IrijRuntimeError(
                         "Unknown scope modifier: " + modifier);
             };
         }
@@ -2591,7 +2855,7 @@ public final class RuntimeSupport {
         }
 
         private Object joinAll(Object bodyResult) {
-            dev.irij.interpreter.IrijRuntimeError firstErr = null;
+            dev.irij.IrijRuntimeError firstErr = null;
             for (Fiber f : fibers) {
                 try { f.result.join(); }
                 catch (java.util.concurrent.CompletionException ce) {

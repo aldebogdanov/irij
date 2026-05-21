@@ -1,44 +1,28 @@
 package dev.irij.nrepl;
 
-import dev.irij.ast.AstBuilder;
-import dev.irij.compiler.CompileOptions;
+import dev.irij.compiler.BytecodeSession;
 import dev.irij.compiler.IrijCompiler;
-import dev.irij.interpreter.Interpreter;
-import dev.irij.interpreter.IrijRuntimeError;
-import dev.irij.interpreter.Values;
-import dev.irij.parser.IrijParseDriver;
+import dev.irij.IrijRuntimeError;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
-import java.lang.reflect.Method;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * An nREPL session: wraps an {@link Interpreter} instance with
- * per-evaluation output capture via {@link IndirectOutputStream}.
+ * An nREPL session: wraps a {@link BytecodeSession} with per-eval
+ * output capture via {@link IndirectOutputStream}.
  *
- * <p>Each session maintains its own environment — bindings persist
- * across evaluations within the session.
+ * <p>v0.6.13: bytecode-only. Each session has its own namespace map +
+ * classloader; top-level binds persist across evaluations within the
+ * session via {@link BytecodeSession}.
  */
 public final class NReplSession {
 
     private final String id;
-    private final Interpreter interpreter;
+    private final BytecodeSession session;
     private final IndirectOutputStream indirectOut;
     private final BackgroundOutputStream backgroundOut;
     private volatile boolean closed;
-
-    /** Per-session shared namespace for `eval-bytecode` operations.
-     *  Top-level `:= name value` binds written here by the emitter
-     *  via {@code RT.nsPut}; reads fall back here via {@code RT.nsGet}.
-     *  Lets successive bytecode evals share state. */
-    private final java.util.Map<String, Object> bytecodeNamespace =
-            new java.util.concurrent.ConcurrentHashMap<>();
-    /** Shared classloader so every eval-bytecode class can refer to
-     *  each other's emitted helpers (e.g. user-fn IrijFn adapters)
-     *  if/when cross-eval fn defs become supported. */
-    private final BytesLoader bytecodeClassLoader = new BytesLoader();
 
     public NReplSession() {
         this(null);
@@ -48,17 +32,13 @@ public final class NReplSession {
         this.id = UUID.randomUUID().toString();
         this.backgroundOut = new BackgroundOutputStream();
         this.indirectOut = new IndirectOutputStream(backgroundOut);
-        var printStream = new PrintStream(indirectOut, true);
-        this.interpreter = new Interpreter(printStream);
+        this.session = new BytecodeSession("irij.NReplEval");
         this.closed = false;
-        if (projectRoot != null) {
-            interpreter.setSourcePath(projectRoot);
-            try {
-                interpreter.loadDeps(projectRoot);
-            } catch (Exception e) {
-                printStream.println("Warning: failed to load seeds from irij.toml: " + e.getMessage());
-            }
-        }
+        // projectRoot is currently informational only; module
+        // resolution happens via the compile-time inliner reading
+        // seeds from `~/.irij/seeds/`. Bytecode mode doesn't have
+        // a runtime "set source path" affordance.
+        // TODO: wire seed-root resolution into BytecodeSession.eval.
     }
 
     public String id() {
@@ -83,13 +63,10 @@ public final class NReplSession {
             return errorResponse("Missing 'op' in message");
         }
         return switch (op) {
-            // R1: the default `eval` op now dispatches to bytecode mode.
-            // The interpreter remains available under `eval-interp`
-            // for emergency back-compat / debugging during the
-            // interpreter-removal transition (Phases R*-series).
-            case "eval" -> evalBytecodeOp(msg);
-            case "eval-bytecode" -> evalBytecodeOp(msg);
-            case "eval-interp" -> evalOp(msg);
+            // v0.6.13: only one execution model — bytecode. `eval` and
+            // `eval-bytecode` are both routed through BytecodeSession.
+            // `eval-interp` was removed with the interpreter.
+            case "eval", "eval-bytecode" -> evalBytecodeOp(msg);
             case "background-out" -> backgroundOutOp();
             case "describe" -> describeOp();
             case "close" -> closeOp();
@@ -99,121 +76,50 @@ public final class NReplSession {
 
     // ── eval-bytecode ──────────────────────────────────────────────────
     //
-    // Compile the snippet to JVM bytecode (state-machine mode) and run
-    // it in a fresh class. Useful for benchmarking + verifying behaviour
-    // under the compiled back-end inside an interactive session.
-    //
-    // Limitation: does NOT share state with the interpreter session
-    // (no cross-eval `:=` or `fn` carry-over). Each eval-bytecode is a
-    // self-contained program. Full bytecode-backed sessions with
-    // cross-eval state require a "namespace" abstraction in the
-    // emitter — tracked tech debt; see docs/internals/hot-redef.md.
-
-    private static final AtomicInteger BYTECODE_EVAL_COUNTER = new AtomicInteger();
-
-    private static final class BytesLoader extends ClassLoader {
-        BytesLoader() { super(NReplSession.class.getClassLoader()); }
-        Class<?> define(String name, byte[] bytes) {
-            return defineClass(name, bytes, 0, bytes.length);
-        }
-    }
+    // Compile the snippet via BytecodeSession (state-machine mode +
+    // namespace mode on) and run it. Top-level binds persist across
+    // evals through the session's shared namespace map.
 
     private Map<String, Object> evalBytecodeOp(Map<String, Object> msg) {
         String code = (String) msg.get("code");
         if (code == null) {
             return errorResponse("Missing 'code' in eval-bytecode message");
         }
-        String modeStr = (String) msg.getOrDefault("mode", "bytecode-sm");
-        CompileOptions opts = switch (modeStr) {
-            case "bytecode-threaded", "threaded" -> CompileOptions.threaded();
-            default -> CompileOptions.stateMachine();
-        };
-        // Enable namespace mode so top-level binds share state across
-        // evals in this session.
-        opts = opts.withNamespaceMode(true);
 
         String bgPrefix = backgroundOut.drain();
         var capture = new ByteArrayOutputStream();
         indirectOut.setTarget(capture);
-        PrintStream origOut = System.out;
-        System.setOut(new PrintStream(capture, true));
-        // Install the session namespace on this thread so the emitted
-        // `nsGet`/`nsPut` calls hit the right map.
-        var prevNS = dev.irij.compiler.RuntimeSupport.NS.get();
-        dev.irij.compiler.RuntimeSupport.NS.set(bytecodeNamespace);
+        // Use the indirectOut wrapper as the session PrintStream, NOT a
+        // direct PrintStream over `capture`. That way spawned threads
+        // (which inherit SESSION_OUT via ParentSnapshot) keep writing
+        // through the indirection: while the eval runs, writes hit
+        // `capture`; after the eval returns and the finally swaps the
+        // indirection back to `backgroundOut`, spawned-thread writes
+        // accumulate there for the next `background-out` op.
+        var captureStream = new PrintStream(indirectOut, true);
+        // Pre-eval sentinel so we can distinguish "user ended with an
+        // expression that legitimately evaluated to ()" from "user ran
+        // only fns/binds (no trailing expression)".
+        Object sentinel = new Object();
+        session.namespace().put(dev.irij.compiler.BytecodeSession.LAST_VALUE_KEY, sentinel);
         try {
-            String className = "irij.NReplEval$" + BYTECODE_EVAL_COUNTER.incrementAndGet();
-            byte[] bytes = IrijCompiler.compileSource(code, className, null, opts);
-            Class<?> cls = bytecodeClassLoader.define(className, bytes);
-            Method main = cls.getMethod("main", String[].class);
-            main.invoke(null, (Object) new String[0]);
-
+            session.eval(code, "nrepl", captureStream);
             var resp = new LinkedHashMap<String, Object>();
             String stdout = bgPrefix + capture.toString();
             if (!stdout.isEmpty()) resp.put("out", stdout);
-            resp.put("value", "nil");  // top-level bytecode programs return via println
+            Object last = session.namespace().get(dev.irij.compiler.BytecodeSession.LAST_VALUE_KEY);
+            Object surfaced = (last == sentinel) ? dev.irij.interpreter.Values.UNIT : last;
+            resp.put("value", dev.irij.interpreter.Values.toIrijString(surfaced));
             resp.put("status", List.of("done"));
             return resp;
         } catch (IrijCompiler.CompileException e) {
             return errorResponseWithOut(bgPrefix, capture, "Compile error: " + e.getMessage());
-        } catch (Exception e) {
-            Throwable cause = e.getCause() != null ? e.getCause() : e;
-            return errorResponseWithOut(bgPrefix, capture, "Bytecode runtime error: " + cause.getMessage());
-        } finally {
-            dev.irij.compiler.RuntimeSupport.NS.set(prevNS);
-            System.setOut(origOut);
-            indirectOut.setTarget(backgroundOut);
-        }
-    }
-
-    // ── eval ────────────────────────────────────────────────────────────
-
-    private Map<String, Object> evalOp(Map<String, Object> msg) {
-        String code = (String) msg.get("code");
-        if (code == null) {
-            return errorResponse("Missing 'code' in eval message");
-        }
-
-        // Drain any background output that accumulated since the last eval
-        // (e.g. from spawned threads) and prepend it to this eval's output.
-        String bgPrefix = backgroundOut.drain();
-
-        // Capture stdout for this eval
-        var capture = new ByteArrayOutputStream();
-        indirectOut.setTarget(capture);
-        try {
-            // Parse
-            var parseResult = IrijParseDriver.parse(code);
-            if (parseResult.hasErrors()) {
-                var sb = new StringBuilder();
-                for (var err : parseResult.errors()) {
-                    sb.append(err).append("\n");
-                }
-                return errorResponseWithOut(bgPrefix, capture,
-                        "Parse error: " + sb.toString().strip());
-            }
-
-            // Build AST and interpret
-            var ast = new AstBuilder().build(parseResult.tree());
-            var value = interpreter.run(ast);
-
-            // Build response
-            var resp = new LinkedHashMap<String, Object>();
-            String stdout = bgPrefix + capture.toString();
-            if (!stdout.isEmpty()) {
-                resp.put("out", stdout);
-            }
-            resp.put("value", Values.toIrijString(value));
-            resp.put("status", List.of("done"));
-            return resp;
-
         } catch (IrijRuntimeError e) {
             return errorResponseWithOut(bgPrefix, capture, "Runtime error: " + e.getMessage());
         } catch (Exception e) {
-            return errorResponseWithOut(bgPrefix, capture, "Error: " + e.getMessage());
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            return errorResponseWithOut(bgPrefix, capture, "Runtime error: " + cause.getMessage());
         } finally {
-            // Restore target to the background buffer so spawned threads
-            // continue writing there (not to System.out).
             indirectOut.setTarget(backgroundOut);
         }
     }
@@ -239,9 +145,8 @@ public final class NReplSession {
     private Map<String, Object> describeOp() {
         var resp = new LinkedHashMap<String, Object>();
         resp.put("ops", Map.of(
-                "eval", Map.of(),               // bytecode-mode (R1)
+                "eval", Map.of(),               // bytecode + namespace
                 "eval-bytecode", Map.of(),      // explicit alias
-                "eval-interp", Map.of(),        // legacy interpreter
                 "background-out", Map.of(),
                 "describe", Map.of(),
                 "clone", Map.of(),

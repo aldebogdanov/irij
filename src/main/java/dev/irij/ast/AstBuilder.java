@@ -121,16 +121,15 @@ public class AstBuilder {
 
         if (ctx.fnBody() == null) {
             return new Decl.FnDecl(name, isPub, effectRow, specAnnotations, new Decl.FnBody.NoBody(),
-                List.of(), List.of(), List.of(), List.of(), List.of(), loc(ctx));
+                List.of(), List.of(), List.of(), List.of(), loc(ctx));
         }
         var content = ctx.fnBody().fnBodyContent();
 
-        // Extract contract clauses (pre/post/in/out/law) from fnBodyContent
+        // Extract contract clauses (pre/post/in/out) from fnBodyContent.
         var pres = new ArrayList<Expr>();
         var posts = new ArrayList<Expr>();
         var ins = new ArrayList<Expr>();
         var outs = new ArrayList<Expr>();
-        var fnLaws = new ArrayList<Decl.FnLaw>();
         for (var cc : content.contractClause()) {
             if (cc.PRE() != null) {
                 pres.add(visitExpr(cc.expr()));
@@ -140,19 +139,11 @@ public class AstBuilder {
                 ins.add(visitExpr(cc.expr()));
             } else if (cc.OUT() != null) {
                 outs.add(visitExpr(cc.expr()));
-            } else if (cc.LAW() != null) {
-                var forallVars = new ArrayList<String>();
-                if (cc.forallBinders() != null) {
-                    for (var id : cc.forallBinders().IDENT()) {
-                        forallVars.add(id.getText());
-                    }
-                }
-                fnLaws.add(new Decl.FnLaw(cc.IDENT().getText(), forallVars, visitExpr(cc.expr())));
             }
         }
 
         Decl.FnBody body = visitFnBody(content);
-        return new Decl.FnDecl(name, isPub, effectRow, specAnnotations, body, pres, posts, ins, outs, fnLaws, loc(ctx));
+        return new Decl.FnDecl(name, isPub, effectRow, specAnnotations, body, pres, posts, ins, outs, loc(ctx));
     }
 
     /**
@@ -549,24 +540,12 @@ public class AstBuilder {
             }
         }
         var methods = new ArrayList<Decl.ProtoMethod>();
-        var laws = new ArrayList<Decl.ProtoLaw>();
         for (var member : ctx.protoBody().protoMember()) {
             if (member.IDENT() != null && member.specExpr() != null) {
                 methods.add(new Decl.ProtoMethod(member.IDENT().getText()));
-            } else if (member.LAW() != null) {
-                var forallVars = new ArrayList<String>();
-                if (member.forallBinders() != null) {
-                    for (var id : member.forallBinders().IDENT()) {
-                        forallVars.add(id.getText());
-                    }
-                }
-                laws.add(new Decl.ProtoLaw(
-                    member.IDENT().getText(),
-                    forallVars,
-                    visitExpr(member.expr())));
             }
         }
-        return new Decl.ProtoDecl(name, typeParams, methods, laws, loc(ctx));
+        return new Decl.ProtoDecl(name, typeParams, methods, loc(ctx));
     }
 
     private Decl visitImplDecl(ImplDeclContext ctx) {

@@ -1,6 +1,6 @@
 package dev.irij.compiler;
 
-import dev.irij.interpreter.IrijRuntimeError;
+import dev.irij.IrijRuntimeError;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;

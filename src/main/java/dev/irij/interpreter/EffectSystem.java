@@ -1,5 +1,7 @@
 package dev.irij.interpreter;
 
+import dev.irij.IrijRuntimeError;
+
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;

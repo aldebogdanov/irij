@@ -14,30 +14,25 @@ public sealed interface Decl extends Node {
                   FnBody body,
                   List<Expr> preConditions, List<Expr> postConditions,
                   List<Expr> inContracts, List<Expr> outContracts,
-                  List<FnLaw> fnLaws,
                   SourceLoc loc) implements Decl {
         /** Convenience constructor for functions without contracts, effects, or specs. */
         public FnDecl(String name, boolean isPub, FnBody body, SourceLoc loc) {
-            this(name, isPub, null, null, body, List.of(), List.of(), List.of(), List.of(), List.of(), loc);
+            this(name, isPub, null, null, body, List.of(), List.of(), List.of(), List.of(), loc);
         }
         /** Convenience constructor for pre/post only (backward compat). */
         public FnDecl(String name, boolean isPub, FnBody body,
                       List<Expr> preConditions, List<Expr> postConditions,
                       SourceLoc loc) {
-            this(name, isPub, null, null, body, preConditions, postConditions, List.of(), List.of(), List.of(), loc);
+            this(name, isPub, null, null, body, preConditions, postConditions, List.of(), List.of(), loc);
         }
         /** Convenience constructor with all contracts but no effects or specs. */
         public FnDecl(String name, boolean isPub, FnBody body,
                       List<Expr> preConditions, List<Expr> postConditions,
                       List<Expr> inContracts, List<Expr> outContracts,
-                      List<FnLaw> fnLaws,
                       SourceLoc loc) {
-            this(name, isPub, null, null, body, preConditions, postConditions, inContracts, outContracts, fnLaws, loc);
+            this(name, isPub, null, null, body, preConditions, postConditions, inContracts, outContracts, loc);
         }
     }
-
-    /** A law declared inside a function body. */
-    record FnLaw(String name, List<String> forallVars, Expr body) {}
 
     /** Spec declaration: spec Name params  variants|fields. */
     record SpecDecl(String name, List<String> specParams, SpecBody body, SourceLoc loc) implements Decl {}
@@ -68,7 +63,7 @@ public sealed interface Decl extends Node {
 
     /** Protocol declaration: proto Name a  methods/laws. */
     record ProtoDecl(String name, List<String> typeParams,
-                     List<ProtoMethod> methods, List<ProtoLaw> laws,
+                     List<ProtoMethod> methods,
                      SourceLoc loc) implements Decl {}
 
     /** Implementation declaration: impl Proto for Type  bindings. */
@@ -143,7 +138,6 @@ public sealed interface Decl extends Node {
     // ── Protocol helpers ────────────────────────────────────────────────
 
     record ProtoMethod(String name) {}
-    record ProtoLaw(String name, List<String> forallVars, Expr body) {}
     record ImplBinding(String name, Expr value) {}
 
     // ── Use Modifier ────────────────────────────────────────────────────

@@ -185,28 +185,17 @@ The blame label points at the *caller*, not the callee, when input
 specs fail. For output failures it points at the callee. This is
 classical higher-order contract blame (Findler/Felleisen 2002).
 
-## Law verification
+## Law verification — REMOVED (v0.6.12)
 
-QuickCheck-style. Declared via:
-
-```
-law name :: Int Int
-  (a b -> a + b == b + a)
-```
-
-Runs N=100 random inputs (via `Arbitrary` instances) and checks the
-property. Reports the smallest failing input via shrinking. Run via
-`irij test`.
-
-## `Arbitrary` instances
-
-Each primitive spec carries an `arbitrary()` method that generates
-random samples. Composites compose: `Vec[Int]` generates a random-
-length list of random ints. Custom specs need an explicit
-`arbitrary` declaration.
-
-Implementation in `dev.irij.spec` (interp-side; bytecode mode doesn't
-yet run law-verification).
+Earlier versions shipped `law NAME = forall x. P x` syntax plus a
+`verify-laws` builtin running QuickCheck-style sampling against a
+shared `Arbitrary` registry. That has been removed in v0.6.12. The
+property-testing job belongs in a library, not the language proper
+(Haskell QuickCheck, Rust proptest, Scala ScalaCheck all sit outside
+their host language). Future work: ship `std.quickcheck` as a regular
+Irij module — `check "associativity" (a b c -> f (f a b) c == f a (f
+b c)) 100` — same machinery, honest framing (random samples, not
+proof).
 
 ## Spec-lint
 
@@ -350,5 +339,5 @@ The project bet:
 
 Trade-off: no compile-time type errors. Some bugs surface at runtime
 that would be caught at compile time in a typed lang. The project
-position is that effect rows + specs + contracts + law verification
-catch enough of the same bugs to be worth the trade.
+position is that effect rows + specs + contracts catch enough of the
+same bugs to be worth the trade.

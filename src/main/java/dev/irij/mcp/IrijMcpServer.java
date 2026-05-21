@@ -2,8 +2,7 @@ package dev.irij.mcp;
 
 import com.google.gson.*;
 import dev.irij.ast.AstBuilder;
-import dev.irij.interpreter.Interpreter;
-import dev.irij.interpreter.IrijRuntimeError;
+import dev.irij.IrijRuntimeError;
 import dev.irij.interpreter.Values;
 import dev.irij.nrepl.BackgroundOutputStream;
 import dev.irij.nrepl.IndirectOutputStream;
@@ -178,29 +177,13 @@ public final class IrijMcpServer {
         // Capture stdout
         var capture = new ByteArrayOutputStream();
         session.indirectOut.setTarget(capture);
+        var captureStream = new PrintStream(capture, true);
         try {
-            var parseResult = IrijParseDriver.parse(code);
-            if (parseResult.hasErrors()) {
-                var sb = new StringBuilder("Parse error:\n");
-                for (var err : parseResult.errors()) {
-                    sb.append("  ").append(err).append("\n");
-                }
-                return toolErrorResult(id, sb.toString().strip());
-            }
-
-            var ast = new AstBuilder().build(parseResult.tree());
-            var value = session.interpreter.run(ast);
-
+            session.bytecode.eval(code, "mcp-eval", captureStream);
             String stdout = capture.toString().strip();
-            var sb = new StringBuilder();
-            if (!stdout.isEmpty()) {
-                sb.append(stdout).append("\n");
-            }
-            if (value != Values.UNIT) {
-                sb.append("=> ").append(Values.toIrijString(value));
-            }
-            return toolResult(id, sb.toString().strip());
-
+            return toolResult(id, stdout.isEmpty() ? "(no output)" : stdout);
+        } catch (dev.irij.compiler.IrijCompiler.CompileException e) {
+            return toolErrorResult(id, "Compile error: " + e.getMessage());
         } catch (IrijRuntimeError e) {
             String stdout = capture.toString().strip();
             var sb = new StringBuilder();
@@ -226,47 +209,24 @@ public final class IrijMcpServer {
             return toolErrorResult(id, "Provide either 'code' or 'file' parameter");
         }
 
-        // Fresh interpreter for each run
+        // Fresh bytecode runner for each call (no cross-call state).
         var capture = new ByteArrayOutputStream();
         var printStream = new PrintStream(capture, true);
-        var interpreter = new Interpreter(printStream);
 
         try {
-            IrijParseDriver.ParseResult parseResult;
             if (file != null && !file.isBlank()) {
                 var path = Path.of(file);
                 if (!Files.exists(path)) {
                     return toolErrorResult(id, "File not found: " + file);
                 }
-                parseResult = IrijParseDriver.parseFile(path);
-                interpreter.setSourcePath(path.toAbsolutePath().getParent());
+                dev.irij.cli.BytecodeRunner.runFile(path, printStream);
             } else {
-                parseResult = IrijParseDriver.parse(code);
-                interpreter.setSourcePath(projectRoot);
+                dev.irij.cli.BytecodeRunner.runSource(code, "mcp-run", printStream);
             }
-
-            if (parseResult.hasErrors()) {
-                var sb = new StringBuilder("Parse error:\n");
-                for (var err : parseResult.errors()) {
-                    sb.append("  ").append(err).append("\n");
-                }
-                return toolErrorResult(id, sb.toString().strip());
-            }
-
-            var ast = new AstBuilder().build(parseResult.tree());
-            var value = interpreter.run(ast);
-
             String stdout = capture.toString().strip();
-            var sb = new StringBuilder();
-            if (!stdout.isEmpty()) {
-                sb.append(stdout).append("\n");
-            }
-            if (value != Values.UNIT) {
-                sb.append("=> ").append(Values.toIrijString(value));
-            }
-            String result = sb.toString().strip();
-            return toolResult(id, result.isEmpty() ? "(no output)" : result);
-
+            return toolResult(id, stdout.isEmpty() ? "(no output)" : stdout);
+        } catch (dev.irij.compiler.IrijCompiler.CompileException e) {
+            return toolErrorResult(id, "Compile error: " + e.getMessage());
         } catch (IrijRuntimeError e) {
             String stdout = capture.toString().strip();
             var sb = new StringBuilder();
@@ -479,21 +439,19 @@ public final class IrijMcpServer {
         System.err.println("[irij-mcp] " + msg);
     }
 
-    // ── Session (persistent interpreter for irij_eval) ───────────────────
+    // ── Session (persistent bytecode session for irij_eval) ──────────────
 
     private static final class Session {
-        final Interpreter interpreter;
+        final dev.irij.compiler.BytecodeSession bytecode;
         final IndirectOutputStream indirectOut;
         final BackgroundOutputStream backgroundOut;
 
         Session(Path sourcePath) {
             this.backgroundOut = new BackgroundOutputStream();
             this.indirectOut = new IndirectOutputStream(backgroundOut);
-            var printStream = new PrintStream(indirectOut, true);
-            this.interpreter = new Interpreter(printStream);
-            if (sourcePath != null) {
-                this.interpreter.setSourcePath(sourcePath);
-            }
+            this.bytecode = new dev.irij.compiler.BytecodeSession("irij.McpEval");
+            // sourcePath is currently informational only — bytecode
+            // mode resolves seeds at compile time via the inliner.
         }
     }
 }

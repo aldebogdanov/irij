@@ -73,6 +73,22 @@ final class ClassEmitter implements Opcodes {
     // 14c.3 SM lowering: name -> continuation fields[] index; kSlot holds cont.
     private Map<String, Integer> currentLiftedLocals = Map.of();
     private int currentKSlot = -1;
+    private boolean currentFnPushesEffects = false;
+    /** Names that have a hard-wired bytecode constant (Math.PI, Math.E,
+     *  Function.identity, etc.). When a top-level binding shadows one
+     *  of these, the binding's INITIALIZER must read the constant
+     *  rather than the (uninitialized) static field. Lookups outside
+     *  initialization fall through to topLevelFields. */
+    private static final java.util.Set<String> BUILTIN_CONST_NAMES = java.util.Set.of(
+            "pi", "e", "identity", "const",
+            "length", "head", "tail", "empty?", "to-str", "not", "type-of",
+            "abs", "sqrt", "floor", "ceil", "round", "reverse", "sort",
+            "println", "print");
+    /** Set immediately before {@link #emitLambda} for a handler clause:
+     *  the clause body should run with these effects pushed on
+     *  RT.EFFECT_ROW so its perform/builtin calls succeed (mirrors the
+     *  interpreter's {@code AVAILABLE_EFFECTS.push(requiredEffects)}). */
+    private java.util.List<String> pendingClauseEffects = null;
     private ClassWriter classWriter;
     private int lambdaCounter = 0;
 
@@ -228,6 +244,11 @@ final class ClassEmitter implements Opcodes {
                     && b.target() instanceof Stmt.BindTarget.Simple sm) {
                 ensureTopLevelField(sm.name());
             }
+            if (d instanceof Decl.BindingDecl bd2
+                    && bd2.stmt() instanceof Stmt.MutBind mb
+                    && mb.target() instanceof Stmt.BindTarget.Simple sm2) {
+                ensureTopLevelField(sm2.name());
+            }
             Object inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
             if (inner instanceof Decl.SpecDecl sd) {
                 switch (sd.body()) {
@@ -269,10 +290,7 @@ final class ClassEmitter implements Opcodes {
             }
             if (inner instanceof Decl.ImplDecl id) {
                 for (Decl.ImplBinding b : id.bindings()) {
-                    if (!(b.value() instanceof Expr.Lambda lam)) {
-                        throw new IrijCompiler.CompileException(
-                                "MVP impl: binding for " + b.name() + " must be a lambda");
-                    }
+                    Expr.Lambda lam = liftImplBindingToLambda(b);
                     protoImpls.computeIfAbsent(b.name(), __ -> new HashMap<>())
                             .put(id.forType(), lam);
                     protoArity.putIfAbsent(b.name(), lam.params().size());
@@ -281,11 +299,18 @@ final class ClassEmitter implements Opcodes {
             }
         }
 
-        // Pass 2: emit static methods for fns.
+        // Pass 2: emit static methods for fns. Dedupe by name — when
+        // a module is :opened and the opener re-declares a name with
+        // an identical body (e.g. std.collection re-exports `sum`
+        // from std.list), the second pub fn would emit a duplicate
+        // JVM method. Last definition wins source-order (overrides
+        // earlier import); we honor that by emitting the last one.
+        java.util.Map<String, Decl.FnDecl> uniqueFns = new java.util.LinkedHashMap<>();
         for (Decl d : decls) {
             Decl.FnDecl fn = asFnDecl(d);
-            if (fn != null) emitFn(fn, cw);
+            if (fn != null) uniqueFns.put(fn.name(), fn); // overwrites: last wins
         }
+        for (Decl.FnDecl fn : uniqueFns.values()) emitFn(fn, cw);
 
         // Pass 2b: emit impl methods + protocol dispatchers.
         for (var entry : protoImpls.entrySet()) {
@@ -485,6 +510,12 @@ final class ClassEmitter implements Opcodes {
                     "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
                     false);
         }
+        // Pop the effect-row frame this fn pushed on entry. The result
+        // is already on the stack; exitFn returns void, so the stack
+        // shape stays { result } for the subsequent ARETURN.
+        if (currentFnPushesEffects) {
+            mv.visitMethodInsn(INVOKESTATIC, RT, "exitFn", "()V", false);
+        }
         mv.visitInsn(ARETURN);
     }
 
@@ -605,7 +636,7 @@ final class ClassEmitter implements Opcodes {
      *  on the stack — the verifier needs the next opcode to be
      *  unreachable or a Label start. Callers place a Label after. */
     private void emitThrowRuntimeError(MethodVisitor mv, String message) {
-        String ire = "dev/irij/interpreter/IrijRuntimeError";
+        String ire = "dev/irij/IrijRuntimeError";
         mv.visitTypeInsn(NEW, ire);
         mv.visitInsn(DUP);
         mv.visitLdcInsn(message);
@@ -640,14 +671,49 @@ final class ClassEmitter implements Opcodes {
         mv.visitCode();
 
         Locals locals = new Locals();
-        for (Pattern p : params) {
-            String name = switch (p) {
-                case Pattern.VarPat v -> v.name();
-                case Pattern.WildcardPat w -> "_";
-                default -> throw new IrijCompiler.CompileException(
-                        "MVP: fn param must be VarPat/WildcardPat, got " + p.getClass().getSimpleName());
-            };
-            locals.allocate(name);
+        // First pass: every JVM param needs its slot reserved at the
+        // expected index (Locals allocates sequentially). For simple
+        // patterns (VarPat / WildcardPat) we use the source name so
+        // body lookups resolve directly. For destructuring patterns
+        // (DestructurePat, ConstructorPat, etc.) we assign a synthetic
+        // `__paramN` slot and remember the pattern for the post-pass.
+        java.util.List<Pattern> deferredPatterns = new java.util.ArrayList<>();
+        java.util.List<Integer> deferredSlots = new java.util.ArrayList<>();
+        for (int i = 0; i < params.size(); i++) {
+            Pattern p = params.get(i);
+            String name;
+            boolean defer = false;
+            switch (p) {
+                case Pattern.VarPat v -> name = v.name();
+                case Pattern.WildcardPat w -> name = "_";
+                default -> { name = "__param" + i; defer = true; }
+            }
+            int slot = locals.allocate(name);
+            if (defer) {
+                deferredPatterns.add(p);
+                deferredSlots.add(slot);
+            }
+        }
+        // Second pass: bind sub-vars by running pattern tests against
+        // each deferred slot. On mismatch we throw a runtime error;
+        // fn-param patterns are total (the spec validator already
+        // rejected obviously bad inputs).
+        if (!deferredPatterns.isEmpty()) {
+            Label paramFailL = new Label();
+            Label paramOkL = new Label();
+            for (int i = 0; i < deferredPatterns.size(); i++) {
+                emitPatternTest(deferredPatterns.get(i), deferredSlots.get(i),
+                        mv, locals, paramFailL);
+            }
+            mv.visitJumpInsn(GOTO, paramOkL);
+            mv.visitLabel(paramFailL);
+            mv.visitTypeInsn(NEW, "dev/irij/IrijRuntimeError");
+            mv.visitInsn(DUP);
+            mv.visitLdcInsn("Pattern match failure in fn '" + fn.name() + "' parameter");
+            mv.visitMethodInsn(INVOKESPECIAL, "dev/irij/IrijRuntimeError",
+                    "<init>", "(Ljava/lang/String;)V", false);
+            mv.visitInsn(ATHROW);
+            mv.visitLabel(paramOkL);
         }
 
         // Bytecode spec validation (input args, full SpecExpr coverage
@@ -678,6 +744,24 @@ final class ClassEmitter implements Opcodes {
         // (wildcard / lowercase var) → null, no per-return overhead.
         currentOutputSpec = outputSpecEncoded(fn);
         installPostSlots(fn, mv, locals);
+
+        // Runtime effect-row tracking. Push this fn's declared row onto
+        // RT.EFFECT_ROW so that every `perform` inside the body honors
+        // it (mirrors the interpreter's AVAILABLE_EFFECTS stack). A
+        // wrap-all try/catch ensures the frame is popped on exception.
+        boolean savedPushes = currentFnPushesEffects;
+        currentFnPushesEffects = true;
+        boolean ambient = isAmbientRow(fn.effectRow());
+        if (ambient) {
+            mv.visitMethodInsn(INVOKESTATIC, RT, "enterFnAmbient", "()V", false);
+        } else {
+            emitStringArrayConst(mv, fn.effectRow());
+            mv.visitMethodInsn(INVOKESTATIC, RT, "enterFn", "([Ljava/lang/String;)V", false);
+        }
+        Label efTryStart = new Label();
+        Label efTryEnd = new Label();
+        Label efHandler = new Label();
+        mv.visitLabel(efTryStart);
         mv.visitLabel(currentFnEntry);
         try {
             switch (fn.body()) {
@@ -702,7 +786,14 @@ final class ClassEmitter implements Opcodes {
             currentPostSlots = savedPostSlots;
             currentPostTempSlot = savedPostTemp;
             currentPostBlame = savedPostBlame;
+            currentFnPushesEffects = savedPushes;
         }
+        mv.visitLabel(efTryEnd);
+        // Catch-all: pop the effect-row frame, then re-throw.
+        mv.visitLabel(efHandler);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "exitFn", "()V", false);
+        mv.visitInsn(ATHROW);
+        mv.visitTryCatchBlock(efTryStart, efTryEnd, efHandler, null);
 
         mv.visitMaxs(0, 0);
         mv.visitEnd();
@@ -770,10 +861,39 @@ final class ClassEmitter implements Opcodes {
             emitExpr(es.expr(), mv, inner);
         } else if (last instanceof Stmt.With w) {
             emitWith(w, mv, inner);
+        } else if (last instanceof Stmt.MatchStmt ms) {
+            // Tail-position match in a Block — propagate the matched
+            // arm's value out as the Block's value.
+            emitMatchExpr(new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc()),
+                    mv, inner);
+        } else if (last instanceof Stmt.IfStmt ifs) {
+            // Tail-position if — propagate each branch's value.
+            emitImperativeIfAsExpr(ifs, mv, inner);
         } else {
             emitStmt(last, mv, inner);
             mv.visitInsn(ACONST_NULL);
         }
+    }
+
+    /** Emit an IfStmt as if it were an IfExpr — each branch becomes a
+     *  Block whose value is the branch's last expression. Used when an
+     *  if appears in tail position inside a Block. */
+    private void emitImperativeIfAsExpr(Stmt.IfStmt ifs, MethodVisitor mv, Locals locals) {
+        emitExpr(ifs.cond(), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "truthy",
+                "(Ljava/lang/Object;)Z", false);
+        Label elseL = new Label();
+        Label endL = new Label();
+        mv.visitJumpInsn(IFEQ, elseL);
+        emitBlock(new Expr.Block(ifs.thenBranch(), ifs.loc()), mv, locals);
+        mv.visitJumpInsn(GOTO, endL);
+        mv.visitLabel(elseL);
+        if (ifs.elseBranch() != null) {
+            emitBlock(new Expr.Block(ifs.elseBranch(), ifs.loc()), mv, locals);
+        } else {
+            mv.visitInsn(ACONST_NULL);
+        }
+        mv.visitLabel(endL);
     }
 
     /** Mangle Irij kebab-case names to JVM-safe identifiers. */
@@ -793,6 +913,23 @@ final class ClassEmitter implements Opcodes {
                 // local-slot store still happens (via emitStmt) so the
                 // rest of main()'s code sees the binding.
                 emitStmt(bd.stmt(), mv, locals);
+                String topName = null;
+                if (bd.stmt() instanceof Stmt.Bind b
+                        && b.target() instanceof Stmt.BindTarget.Simple sm) {
+                    topName = sm.name();
+                } else if (bd.stmt() instanceof Stmt.MutBind mb
+                        && mb.target() instanceof Stmt.BindTarget.Simple sm) {
+                    topName = sm.name();
+                }
+                if (topName != null) {
+                    Integer slot = locals.lookup(topName);
+                    if (slot != null) {
+                        String field = ensureTopLevelField(topName);
+                        mv.visitVarInsn(ALOAD, slot);
+                        mv.visitFieldInsn(PUTSTATIC, internalName, field, OBJ_DESC);
+                    }
+                }
+                // Keep the old narrow nsPut path for namespace mode.
                 if (bd.stmt() instanceof Stmt.Bind b
                         && b.target() instanceof Stmt.BindTarget.Simple sm) {
                     Integer slot = locals.lookup(sm.name());
@@ -814,6 +951,7 @@ final class ClassEmitter implements Opcodes {
                 }
             }
             case Decl.IfDecl id -> emitStmt(id.ifStmt(), mv, locals);
+            case Decl.MatchDecl md -> emitStmt(md.match(), mv, locals);
             case Decl.SpecDecl __ -> { /* structural only; constructors resolved via TypeRef */ }
             case Decl.ProtoDecl __ -> { /* no runtime rep; methods go through dispatchers */ }
             case Decl.ImplDecl __ -> { /* bindings hoisted to static methods in pass 2b */ }
@@ -835,6 +973,7 @@ final class ClassEmitter implements Opcodes {
         switch (s) {
             case Stmt.ExprStmt es -> emitStmtExpr(es.expr(), mv, locals);
             case Stmt.Bind b -> emitBind(b, mv, locals);
+            case Stmt.MutBind mb -> emitMutBind(mb, mv, locals);
             case Stmt.IfStmt ifs -> emitIfStmt(ifs, mv, locals);
             case Stmt.MatchStmt ms -> {
                 // Match as statement: emit as expression, discard result.
@@ -870,6 +1009,22 @@ final class ClassEmitter implements Opcodes {
             return;
         }
         emitExpr(a.value(), mv, locals);
+        // Top-level mutable bind: write the static field FIRST so
+        // captured-by-static-field readers (lambdas, other threads)
+        // see the update. Falls through to local-slot update if there
+        // is one, so same-method reads also see the new value.
+        String topField = topLevelFields.get(s.name());
+        if (topField != null) {
+            mv.visitInsn(DUP);
+            mv.visitFieldInsn(PUTSTATIC, internalName, topField, OBJ_DESC);
+            Integer slotMaybe = locals.lookup(s.name());
+            if (slotMaybe != null) {
+                mv.visitVarInsn(ASTORE, slotMaybe);
+            } else {
+                mv.visitInsn(POP);
+            }
+            return;
+        }
         Integer slot = locals.lookup(s.name());
         if (slot != null) {
             mv.visitVarInsn(ASTORE, slot);
@@ -882,6 +1037,33 @@ final class ClassEmitter implements Opcodes {
         }
         throw new IrijCompiler.CompileException(
                 "MVP: assignment to unknown target: " + s.name());
+    }
+
+    /** Emit a mutable bind `x :! v`. For locals, semantically
+     *  identical to immutable bind — the value lives in a local
+     *  slot and subsequent {@code Stmt.Assign} writes via ASTORE.
+     *  The mutability distinction is enforced by the parser/AST,
+     *  not by the JVM storage. Top-level MutBinds get hoisted to
+     *  static fields by {@link #emitTopLevel} the same way Bind
+     *  does. */
+    private void emitMutBind(Stmt.MutBind mb, MethodVisitor mv, Locals locals) {
+        if (!(mb.target() instanceof Stmt.BindTarget.Simple simple)) {
+            throw new IrijCompiler.CompileException(
+                    "MVP: mutable bind requires a Simple target (got "
+                            + mb.target().getClass().getSimpleName() + ")");
+        }
+        Integer liftedIdx = currentLiftedLocals.get(simple.name());
+        if (liftedIdx != null && currentKSlot >= 0) {
+            mv.visitVarInsn(ALOAD, currentKSlot);
+            mv.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+            pushIconst(mv, liftedIdx);
+            emitExpr(mb.value(), mv, locals);
+            mv.visitInsn(AASTORE);
+            return;
+        }
+        emitExpr(mb.value(), mv, locals);
+        int slot = locals.allocate(simple.name());
+        mv.visitVarInsn(ASTORE, slot);
     }
 
     private void emitBind(Stmt.Bind b, MethodVisitor mv, Locals locals) {
@@ -971,6 +1153,8 @@ final class ClassEmitter implements Opcodes {
             case Expr.TupleLit tl -> emitTupleLiteral(tl.elements(), mv, locals);
             case Expr.SetLit sl -> emitListLiteral(sl.elements(), mv, locals, "IrijSet");
             case Expr.MapLit ml -> emitMapLiteral(ml, mv, locals);
+            case Expr.RecordUpdate ru -> emitRecordUpdate(ru, mv, locals);
+            case Expr.StringInterp si -> emitStringInterp(si, mv, locals);
             case Expr.Var v -> emitVarLoad(v.name(), mv, locals);
             case Expr.TypeRef tr -> emitConstructorApp(tr.name(), List.of(), mv, locals);
             case Expr.BinaryOp bop -> emitBinaryOp(bop, mv, locals);
@@ -999,10 +1183,23 @@ final class ClassEmitter implements Opcodes {
             // Pipe: `a |> f` ≡ `f a`, `a <| f` ≡ `f a` (reversed at parse).
             // Lower to an App so the existing apply-path handles arity,
             // effect rows, callable kinds (IrijFn / user fn / builtin).
+            //
+            // Special case: if the function side is itself an App, splice
+            // the piped value as the final positional arg instead of
+            // currying. So `x |> get k` becomes `get k x` (2-arg call)
+            // rather than `(get k)(x)`. This matches the canonical pipe
+            // idiom and avoids partial-application paths that builtin
+            // dispatch doesn't natively support.
             case Expr.Pipe p -> {
                 Expr fn = p.forward() ? p.right() : p.left();
                 Expr arg = p.forward() ? p.left() : p.right();
-                emitExpr(new Expr.App(fn, java.util.List.of(arg), p.loc()), mv, locals);
+                if (fn instanceof Expr.App innerApp) {
+                    java.util.List<Expr> spliced = new java.util.ArrayList<>(innerApp.args());
+                    spliced.add(arg);
+                    emitExpr(new Expr.App(innerApp.fn(), spliced, p.loc()), mv, locals);
+                } else {
+                    emitExpr(new Expr.App(fn, java.util.List.of(arg), p.loc()), mv, locals);
+                }
             }
             case Expr.SeqOp so -> emitSeqOp(so, mv, locals);
             default -> throw new IrijCompiler.CompileException(
@@ -1011,6 +1208,33 @@ final class ClassEmitter implements Opcodes {
     }
 
     private void emitVarLoad(String name, MethodVisitor mv, Locals locals) {
+        // Locals shadow ALL outer scopes — pattern binds, params, lets.
+        // Without this, `Err e => e` returned Math.E (the `e` constant
+        // shadowed by the pattern-bound `e`).
+        Integer __preSlot = locals.lookup(name);
+        if (__preSlot != null) {
+            mv.visitVarInsn(ALOAD, __preSlot);
+            return;
+        }
+        Integer __preLifted = currentLiftedLocals.get(name);
+        if (__preLifted != null && currentKSlot >= 0) {
+            mv.visitVarInsn(ALOAD, currentKSlot);
+            mv.visitFieldInsn(GETFIELD, CONT, "fields", "[Ljava/lang/Object;");
+            pushIconst(mv, __preLifted);
+            mv.visitInsn(AALOAD);
+            return;
+        }
+        // Top-level mut binds: read via GETSTATIC so cross-thread
+        // updates (e.g. assignments inside a forked fiber) are visible.
+        // The dual local slot allocated at init time is only used by
+        // the initializer itself; once init completes, the static is
+        // authoritative.
+        if (topLevelFields.containsKey(name)
+                && !BUILTIN_CONST_NAMES.contains(name)) {
+            mv.visitFieldInsn(GETSTATIC, internalName,
+                    topLevelFields.get(name), OBJ_DESC);
+            return;
+        }
         switch (name) {
             case "true" -> {
                 mv.visitFieldInsn(GETSTATIC, "java/lang/Boolean", "TRUE", "Ljava/lang/Boolean;");
@@ -1228,6 +1452,7 @@ final class ClassEmitter implements Opcodes {
             case "*"  -> mv.visitMethodInsn(INVOKESTATIC, RT, "mul", BINOP_DESC, false);
             case "/"  -> mv.visitMethodInsn(INVOKESTATIC, RT, "div", BINOP_DESC, false);
             case "%"  -> mv.visitMethodInsn(INVOKESTATIC, RT, "mod", BINOP_DESC, false);
+            case "**" -> mv.visitMethodInsn(INVOKESTATIC, RT, "pow", BINOP_DESC, false);
             case "<"  -> cmpToBoxedBool(mv, "lt");
             case "<=" -> cmpToBoxedBool(mv, "le");
             case ">"  -> cmpToBoxedBool(mv, "gt");
@@ -1285,6 +1510,57 @@ final class ClassEmitter implements Opcodes {
                 "([Ljava/lang/Object;)V", false);
     }
 
+    /** `"prefix {expr} suffix"` — build a String via StringBuilder,
+     *  appending each part. Interpolated exprs go through
+     *  {@code Values.toIrijString}. */
+    private void emitStringInterp(Expr.StringInterp si, MethodVisitor mv, Locals locals) {
+        mv.visitTypeInsn(NEW, "java/lang/StringBuilder");
+        mv.visitInsn(DUP);
+        mv.visitMethodInsn(INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false);
+        for (Expr.StringPart part : si.parts()) {
+            if (part instanceof Expr.StringPart.Literal lit) {
+                mv.visitLdcInsn(lit.text());
+                mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false);
+            } else if (part instanceof Expr.StringPart.Interpolation interp) {
+                emitExpr(interp.expr(), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, VALUES, "toIrijString",
+                        "(Ljava/lang/Object;)Ljava/lang/String;", false);
+                mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "append",
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false);
+            }
+        }
+        mv.visitMethodInsn(INVOKEVIRTUAL, "java/lang/StringBuilder", "toString",
+                "()Ljava/lang/String;", false);
+    }
+
+    /** `{...base k1= v1 k2= v2}` — clone base map, overwrite keys. */
+    private void emitRecordUpdate(Expr.RecordUpdate ru, MethodVisitor mv, Locals locals) {
+        // Push the base value, call RT.recordUpdateBegin → LinkedHashMap.
+        emitVarLoad(ru.base(), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "recordUpdateBegin",
+                "(Ljava/lang/Object;)Ljava/util/LinkedHashMap;", false);
+        // For each Field entry, DUP map, push key/value, put, pop result.
+        for (Expr.MapEntry me : ru.updates()) {
+            if (!(me instanceof Expr.MapEntry.Field f)) {
+                throw new IrijCompiler.CompileException(
+                        "MVP: record-update spread not supported");
+            }
+            mv.visitInsn(DUP);
+            mv.visitLdcInsn(f.key());
+            emitExpr(f.value(), mv, locals);
+            mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "put",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
+            mv.visitInsn(POP);
+        }
+        // Wrap the LinkedHashMap in IrijMap.
+        mv.visitTypeInsn(NEW, VALUES + "$IrijMap");
+        mv.visitInsn(DUP_X1);
+        mv.visitInsn(SWAP);
+        mv.visitMethodInsn(INVOKESPECIAL, VALUES + "$IrijMap", "<init>",
+                "(Ljava/util/Map;)V", false);
+    }
+
     private void emitMapLiteral(Expr.MapLit ml, MethodVisitor mv, Locals locals) {
         // new java.util.LinkedHashMap
         mv.visitTypeInsn(NEW, "java/util/LinkedHashMap");
@@ -1330,7 +1606,44 @@ final class ClassEmitter implements Opcodes {
     }
 
     /** Returns true if the call was emitted as a built-in. */
+    /** Builtins that have an associated effect (mirrors {@code BuiltinFn.requiredEffects}
+     *  in {@link dev.irij.interpreter.Builtins}). Emitting one of these triggers a
+     *  {@code RT.checkPerformEffect} so the enclosing fn's row honors the requirement. */
+    private static final java.util.Map<String, String> BUILTIN_EFFECT = java.util.Map.ofEntries(
+        java.util.Map.entry("print",            "Console"),
+        java.util.Map.entry("println",          "Console"),
+        java.util.Map.entry("dbg",              "Console"),
+        java.util.Map.entry("read-line",        "Console"),
+        java.util.Map.entry("read-file",        "FileIO"),
+        java.util.Map.entry("write-file",       "FileIO"),
+        java.util.Map.entry("file-exists?",     "FileIO"),
+        java.util.Map.entry("list-dir",         "FileIO"),
+        java.util.Map.entry("delete-file",      "FileIO"),
+        java.util.Map.entry("make-dir",         "FileIO"),
+        java.util.Map.entry("append-file",      "FileIO"),
+        java.util.Map.entry("raw-multipart-save","FileIO"),
+        java.util.Map.entry("raw-db-open",      "Db"),
+        java.util.Map.entry("raw-db-query",     "Db"),
+        java.util.Map.entry("raw-db-exec",      "Db"),
+        java.util.Map.entry("raw-db-close",     "Db"),
+        java.util.Map.entry("raw-db-transaction","Db"),
+        java.util.Map.entry("sleep",            "Time"),
+        java.util.Map.entry("now-ms",           "Time"),
+        java.util.Map.entry("random-int",       "Random"),
+        java.util.Map.entry("random-float",     "Random")
+    );
+
+    private void emitBuiltinEffectCheck(String name, MethodVisitor mv) {
+        String eff = BUILTIN_EFFECT.get(name);
+        if (eff == null) return;
+        mv.visitLdcInsn(eff);
+        mv.visitLdcInsn(name);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "checkPerformEffect",
+                "(Ljava/lang/String;Ljava/lang/String;)V", false);
+    }
+
     private boolean emitBuiltinApp(String name, List<Expr> args, MethodVisitor mv, Locals locals) {
+        emitBuiltinEffectCheck(name, mv);
         switch (name) {
             case "print", "println" -> {
                 if (args.size() != 1) return false;
@@ -1491,6 +1804,8 @@ final class ClassEmitter implements Opcodes {
             case "to-vec"       -> { return emitRT1(args, mv, locals, "toVec"); }
             case "not"          -> { return emitRT1(args, mv, locals, "notOp"); }
             case "type-of"      -> { return emitRT1(args, mv, locals, "typeOf"); }
+            case "validate"     -> { return emitRT2(args, mv, locals, "validate"); }
+            case "validate!"    -> { return emitRT2(args, mv, locals, "validateBang"); }
             // ── R3 batch 2: SQLite raw-db-* ──────────────────────────
             case "raw-db-open"        -> { return emitRT1(args, mv, locals, "rawDbOpen"); }
             case "raw-db-close"       -> { return emitRT1(args, mv, locals, "rawDbClose"); }
@@ -1991,6 +2306,9 @@ final class ClassEmitter implements Opcodes {
                 emitTierCClauseLambda(c, clauseParams, mv, locals);
             } else {
                 Expr.Lambda clauseLam = new Expr.Lambda(clauseParams, null, c.body(), null);
+                // Pass the handler's declared required effects to the
+                // clause lambda so its body sees them on EFFECT_ROW.
+                pendingClauseEffects = h.requiredEffects();
                 emitLambda(clauseLam, mv, locals);
             }
 
@@ -2021,6 +2339,12 @@ final class ClassEmitter implements Opcodes {
         // `() -> ()` effects are called `op ()` — strip single unit arg.
         if (args.size() == 1 && args.get(0) instanceof Expr.UnitLit) args = List.of();
         String effectName = effectOps.get(opName);
+        // Runtime effect-row check: throws if the enclosing fn doesn't
+        // declare this effect (and we're not inside an ambient frame).
+        mv.visitLdcInsn(effectName);
+        mv.visitLdcInsn(opName);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "checkPerformEffect",
+                "(Ljava/lang/String;Ljava/lang/String;)V", false);
         mv.visitLdcInsn(effectName);
         mv.visitLdcInsn(opName);
         pushObjectArray(args, mv, locals);
@@ -2034,20 +2358,57 @@ final class ClassEmitter implements Opcodes {
      * EffectSystem; handler clauses compiled as IrijFns receiving (args…, resume).
      */
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
-        // 14c.3: try the state-machine lowering when selected + body shape
-        // fits what we support so far. Otherwise fall back to 14c.2 (threaded).
-        if (options.handlerStrategy() == CompileOptions.HandlerStrategy.STATE_MACHINE
-                && smCanHandle(w.handler())) {
-            // Step 3c: A-normalize first so nested op calls become top-level
-            // Simple-Binds before classification.
-            List<Stmt> body = new ANormalizer().normalize(w.body());
-            WithBodyShape shape = classifyWithBody(body);
-            if (!(shape instanceof WithBodyShape.Unsupported)) {
-                emitWithSM(w, body, shape, mv, outer);
-                return;
+        // Runtime effect-row: push each handler's effect onto the
+        // RT.EFFECT_ROW stack so inner performs see them as available.
+        // Wrap the body in a try/catch-rethrow that pops the frames.
+        java.util.List<String> pushedEffects = new java.util.ArrayList<>();
+        for (String hName : collectHandlerNames(w.handler())) {
+            Decl.HandlerDecl hd = handlers.get(hName);
+            if (hd != null) {
+                // Push the effect the handler handles so the with-body
+                // can perform it without a row violation. The handler's
+                // own required effects (its `::: …` declaration) are
+                // pushed inside each clause lambda on entry — see
+                // {@code emitLambda} + {@code pendingClauseEffects}.
+                mv.visitLdcInsn(hd.effectName());
+                mv.visitMethodInsn(INVOKESTATIC, RT, "enterWith",
+                        "(Ljava/lang/String;)V", false);
+                pushedEffects.add(hd.effectName());
             }
         }
-        emitWithThreaded(w, mv, outer);
+        Label withStart = new Label();
+        Label withEnd = new Label();
+        Label withHandler = new Label();
+        Label afterWith = new Label();
+        mv.visitLabel(withStart);
+        if (!smCanHandle(w.handler())) {
+            throw new IrijCompiler.CompileException(
+                    "with: handler shape not supported by state-machine lowering at "
+                            + (w.loc() != null ? w.loc().line() + ":" + w.loc().col() : "<unknown>"));
+        }
+        List<Stmt> body = new ANormalizer().normalize(w.body());
+        body = expandDestructureBindsForSM(body);
+        WithBodyShape shape = classifyWithBody(body);
+        if (shape instanceof WithBodyShape.Unsupported) {
+            throw new IrijCompiler.CompileException(
+                    "with: body shape not supported by state-machine lowering at "
+                            + (w.loc() != null ? w.loc().line() + ":" + w.loc().col() : "<unknown>"));
+        }
+        emitWithSM(w, body, shape, mv, outer);
+        mv.visitLabel(withEnd);
+        // Normal exit: pop each pushed frame, then GOTO afterWith.
+        for (int i = 0; i < pushedEffects.size(); i++) {
+            mv.visitMethodInsn(INVOKESTATIC, RT, "exitWith", "()V", false);
+        }
+        mv.visitJumpInsn(GOTO, afterWith);
+        // Exception exit: pop, rethrow.
+        mv.visitLabel(withHandler);
+        for (int i = 0; i < pushedEffects.size(); i++) {
+            mv.visitMethodInsn(INVOKESTATIC, RT, "exitWith", "()V", false);
+        }
+        mv.visitInsn(ATHROW);
+        mv.visitTryCatchBlock(withStart, withEnd, withHandler, null);
+        mv.visitLabel(afterWith);
     }
 
     /**
@@ -2111,6 +2472,10 @@ final class ClassEmitter implements Opcodes {
         } else if (e instanceof Expr.App app && app.fn() instanceof Expr.Var fv
                 && (">>".equals(fv.name()) || "compose".equals(fv.name()))) {
             for (Expr a : app.args()) collectHandlerNamesInto(a, out);
+        } else if (e instanceof Expr.Compose c) {
+            // `h1 >> h2` parses as Expr.Compose (not App), so walk both sides.
+            collectHandlerNamesInto(c.left(), out);
+            collectHandlerNamesInto(c.right(), out);
         } else {
             // Unknown shape (lambda result, function call, etc.): mark unknown.
             out.add("__unknown__");
@@ -2153,60 +2518,6 @@ final class ClassEmitter implements Opcodes {
         }
         return false;
     }
-
-    private void emitWithThreaded(Stmt.With w, MethodVisitor mv, Locals outer) {
-        String runEx = "java/lang/RuntimeException";
-        int resultSlot = outer.allocateAnon();
-
-        Label tryStart = new Label();
-        Label tryEnd = new Label();
-        Label runCatch = new Label();
-        Label end = new Label();
-
-        if (w.onFailure() != null && !w.onFailure().isEmpty()) {
-            mv.visitTryCatchBlock(tryStart, tryEnd, runCatch, runEx);
-        }
-
-        mv.visitLabel(tryStart);
-        // Emit handler expression as Object (CompiledHandler or CompiledComposedHandler).
-        emitExpr(w.handler(), mv, outer);
-        // Body: IrijFn of zero params — synthesize Expr.Lambda wrapping a Block.
-        Expr bodyExpr = new Expr.Block(w.body(), null);
-        Expr.Lambda bodyLam = new Expr.Lambda(List.of(), null, bodyExpr, null);
-        emitLambda(bodyLam, mv, outer);
-        // RuntimeSupport.runWith(CompiledHandler, IrijFn) → Object
-        mv.visitMethodInsn(INVOKESTATIC, RT, "runWith",
-                "(Ljava/lang/Object;L" + IRIJ_FN + ";)Ljava/lang/Object;", false);
-        mv.visitVarInsn(ASTORE, resultSlot);
-        mv.visitLabel(tryEnd);
-        mv.visitJumpInsn(GOTO, end);
-
-        if (w.onFailure() != null && !w.onFailure().isEmpty()) {
-            mv.visitLabel(runCatch);
-            int teSlot = outer.allocateAnon();
-            mv.visitVarInsn(ASTORE, teSlot);
-            Locals ofLocals = outer.childScope();
-            int errorSlot = ofLocals.allocate("error");
-            mv.visitVarInsn(ALOAD, teSlot);
-            mv.visitMethodInsn(INVOKESTATIC, RT, "errorMessage",
-                    "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
-            mv.visitVarInsn(ASTORE, errorSlot);
-            List<Stmt> of = w.onFailure();
-            for (int i = 0; i < of.size() - 1; i++) emitStmt(of.get(i), mv, ofLocals);
-            Stmt last = of.get(of.size() - 1);
-            if (last instanceof Stmt.ExprStmt es) {
-                emitExpr(es.expr(), mv, ofLocals);
-            } else {
-                emitStmt(last, mv, ofLocals);
-                mv.visitInsn(ACONST_NULL);
-            }
-            mv.visitVarInsn(ASTORE, resultSlot);
-        }
-
-        mv.visitLabel(end);
-        mv.visitVarInsn(ALOAD, resultSlot);
-    }
-
     // ── 14c.3 state-machine lowering (step 2: pure + single-op bodies) ──
     //
     // Design: docs/phase-14c3-state-machine.md
@@ -2537,6 +2848,70 @@ final class ClassEmitter implements Opcodes {
             if (s instanceof Stmt.IfStmt && stmtContainsOpRecursive(s)) return true;
         }
         return false;
+    }
+
+    /** Pre-pass for SM lowering: rewrite destructure binds (vector or
+     *  tuple patterns of simple var names) into a temp + element
+     *  extractions, so the segment-collecting classifier in
+     *  {@link #classifyWithBody} doesn't trip the
+     *  "destructure in non-final segment" Unsupported check.
+     *
+     *  <p>{@code #[sql params] := pair ()} becomes:
+     *  <pre>
+     *  __sm$dest$N := pair ()
+     *  sql    := nth 0 __sm$dest$N
+     *  params := nth 1 __sm$dest$N
+     *  </pre>
+     *
+     *  <p>Patterns with nested non-Var subpatterns, spreads, or maps
+     *  are left untouched and classify the same way as before. */
+    private List<Stmt> expandDestructureBindsForSM(List<Stmt> stmts) {
+        List<Stmt> out = new ArrayList<>(stmts.size());
+        for (Stmt s : stmts) {
+            if (!(s instanceof Stmt.Bind b)) { out.add(s); continue; }
+            if (!(b.target() instanceof Stmt.BindTarget.Destructure d)) { out.add(s); continue; }
+            Pattern pat = d.pattern();
+            List<String> names = simpleVarSequenceFromPattern(pat);
+            if (names == null) { out.add(s); continue; }
+            // Synthesize: __sm$dest$N := value; name_i := nth i __sm$dest$N
+            String tmp = "__sm$dest$" + smDestCounter++;
+            out.add(new Stmt.Bind(new Stmt.BindTarget.Simple(tmp),
+                    b.value(), null, b.loc()));
+            for (int i = 0; i < names.size(); i++) {
+                Expr nth = new Expr.App(
+                        new Expr.Var("nth", b.loc()),
+                        java.util.List.of(
+                                new Expr.IntLit(i, b.loc()),
+                                new Expr.Var(tmp, b.loc())),
+                        b.loc());
+                out.add(new Stmt.Bind(new Stmt.BindTarget.Simple(names.get(i)),
+                        nth, null, b.loc()));
+            }
+        }
+        return out;
+    }
+
+    private int smDestCounter = 0;
+
+    /** Returns the list of simple-var names if {@code pat} is a vector
+     *  or tuple of plain {@link Pattern.VarPat}s (no spread, no nested
+     *  patterns). Otherwise returns {@code null}. */
+    private static List<String> simpleVarSequenceFromPattern(Pattern pat) {
+        List<Pattern> elems;
+        if (pat instanceof Pattern.VectorPat vp) {
+            if (vp.spread() != null) return null;
+            elems = vp.elements();
+        } else if (pat instanceof Pattern.TuplePat tp) {
+            elems = tp.elements();
+        } else {
+            return null;
+        }
+        List<String> names = new ArrayList<>(elems.size());
+        for (Pattern e : elems) {
+            if (e instanceof Pattern.VarPat vp) names.add(vp.name());
+            else return null;
+        }
+        return names;
     }
 
     private WithBodyShape classifyWithBody(List<Stmt> body) {
@@ -3337,6 +3712,92 @@ final class ClassEmitter implements Opcodes {
         return "impl$" + mangle(method) + "$" + forType;
     }
 
+    /** True if a declared effect-row should map to RT's AMBIENT frame
+     *  (caller's effects flow through unchanged): contains `Any`, or
+     *  contains a parametric row-variable (lowercase first char). */
+    private static boolean isAmbientRow(java.util.List<String> row) {
+        if (row == null) return false; // null = unannotated → pure
+        if (row.contains("Any")) return true;
+        for (String e : row) {
+            if (e == null || e.isEmpty()) continue;
+            if (Character.isLowerCase(e.charAt(0))) return true;
+        }
+        return false;
+    }
+
+    /** Push a {@code String[]} constant onto the operand stack. Used to
+     *  pass a fn's declared effect row to {@code RT.enterFn}. */
+    private void emitStringArrayConst(MethodVisitor mv, java.util.List<String> row) {
+        int n = row == null ? 0 : row.size();
+        pushIconst(mv, n);
+        mv.visitTypeInsn(ANEWARRAY, "java/lang/String");
+        if (row != null) {
+            for (int i = 0; i < row.size(); i++) {
+                mv.visitInsn(DUP);
+                pushIconst(mv, i);
+                mv.visitLdcInsn(row.get(i));
+                mv.visitInsn(AASTORE);
+            }
+        }
+    }
+
+    /** Lower an impl binding's RHS into a lambda the emitter can handle.
+     *  Already-lambda bindings pass through. Common non-lambda shapes
+     *  get wrapped:
+     *    - Operator section `(+)` → `(a b -> a + b)` (arity 2)
+     *    - Var naming a top-level fn → `(args... -> fn args...)` with
+     *      that fn's arity (so `describe := fmt-pt` dispatches into
+     *      fmt-pt's body with the witness arg threaded through).
+     *    - Other (literals, etc.) → `(_w -> value)` (arity 1; the
+     *      witness arg is consumed by the proto dispatcher, the value
+     *      itself is returned, matching the interpreter's "if impl
+     *      binding is non-callable, return it directly" path). */
+    private Expr.Lambda liftImplBindingToLambda(Decl.ImplBinding b) {
+        Expr v = b.value();
+        if (v instanceof Expr.Lambda lam) return lam;
+        if (v instanceof Expr.OpSection os) {
+            // (op) → (a b -> a op b)
+            String op = os.op();
+            Pattern.VarPat pa = new Pattern.VarPat("_a", os.loc());
+            Pattern.VarPat pb = new Pattern.VarPat("_b", os.loc());
+            Expr body = new Expr.BinaryOp(
+                    op,
+                    new Expr.Var("_a", os.loc()),
+                    new Expr.Var("_b", os.loc()),
+                    os.loc());
+            return new Expr.Lambda(
+                    java.util.List.of(pa, pb), null, body, os.loc());
+        }
+        if (v instanceof Expr.Var vr) {
+            // `describe := fmt-pt` — wrap into `(a0 a1 ... -> fmt-pt a0 a1 ...)`
+            // using fmt-pt's known arity. For builtins (no fnArity
+            // entry), default to arity 1 — most value-method bindings
+            // (`size := length`, `to-show := to-str`) are unary, and
+            // the proto dispatcher only needs the first arg's type to
+            // pick the impl anyway.
+            Integer arity = fnArity.get(vr.name());
+            int n = arity != null ? arity : 1;
+            if (n > 0) {
+                java.util.List<Pattern> params = new java.util.ArrayList<>();
+                java.util.List<Expr> argExprs = new java.util.ArrayList<>();
+                for (int i = 0; i < n; i++) {
+                    String pn = "_a" + i;
+                    params.add(new Pattern.VarPat(pn, vr.loc()));
+                    argExprs.add(new Expr.Var(pn, vr.loc()));
+                }
+                Expr body = new Expr.App(
+                        new Expr.Var(vr.name(), vr.loc()), argExprs, vr.loc());
+                return new Expr.Lambda(params, null, body, vr.loc());
+            }
+        }
+        // Default: arity-1 thunk returning the value verbatim. The
+        // witness arg `_w` is ignored. Works for IntLit / StrLit /
+        // FloatLit / BoolLit / Keyword / UnitLit — value-as-method
+        // bindings like `empty := 0`.
+        Pattern.VarPat pw = new Pattern.VarPat("_w", null);
+        return new Expr.Lambda(java.util.List.of(pw), null, v, null);
+    }
+
     private void emitImplMethod(String method, String forType, Expr.Lambda lam, ClassWriter cw) {
         List<String> paramNames = new ArrayList<>();
         for (Pattern p : lam.params()) {
@@ -3702,8 +4163,34 @@ final class ClassEmitter implements Opcodes {
                     "([Ljava/lang/Object;I)Ljava/lang/Object;", false);
             lm.visitVarInsn(ASTORE, restSlot);
         }
+        // If a clause-required-effects context is pending, push it on
+        // RT.EFFECT_ROW for the body. The frame is popped before
+        // ARETURN (normal path) and via a catch-all (exception path)
+        // so EFFECT_ROW stays balanced across throws.
+        java.util.List<String> clauseEffects = pendingClauseEffects;
+        pendingClauseEffects = null;
+        Label clauseTryStart = null, clauseTryEnd = null, clauseHandler = null;
+        if (clauseEffects != null) {
+            emitStringArrayConst(lm, clauseEffects);
+            lm.visitMethodInsn(INVOKESTATIC, RT, "enterFn", "([Ljava/lang/String;)V", false);
+            clauseTryStart = new Label();
+            clauseTryEnd = new Label();
+            clauseHandler = new Label();
+            lm.visitLabel(clauseTryStart);
+        }
         emitExpr(lam.body(), lm, inner);
+        if (clauseEffects != null) {
+            // Normal exit: pop, then return the value left on stack.
+            lm.visitMethodInsn(INVOKESTATIC, RT, "exitFn", "()V", false);
+        }
         lm.visitInsn(ARETURN);
+        if (clauseEffects != null) {
+            lm.visitLabel(clauseTryEnd);
+            lm.visitLabel(clauseHandler);
+            lm.visitMethodInsn(INVOKESTATIC, RT, "exitFn", "()V", false);
+            lm.visitInsn(ATHROW);
+            lm.visitTryCatchBlock(clauseTryStart, clauseTryEnd, clauseHandler, null);
+        }
         lm.visitMaxs(0, 0);
         lm.visitEnd();
 
@@ -3726,6 +4213,16 @@ final class ClassEmitter implements Opcodes {
         Handle implHandle = new Handle(H_INVOKESTATIC, internalName, methodName, desc.toString(), false);
         mv.visitInvokeDynamicInsn("apply", indyDesc.toString(), bsm,
                 samType, implHandle, samType);
+        // Wrap the raw IrijFn in a CurriedFn that remembers the lambda's
+        // arity. Enables partial application (`add 5` returns a function
+        // awaiting one more arg) and over-application (curried lambda
+        // applied to too many args dispatches the tail). Rest-param
+        // lambdas are variadic (arity = -1) — every arg goes straight
+        // to the impl, no currying.
+        int curryArity = (restName != null) ? -1 : paramNames.size();
+        pushIconst(mv, curryArity);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "curry",
+                "(" + IRIJ_FN_DESC + "I)" + IRIJ_FN_DESC, false);
     }
 
     /** Walk Expr, collecting names referenced but not bound, that resolve to outer locals. */
@@ -3735,6 +4232,11 @@ final class ClassEmitter implements Opcodes {
         switch (e) {
             case Expr.Var v -> {
                 String n = v.name();
+                // Top-level (mut) bindings live in static fields. Don't
+                // capture them by value — reads and writes inside a
+                // lambda must hit the static field directly so updates
+                // are visible across threads / scope boundaries.
+                if (topLevelFields.containsKey(n)) break;
                 if (!bound.contains(n) && outer.lookup(n) != null && !seen.contains(n)) {
                     seen.add(n);
                     out.add(n);
@@ -3873,6 +4375,14 @@ final class ClassEmitter implements Opcodes {
             // Lifted (k.fields[]) lambda value — same call shape, the
             // Var-load inside emitIrijFnCall resolves via lifted lookup.
             if (currentLiftedLocals.containsKey(fnName)) {
+                emitIrijFnCall(app.fn(), app.args(), mv, locals);
+                return;
+            }
+            // Top-level mut/let binding hoisted to a static field —
+            // e.g. `add5 := add-positive 5` where add5 holds a curried
+            // IrijFn. The Var-load inside emitIrijFnCall picks it up
+            // via topLevelFields → GETSTATIC.
+            if (topLevelFields.containsKey(fnName)) {
                 emitIrijFnCall(app.fn(), app.args(), mv, locals);
                 return;
             }

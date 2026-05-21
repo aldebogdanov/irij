@@ -457,11 +457,9 @@ public final class Values {
      * @param impls       map from type name → (method name → value)
      */
     public record ProtocolDescriptor(String name, List<String> methodNames,
-                                     List<dev.irij.ast.Decl.ProtoLaw> laws,
                                      Map<String, Map<String, Object>> impls) {
-        public ProtocolDescriptor(String name, List<String> methodNames,
-                                  List<dev.irij.ast.Decl.ProtoLaw> laws) {
-            this(name, methodNames, laws, new java.util.concurrent.ConcurrentHashMap<>());
+        public ProtocolDescriptor(String name, List<String> methodNames) {
+            this(name, methodNames, new java.util.concurrent.ConcurrentHashMap<>());
         }
 
         /** Register an implementation for a given type (thread-safe). */
@@ -571,8 +569,6 @@ public final class Values {
         if (value instanceof IrijRange) return "Range";
         if (value instanceof Tagged t) return t.tag();
         if (value instanceof Lambda) return "Lambda";
-        if (value instanceof Interpreter.ContractedFn cf) return Values.typeName(cf.fn());
-        if (value instanceof Interpreter.SpecContractFn scf) return Values.typeName(scf.fn());
         if (value instanceof BuiltinFn) return "BuiltinFn";
         if (value instanceof PartialApp) return "PartialApp";
         if (value instanceof ComposedFn) return "ComposedFn";

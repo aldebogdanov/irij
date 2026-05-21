@@ -1,10 +1,7 @@
 package dev.irij.compiler;
 
-import dev.irij.ast.AstBuilder;
-import dev.irij.interpreter.IrijRuntimeError;
-import dev.irij.interpreter.Interpreter;
+import dev.irij.IrijRuntimeError;
 import dev.irij.interpreter.Values;
-import dev.irij.parser.IrijParseDriver;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -19,23 +16,23 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Sandboxed-interpreter sessions for the Playground.
+ * Sandboxed-bytecode sessions for the Playground.
  *
- * <p>Pulls the session manager out of {@link Interpreter} so both
- * interpreter-mode and bytecode-mode reach the same in-process store.
- * Each session owns a private {@link Interpreter} with its own
- * stdout buffer and an optional SSE subscriber that streams output
- * line-by-line.
+ * <p>v0.6.13: Migrated off the interpreter. Each session owns its
+ * own {@link BytecodeSession} (per-session namespace map +
+ * classloader) and a stdout buffer. The session classloader's parent
+ * is the Irij runtime classloader so user code reaches builtins via
+ * {@link RuntimeSupport}, but classes loaded inside a session are
+ * isolated from other sessions.
+ *
+ * <p>Isolation today is namespace-level + classloader-level. Hard
+ * isolation (SecurityManager / native-access deny / resource limits)
+ * is future work — for now the Playground deploys assume trusted
+ * code or a separate JVM per untrusted tenant.
  *
  * <p>Holds a process-wide {@link ConcurrentHashMap}; auto-evicts
  * sessions idle for more than {@code irij.session.ttl.ms} (default
- * 30 minutes) on a daemon sweeper thread. The sweeper starts lazily
- * on first session creation so non-Playground programs pay nothing.
- *
- * <p>The {@link Interpreter} type is referenced by name only —
- * bytecode-emitted code resolves to the static helpers here; the
- * interpreter class is loaded only when the Playground feature is
- * actually used.
+ * 30 minutes) on a daemon sweeper thread.
  */
 public final class RuntimeSessions {
 
@@ -44,14 +41,17 @@ public final class RuntimeSessions {
     // ── Session entry ───────────────────────────────────────────────
 
     public static final class Session {
-        public final Interpreter interp;
+        public final BytecodeSession bytecode;
         public final ByteArrayOutputStream stdoutBuf;
+        public final PrintStream stdout;
         public volatile long lastAccessMs;
         public volatile Values.SseWriter sse;
 
-        Session(Interpreter interp, ByteArrayOutputStream stdoutBuf) {
-            this.interp = interp;
+        Session(BytecodeSession bytecode, ByteArrayOutputStream stdoutBuf,
+                PrintStream stdout) {
+            this.bytecode = bytecode;
             this.stdoutBuf = stdoutBuf;
+            this.stdout = stdout;
             this.lastAccessMs = System.currentTimeMillis();
         }
     }
@@ -79,7 +79,6 @@ public final class RuntimeSessions {
         sweeperStarted = true;
     }
 
-    /** Lookup for tests / inspection. */
     public static Session lookup(String id) { return SESSIONS.get(id); }
 
     // ── raw-session-create ──────────────────────────────────────────
@@ -110,14 +109,11 @@ public final class RuntimeSessions {
                     }
                 }
             }
-            @Override public void flush() {
-                // baos has no buffering; nothing to flush.
-            }
+            @Override public void flush() {}
         }, true);
 
-        Interpreter interp = new Interpreter(sessionOut, true);
-        interp.setSpecLintEnabled(false);
-        Session s = new Session(interp, baos);
+        BytecodeSession bs = new BytecodeSession("irij.Sandbox$" + id.substring(0, 8));
+        Session s = new Session(bs, baos, sessionOut);
         holder[0] = s;
         SESSIONS.put(id, s);
         return id;
@@ -135,7 +131,7 @@ public final class RuntimeSessions {
         }
         s.lastAccessMs = System.currentTimeMillis();
         s.stdoutBuf.reset();
-        return runEval(s.interp, s.stdoutBuf, code, timeoutMs);
+        return runEval(s.bytecode, s.stdoutBuf, s.stdout, code, timeoutMs);
     }
 
     // ── raw-session-destroy ─────────────────────────────────────────
@@ -155,8 +151,12 @@ public final class RuntimeSessions {
         }
         Session s = SESSIONS.get(id);
         if (s == null) {
-            throw new IrijRuntimeError(
-                    "raw-session-subscribe: no session with id " + id);
+            // Playground race: client opens SSE before /api/session/create
+            // returned, or after the session was destroyed/evicted.
+            // Treat as soft no-op so the SSE handler closes the stream
+            // cleanly instead of bubbling a 500. The client will
+            // reconnect once it has a valid id.
+            return Values.UNIT;
         }
         s.sse = sse;
         return Values.UNIT;
@@ -193,28 +193,31 @@ public final class RuntimeSessions {
         long timeoutMs = asLong(timeoutArg, "raw-nrepl-eval-sandboxed");
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         PrintStream evalOut = new PrintStream(baos);
-        Interpreter interp = new Interpreter(evalOut, true);
-        interp.setSpecLintEnabled(false);
-        return runEval(interp, baos, code, timeoutMs);
+        BytecodeSession bs = new BytecodeSession("irij.NReplSandbox");
+        return runEval(bs, baos, evalOut, code, timeoutMs);
     }
 
     // ── Shared eval driver ──────────────────────────────────────────
 
-    private static Object runEval(Interpreter interp,
+    private static Object runEval(BytecodeSession bs,
                                    ByteArrayOutputStream baos,
+                                   PrintStream captureOut,
                                    String code,
                                    long timeoutMs) {
         LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+        // Mark with a fresh sentinel; if the eval doesn't overwrite it,
+        // we know the program had no trailing expression.
+        Object sentinel = new Object();
+        bs.namespace().put(BytecodeSession.LAST_VALUE_KEY, sentinel);
         CompletableFuture<Object> future = CompletableFuture.supplyAsync(() -> {
-            var parsed = IrijParseDriver.parse(code + "\n");
-            if (parsed.hasErrors()) {
-                throw new IrijRuntimeError("Parse error: " + parsed.errors());
-            }
-            return interp.run(new AstBuilder().build(parsed.tree()));
+            bs.eval(code, "sandbox", captureOut);
+            return Values.UNIT;
         });
         try {
-            Object value = future.get(timeoutMs, TimeUnit.MILLISECONDS);
-            result.put("value", Values.toIrijString(value));
+            future.get(timeoutMs, TimeUnit.MILLISECONDS);
+            Object last = bs.namespace().get(BytecodeSession.LAST_VALUE_KEY);
+            Object surfaced = (last == sentinel) ? Values.UNIT : last;
+            result.put("value", Values.toIrijString(surfaced));
             result.put("stdout", baos.toString());
             result.put("error", Values.UNIT);
             result.put("ok", Boolean.TRUE);

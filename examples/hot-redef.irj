@@ -22,11 +22,11 @@
 ;;
 ;; Or from Emacs: C-c C-d on the new fn greet definition.
 
-fn greet
+fn greet ::: Console
   => name
   println ~ "Hello, " ++ name ++ "!"
 
-fn run-loop
+fn run-loop ::: Console Time
   => n
   greet "World"
   sleep 1000

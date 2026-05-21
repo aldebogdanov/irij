@@ -1,8 +1,8 @@
 package dev.irij.cli;
 
 import dev.irij.ast.AstBuilder;
-import dev.irij.interpreter.Interpreter;
-import dev.irij.interpreter.IrijRuntimeError;
+import dev.irij.compiler.IrijCompiler;
+import dev.irij.IrijRuntimeError;
 import dev.irij.interpreter.Values;
 import dev.irij.mcp.IrijMcpServer;
 import dev.irij.nrepl.NReplServer;
@@ -50,12 +50,6 @@ public final class IrijCli {
 
     public static void main(String[] args) throws Exception {
         if (args.length == 0) {
-            // Check if running from a bundled JAR (irij build output)
-            String bundledEntry = getBundledEntryPoint();
-            if (bundledEntry != null) {
-                runBundled(bundledEntry);
-                return;
-            }
             launchRepl();
             return;
         }
@@ -95,7 +89,6 @@ public final class IrijCli {
         boolean parseOnly    = false;
         boolean dumpAst      = false;
         boolean mcpServer    = false;
-        boolean verifyLaws   = false;
         boolean noSpecLint   = false;
         int     nreplPort    = -1;
         String  filePath     = null;
@@ -106,7 +99,6 @@ public final class IrijCli {
                 case "--ast"        -> dumpAst   = true;
                 case "--nrepl-server" -> nreplPort = DEFAULT_NREPL_PORT;
                 case "--mcp-server" -> mcpServer = true;
-                case "--verify-laws" -> verifyLaws = true;
                 case "--no-spec-lint" -> noSpecLint = true;
                 case "--version", "-v" -> {
                     System.out.println("Irij ℑ  version " + VERSION);
@@ -154,12 +146,12 @@ public final class IrijCli {
             System.exit(1);
         }
 
-        runFile(Path.of(filePath), parseOnly, dumpAst, verifyLaws, noSpecLint);
+        runFile(Path.of(filePath), parseOnly, dumpAst, noSpecLint);
     }
 
     // ── File runner ──────────────────────────────────────────────────────
 
-    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean verifyLaws, boolean noSpecLint) throws IOException {
+    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean noSpecLint) throws IOException {
         IrijParseDriver.ParseResult result;
         try {
             result = IrijParseDriver.parseFile(path);
@@ -182,29 +174,21 @@ public final class IrijCli {
             return;
         }
 
-        var ast = new AstBuilder().build(result.tree());
-
         if (dumpAst) {
+            var ast = new AstBuilder().build(result.tree());
             for (var decl : ast) {
                 System.out.println(decl);
             }
             return;
         }
 
-        // R5a in progress: BytecodeRunner exists and works for
-        // simple programs, but several bytecode gaps remain
-        // (top-level MutBind, builtins like zip that don't accept
-        // IrijRange, spec-output failures in some else-if chains).
-        // Until those are closed, `irij run` and `irij test` stay
-        // on the interpreter. Tracked as v0.7 work.
+        // v0.6.13: single execution model — bytecode. The interpreter
+        // was removed in R5d.
         try {
-            var interpreter = new Interpreter();
-            var projectRoot = path.toAbsolutePath().getParent();
-            interpreter.setSourcePath(projectRoot);
-            interpreter.loadDeps(projectRoot);
-            if (verifyLaws) interpreter.setAutoVerifyLaws(true);
-            if (noSpecLint) interpreter.setSpecLintEnabled(false);
-            interpreter.run(ast);
+            BytecodeRunner.runFile(path, null);
+        } catch (IrijCompiler.CompileException e) {
+            System.err.println(path + ":" + e.getMessage());
+            System.exit(1);
         } catch (IrijRuntimeError e) {
             System.err.println(path + ":" + e.getMessage());
             System.exit(1);
@@ -301,14 +285,10 @@ public final class IrijCli {
                     continue;
                 }
 
-                var ast = new AstBuilder().build(result.tree());
-
-                // Same R5a hold: interpreter for now.
+                // v0.6.13: bytecode-only execution.
                 var baos = new ByteArrayOutputStream();
                 var ps = new PrintStream(baos, true, StandardCharsets.UTF_8);
-                var interpreter = new Interpreter(ps);
-                interpreter.setSourcePath(file.toAbsolutePath().getParent());
-                interpreter.run(ast);
+                BytecodeRunner.runFile(file, ps);
 
                 // Count [ok] and [FAIL] lines
                 String output = baos.toString(StandardCharsets.UTF_8);
@@ -528,107 +508,6 @@ public final class IrijCli {
         return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
     }
 
-    // ── Bundled JAR runner ────────────────────────────────────────────────
-
-    /** Check if this JAR has a bundled entry point (built with irij build). */
-    private static String getBundledEntryPoint() {
-        return readManifestAttr("Irij-Entry-Point");
-    }
-
-    /** Read the bundled `Irij-NRepl-Port` manifest attribute (set by
-     *  `irij build --nrepl-port=N`). Returns 0 if absent or invalid. */
-    private static int getBundledNReplPort() {
-        String v = readManifestAttr("Irij-NRepl-Port");
-        if (v == null) return 0;
-        try { return Integer.parseInt(v); } catch (NumberFormatException e) { return 0; }
-    }
-
-    private static String readManifestAttr(String key) {
-        try {
-            var url = IrijCli.class.getProtectionDomain().getCodeSource().getLocation();
-            if (url != null) {
-                var jarPath = Path.of(url.toURI());
-                if (java.nio.file.Files.isRegularFile(jarPath) && jarPath.toString().endsWith(".jar")) {
-                    try (var jf = new java.util.jar.JarFile(jarPath.toFile())) {
-                        var manifest = jf.getManifest();
-                        if (manifest != null) {
-                            return manifest.getMainAttributes().getValue(key);
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {}
-        return null;
-    }
-
-    /** Run a bundled application from inside the JAR. */
-    private static void runBundled(String entryPoint) {
-        var cl = IrijCli.class.getClassLoader();
-
-        // Load entry point source from __irij_app/
-        String source;
-        try (var is = cl.getResourceAsStream("__irij_app/" + entryPoint)) {
-            if (is == null) {
-                System.err.println("Bundled entry point not found: __irij_app/" + entryPoint);
-                System.exit(1);
-                return;
-            }
-            source = new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IOException e) {
-            System.err.println("Error reading bundled entry: " + e.getMessage());
-            System.exit(1);
-            return;
-        }
-
-        // Parse
-        var result = IrijParseDriver.parse(source);
-        if (result.hasErrors()) {
-            for (var err : result.errors()) {
-                System.err.println(entryPoint + ":" + err);
-            }
-            System.exit(1);
-            return;
-        }
-
-        var ast = new AstBuilder().build(result.tree());
-
-        // If the manifest says `Irij-NRepl-Port=N`, start a co-resident
-        // nREPL server before running the entry. The server runs in a
-        // background virtual thread; the entry runs on main. After the
-        // entry completes, the JVM stays alive as long as the nREPL
-        // socket is open — operators can attach an editor and live-patch.
-        //
-        // NOTE: the embedded nREPL gets its OWN Interpreter instance
-        // (not the entry's), so it can't inspect the running app's
-        // bindings directly. Useful for live fn redefinition + ad-hoc
-        // eval against the bundled stdlib. Sharing the entry's
-        // interpreter is a future enhancement.
-        int nreplPort = getBundledNReplPort();
-        if (nreplPort > 0) {
-            try {
-                var server = new dev.irij.nrepl.NReplServer(nreplPort);
-                Thread.startVirtualThread(() -> {
-                    try { server.start(); }
-                    catch (Exception e) {
-                        System.err.println("nREPL server failed: " + e.getMessage());
-                    }
-                });
-                System.out.println("Embedded nREPL listening on " + nreplPort
-                        + " (connect with: irij nrepl-connect localhost:" + nreplPort + ")");
-            } catch (Exception e) {
-                System.err.println("Failed to start embedded nREPL: " + e.getMessage());
-            }
-        }
-
-        try {
-            var interpreter = new Interpreter();
-            interpreter.setBundledMode(true);
-            interpreter.run(ast);
-        } catch (IrijRuntimeError e) {
-            System.err.println(entryPoint + ":" + e.getMessage());
-            System.exit(1);
-        }
-    }
 
     // ── Help ─────────────────────────────────────────────────────────────
 
@@ -653,7 +532,6 @@ public final class IrijCli {
               irij test f1.irj f2.irj    run multiple test files
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
-              irij --verify-laws <file>  run file with automatic law verification on impl
               irij --no-spec-lint <file> disable spec lint warnings (on by default)
               irij --mcp-server          start MCP server (stdio, for Claude Code)
               irij --nrepl-server        start nREPL server (port 7888)

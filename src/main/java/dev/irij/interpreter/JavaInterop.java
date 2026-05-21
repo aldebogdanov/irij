@@ -1,5 +1,7 @@
 package dev.irij.interpreter;
 
+import dev.irij.IrijRuntimeError;
+
 import dev.irij.interpreter.Values.BuiltinFn;
 import dev.irij.interpreter.Values.IrijMap;
 import dev.irij.interpreter.Values.IrijVector;

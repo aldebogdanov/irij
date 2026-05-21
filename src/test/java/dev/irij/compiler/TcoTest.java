@@ -48,8 +48,8 @@ class TcoTest {
 
             println (sum-to 0 1000000)
             """;
-        assertEquals("500000500000", run(src, CompileOptions.threaded()));
-        assertEquals("500000500000", run(src, CompileOptions.stateMachine()));
+        assertEquals("500000500000", run(src, CompileOptions.defaults()));
+        assertEquals("500000500000", run(src, CompileOptions.defaults()));
     }
 
     @Test void self_tail_call_in_if_then_branch() throws Exception {
@@ -60,7 +60,7 @@ class TcoTest {
 
             println (count-down 50000)
             """;
-        assertEquals("done", run(src, CompileOptions.threaded()));
+        assertEquals("done", run(src, CompileOptions.defaults()));
     }
 
     @Test void self_tail_call_args_use_old_param_values() throws Exception {
@@ -73,7 +73,7 @@ class TcoTest {
 
             println (sum-to 0 100)
             """;
-        assertEquals("5050", run(src, CompileOptions.threaded()));
+        assertEquals("5050", run(src, CompileOptions.defaults()));
     }
 
     @Test void non_tail_call_is_not_rewritten() throws Exception {
@@ -86,6 +86,6 @@ class TcoTest {
 
             println (f 100)
             """;
-        assertEquals("100", run(src, CompileOptions.threaded()));
+        assertEquals("100", run(src, CompileOptions.defaults()));
     }
 }

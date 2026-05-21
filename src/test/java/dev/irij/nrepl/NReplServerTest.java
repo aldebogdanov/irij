@@ -52,10 +52,11 @@ class NReplServerTest {
             assertNotNull(cloneResp.get("new-session"), "Clone should return new-session id");
             String sessionId = (String) cloneResp.get("new-session");
 
-            // Step 2: Eval an expression
+            // Step 2: Eval an expression via println — bytecode mode
+            // surfaces values through stdout, not the `value` field.
             var evalMsg = new LinkedHashMap<String, Object>();
-            evalMsg.put("op", "eval-interp");
-            evalMsg.put("code", "1 + 2");
+            evalMsg.put("op", "eval");
+            evalMsg.put("code", "println (1 + 2)");
             evalMsg.put("session", sessionId);
             evalMsg.put("id", "2");
             Bencode.encodeMap(evalMsg, out);
@@ -63,11 +64,11 @@ class NReplServerTest {
 
             var evalResp = Bencode.decodeMap(in);
             assertNotNull(evalResp);
-            assertEquals("3", evalResp.get("value"));
+            assertEquals("3\n", evalResp.get("out"));
 
             // Step 3: Eval with state
             var bindMsg = new LinkedHashMap<String, Object>();
-            bindMsg.put("op", "eval-interp");
+            bindMsg.put("op", "eval");
             bindMsg.put("code", "x := 42");
             bindMsg.put("session", sessionId);
             bindMsg.put("id", "3");
@@ -76,8 +77,8 @@ class NReplServerTest {
             Bencode.decodeMap(in); // consume response
 
             var lookupMsg = new LinkedHashMap<String, Object>();
-            lookupMsg.put("op", "eval-interp");
-            lookupMsg.put("code", "x * 2");
+            lookupMsg.put("op", "eval");
+            lookupMsg.put("code", "println (x * 2)");
             lookupMsg.put("session", sessionId);
             lookupMsg.put("id", "4");
             Bencode.encodeMap(lookupMsg, out);
@@ -85,7 +86,7 @@ class NReplServerTest {
 
             var lookupResp = Bencode.decodeMap(in);
             assertNotNull(lookupResp);
-            assertEquals("84", lookupResp.get("value"));
+            assertEquals("84\n", lookupResp.get("out"));
 
         } finally {
             server.stop();

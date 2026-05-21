@@ -307,14 +307,18 @@ public final class EffectRowChecker {
                     for (Expr a : app.args()) walkExpr(a, avail, ctx);
                     return;
                 }
-                // NB: builtins (println, log, raw-*, …) are NOT enforced
-                // at the call site here. Pre-existing static gap — the
-                // interpreter catches them at runtime via BuiltinFn
-                // effect-row metadata. {@link #BUILTIN_EFFECTS} is used
-                // only by {@link #collectInto} to bind row-vars from
-                // callback lambdas. Tightening the call-site check is a
-                // separate commit that needs every existing test
-                // fixture without {@code :::} to be migrated.
+                // Builtin call-site enforcement: `println`, `read-file`,
+                // `sleep`, … each carry a declared effect (see
+                // {@link #BUILTIN_EFFECTS}); the caller's row must include
+                // it. Symmetric with the user-effect-op check above —
+                // catches `pure fn calls println` at compile time
+                // instead of waiting for the runtime PerformSignal.
+                if (app.fn() instanceof Expr.Var bv && BUILTIN_EFFECTS.containsKey(bv.name())) {
+                    String builtinEff = BUILTIN_EFFECTS.get(bv.name());
+                    requireEffect(builtinEff, "'" + bv.name() + "'", ctx, avail, app.loc());
+                    for (Expr a : app.args()) walkExpr(a, avail, ctx);
+                    return;
+                }
                 if (app.fn() instanceof Expr.Var v && fnRows.containsKey(v.name())) {
                     List<String> calleeRow = fnRows.get(v.name());
                     if (hasRowVar(calleeRow)) {

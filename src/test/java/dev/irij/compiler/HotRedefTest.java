@@ -51,7 +51,7 @@ class HotRedefTest {
         // Compile a small program that calls `greet` from `main`. Default
         // build (directLinking=false) emits an indy site through redefBootstrap.
         String src = """
-            fn greet
+            fn greet ::: Console
               _ => println "hi"
             greet ()
             """;
@@ -85,7 +85,7 @@ class HotRedefTest {
         // Compile the same program with --direct-linking. The call site is
         // a plain invokestatic; redefine() finds no site for that key.
         String src = """
-            fn greet
+            fn greet ::: Console
               _ => println "hi-direct"
             greet ()
             """;

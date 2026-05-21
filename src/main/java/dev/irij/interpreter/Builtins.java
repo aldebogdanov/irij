@@ -1,5 +1,7 @@
 package dev.irij.interpreter;
 
+import dev.irij.IrijRuntimeError;
+
 import dev.irij.ast.Node.SourceLoc;
 import dev.irij.interpreter.Values.*;
 

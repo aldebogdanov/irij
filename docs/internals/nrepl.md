@@ -92,17 +92,12 @@ What works today: data values (`:=`), expressions reading prior
 state. Re-defining fns: only within a single eval (`fn` + caller in
 the same snippet).
 
-## `mode` parameter
+## `mode` parameter (removed)
 
-`eval-bytecode` accepts `mode = "bytecode-sm"` (default) or
-`"bytecode-threaded"`. Selects which effect-lowering strategy the
-emitter uses for any `with` blocks in the snippet.
-
-```
-{"op": "eval-bytecode",
- "code": "with unsafe-jvm (println (Math/sqrt 2.0))",
- "mode": "bytecode-threaded"}
-```
+Old clients sent `mode = "bytecode-sm"` / `"bytecode-threaded"` to
+pick a lowering strategy. v0.6.13 removed the threaded back-end, so
+only one mode exists. The field is silently ignored for backwards
+compat with old client builds.
 
 ## Connect-to-running-JAR
 
@@ -120,7 +115,7 @@ java -jar server.jar
 # Embedded nREPL listening on 7888 (connect with: irij nrepl-connect localhost:7888)
 ```
 
-Caveat: the embedded nREPL gets its OWN `Interpreter` instance, not
+Caveat: the embedded nREPL gets its OWN `BytecodeSession`, not
 the entry's. So it can't read the running app's bindings directly.
 What works:
 

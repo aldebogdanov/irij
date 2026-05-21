@@ -428,52 +428,7 @@ fn guarded
 println ("all contracts: " ++ to-str (guarded 50))
 
 ;; ═══════════════════════════════════════════════════════════════
-;; 12. Law Verification (QuickCheck)
-;; ═══════════════════════════════════════════════════════════════
-;; Interpreter.java: verifyLaws() → generateRandomValue() per type
-;; Evaluates law body with random inputs, 100 trials by default
-;; Seed fixed at 42 for reproducibility
-
-proto Additive a
-  nil :: a
-  combine :: a -> a -> a
-  law left-id  = forall x. combine nil x == x
-  law right-id = forall x. combine x nil == x
-  law assoc    = forall x y z. combine (combine x y) z == combine x (combine y z)
-
-impl Additive for Int
-  nil := 0
-  combine := (+)
-
-println ""
-println ";; Verifying Additive laws (should pass):"
-verify-laws Additive
-
-;; Fn-level law
-fn triple
-  law triples = forall x. triple x == x + x + x
-  (x -> x * 3)
-
-println ""
-println ";; Verifying fn-level law (should pass):"
-verify-laws "triple"
-
-;; Detecting a broken law
-proto BadComm a
-  unit :: a
-  op :: a -> a -> a
-  law commutative = forall x y. op x y == op y x
-
-impl BadComm for Str
-  unit := ""
-  op := (++)
-
-println ""
-println ";; Detecting broken law (string concat not commutative):"
-verify-laws BadComm
-
-;; ═══════════════════════════════════════════════════════════════
-;; 13. Effect Rows (Mandatory)
+;; 12. Effect Rows (Mandatory)
 ;; ═══════════════════════════════════════════════════════════════
 ;; Interpreter.java: AVAILABLE_EFFECTS ThreadLocal stack
 ;; makeFnValue() → unannotated fn gets empty effect row (pure)
@@ -492,9 +447,9 @@ fn say ::: Console
 
 say "effect row works"
 
-;; Pure fn can call annotated fn (each fn has its own context)
-fn caller
-  (x -> say x)   ;; ok: say pushes its own {Console}
+;; A fn calling an effectful fn must declare the same effects in its row.
+fn caller ::: Console
+  (x -> say x)
 
 caller "transitive call works"
 
@@ -523,13 +478,10 @@ fn run-logging
 
 run-logging ()
 
-;; Verify pure fn cannot call println
-;; Named fn (not lambda) gets empty effect row → println fails
-fn try-print
-  (x -> println x)
-
-err := try (-> try-print "test")
-println ("pure violation: " ++ to-str err)
+;; (A pure fn cannot call println — the static checker rejects
+;;  `fn try-print (x -> println x)` at compile time with
+;;  "Effect 'Console' not declared in fn try-print". See
+;;  EffectRowLintTest.unannotatedFnCallingPrintlnRejected.)
 
 ;; ═══════════════════════════════════════════════════════════════
 ;; 14. Modules & Stdlib

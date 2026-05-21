@@ -1,52 +1,9 @@
 # Effect system
 
-Irij implements algebraic effects with deep handlers. Three back-ends
-share the same semantics; they differ in *how* they implement
-suspension and resumption.
-
-## Three back-ends
-
-| Back-end | Body runs in | Handler dispatch | Resume mechanism |
-|---|---|---|---|
-| Interpreter | Virtual thread | Calling thread via `runHandlerLoop` | `SynchronousQueue.put/take` |
-| Bytecode threaded (14c.2) | Virtual thread | Calling thread via `runHandlerLoop` | Same as interp |
-| Bytecode state-machine (14c.3) | Single thread (caller's) | Caller's stack via `dispatchLoopSM` | Exception-driven trampoline |
-
-The interpreter and threaded bytecode share the protocol — both build
-`EffectSystem.HandlerContext` records on a per-thread stack, suspend
-the body via `SynchronousQueue`, and resume by writing to a per-op
-return channel. The SM bytecode replaces all of that with a
-trampoline.
-
-## Threaded protocol (14c.2)
-
-`with X body`:
-
-```
-Calling thread                   Body vthread
-─────────────                    ────────────
-runWith(handler, body)
-  push HandlerContext
-  spawn vthread:
-    body() {
-      … some perform p …
-        fireOp("E", "p", args):
-          new resumeChannel
-          opChannel.put(Op p args resumeChannel)  ◄── blocks
-                                                   ▶ resumeChannel.take()
-  runHandlerLoop:                                   blocks
-    msg = opChannel.take()      ◄── unblock
-    if Op p args:
-      v = clause.apply(args + resumeFn)
-      resumeFn(x): resumeChannel.put(x); runHandlerLoop()
-    if Done v: return v
-```
-
-Two threads ping-pong via two SynchronousQueues. Each perform is
-~one vthread context-switch.
-
-Cost per perform: ~µs (cheap because virtual threads, but the queue +
-context-switch isn't free).
+Irij implements algebraic effects with deep handlers. **One back-end**
+since v0.6.13: state-machine bytecode lowering. The interpreter and
+the threaded (14c.2) handler protocol were both removed — single
+execution model, zero ambiguity about which path runs.
 
 ## State-machine protocol (14c.3)
 
@@ -99,7 +56,10 @@ catching frame.
   CFG: blocks with `Return`/`Perform`/`Branch`/`Jump` terminators.
   Each block has a "header" label (does resume-bind store) and a
   "body" label (intra-step jump target).
-- **Unsupported** — falls back to threaded mode.
+- **Unsupported** — compile error. Common cases (`with h1 >> h2` on a
+  local var, op-call in an if-condition, tier-c clauses crossing
+  composed-handler chains) are tracked TODO SM-N items in
+  `StateMachineWithTest.java`'s `@Disabled` notes.
 
 For each shape, the emitter:
 
@@ -164,25 +124,47 @@ site if not — *not* at the handler dispatch.
 Bytecode enforces effect rows at **compile time** via
 `EffectRowChecker.check(decls)` after module inlining and before
 emit (see `docs/internals/specs.md` § Compile-time effect-row lint).
-Both `--mode=bytecode-threaded` and `--mode=bytecode-sm` fail the
-build on subsumption violations; no runtime cost. The interpreter
-checks the same rule at apply-time. Per-ref JVM capability
-propagation (v0.5.0) refines the JVM tag at handle-binding sites.
+The checker rejects three patterns:
+
+1. **Call-site subsumption** — fn `f ::: A` calling fn `g ::: B` where
+   `B ⊄ A ∪ available-handlers`.
+2. **User effect-op performs** — `perform 'X.op'` from a fn whose row
+   doesn't include `X`.
+3. **Builtin call sites** — `println` / `read-file` / `sleep` / `raw-db-*`
+   / etc. each carry a declared effect (Console / FileIO / Time / Db /
+   …); see `EffectRowChecker.BUILTIN_EFFECTS`. The caller's row must
+   contain it. This is what makes `fn pure (x -> println x)` fail to
+   compile rather than throwing at runtime — the static check
+   subsumes interp's `BuiltinFn.requiredEffects` runtime gate.
+
+The build fails on subsumption violations; no runtime cost. Per-ref
+JVM capability propagation refines the JVM tag at handle-binding
+sites.
+
+As a defense-in-depth backstop, the bytecode runtime also maintains
+an `RT.EFFECT_ROW` thread-local stack (pushed at fn entry, `with`
+block entry, and inside handler clauses) and calls
+`checkPerformEffect` at every emitted `perform`. This catches the
+narrow class of effect flows that the static pass can't see — e.g.
+an effect that flows through a dynamically-typed callback dispatched
+via `RT.callAny`. In well-typed code the runtime check is a no-op;
+when it fires, the same `IrijRuntimeError` shape as the static
+checker is raised, just at a later layer. Virtual-thread fibers
+inherit the stack via `inheritEffectRow` so the property survives
+`spawn` / `fork`.
+
+Test-fixture authoring rule: negative cases ("this code should be
+rejected") live in
+`src/test/java/dev/irij/compiler/EffectRowLintTest.java` as JUnit
+tests that compile a bad source string and assert
+`CompileException`. They must **not** live in `.irj` runtime fixtures
+— the static checker would reject the fixture itself before any
+runtime assertion could observe the error.
 
 ## Concurrency parity
 
-Spawned fibers inherit both `EffectSystem.STACK` (threaded handlers)
-and `SM_STACK` (SM handlers) — see `concurrency.md`. `fireOp` from a
-fiber walks the threaded stack first, then falls through to
-`fireOpToSM` which walks the SM stack and dispatches synchronously.
-
-## Trade-offs by back-end
-
-- **Threaded**: simpler runtime, but every perform costs a vthread
-  context-switch. Body's state survives naturally on the JVM stack.
-- **State-machine**: ~10× faster on hot perform loops but emitter
-  complexity is higher. Pooled exceptions, lifted locals, target-
-  marker TailResume — all to keep the trampoline simple.
-
-The default mode is `bytecode-threaded` for stability; switch to
-`bytecode-sm` for hot perform-heavy workloads.
+Spawned fibers inherit `SM_STACK` (SM handler frames), `EFFECT_ROW`
+(declared row stack), the session namespace map (`NS`) and the
+per-thread session PrintStream (`SESSION_OUT`) via `ParentSnapshot`
+— see `concurrency.md`. `fireOp` from a fiber walks `SM_STACK` and
+dispatches synchronously.

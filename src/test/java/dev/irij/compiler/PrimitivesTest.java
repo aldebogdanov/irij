@@ -25,7 +25,7 @@ class PrimitivesTest {
 
     private static String run(String source) throws Exception {
         byte[] bytes = IrijCompiler.compileSource(source, "irij.Program",
-                null, CompileOptions.threaded());
+                null, CompileOptions.defaults());
         PrintStream origOut = System.out;
         ByteArrayOutputStream buf = new ByteArrayOutputStream();
         System.setOut(new PrintStream(buf));

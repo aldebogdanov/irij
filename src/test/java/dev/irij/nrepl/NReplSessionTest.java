@@ -8,37 +8,63 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for nREPL session — evaluation, state, errors.
+ *
+ * v0.6.13: bytecode-only. Top-level {@code println} side-effects
+ * land in the {@code out} field; the value of the last top-level
+ * expression (if any) lands in the {@code value} field via
+ * {@link dev.irij.compiler.BytecodeSession}'s last-value capture
+ * (v0.6.18).
  */
 class NReplSessionTest {
 
     private Map<String, Object> eval(NReplSession session, String code) {
-        // R1: default `eval` now routes to bytecode mode. These tests
-        // assert interpreter semantics (`value` is the last expr's
-        // result), so they use the back-compat `eval-interp` op.
-        return session.handleOp(Map.of("op", "eval-interp", "code", code));
+        return session.handleOp(Map.of("op", "eval", "code", code));
     }
 
-    @Test void evalSimpleExpression() {
+    @Test void evalSimpleExpressionPrintsToOut() {
+        var session = new NReplSession();
+        var resp = eval(session, "println (1 + 2)");
+        assertEquals("3\n", resp.get("out"));
+        assertEquals(List.of("done"), resp.get("status"));
+    }
+
+    @Test void evalReturnsLastExpressionValue() {
         var session = new NReplSession();
         var resp = eval(session, "1 + 2");
         assertEquals("3", resp.get("value"));
-        assertEquals(List.of("done"), resp.get("status"));
+    }
+
+    @Test void evalReturnsStringConcatValue() {
+        var session = new NReplSession();
+        var resp = eval(session, "\"1\" ++ \"2\"");
+        assertEquals("12", resp.get("value"));
+    }
+
+    @Test void evalReturnsUnitWhenNoTrailingExpression() {
+        var session = new NReplSession();
+        var resp = eval(session, "x := 42");
+        assertEquals("()", resp.get("value"));
+    }
+
+    @Test void evalReturnsLastExpressionAfterDef() {
+        var session = new NReplSession();
+        var resp = eval(session,
+                "fn double :: Int Int\n  (x -> x * 2)\n\ndouble 21");
+        assertEquals("42", resp.get("value"));
     }
 
     @Test void evalWithStdout() {
         var session = new NReplSession();
         var resp = eval(session, "println 42");
         assertTrue(resp.get("out").toString().contains("42"));
-        // println returns Unit, which is now always included as "()"
-        assertEquals("()", resp.get("value"));
         assertEquals(List.of("done"), resp.get("status"));
     }
 
     @Test void statePreservedAcrossEvals() {
         var session = new NReplSession();
         eval(session, "x := 10");
-        var resp = eval(session, "x + 5");
-        assertEquals("15", resp.get("value"));
+        var resp = eval(session, "println (x + 5)");
+        assertEquals("15\n", resp.get("out"));
     }
 
     @Test void runtimeError() {
@@ -88,13 +114,13 @@ class NReplSessionTest {
 
     @Test void fnRedefinition() {
         var session = new NReplSession();
-        eval(session, "fn f\n  (x -> x + 1)");
-        eval(session, "fn g\n  (x -> f x)");
+        eval(session, "fn f ::: Console\n  (x -> x + 1)");
+        eval(session, "fn g ::: Console\n  (x -> f x)");
         // Redefine f
-        eval(session, "fn f\n  (x -> x + 100)");
+        eval(session, "fn f ::: Console\n  (x -> x + 100)");
         // g should see the new f
-        var resp = eval(session, "g 5");
-        assertEquals("105", resp.get("value"));
+        var resp = eval(session, "println (g 5)");
+        assertEquals("105\n", resp.get("out"));
     }
 
     @Test void sessionIdIsUnique() {
@@ -109,19 +135,6 @@ class NReplSessionTest {
         assertNotNull(resp.get("err"));
     }
 
-    @Test void evalAlwaysIncludesValue() {
-        var session = new NReplSession();
-        // Even Unit is returned as "()"
-        var resp = eval(session, "println \"hi\"");
-        assertEquals("()", resp.get("value"));
-    }
-
-    @Test void bindingReturnsValue() {
-        var session = new NReplSession();
-        var resp = eval(session, "x := 42");
-        assertEquals("42", resp.get("value"));
-    }
-
     @Test void backgroundOutOpEmpty() {
         var session = new NReplSession();
         var resp = session.handleOp(Map.of("op", "background-out"));
@@ -131,11 +144,8 @@ class NReplSessionTest {
 
     @Test void backgroundOutCapturesSpawnedOutput() throws Exception {
         var session = new NReplSession();
-        // Spawn a thread that prints after a short delay
         eval(session, "spawn (-> sleep 50 ; println \"from-thread\")");
-        // Wait for the spawned thread to run
         Thread.sleep(200);
-        // Poll background output
         var resp = session.handleOp(Map.of("op", "background-out"));
         assertNotNull(resp.get("out"), "Expected background output from spawned thread");
         assertTrue(resp.get("out").toString().contains("from-thread"));
@@ -145,10 +155,8 @@ class NReplSessionTest {
         var session = new NReplSession();
         eval(session, "spawn (-> sleep 50 ; println \"once\")");
         Thread.sleep(200);
-        // First drain gets the output
         var resp1 = session.handleOp(Map.of("op", "background-out"));
         assertTrue(resp1.get("out").toString().contains("once"));
-        // Second drain is empty
         var resp2 = session.handleOp(Map.of("op", "background-out"));
         assertNull(resp2.get("out"));
     }

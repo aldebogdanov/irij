@@ -28,16 +28,6 @@ import java.util.stream.Stream;
  */
 public final class BuildCommand {
 
-    /** How the entry program is packaged into the output JAR. */
-    public enum Mode {
-        /** Bundle the interpreter + source (legacy; deprecated). */
-        INTERP,
-        /** Bytecode compile with 14c.2 threaded handlers. */
-        BYTECODE_THREADED,
-        /** Bytecode compile with 14c.3 state-machine handlers (not yet impl). */
-        BYTECODE_SM,
-    }
-
     private static final String APP_PREFIX = "__irij_app/";
     private static final String DEPS_PREFIX = "__irij_deps/";
     private static final String RESOURCES_PREFIX = "__irij_resources/";
@@ -52,58 +42,25 @@ public final class BuildCommand {
      */
     public static void run(String[] args) throws IOException {
         Path projectRoot = Path.of("").toAbsolutePath();
-        Mode mode = parseMode(args);
+        rejectLegacyModeFlag(args);
         boolean directLinking = parseDirectLinking(args);
         int nreplPort = parseNReplPort(args);
         String entryPoint = findEntryPoint(projectRoot, args);
         Path outputJar = resolveOutputPath(args, entryPoint);
 
         System.out.println("Building Irij application...");
-        System.out.println("  mode:   " + modeLabel(mode));
         if (directLinking) System.out.println("  link:   direct (no hot-redef)");
         if (nreplPort > 0) System.out.println("  nrepl:  embedded on port " + nreplPort);
         System.out.println("  entry:  " + entryPoint);
         System.out.println("  output: " + outputJar);
 
-        if (mode != Mode.INTERP) {
-            Map<String, Path> bcDeps = resolveDeps(projectRoot);
-            buildBytecodeJar(projectRoot, entryPoint, outputJar, mode, directLinking, bcDeps);
-            long sizeKbBc = Files.size(outputJar) / 1024;
-            System.out.println();
-            System.out.println("Built: " + outputJar + " (" + sizeKbBc + " KB)");
-            System.out.println("Run:   java --enable-native-access=ALL-UNNAMED -jar "
-                    + outputJar.getFileName());
-            return;
-        }
-
-        // Find the running irij JAR (our own JAR)
-        Path runtimeJar = findRuntimeJar();
-        if (runtimeJar == null) {
-            System.err.println("Error: cannot locate irij runtime JAR.");
-            System.err.println("Build requires running from an installed irij JAR (not IDE/classpath).");
-            System.exit(1);
-            return;
-        }
-
-        // Resolve dependencies
-        Map<String, Path> deps = resolveDeps(projectRoot);
-
-        // Collect app source files
-        List<Path> appFiles = collectIrjFiles(projectRoot);
-
-        // Collect resources
-        Path resourcesDir = projectRoot.resolve("resources");
-        List<Path> resourceFiles = Files.isDirectory(resourcesDir)
-            ? collectAllFiles(resourcesDir) : List.of();
-
-        // Build the JAR
-        buildJar(runtimeJar, outputJar, projectRoot, entryPoint, appFiles, deps,
-                resourcesDir, resourceFiles, nreplPort);
-
-        long sizeKb = Files.size(outputJar) / 1024;
+        Map<String, Path> bcDeps = resolveDeps(projectRoot);
+        buildBytecodeJar(projectRoot, entryPoint, outputJar, directLinking, bcDeps);
+        long sizeKbBc = Files.size(outputJar) / 1024;
         System.out.println();
-        System.out.println("Built: " + outputJar + " (" + sizeKb + " KB)");
-        System.out.println("Run:   java --enable-native-access=ALL-UNNAMED -jar " + outputJar.getFileName());
+        System.out.println("Built: " + outputJar + " (" + sizeKbBc + " KB)");
+        System.out.println("Run:   java --enable-native-access=ALL-UNNAMED -jar "
+                + outputJar.getFileName());
     }
 
     private static String findEntryPoint(Path projectRoot, String[] args) {
@@ -312,55 +269,30 @@ public final class BuildCommand {
         return false; // default: hot-redef enabled
     }
 
-    // ── --mode parsing ──────────────────────────────────────────────────
+    // ── Legacy --mode flag handling ─────────────────────────────────────
 
-    private static Mode parseMode(String[] args) {
+    /** v0.6.13: only one mode left (bytecode-sm). The `--mode=` flag is
+     *  still accepted for one release as a no-op so old build scripts
+     *  don't fail silently; passing it prints a soft warning. */
+    private static void rejectLegacyModeFlag(String[] args) {
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
-            String value = null;
-            if (a.startsWith("--mode=")) value = a.substring("--mode=".length());
-            else if (a.equals("--mode") && i + 1 < args.length) value = args[i + 1];
-            if (value != null) {
-                return switch (value) {
-                    case "interp", "interpreter" -> Mode.INTERP;
-                    case "bytecode-threaded", "threaded", "bc-threaded" -> Mode.BYTECODE_THREADED;
-                    case "bytecode-sm", "sm", "state-machine" -> Mode.BYTECODE_SM;
-                    default -> {
-                        System.err.println("Unknown --mode value: " + value
-                                + " (expected: interp | bytecode-threaded | bytecode-sm)");
-                        System.exit(1);
-                        yield Mode.BYTECODE_SM;
-                    }
-                };
+            if (a.startsWith("--mode=") || a.equals("--mode")) {
+                System.err.println("[warn] --mode is no longer needed: "
+                        + "bytecode-sm is the only mode. Flag ignored.");
+                return;
             }
         }
-        // R4: default flipped from INTERP to BYTECODE_SM. The
-        // interpreter is deprecated and will be removed in R5.
-        // Pass `--mode=interp` explicitly to opt back during the
-        // transition period.
-        return Mode.BYTECODE_SM;
-    }
-
-    private static String modeLabel(Mode m) {
-        return switch (m) {
-            case INTERP -> "interp (bundled interpreter)";
-            case BYTECODE_THREADED -> "bytecode-threaded (14c.2)";
-            case BYTECODE_SM -> "bytecode-sm (14c.3)";
-        };
     }
 
     // ── Bytecode-build path ─────────────────────────────────────────────
 
     private static void buildBytecodeJar(Path projectRoot, String entryPoint,
-                                          Path outputJar, Mode mode,
+                                          Path outputJar,
                                           boolean directLinking,
                                           Map<String, Path> deps) throws IOException {
-        CompileOptions opts = switch (mode) {
-            case BYTECODE_THREADED -> CompileOptions.threaded();
-            case BYTECODE_SM -> CompileOptions.stateMachine();
-            default -> CompileOptions.defaults();
-        };
-        opts = opts.withDirectLinking(directLinking);
+        CompileOptions opts = CompileOptions.defaults()
+                .withDirectLinking(directLinking);
 
         Path entryFile = projectRoot.resolve(entryPoint);
         // Hand resolved seed dirs to the compiler so `use mod.X` in the

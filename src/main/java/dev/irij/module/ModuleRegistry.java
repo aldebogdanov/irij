@@ -2,7 +2,7 @@ package dev.irij.module;
 
 import dev.irij.ast.AstBuilder;
 import dev.irij.ast.Node.SourceLoc;
-import dev.irij.interpreter.IrijRuntimeError;
+import dev.irij.IrijRuntimeError;
 import dev.irij.interpreter.Values.ModuleValue;
 import dev.irij.parser.IrijParseDriver;
 

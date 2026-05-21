@@ -124,8 +124,7 @@ println ("Nested: " ++ nested-example ())
 
 fn composition-example
   _ =>
-    combined := quiet-log >> friendly
-    with combined
+    with quiet-log >> friendly
       log "about to greet"
       greet "Composed"
 

@@ -576,15 +576,6 @@ class ParserSmokeTest {
                 """);
         }
 
-        @Test void protoWithLaws() {
-            assertParses("""
-                proto Monoid a
-                  empty :: a
-                  append :: a -> a -> a
-                  law identity = forall x. append empty x == x
-                """);
-        }
-
         @Test void basicImplDecl() {
             assertParses("""
                 impl Show for Int
@@ -705,35 +696,6 @@ class ParserSmokeTest {
                   post (r -> r > 0)
                   out (r -> r < 200)
                   (x -> x * 2)
-                """);
-        }
-
-        // ── Phase 6c: law clauses ───────────────────────────────
-
-        @Test void fnLevelLaw() {
-            assertParses("""
-                fn my-sort
-                  law idempotent = forall xs. my-sort (my-sort xs) == my-sort xs
-                  (xs -> sort xs)
-                """);
-        }
-
-        @Test void fnLevelLawNoForall() {
-            assertParses("""
-                fn add-zero
-                  law identity = add-zero 0 == 0
-                  (x -> x + 0)
-                """);
-        }
-
-        @Test void protoWithLawAndForall() {
-            assertParses("""
-                proto Monoid a
-                  empty :: a
-                  append :: a -> a -> a
-                  law identity-left = forall x. append empty x == x
-                  law identity-right = forall x. append x empty == x
-                  law associative = forall x y z. append (append x y) z == append x (append y z)
                 """);
         }
 

@@ -64,11 +64,19 @@ public final class IrijCompiler {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
         }
         List<Decl> decls = new AstBuilder().build(parsed.tree());
+        return compileDecls(decls, className, sourceRoot, opts, seedRoots, sourceFile);
+    }
+
+    /** Compile a pre-parsed (and possibly rewritten) decl list. Lets
+     *  callers like {@link BytecodeSession} transform the AST before
+     *  emission — e.g. capture the last top-level expression's value
+     *  into the session namespace so Playground / REPL can surface
+     *  it. */
+    public static byte[] compileDecls(List<Decl> decls, String className,
+                                       Path sourceRoot, CompileOptions opts,
+                                       List<Path> seedRoots, String sourceFile) {
         var inliner = new ModuleInliner(sourceRoot, seedRoots);
         List<Decl> inlined = inliner.inline(decls);
-        // Compile-time effect-row subsumption check (closes the bytecode
-        // mode gap: bytecode emission doesn't enforce rows at runtime,
-        // so the static lint must reject violations before emit).
         EffectRowChecker.check(inlined);
         return new ClassEmitter(className, inliner.aliases(), opts, sourceFile).emit(inlined);
     }

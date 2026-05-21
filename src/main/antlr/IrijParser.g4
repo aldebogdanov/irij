@@ -57,7 +57,7 @@ nameListItem
     : IDENT | UPPER_NAME
     | FN | DO | IF | ELSE | MATCH | SPEC | NEWTYPE | MOD | USE | PUB
     | WITH | SCOPE | EFFECT | ROLE | CAP | HANDLER | IMPL | PROTO
-    | PRE | POST | LAW | CONTRACT | SELECT | ENCLAVE | FORALL
+    | PRE | POST | CONTRACT | SELECT | ENCLAVE
     | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF
     ;
 
@@ -135,7 +135,6 @@ contractClause
     | POST expr NEWLINE
     | IN expr NEWLINE
     | OUT expr NEWLINE
-    | LAW IDENT EQUALS forallBinders? expr NEWLINE
     ;
 
 // ── spec / newtype ──────────────────────────────────────────────────
@@ -216,7 +215,6 @@ protoBody
 
 protoMember
     : IDENT SPEC_ANN specExpr                // method signature
-    | LAW IDENT EQUALS forallBinders? expr   // law
     ;
 
 // ── impl ─────────────────────────────────────────────────────────────
@@ -242,10 +240,6 @@ contractBlock
 contractInOut
     : IN expr
     | OUT expr
-    ;
-
-forallBinders
-    : FORALL IDENT+ DOT
     ;
 
 // ═══════════════════════════════════════════════════════════════════════

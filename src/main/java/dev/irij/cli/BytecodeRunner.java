@@ -65,7 +65,7 @@ public final class BytecodeRunner {
 
         String className = "irij.CliRun$" + COUNTER.incrementAndGet();
         byte[] bytes = IrijCompiler.compileFile(sourceFile, className,
-                CompileOptions.stateMachine(), seedRoots);
+                CompileOptions.defaults(), seedRoots);
 
         // Run in a fresh classloader so subsequent runs don't see
         // each other's static state (e.g. SpecValidator registry).
@@ -94,7 +94,7 @@ public final class BytecodeRunner {
     public static void runSource(String source, String fileLabel, PrintStream captureOut) {
         String className = "irij.CliEval$" + COUNTER.incrementAndGet();
         byte[] bytes = IrijCompiler.compileSource(source, className,
-                null, CompileOptions.stateMachine(), List.of(), fileLabel);
+                null, CompileOptions.defaults(), List.of(), fileLabel);
         BytesLoader loader = new BytesLoader();
         Class<?> cls = loader.define(className, bytes);
 

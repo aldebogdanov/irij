@@ -116,4 +116,71 @@ class EffectRowLintTest {
             """;
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
     }
+
+    // ── (4) Migrated from tests/test-effect-rows.irj ─────────────────
+    //
+    // These cases used to be runtime-pattern tests (`try (-> bad-fn ())`
+    // → expect Err). Under strict static checking they trip
+    // EffectRowChecker before the test fixture can even compile, so
+    // they belong here.
+
+    @Test
+    void unannotatedFnCallingPrintlnRejected() {
+        // `bad-pure` has no `:::` row → empty avail → println needs Console.
+        String src = """
+            fn bad-pure
+              (x -> println x)
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Console"),
+                () -> "expected Console-effect error, got: " + e.getMessage());
+    }
+
+    @Test
+    void unannotatedFnCallingUserEffectOpRejected() {
+        // `silent` is unannotated, but its body performs `log-it` from
+        // the user-declared `MyLog` effect → MyLog not in avail → reject.
+        String src = """
+            effect MyLog
+              log-it :: Str -> ()
+            fn silent
+              (_ -> log-it "nope")
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("MyLog"),
+                () -> "expected MyLog-effect error, got: " + e.getMessage());
+    }
+
+    @Test
+    void fnDeclaresOneEffectButPerformsAnotherRejected() {
+        // `only-log` declares ::: MyLog, body performs Beep → reject.
+        String src = """
+            effect MyLog
+              log-it :: Str -> ()
+            effect Beep
+              beep :: () -> ()
+            fn only-log ::: MyLog
+              (_ -> beep ())
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Beep"),
+                () -> "expected Beep-effect error, got: " + e.getMessage());
+    }
+
+    @Test
+    void handlerWithoutEffectAnnotationRejectsClauseUsingEffectBuiltin() {
+        // `pure-logger :: MyLog` (no `::: Console`) — its clause body
+        // calls println which needs Console. Clause body runs under the
+        // handler's declared row; with empty requiredEffects, Console is
+        // unavailable → reject.
+        String src = """
+            effect MyLog
+              log-it :: Str -> ()
+            handler pure-logger :: MyLog
+              log-it msg => resume (println msg)
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Console"),
+                () -> "expected Console-effect error, got: " + e.getMessage());
+    }
 }

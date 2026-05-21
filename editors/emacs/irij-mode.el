@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2024  Irij Contributors
 ;; Author: Irij Contributors
-;; Version: 0.1.1
+;; Version: 0.2.0
 ;; Keywords: languages irij
 ;; URL: https://github.com/irij-lang/irij
 ;; Package-Requires: ((emacs "27.1"))
@@ -82,8 +82,8 @@
   '("fn" "do" "if" "else" "match" "spec" "newtype"
     "mod" "use" "pub" "with" "scope" "effect"
     "role" "cap" "handler" "impl" "proto"
-    "pre" "post" "law" "contract" "select"
-    "enclave" "forall" "par-each" "on-failure"
+    "pre" "post" "contract" "select"
+    "enclave" "par-each" "on-failure"
     "in" "out")
   "Reserved words in Irij.")
 
@@ -93,14 +93,15 @@
 
 (defconst irij-builtin-fns
   '("print" "println" "to-str" "dbg"
-    "div" "abs" "min" "max"
+    "div" "mod" "abs" "min" "max"
     "head" "tail" "length" "reverse" "sort"
-    "concat" "take" "drop" "to-vec"
+    "concat" "conj" "take" "drop" "to-vec"
     "contains?" "keys" "vals" "get"
-    "nth" "last" "fold"
+    "nth" "last" "fold" "flip"
     "identity" "const" "not" "empty?"
+    "pi" "e"
     "spawn" "sleep" "try" "apply"
-    "await" "timeout" "par" "race" "verify-laws"
+    "await" "timeout" "par" "race"
     "error" "type-of"
     "assoc" "dissoc" "merge"
     "split" "join" "trim" "upper-case" "lower-case"
@@ -110,8 +111,16 @@
     "parse-int" "parse-float" "char-code" "from-char-code"
     "read-file" "write-file" "append-file" "delete-file" "list-dir" "make-dir"
     "file-exists?" "get-env" "env" "now-ms" "read-line"
-    "json-parse" "json-stringify" "url-encode" "url-decode"
+    "json-parse" "json-encode" "json-encode-pretty"
+    "url-encode" "url-decode" "toml-parse"
     "validate" "validate!"
+    ;; raw-* primitives (effects layer)
+    "raw-http-request" "raw-http-serve"
+    "raw-db-open" "raw-db-query" "raw-db-exec" "raw-db-close" "raw-db-transaction"
+    "raw-sse-response" "raw-sse-send" "raw-sse-close" "raw-sse-closed?"
+    "raw-multipart-field" "raw-multipart-save"
+    "raw-session-create" "raw-session-eval" "raw-session-destroy"
+    "raw-session-subscribe" "raw-session-unsubscribe" "raw-session-cleanup"
     ;; std.time / std.random / std.env wrappers + handlers
     "time-now" "time-sleep" "default-time" "fixed-clock"
     "rand-int" "rand-float" "default-random" "fixed-random"
@@ -144,6 +153,8 @@
       ("\\$[A-Z][A-Z0-9_]*" . font-lock-type-face)
       ;; Keyword atoms — :ident (not ::)
       ("\\(?:^\\|[^:]\\)\\(:[a-z][a-z0-9-]*\\)" 1 font-lock-constant-face)
+      ;; Effect row marker — ::: Eff (must match before ::)
+      (":::" . font-lock-keyword-face)
       ;; Type annotations — :: Type
       ("::" . font-lock-keyword-face)
       ;; Bind operators

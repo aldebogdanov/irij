@@ -92,8 +92,7 @@ r5 := test "nested handlers different effects" (-> assert-eq 42 (nested-test ())
 
 fn composed-test
   _ =>
-    combined := silent-log >> const-state
-    with combined
+    with silent-log >> const-state
       log "ignored"
       get-val ()
 
