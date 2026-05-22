@@ -74,6 +74,13 @@ final class ClassEmitter implements Opcodes {
     private Map<String, Integer> currentLiftedLocals = Map.of();
     private int currentKSlot = -1;
     private boolean currentFnPushesEffects = false;
+    /** Local-var name → handler expression it was bound to. Populated
+     *  by {@link #scanLocalHandlerBindings} at fn-emit time so
+     *  {@link #collectHandlerNamesInto} can resolve a {@code with
+     *  combined} where {@code combined := h1 >> h2} was bound earlier
+     *  in the same fn. Without this, the SM lowering's handler-shape
+     *  analysis gives up on local-var aliasing of composed handlers. */
+    private java.util.Map<String, Expr> currentLocalHandlerBindings = java.util.Map.of();
     /** Names that have a hard-wired bytecode constant (Math.PI, Math.E,
      *  Function.identity, etc.). When a top-level binding shadows one
      *  of these, the binding's INITIALIZER must read the constant
@@ -763,6 +770,11 @@ final class ClassEmitter implements Opcodes {
         Label efHandler = new Label();
         mv.visitLabel(efTryStart);
         mv.visitLabel(currentFnEntry);
+        // Pre-scan body for `name := <handler-expr>` Simple binds so a
+        // later `with name` inside the body can resolve through the
+        // local alias (SM-1 fix).
+        var savedHandlerBindings = currentLocalHandlerBindings;
+        currentLocalHandlerBindings = scanLocalHandlerBindings(fn.body());
         try {
             switch (fn.body()) {
                 case Decl.FnBody.LambdaBody lb -> emitTailExpr(lb.body(), mv, locals);
@@ -779,6 +791,7 @@ final class ClassEmitter implements Opcodes {
                         "MVP: unsupported fn body: " + fn.body().getClass().getSimpleName());
             }
         } finally {
+            currentLocalHandlerBindings = savedHandlerBindings;
             currentFnName = savedFnName;
             currentFnArity = savedFnArity;
             currentFnEntry = savedFnEntry;
@@ -2450,7 +2463,14 @@ final class ClassEmitter implements Opcodes {
         try {
             stmts = new ANormalizer().normalize(stmts);
             WithBodyShape shape = classifyWithBody(stmts);
-            if (!(shape instanceof WithBodyShape.Sequence seq)) return false;
+            WithBodyShape.Sequence seq;
+            if (shape instanceof WithBodyShape.Sequence s) {
+                seq = s;
+            } else if (shape instanceof WithBodyShape.SingleOp so) {
+                seq = singleOpToSequence(stmts, so);
+            } else {
+                return false;
+            }
             for (Segment s : seq.segments()) {
                 if (s.innerWith() != null) return false;
             }
@@ -2458,6 +2478,22 @@ final class ClassEmitter implements Opcodes {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    /** Promote a SingleOp shape into a 2-segment Sequence so tier-c
+     *  lowering (which only emits Sequence shapes) can compile clause
+     *  bodies whose only foreign op is a single perform. */
+    private WithBodyShape.Sequence singleOpToSequence(List<Stmt> body,
+                                                       WithBodyShape.SingleOp so) {
+        int idx = so.idx();
+        List<Stmt> pre = new ArrayList<>(body.subList(0, idx));
+        List<Stmt> post = new ArrayList<>(body.subList(idx + 1, body.size()));
+        List<Segment> segments = new ArrayList<>();
+        segments.add(new Segment(pre, so.opName(), so.opArgs(), so.bindName()));
+        segments.add(new Segment(post, null, null, null));
+        List<String> lifted = new ArrayList<>();
+        if (so.bindName() != null) lifted.add(so.bindName());
+        return new WithBodyShape.Sequence(segments, lifted);
     }
 
     private List<String> collectHandlerNames(Expr e) {
@@ -2468,7 +2504,16 @@ final class ClassEmitter implements Opcodes {
 
     private void collectHandlerNamesInto(Expr e, List<String> out) {
         if (e instanceof Expr.Var v) {
-            out.add(v.name());
+            // If the Var refers to a local-bound handler expression
+            // (`combined := h1 >> h2`), recurse into the bound RHS so
+            // SM-shape analysis sees the actual handler chain rather
+            // than treating the alias as an unknown handler name.
+            Expr bound = currentLocalHandlerBindings.get(v.name());
+            if (bound != null && bound != e) {
+                collectHandlerNamesInto(bound, out);
+            } else {
+                out.add(v.name());
+            }
         } else if (e instanceof Expr.App app && app.fn() instanceof Expr.Var fv
                 && (">>".equals(fv.name()) || "compose".equals(fv.name()))) {
             for (Expr a : app.args()) collectHandlerNamesInto(a, out);
@@ -2479,6 +2524,43 @@ final class ClassEmitter implements Opcodes {
         } else {
             // Unknown shape (lambda result, function call, etc.): mark unknown.
             out.add("__unknown__");
+        }
+    }
+
+    /** Walk a fn body and collect `name := <handler-expr>` Simple binds
+     *  where the RHS is a Var (handler ref) or Compose (`h1 >> h2`).
+     *  Used by {@link #collectHandlerNamesInto} to resolve `with name`
+     *  through a local alias. Walks ImperativeBody stmts, LambdaBody
+     *  Block stmts, and every MatchArmsBody arm's Block stmts. */
+    private java.util.Map<String, Expr> scanLocalHandlerBindings(Decl.FnBody body) {
+        java.util.Map<String, Expr> out = new java.util.HashMap<>();
+        switch (body) {
+            case Decl.FnBody.ImperativeBody ib -> scanStmtsForHandlerBinds(ib.stmts(), out);
+            case Decl.FnBody.LambdaBody lb -> scanExprForHandlerBinds(lb.body(), out);
+            case Decl.FnBody.MatchArmsBody mab -> {
+                for (var arm : mab.arms()) scanExprForHandlerBinds(arm.body(), out);
+            }
+            default -> {}
+        }
+        return out;
+    }
+
+    private void scanExprForHandlerBinds(Expr e, java.util.Map<String, Expr> out) {
+        if (e instanceof Expr.Block blk) scanStmtsForHandlerBinds(blk.stmts(), out);
+    }
+
+    private void scanStmtsForHandlerBinds(List<Stmt> stmts, java.util.Map<String, Expr> out) {
+        for (Stmt s : stmts) {
+            if (s instanceof Stmt.Bind b
+                    && b.target() instanceof Stmt.BindTarget.Simple sm) {
+                Expr v = b.value();
+                if (v instanceof Expr.Var || v instanceof Expr.Compose
+                        || (v instanceof Expr.App app
+                            && app.fn() instanceof Expr.Var fv
+                            && (">>".equals(fv.name()) || "compose".equals(fv.name())))) {
+                    out.put(sm.name(), v);
+                }
+            }
         }
     }
 
@@ -3093,6 +3175,10 @@ final class ClassEmitter implements Opcodes {
             case Stmt.Bind b -> containsOpCallExpr(b.value());
             case Stmt.MutBind b -> containsOpCallExpr(b.value());
             case Stmt.Assign a -> containsOpCallExpr(a.value());
+            // Plain IfStmt — no op in its cond / branches means safe to
+            // emit as a regular branch in the segment. The bodyHasBranchingOp
+            // gate above already routed if-with-op-in-branches to EffIR.
+            case Stmt.IfStmt ifs -> stmtContainsOpRecursive(ifs);
             // Step 8: nested `with` would require the outer continuation to
             // resume INSIDE the inner with rather than at its start, plus
             // bridging PerformSignal across SM/threaded boundaries. Both
@@ -3921,9 +4007,14 @@ final class ClassEmitter implements Opcodes {
         }
         stmts = new ANormalizer().normalize(stmts);
         WithBodyShape shape = classifyWithBody(stmts);
-        if (!(shape instanceof WithBodyShape.Sequence seq)) {
+        WithBodyShape.Sequence seq;
+        if (shape instanceof WithBodyShape.Sequence s) {
+            seq = s;
+        } else if (shape instanceof WithBodyShape.SingleOp so) {
+            seq = singleOpToSequence(stmts, so);
+        } else {
             throw new IrijCompiler.CompileException(
-                    "tier-c clause: only Sequence shape supported (v1)");
+                    "tier-c clause: only Sequence/SingleOp shape supported (v1)");
         }
 
         // Augmented lifted: paramNames + classifier-lifted. emitSMSequence

@@ -2433,8 +2433,18 @@ public final class RuntimeSupport {
                 sig = s;
             }
 
+            // Snapshot the pooled signal's fields immediately. The pool is
+            // thread-local and shared with any nested dispatch loop spawned
+            // by the clause we're about to invoke (e.g. a tier-c clause's
+            // own perform reuses the same pool slot, overwriting our sig.*
+            // before this iteration consumes them).
+            final String sigEffectName = sig.effectName;
+            final String sigOpName = sig.opName;
+            final Object[] sigArgs = sig.args;
+            final IrijContinuation sigContinuation = sig.continuation;
+
             // Find the innermost matching SM handler — own hs first.
-            CompiledHandler h = findHandler(hs, sig.effectName);
+            CompiledHandler h = findHandler(hs, sigEffectName);
             // Fallback: walk other frames in SM_STACK (innermost-first,
             // skipping our own frame which is on top). Lets a tier-c
             // clause's perform reach the next-outer SM with's handler.
@@ -2442,7 +2452,7 @@ public final class RuntimeSupport {
                 boolean skippedSelf = false;
                 for (var frame : stack) {
                     if (!skippedSelf) { skippedSelf = true; continue; }
-                    h = findHandler(frame, sig.effectName);
+                    h = findHandler(frame, sigEffectName);
                     if (h != null) break;
                 }
             }
@@ -2451,11 +2461,11 @@ public final class RuntimeSupport {
                 boolean bridged = false;
                 var threadedStack = dev.irij.interpreter.EffectSystem.STACK.get();
                 for (var ctx : threadedStack) {
-                    if (ctx.effectName().equals(sig.effectName)) {
+                    if (ctx.effectName().equals(sigEffectName)) {
                         resumeArg = dev.irij.interpreter.EffectSystem.fireOp(
-                                sig.effectName, sig.opName,
-                                java.util.Arrays.asList(sig.args));
-                        currentK = sig.continuation;
+                                sigEffectName, sigOpName,
+                                java.util.Arrays.asList(sigArgs));
+                        currentK = sigContinuation;
                         bridged = true;
                         break;
                     }
@@ -2464,10 +2474,10 @@ public final class RuntimeSupport {
                 throw sig; // truly unhandled
             }
 
-            IrijFn clause = h.clauses.get(sig.opName);
+            IrijFn clause = h.clauses.get(sigOpName);
             if (clause == null) {
                 throw new dev.irij.IrijRuntimeError(
-                        "Handler " + h.name + " has no clause for " + sig.opName);
+                        "Handler " + h.name + " has no clause for " + sigOpName);
             }
 
             // The TailResume thrown by this iteration's resumeFn must
@@ -2475,7 +2485,7 @@ public final class RuntimeSupport {
             // nested loop catching a TailResume not addressed to it
             // re-throws so the right loop consumes it (matters for native
             // nested-SM and for future tier-c clause-as-SM compilation).
-            final IrijContinuation expectedTarget = sig.continuation;
+            final IrijContinuation expectedTarget = sigContinuation;
             final var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
             IrijFn resumeFn = (resumeArgs) -> {
                 if (!resumed.compareAndSet(false, true)) {
@@ -2488,9 +2498,9 @@ public final class RuntimeSupport {
                 throw TailResume.of(v, expectedTarget);
             };
 
-            Object[] clauseArgs = new Object[sig.args.length + 1];
-            System.arraycopy(sig.args, 0, clauseArgs, 0, sig.args.length);
-            clauseArgs[sig.args.length] = resumeFn;
+            Object[] clauseArgs = new Object[sigArgs.length + 1];
+            System.arraycopy(sigArgs, 0, clauseArgs, 0, sigArgs.length);
+            clauseArgs[sigArgs.length] = resumeFn;
 
             try {
                 Object clauseReturn = clause.apply(clauseArgs);
@@ -2500,10 +2510,10 @@ public final class RuntimeSupport {
             } catch (TailResume tr) {
                 if (tr.target != expectedTarget) throw tr; // not for me
                 resumeArg = tr.value;
-                // Resume the body that yielded — sig.continuation may differ
+                // Resume the body that yielded — sigContinuation may differ
                 // from the original `k` if the signal originated in a nested
                 // SM frame and we dispatched on its behalf via SM_STACK.
-                currentK = sig.continuation;
+                currentK = sigContinuation;
             }
         }
     }

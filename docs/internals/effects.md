@@ -56,10 +56,11 @@ catching frame.
   CFG: blocks with `Return`/`Perform`/`Branch`/`Jump` terminators.
   Each block has a "header" label (does resume-bind store) and a
   "body" label (intra-step jump target).
-- **Unsupported** — compile error. Common cases (`with h1 >> h2` on a
-  local var, op-call in an if-condition, tier-c clauses crossing
-  composed-handler chains) are tracked TODO SM-N items in
-  `StateMachineWithTest.java`'s `@Disabled` notes.
+- **Unsupported** — compile error. Historic SM-N gaps tracked in
+  `StateMachineWithTest.java` (op-call in if-condition, composed
+  handler bound to a local, tier-c clauses crossing composed chains,
+  tier-c resume-value flow-through) are all closed as of v0.7.0 —
+  zero `@Disabled` SM tests remain.
 
 For each shape, the emitter:
 
@@ -103,6 +104,18 @@ The trampoline target marker (`TailResume.target`) keeps the right
 loop catching the right resume. Without it, the clause's own
 perform-resume would be confused with the outer body's
 perform-resume.
+
+**Pool-snapshot invariant (v0.7.0).** `PerformSignal` and `TailResume`
+are pooled per-thread for zero-allocation control flow. The pool slot
+is shared across nested dispatch loops, so each iteration of
+`dispatchLoopSMImpl` snapshots `sig.effectName`, `sig.opName`,
+`sig.args`, and `sig.continuation` into locals immediately after the
+catch — before invoking the clause. A tier-c clause that performs its
+own effect spawns an inner dispatch loop that reuses the same pool
+instance; without the snapshot, the inner perform would overwrite the
+outer iteration's `sig.continuation`, causing the outer trampoline to
+resume the wrong continuation (and trigger spurious "resume called
+twice" errors).
 
 See `phase-14c3-techdebt.md` for the full design walk.
 

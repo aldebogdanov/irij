@@ -323,7 +323,6 @@ class StateMachineWithTest {
         assertEquals(nl("hi earth"), runSM(src));
     }
 
-    @org.junit.jupiter.api.Disabled("SM gap: effect-op call inside if-condition (EffIRBuilder produces Unsupported). TODO SM-1.")
     @Test void op_result_used_in_if_cond() throws Exception {
         String src = """
             effect Ask
@@ -511,7 +510,6 @@ class StateMachineWithTest {
         assertEquals(nl("log: between", "hi-A / hi-B"), runSM(src));
     }
 
-    @org.junit.jupiter.api.Disabled("SM gap: handler bound to a local var (`combined := h1 >> h2; with combined`) — collectHandlerNames can't resolve through local vars. Workaround: inline `with h1 >> h2`. TODO SM-2.")
     @Test void composed_local_binding() throws Exception {
         String src = """
             effect Greet
@@ -539,7 +537,6 @@ class StateMachineWithTest {
     // SM_STACK fallback. The threaded path is now only used for handlers
     // whose body shape SM can't lower (none in current tests).
 
-    @org.junit.jupiter.api.Disabled("SM gap: tier-c clause's foreign-effect perform crossing composed-handler chain. TODO SM-3.")
     @Test void tier_c_clause_with_required_effects_annotation() throws Exception {
         // Handler declares `::: Logger` and clause body performs log.
         // Native tier-c emits clause body as an SM step; the foreign
@@ -569,7 +566,6 @@ class StateMachineWithTest {
         assertEquals(nl("3"), runSM(src));
     }
 
-    @org.junit.jupiter.api.Disabled("SM gap: see tier_c_clause_with_required_effects_annotation. TODO SM-3.")
     @Test void tier_c_clause_with_explicit_foreign_effect_annotation() throws Exception {
         // Handler whose clause performs a foreign effect MUST declare
         // that effect via `:::` — the compile-time effect-row checker
@@ -734,7 +730,6 @@ class StateMachineWithTest {
 
     // ── Native tier-c — clause body as its own SM continuation ──────
 
-    @org.junit.jupiter.api.Disabled("SM gap: tier-c clause resume value flowing into post-segment context. TODO SM-4.")
     @Test void native_tier_c_clause_resume_value_flows_through() throws Exception {
         // Inner handler's clause body performs an outer effect, then
         // resumes with a derived value. The body's `:= bump` bind must

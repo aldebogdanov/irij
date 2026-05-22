@@ -94,6 +94,37 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.7.0 &mdash; State-machine lowering: all known correctness gaps closed.
+
+Four SM bugs tracked in `StateMachineWithTest.java` as `@Disabled`
+tests are now fixed; zero disabled tests remain.
+
+- **SM-1**: `if (perform-result == X) …` now compiles. Plain `IfStmt`
+  in a `with` body no longer routes to EffIR just because the gate
+  was too coarse — `containsOpCall(s)` now recurses into the if's
+  cond/branches, matching `stmtContainsOpRecursive` semantics.
+- **SM-2**: `combined := h1 >> h2; with combined …` now compiles.
+  A pre-pass `scanLocalHandlerBindings` records every `name := <Var
+  | Compose | App(>>, …)>` in the enclosing fn body; `collectHandler
+  NamesInto` resolves the `Var` ref through that map so SM-shape
+  analysis sees the underlying handler chain.
+- **SM-3**: `handler h ::: F { op a => perform-F …; resume v }` —
+  tier-c clauses with a SingleOp shape (one foreign perform) now
+  compile. `tierCClauseCompilable` + `emitTierCClauseLambda` accept
+  `SingleOp` and promote it to a 2-segment `Sequence` via
+  `singleOpToSequence`.
+- **SM-4**: tier-c resume-value flow-through. The deeper cause was
+  `PerformSignal` pool sharing across nested `dispatchLoopSMImpl`
+  invocations — an inner perform overwrote the outer iteration's
+  `sig.continuation`, so the outer trampoline resumed the wrong
+  continuation and surfaced as a spurious "resume called twice"
+  error. Fixed by snapshotting `sig.effectName`/`opName`/`args`/
+  `continuation` into locals immediately after the catch, before
+  invoking the clause.
+
+330 Java tests passing (0 disabled), 286/286 integration tests
+passing.
+
 0.6.21 &mdash; Parser-gotchas doc update + irij.online ex-parametric-effects card fixed (was unparseable). Three things documented in `docs/parser-gotchas.md`:
 
 - **Top-level `App`-as-decl restriction:** a bare top-level expression whose first argument starts with `(` (typical of `fold (lambda) init coll`) fails because the parser closes the expression at the trailing `fold` Var and chokes on the open paren. Wrap in a binding or `println (…)`.
