@@ -58,6 +58,6 @@ editors/emacs/                 — irij-mode.el (syntax + REPL) + irij-nrepl.el 
 ## Style
 
 - Java 25, records and sealed interfaces for AST nodes
-- Package structure: `dev.irij.parser`, `dev.irij.ast`, `dev.irij.interpreter`, `dev.irij.repl`, `dev.irij.cli`
-- Test class per component: `ParserSmokeTest`, `InterpreterTest`, etc.
+- Package structure: `dev.irij.parser`, `dev.irij.ast`, `dev.irij.compiler`, `dev.irij.runtime`, `dev.irij.repl`, `dev.irij.cli`
+- Test class per component: `ParserSmokeTest`, `ClassEmitterTest`, etc.
 - Test helper: `run(String source)` captures stdout and returns it for assertion

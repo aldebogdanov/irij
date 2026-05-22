@@ -3,7 +3,7 @@ package dev.irij.repl;
 import dev.irij.compiler.BytecodeSession;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.IrijRuntimeError;
-import dev.irij.interpreter.Values;
+import dev.irij.runtime.Values;
 import dev.irij.parser.IrijLexer;
 import dev.irij.parser.IrijParseDriver;
 import org.antlr.v4.runtime.Token;

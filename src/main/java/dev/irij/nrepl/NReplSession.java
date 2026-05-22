@@ -108,8 +108,8 @@ public final class NReplSession {
             String stdout = bgPrefix + capture.toString();
             if (!stdout.isEmpty()) resp.put("out", stdout);
             Object last = session.namespace().get(dev.irij.compiler.BytecodeSession.LAST_VALUE_KEY);
-            Object surfaced = (last == sentinel) ? dev.irij.interpreter.Values.UNIT : last;
-            resp.put("value", dev.irij.interpreter.Values.toIrijString(surfaced));
+            Object surfaced = (last == sentinel) ? dev.irij.runtime.Values.UNIT : last;
+            resp.put("value", dev.irij.runtime.Values.toIrijString(surfaced));
             resp.put("status", List.of("done"));
             return resp;
         } catch (IrijCompiler.CompileException e) {

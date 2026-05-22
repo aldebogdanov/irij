@@ -1,10 +1,10 @@
-package dev.irij.interpreter;
+package dev.irij.runtime;
 
 import dev.irij.IrijRuntimeError;
 
-import dev.irij.interpreter.Values.BuiltinFn;
-import dev.irij.interpreter.Values.IrijMap;
-import dev.irij.interpreter.Values.IrijVector;
+import dev.irij.runtime.Values.BuiltinFn;
+import dev.irij.runtime.Values.IrijMap;
+import dev.irij.runtime.Values.IrijVector;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;

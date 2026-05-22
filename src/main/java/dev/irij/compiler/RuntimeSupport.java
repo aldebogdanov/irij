@@ -160,11 +160,11 @@ public final class RuntimeSupport {
         // `f ()` calling a zero-arg curried lambda: strip the unit so
         // CurriedFn doesn't think this is an over-application.
         if (fn instanceof CurriedFn cf && cf.arity == 0
-                && args.length == 1 && args[0] == dev.irij.interpreter.Values.UNIT) {
+                && args.length == 1 && args[0] == dev.irij.runtime.Values.UNIT) {
             return cf.apply(new Object[0]);
         }
         if (fn instanceof IrijFn f) return f.apply(args);
-        if (fn instanceof dev.irij.interpreter.Values.BuiltinFn bf) {
+        if (fn instanceof dev.irij.runtime.Values.BuiltinFn bf) {
             return bf.apply(java.util.Arrays.asList(args));
         }
         throw new IllegalArgumentException("Not callable: " + display(fn));
@@ -172,7 +172,7 @@ public final class RuntimeSupport {
 
     /** Resolve a Java static ref like "System/getenv" → BuiltinFn. */
     public static Object javaStaticRef(String ref) {
-        return dev.irij.interpreter.JavaInterop.resolveStaticRef(ref);
+        return dev.irij.runtime.JavaInterop.resolveStaticRef(ref);
     }
 
     /**
@@ -187,18 +187,18 @@ public final class RuntimeSupport {
         // Match Interpreter.evalDotAccess: check Irij record-shaped
         // values first so `map.key` and `tagged.field` work in
         // bytecode mode without falling through to JavaInterop.
-        if (recv instanceof dev.irij.interpreter.Values.IrijMap m) {
+        if (recv instanceof dev.irij.runtime.Values.IrijMap m) {
             Object v = m.entries().get(member);
-            return v != null ? v : dev.irij.interpreter.Values.UNIT;
+            return v != null ? v : dev.irij.runtime.Values.UNIT;
         }
-        if (recv instanceof dev.irij.interpreter.Values.Tagged t
+        if (recv instanceof dev.irij.runtime.Values.Tagged t
                 && t.namedFields() != null) {
             Object v = t.namedFields().get(member);
             if (v != null) return v;
             throw new dev.irij.IrijRuntimeError(
                     "No field '" + member + "' on " + t.tag());
         }
-        return dev.irij.interpreter.JavaInterop.resolveInstanceRef(recv, member);
+        return dev.irij.runtime.JavaInterop.resolveInstanceRef(recv, member);
     }
 
     public static void print(Object v) {
@@ -215,8 +215,8 @@ public final class RuntimeSupport {
 
     public static String display(Object v) {
         // Delegate to interpreter's display logic for bit-exact parity.
-        if (v == null) return dev.irij.interpreter.Values.toIrijString(dev.irij.interpreter.Values.UNIT);
-        return dev.irij.interpreter.Values.toIrijString(v);
+        if (v == null) return dev.irij.runtime.Values.toIrijString(dev.irij.runtime.Values.UNIT);
+        return dev.irij.runtime.Values.toIrijString(v);
     }
 
     public static String toStr(Object v) { return display(v); }
@@ -225,11 +225,11 @@ public final class RuntimeSupport {
         if (a instanceof String || b instanceof String) {
             return display(a) + display(b);
         }
-        if (a instanceof dev.irij.interpreter.Values.IrijVector va
-                && b instanceof dev.irij.interpreter.Values.IrijVector vb) {
+        if (a instanceof dev.irij.runtime.Values.IrijVector va
+                && b instanceof dev.irij.runtime.Values.IrijVector vb) {
             java.util.List<Object> out = new java.util.ArrayList<>(va.elements());
             out.addAll(vb.elements());
-            return new dev.irij.interpreter.Values.IrijVector(out);
+            return new dev.irij.runtime.Values.IrijVector(out);
         }
         throw new IllegalArgumentException("++ not defined for: " + a + " and " + b);
     }
@@ -290,7 +290,7 @@ public final class RuntimeSupport {
     private static int cmp(Object a, Object b) {
         // Delegate to the canonical comparator in Builtins — handles
         // Long/Double/String/Keyword/Tuple/Vector recursively.
-        return dev.irij.interpreter.Builtins.compare(a, b);
+        return dev.irij.runtime.Builtins.compare(a, b);
     }
 
     private static double asDouble(Object v) {
@@ -302,7 +302,7 @@ public final class RuntimeSupport {
 
     public static boolean truthy(Object v) {
         if (v == null) return false;
-        if (v == dev.irij.interpreter.Values.UNIT) return false;
+        if (v == dev.irij.runtime.Values.UNIT) return false;
         if (v instanceof Boolean b) return b;
         return true;
     }
@@ -310,40 +310,40 @@ public final class RuntimeSupport {
     // ── Pattern-match helpers ────────────────────────────────────────────
 
     public static boolean isTag(Object v, String tag) {
-        return v instanceof dev.irij.interpreter.Values.Tagged t && t.tag().equals(tag);
+        return v instanceof dev.irij.runtime.Values.Tagged t && t.tag().equals(tag);
     }
 
     public static Object taggedField(Object v, int i) {
-        return ((dev.irij.interpreter.Values.Tagged) v).fields().get(i);
+        return ((dev.irij.runtime.Values.Tagged) v).fields().get(i);
     }
 
     public static int taggedArity(Object v) {
-        return ((dev.irij.interpreter.Values.Tagged) v).fields().size();
+        return ((dev.irij.runtime.Values.Tagged) v).fields().size();
     }
 
     public static boolean isUnit(Object v) {
-        return v == null || v == dev.irij.interpreter.Values.UNIT;
+        return v == null || v == dev.irij.runtime.Values.UNIT;
     }
 
     public static boolean isKeyword(Object v, String name) {
-        return v instanceof dev.irij.interpreter.Values.Keyword k && k.name().equals(name);
+        return v instanceof dev.irij.runtime.Values.Keyword k && k.name().equals(name);
     }
 
-    public static boolean isVector(Object v) { return v instanceof dev.irij.interpreter.Values.IrijVector; }
-    public static boolean isTuple(Object v)  { return v instanceof dev.irij.interpreter.Values.IrijTuple; }
-    public static boolean isMap(Object v)    { return v instanceof dev.irij.interpreter.Values.IrijMap; }
+    public static boolean isVector(Object v) { return v instanceof dev.irij.runtime.Values.IrijVector; }
+    public static boolean isTuple(Object v)  { return v instanceof dev.irij.runtime.Values.IrijTuple; }
+    public static boolean isMap(Object v)    { return v instanceof dev.irij.runtime.Values.IrijMap; }
 
     public static int vecSize(Object v) {
-        return ((dev.irij.interpreter.Values.IrijVector) v).elements().size();
+        return ((dev.irij.runtime.Values.IrijVector) v).elements().size();
     }
 
     public static Object vecGet(Object v, int i) {
-        return ((dev.irij.interpreter.Values.IrijVector) v).elements().get(i);
+        return ((dev.irij.runtime.Values.IrijVector) v).elements().get(i);
     }
 
     public static Object vecSlice(Object v, int from, int to) {
-        var es = ((dev.irij.interpreter.Values.IrijVector) v).elements();
-        return new dev.irij.interpreter.Values.IrijVector(new java.util.ArrayList<>(es.subList(from, to)));
+        var es = ((dev.irij.runtime.Values.IrijVector) v).elements();
+        return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<>(es.subList(from, to)));
     }
 
     // ── Bytecode-callable raw primitives ────────────────────────────────
@@ -357,19 +357,19 @@ public final class RuntimeSupport {
     public static Object length(Object v) {
         if (v == null) return 0L;
         if (v instanceof String s) return (long) s.length();
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             return (long) vec.elements().size();
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijMap m) {
+        if (v instanceof dev.irij.runtime.Values.IrijMap m) {
             return (long) m.entries().size();
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijTuple t) {
+        if (v instanceof dev.irij.runtime.Values.IrijTuple t) {
             return (long) t.elements().length;
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+        if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             return (long) r.size();
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijSet s) {
+        if (v instanceof dev.irij.runtime.Values.IrijSet s) {
             return (long) s.elements().size();
         }
         throw new dev.irij.IrijRuntimeError(
@@ -382,7 +382,7 @@ public final class RuntimeSupport {
      *  Vector, Tuple, String. */
     public static Object nth(Object iBoxed, Object v) {
         long idx = ((Long) iBoxed).longValue();
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             if (idx < 0 || idx >= vec.elements().size()) {
                 throw new dev.irij.IrijRuntimeError(
                         "nth: index " + idx + " out of bounds (size "
@@ -390,7 +390,7 @@ public final class RuntimeSupport {
             }
             return vec.elements().get((int) idx);
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijTuple tup) {
+        if (v instanceof dev.irij.runtime.Values.IrijTuple tup) {
             if (idx < 0 || idx >= tup.elements().length) {
                 throw new dev.irij.IrijRuntimeError(
                         "nth: index " + idx + " out of bounds (size "
@@ -399,7 +399,7 @@ public final class RuntimeSupport {
             return tup.elements()[(int) idx];
         }
         if (v instanceof String s) return String.valueOf(s.charAt((int) idx));
-        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+        if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             long size = r.size();
             if (idx < 0 || idx >= size) {
                 throw new dev.irij.IrijRuntimeError(
@@ -413,10 +413,10 @@ public final class RuntimeSupport {
 
     /** `conj v x` — append x, return new vector (immutable semantics). */
     public static Object conj(Object v, Object x) {
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             var out = new java.util.ArrayList<>(vec.elements());
             out.add(x);
-            return new dev.irij.interpreter.Values.IrijVector(out);
+            return new dev.irij.runtime.Values.IrijVector(out);
         }
         throw new dev.irij.IrijRuntimeError(
                 "conj: expected Vector, got " + typeTag(v));
@@ -426,16 +426,16 @@ public final class RuntimeSupport {
     public static Object isEmpty(Object v) {
         if (v == null) return Boolean.TRUE;
         if (v instanceof String s) return s.isEmpty();
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             return vec.elements().isEmpty();
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijMap m) {
+        if (v instanceof dev.irij.runtime.Values.IrijMap m) {
             return m.entries().isEmpty();
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijTuple t) {
+        if (v instanceof dev.irij.runtime.Values.IrijTuple t) {
             return t.elements().length == 0;
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+        if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             long upper = r.exclusive() ? r.to() : r.to() + 1;
             return r.from() >= upper;
         }
@@ -449,9 +449,9 @@ public final class RuntimeSupport {
      *  callers get the same semantics they have in the interpreter. */
     public static Object fold(Object fn, Object init, Object coll) {
         java.util.List<Object> list;
-        if (coll instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (coll instanceof dev.irij.runtime.Values.IrijVector vec) {
             list = vec.elements();
-        } else if (coll instanceof dev.irij.interpreter.Values.IrijRange r) {
+        } else if (coll instanceof dev.irij.runtime.Values.IrijRange r) {
             list = new java.util.ArrayList<>();
             long upper = r.exclusive() ? r.to() : r.to() + 1;
             for (long i = r.from(); i < upper; i++) list.add(i);
@@ -470,14 +470,14 @@ public final class RuntimeSupport {
     /** `head v` — first element of a non-empty collection. Works on
      *  Vector and IrijRange (so `head (0 ..< 10)` returns 0L). */
     public static Object head(Object v) {
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             var es = vec.elements();
             if (es.isEmpty()) {
                 throw new dev.irij.IrijRuntimeError("head: empty vector");
             }
             return es.get(0);
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+        if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             long upper = r.exclusive() ? r.to() : r.to() + 1;
             if (r.from() >= upper) {
                 throw new dev.irij.IrijRuntimeError("head: empty range");
@@ -491,18 +491,18 @@ public final class RuntimeSupport {
     /** `tail v` — collection without first element (immutable). Works
      *  on Vector and IrijRange. */
     public static Object tail(Object v) {
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             var es = vec.elements();
             if (es.isEmpty()) {
-                return new dev.irij.interpreter.Values.IrijVector(new java.util.ArrayList<>());
+                return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<>());
             }
-            return new dev.irij.interpreter.Values.IrijVector(
+            return new dev.irij.runtime.Values.IrijVector(
                     new java.util.ArrayList<>(es.subList(1, es.size())));
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+        if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             long upper = r.exclusive() ? r.to() : r.to() + 1;
             if (r.from() >= upper) return r; // empty stays empty
-            return new dev.irij.interpreter.Values.IrijRange(
+            return new dev.irij.runtime.Values.IrijRange(
                     r.from() + 1, r.to(), r.exclusive());
         }
         throw new dev.irij.IrijRuntimeError(
@@ -513,43 +513,43 @@ public final class RuntimeSupport {
     public static Object restVector(Object[] args, int from) {
         java.util.List<Object> out = new java.util.ArrayList<>();
         for (int i = from; i < args.length; i++) out.add(args[i]);
-        return new dev.irij.interpreter.Values.IrijVector(out);
+        return new dev.irij.runtime.Values.IrijVector(out);
     }
 
     public static int tupleSize(Object v) {
-        return ((dev.irij.interpreter.Values.IrijTuple) v).elements().length;
+        return ((dev.irij.runtime.Values.IrijTuple) v).elements().length;
     }
 
     public static Object tupleGet(Object v, int i) {
-        return ((dev.irij.interpreter.Values.IrijTuple) v).elements()[i];
+        return ((dev.irij.runtime.Values.IrijTuple) v).elements()[i];
     }
 
     public static Object mapGet(Object v, String k) {
-        return ((dev.irij.interpreter.Values.IrijMap) v).entries().get(k);
+        return ((dev.irij.runtime.Values.IrijMap) v).entries().get(k);
     }
 
     public static boolean mapHas(Object v, String k) {
-        return ((dev.irij.interpreter.Values.IrijMap) v).entries().containsKey(k);
+        return ((dev.irij.runtime.Values.IrijMap) v).entries().containsKey(k);
     }
 
     /** Field lookup across IrijMap and Tagged-with-named-fields. */
     public static boolean recordHas(Object v, String k) {
-        if (v instanceof dev.irij.interpreter.Values.IrijMap m) return m.entries().containsKey(k);
-        if (v instanceof dev.irij.interpreter.Values.Tagged t && t.namedFields() != null)
+        if (v instanceof dev.irij.runtime.Values.IrijMap m) return m.entries().containsKey(k);
+        if (v instanceof dev.irij.runtime.Values.Tagged t && t.namedFields() != null)
             return t.namedFields().containsKey(k);
         return false;
     }
 
     public static Object recordGet(Object v, String k) {
-        if (v instanceof dev.irij.interpreter.Values.IrijMap m) return m.entries().get(k);
-        if (v instanceof dev.irij.interpreter.Values.Tagged t && t.namedFields() != null)
+        if (v instanceof dev.irij.runtime.Values.IrijMap m) return m.entries().get(k);
+        if (v instanceof dev.irij.runtime.Values.Tagged t && t.namedFields() != null)
             return t.namedFields().get(k);
         return null;
     }
 
     public static boolean isRecord(Object v) {
-        return v instanceof dev.irij.interpreter.Values.IrijMap
-                || (v instanceof dev.irij.interpreter.Values.Tagged t && t.namedFields() != null);
+        return v instanceof dev.irij.runtime.Values.IrijMap
+                || (v instanceof dev.irij.runtime.Values.Tagged t && t.namedFields() != null);
     }
 
     public static IllegalStateException noMatch(Object v) {
@@ -578,22 +578,22 @@ public final class RuntimeSupport {
     }
 
     private static java.util.List<Object> asListAny(Object v) {
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) return vec.elements();
-        if (v instanceof dev.irij.interpreter.Values.IrijSet set) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) return vec.elements();
+        if (v instanceof dev.irij.runtime.Values.IrijSet set) {
             return new java.util.ArrayList<>(set.elements());
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijMap map) {
+        if (v instanceof dev.irij.runtime.Values.IrijMap map) {
             return new java.util.ArrayList<>(map.entries().values());
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijTuple tup) {
+        if (v instanceof dev.irij.runtime.Values.IrijTuple tup) {
             return java.util.Arrays.asList(tup.elements());
         }
-        if (v instanceof dev.irij.interpreter.Values.IrijRange r) {
+        if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             java.util.List<Object> out = new java.util.ArrayList<>(r.size());
             for (Object x : r) out.add(x);
             return out;
         }
-        if (v instanceof dev.irij.interpreter.Builtins.LazyIterable li) {
+        if (v instanceof dev.irij.runtime.Builtins.LazyIterable li) {
             java.util.List<Object> out = new java.util.ArrayList<>();
             for (Object x : li) out.add(x);
             return out;
@@ -635,7 +635,7 @@ public final class RuntimeSupport {
         } else {
             for (String p : s.split(java.util.regex.Pattern.quote(sp), -1)) parts.add(p);
         }
-        return new dev.irij.interpreter.Values.IrijVector(parts);
+        return new dev.irij.runtime.Values.IrijVector(parts);
     }
 
     public static Object join(Object sep, Object coll) {
@@ -644,7 +644,7 @@ public final class RuntimeSupport {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < list.size(); i++) {
             if (i > 0) sb.append(sp);
-            sb.append(dev.irij.interpreter.Values.toIrijString(list.get(i)));
+            sb.append(dev.irij.runtime.Values.toIrijString(list.get(i)));
         }
         return sb.toString();
     }
@@ -686,18 +686,18 @@ public final class RuntimeSupport {
     // ── Map / collection ───────────────────────────────────────────────
 
     public static Object getOp(Object key, Object coll) {
-        if (coll instanceof dev.irij.interpreter.Values.IrijMap map) {
-            Object v = map.entries().get(dev.irij.interpreter.Values.toIrijString(key));
-            return v != null ? v : dev.irij.interpreter.Values.UNIT;
+        if (coll instanceof dev.irij.runtime.Values.IrijMap map) {
+            Object v = map.entries().get(dev.irij.runtime.Values.toIrijString(key));
+            return v != null ? v : dev.irij.runtime.Values.UNIT;
         }
-        if (coll instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (coll instanceof dev.irij.runtime.Values.IrijVector vec) {
             long idx = asLongArg(key, "get");
-            if (idx < 0 || idx >= vec.elements().size()) return dev.irij.interpreter.Values.UNIT;
+            if (idx < 0 || idx >= vec.elements().size()) return dev.irij.runtime.Values.UNIT;
             return vec.elements().get((int) idx);
         }
-        if (coll instanceof dev.irij.interpreter.Values.IrijTuple tup) {
+        if (coll instanceof dev.irij.runtime.Values.IrijTuple tup) {
             long idx = asLongArg(key, "get");
-            if (idx < 0 || idx >= tup.elements().length) return dev.irij.interpreter.Values.UNIT;
+            if (idx < 0 || idx >= tup.elements().length) return dev.irij.runtime.Values.UNIT;
             return tup.elements()[(int) idx];
         }
         throw new dev.irij.IrijRuntimeError(
@@ -705,72 +705,72 @@ public final class RuntimeSupport {
     }
 
     public static Object assoc(Object m, Object key, Object val) {
-        if (m instanceof dev.irij.interpreter.Values.IrijMap map) {
+        if (m instanceof dev.irij.runtime.Values.IrijMap map) {
             java.util.LinkedHashMap<String, Object> entries =
                     new java.util.LinkedHashMap<>(map.entries());
-            entries.put(dev.irij.interpreter.Values.toIrijString(key), val);
-            return new dev.irij.interpreter.Values.IrijMap(entries);
+            entries.put(dev.irij.runtime.Values.toIrijString(key), val);
+            return new dev.irij.runtime.Values.IrijMap(entries);
         }
         throw new dev.irij.IrijRuntimeError(
                 "assoc expects a Map as first argument, got " + typeTag(m));
     }
 
     public static Object dissoc(Object m, Object key) {
-        if (m instanceof dev.irij.interpreter.Values.IrijMap map) {
+        if (m instanceof dev.irij.runtime.Values.IrijMap map) {
             java.util.LinkedHashMap<String, Object> entries =
                     new java.util.LinkedHashMap<>(map.entries());
-            entries.remove(dev.irij.interpreter.Values.toIrijString(key));
-            return new dev.irij.interpreter.Values.IrijMap(entries);
+            entries.remove(dev.irij.runtime.Values.toIrijString(key));
+            return new dev.irij.runtime.Values.IrijMap(entries);
         }
         throw new dev.irij.IrijRuntimeError(
                 "dissoc expects a Map as first argument, got " + typeTag(m));
     }
 
     public static Object merge(Object a, Object b) {
-        if (a instanceof dev.irij.interpreter.Values.IrijMap m1
-                && b instanceof dev.irij.interpreter.Values.IrijMap m2) {
+        if (a instanceof dev.irij.runtime.Values.IrijMap m1
+                && b instanceof dev.irij.runtime.Values.IrijMap m2) {
             java.util.LinkedHashMap<String, Object> entries =
                     new java.util.LinkedHashMap<>(m1.entries());
             entries.putAll(m2.entries());
-            return new dev.irij.interpreter.Values.IrijMap(entries);
+            return new dev.irij.runtime.Values.IrijMap(entries);
         }
         throw new dev.irij.IrijRuntimeError(
                 "merge expects two Maps, got " + typeTag(a) + " and " + typeTag(b));
     }
 
     public static Object keys(Object v) {
-        if (v instanceof dev.irij.interpreter.Values.IrijMap map) {
-            return new dev.irij.interpreter.Values.IrijVector(
+        if (v instanceof dev.irij.runtime.Values.IrijMap map) {
+            return new dev.irij.runtime.Values.IrijVector(
                     new java.util.ArrayList<>(map.entries().keySet()));
         }
         throw new dev.irij.IrijRuntimeError("keys expects a Map");
     }
 
     public static Object vals(Object v) {
-        if (v instanceof dev.irij.interpreter.Values.IrijMap map) {
-            return new dev.irij.interpreter.Values.IrijVector(
+        if (v instanceof dev.irij.runtime.Values.IrijMap map) {
+            return new dev.irij.runtime.Values.IrijVector(
                     new java.util.ArrayList<>(map.entries().values()));
         }
         throw new dev.irij.IrijRuntimeError("vals expects a Map");
     }
 
     public static Object containsP(Object coll, Object elem) {
-        if (coll instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (coll instanceof dev.irij.runtime.Values.IrijVector vec) {
             return vec.elements().contains(elem);
         }
-        if (coll instanceof dev.irij.interpreter.Values.IrijSet set) {
+        if (coll instanceof dev.irij.runtime.Values.IrijSet set) {
             return set.elements().contains(elem);
         }
-        if (coll instanceof dev.irij.interpreter.Values.IrijMap map) {
+        if (coll instanceof dev.irij.runtime.Values.IrijMap map) {
             return map.entries().containsKey(
-                    dev.irij.interpreter.Values.toIrijString(elem));
+                    dev.irij.runtime.Values.toIrijString(elem));
         }
         throw new dev.irij.IrijRuntimeError(
                 "contains? expects a collection, got " + typeTag(coll));
     }
 
     public static Object last(Object v) {
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             if (vec.elements().isEmpty()) {
                 throw new dev.irij.IrijRuntimeError("last of empty vector");
             }
@@ -781,7 +781,7 @@ public final class RuntimeSupport {
     }
 
     public static Object toVec(Object v) {
-        return new dev.irij.interpreter.Values.IrijVector(asListAny(v));
+        return new dev.irij.runtime.Values.IrijVector(asListAny(v));
     }
 
     // ── Misc ───────────────────────────────────────────────────────────
@@ -801,10 +801,10 @@ public final class RuntimeSupport {
         try {
             Object result = dev.irij.compiler.SpecValidator.validate(
                     value, new dev.irij.ast.SpecExpr.Name(name));
-            return new dev.irij.interpreter.Values.Tagged(
+            return new dev.irij.runtime.Values.Tagged(
                     "Ok", java.util.List.of(result));
         } catch (dev.irij.IrijRuntimeError e) {
-            return new dev.irij.interpreter.Values.Tagged(
+            return new dev.irij.runtime.Values.Tagged(
                     "Err", java.util.List.of(e.getMessage() == null ? "" : e.getMessage()));
         }
     }
@@ -814,7 +814,7 @@ public final class RuntimeSupport {
      *  LinkedHashMap, returning that. Bytecode emitter then puts each
      *  updated field and wraps in IrijMap. */
     public static java.util.LinkedHashMap<String, Object> recordUpdateBegin(Object base) {
-        if (!(base instanceof dev.irij.interpreter.Values.IrijMap bm)) {
+        if (!(base instanceof dev.irij.runtime.Values.IrijMap bm)) {
             throw new dev.irij.IrijRuntimeError(
                     "Record update requires a Map, got " + typeTag(base));
         }
@@ -832,7 +832,7 @@ public final class RuntimeSupport {
     public static Object jsonParse(Object strArg) {
         String str = asStr(strArg, "json-parse");
         try {
-            return dev.irij.interpreter.Builtins.jsonToIrij(
+            return dev.irij.runtime.Builtins.jsonToIrij(
                     com.google.gson.JsonParser.parseString(str));
         } catch (com.google.gson.JsonSyntaxException e) {
             throw new dev.irij.IrijRuntimeError("json-parse: " + e.getMessage());
@@ -840,13 +840,13 @@ public final class RuntimeSupport {
     }
 
     public static Object jsonEncode(Object v) {
-        return dev.irij.interpreter.Builtins.irijToJson(v).toString();
+        return dev.irij.runtime.Builtins.irijToJson(v).toString();
     }
 
     public static Object jsonEncodePretty(Object v) {
         com.google.gson.Gson gson = new com.google.gson.GsonBuilder()
                 .setPrettyPrinting().create();
-        return gson.toJson(dev.irij.interpreter.Builtins.irijToJson(v));
+        return gson.toJson(dev.irij.runtime.Builtins.irijToJson(v));
     }
 
     // ── FileIO ───────────────────────────────────────────────────────
@@ -858,7 +858,7 @@ public final class RuntimeSupport {
         } catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("make-dir: " + e.getMessage());
         }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object listDir(Object pathArg) {
@@ -867,7 +867,7 @@ public final class RuntimeSupport {
                 java.nio.file.Files.list(java.nio.file.Path.of(path))) {
             java.util.List<Object> names = new java.util.ArrayList<>();
             stream.forEach(p -> names.add(p.getFileName().toString()));
-            return new dev.irij.interpreter.Values.IrijVector(names);
+            return new dev.irij.runtime.Values.IrijVector(names);
         } catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("list-dir: " + e.getMessage());
         }
@@ -879,7 +879,7 @@ public final class RuntimeSupport {
         catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("delete-file: " + e.getMessage());
         }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object readFile(Object pathArg) {
@@ -901,7 +901,7 @@ public final class RuntimeSupport {
         } catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("write-file: " + e.getMessage());
         }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object appendFile(Object pathArg, Object content) {
@@ -915,7 +915,7 @@ public final class RuntimeSupport {
         } catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("append-file: " + e.getMessage());
         }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object fileExistsQ(Object pathArg) {
@@ -928,7 +928,7 @@ public final class RuntimeSupport {
     public static Object getEnv(Object nameArg) {
         String name = asStr(nameArg, "get-env");
         String v = System.getenv(name);
-        return v != null ? v : dev.irij.interpreter.Values.UNIT;
+        return v != null ? v : dev.irij.runtime.Values.UNIT;
     }
 
     public static Object nowMs() {
@@ -945,7 +945,7 @@ public final class RuntimeSupport {
                     "Range requires Int endpoints, got "
                             + typeTag(fromArg) + " .. " + typeTag(toArg));
         }
-        return new dev.irij.interpreter.Values.IrijRange(lf, lt, exclusive);
+        return new dev.irij.runtime.Values.IrijRange(lf, lt, exclusive);
     }
 
     // ── Math primitives (Phase R3) ────────────────────────────────────
@@ -1119,44 +1119,44 @@ public final class RuntimeSupport {
     // ── Vec ops not yet emitted ──────────────────────────────────────
 
     public static Object reverseVal(Object v) {
-        if (v instanceof dev.irij.interpreter.Values.IrijVector vec) {
+        if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             java.util.List<Object> rev = new java.util.ArrayList<>(vec.elements());
             java.util.Collections.reverse(rev);
-            return new dev.irij.interpreter.Values.IrijVector(rev);
+            return new dev.irij.runtime.Values.IrijVector(rev);
         }
         if (v instanceof String s) return new StringBuilder(s).reverse().toString();
         throw new dev.irij.IrijRuntimeError(
                 "reverse expects Vector or Str, got " + typeTag(v));
     }
     public static Object sortVal(Object v) {
-        if (!(v instanceof dev.irij.interpreter.Values.IrijVector vec)) {
+        if (!(v instanceof dev.irij.runtime.Values.IrijVector vec)) {
             throw new dev.irij.IrijRuntimeError(
                     "sort expects Vector, got " + typeTag(v));
         }
         java.util.List<Object> out = new java.util.ArrayList<>(vec.elements());
         out.sort((a, b) -> cmp(a, b));
-        return new dev.irij.interpreter.Values.IrijVector(out);
+        return new dev.irij.runtime.Values.IrijVector(out);
     }
     public static Object takeVal(Object nArg, Object collArg) {
         long n = asLongArg(nArg, "take");
         java.util.List<Object> list = asListAny(collArg);
-        return new dev.irij.interpreter.Values.IrijVector(
+        return new dev.irij.runtime.Values.IrijVector(
                 new java.util.ArrayList<>(list.subList(0, (int) Math.min(n, list.size()))));
     }
     public static Object dropVal(Object nArg, Object collArg) {
         long n = asLongArg(nArg, "drop");
         java.util.List<Object> list = asListAny(collArg);
-        return new dev.irij.interpreter.Values.IrijVector(
+        return new dev.irij.runtime.Values.IrijVector(
                 new java.util.ArrayList<>(list.subList((int) Math.min(n, list.size()), list.size())));
     }
     public static Object concatTwo(Object a, Object b) {
         // Match Builtins.concatValues semantics: Vec+Vec→Vec, Str+Str→Str.
         if (a instanceof String sa && b instanceof String sb) return sa + sb;
-        if (a instanceof dev.irij.interpreter.Values.IrijVector va
-                && b instanceof dev.irij.interpreter.Values.IrijVector vb) {
+        if (a instanceof dev.irij.runtime.Values.IrijVector va
+                && b instanceof dev.irij.runtime.Values.IrijVector vb) {
             java.util.List<Object> out = new java.util.ArrayList<>(va.elements());
             out.addAll(vb.elements());
-            return new dev.irij.interpreter.Values.IrijVector(out);
+            return new dev.irij.runtime.Values.IrijVector(out);
         }
         throw new dev.irij.IrijRuntimeError(
                 "concat: type mismatch (" + typeTag(a) + ", " + typeTag(b) + ")");
@@ -1190,8 +1190,8 @@ public final class RuntimeSupport {
     public static final IrijFn ROUND_FN    = args -> round(args[0]);
     public static final IrijFn REVERSE_FN  = args -> reverseVal(args[0]);
     public static final IrijFn SORT_FN     = args -> sortVal(args[0]);
-    public static final IrijFn PRINTLN_FN  = args -> { println(args[0]); return dev.irij.interpreter.Values.UNIT; };
-    public static final IrijFn PRINT_FN    = args -> { print(args[0]); return dev.irij.interpreter.Values.UNIT; };
+    public static final IrijFn PRINTLN_FN  = args -> { println(args[0]); return dev.irij.runtime.Values.UNIT; };
+    public static final IrijFn PRINT_FN    = args -> { print(args[0]); return dev.irij.runtime.Values.UNIT; };
 
     // ── Generic builtin-fn-by-name registry ──────────────────────────
     //
@@ -1232,14 +1232,14 @@ public final class RuntimeSupport {
 
     private static java.util.Map<String, IrijFn> initBuiltinRegistry() {
         java.util.Map<String, IrijFn> out = new java.util.HashMap<>();
-        dev.irij.interpreter.Environment env =
-                new dev.irij.interpreter.Environment(null);
-        dev.irij.interpreter.Builtins.install(env, System.out, null);
+        dev.irij.runtime.Environment env =
+                new dev.irij.runtime.Environment(null);
+        dev.irij.runtime.Builtins.install(env, System.out, null);
         for (var entry : env.getBindings().entrySet()) {
             String name = entry.getKey();
             var cell = entry.getValue();
             Object value = unwrapCell(cell);
-            if (value instanceof dev.irij.interpreter.Values.BuiltinFn bf) {
+            if (value instanceof dev.irij.runtime.Values.BuiltinFn bf) {
                 out.put(name, args ->
                         bf.apply(java.util.Arrays.asList(args)));
             }
@@ -1247,11 +1247,11 @@ public final class RuntimeSupport {
         return out;
     }
 
-    private static Object unwrapCell(dev.irij.interpreter.Environment.Cell c) {
-        if (c instanceof dev.irij.interpreter.Environment.ImmutableCell ic) {
+    private static Object unwrapCell(dev.irij.runtime.Environment.Cell c) {
+        if (c instanceof dev.irij.runtime.Environment.ImmutableCell ic) {
             return ic.value();
         }
-        if (c instanceof dev.irij.interpreter.Environment.MutableCell mc) {
+        if (c instanceof dev.irij.runtime.Environment.MutableCell mc) {
             return mc.get();
         }
         return null;
@@ -1265,7 +1265,7 @@ public final class RuntimeSupport {
     public static Object tomlParse(Object strArg) {
         String s = asStr(strArg, "toml-parse");
         try {
-            return dev.irij.interpreter.Builtins.tomlValueToIrij(
+            return dev.irij.runtime.Builtins.tomlValueToIrij(
                     new com.moandjiezana.toml.Toml().read(s).toMap());
         } catch (IllegalStateException e) {
             throw new dev.irij.IrijRuntimeError("toml-parse: " + e.getMessage());
@@ -1274,13 +1274,13 @@ public final class RuntimeSupport {
 
     public static Object printlnVal(Object v) {
         println(v);
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object rawHttpRequest(Object optsArg) {
         // Delegate to interp's BuiltinFn via a single direct call.
         // Move to standalone impl post-R5 (interp deletion).
-        return dev.irij.interpreter.Builtins.rawHttpRequestImpl(optsArg);
+        return dev.irij.runtime.Builtins.rawHttpRequestImpl(optsArg);
     }
 
     public static Object readLine() {
@@ -1307,7 +1307,7 @@ public final class RuntimeSupport {
         String v = System.getenv(name);
         if (v != null) return v;
         if (args.length >= 2) return asStr(args[args.length - 1], "env");
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     // ── Sequence ops (Phase R3 batch 5) ──────────────────────────────
@@ -1329,7 +1329,7 @@ public final class RuntimeSupport {
         java.util.List<Object> in = seqList(coll);
         java.util.List<Object> out = new java.util.ArrayList<>(in.size());
         for (Object x : in) out.add(callAny(f, new Object[]{x}));
-        return new dev.irij.interpreter.Values.IrijVector(out);
+        return new dev.irij.runtime.Values.IrijVector(out);
     }
 
     public static Object seqMapIndexed(Object f, Object coll) {
@@ -1338,7 +1338,7 @@ public final class RuntimeSupport {
         for (int i = 0; i < in.size(); i++) {
             out.add(callAny(f, new Object[]{(long) i, in.get(i)}));
         }
-        return new dev.irij.interpreter.Values.IrijVector(out);
+        return new dev.irij.runtime.Values.IrijVector(out);
     }
 
     public static Object seqFilter(Object pred, Object coll) {
@@ -1347,14 +1347,14 @@ public final class RuntimeSupport {
         for (Object x : in) {
             if (truthy(callAny(pred, new Object[]{x}))) out.add(x);
         }
-        return new dev.irij.interpreter.Values.IrijVector(out);
+        return new dev.irij.runtime.Values.IrijVector(out);
     }
 
     public static Object seqFindFirst(Object pred, Object coll) {
         for (Object x : seqList(coll)) {
             if (truthy(callAny(pred, new Object[]{x}))) return x;
         }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object seqReduce(Object f, Object coll) {
@@ -1372,14 +1372,14 @@ public final class RuntimeSupport {
     public static Object seqScan(Object f, Object coll) {
         java.util.List<Object> list = seqList(coll);
         java.util.List<Object> out = new java.util.ArrayList<>(list.size());
-        if (list.isEmpty()) return new dev.irij.interpreter.Values.IrijVector(out);
+        if (list.isEmpty()) return new dev.irij.runtime.Values.IrijVector(out);
         Object acc = list.get(0);
         out.add(acc);
         for (int i = 1; i < list.size(); i++) {
             acc = callAny(f, new Object[]{acc, list.get(i)});
             out.add(acc);
         }
-        return new dev.irij.interpreter.Values.IrijVector(out);
+        return new dev.irij.runtime.Values.IrijVector(out);
     }
 
     public static Object seqSum(Object coll) {
@@ -1451,7 +1451,7 @@ public final class RuntimeSupport {
             try (var stmt = conn.createStatement()) {
                 stmt.execute("PRAGMA journal_mode=WAL");
             }
-            return new dev.irij.interpreter.Values.Tagged(
+            return new dev.irij.runtime.Values.Tagged(
                     "DbConn", java.util.List.of(conn), null, null);
         } catch (java.sql.SQLException e) {
             throw new dev.irij.IrijRuntimeError("raw-db-open: " + e.getMessage());
@@ -1464,7 +1464,7 @@ public final class RuntimeSupport {
         catch (java.sql.SQLException e) {
             throw new dev.irij.IrijRuntimeError("raw-db-close: " + e.getMessage());
         }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object rawDbQuery(Object connArg, Object sqlArg, Object paramsArg) {
@@ -1485,11 +1485,11 @@ public final class RuntimeSupport {
                         row.put(meta.getColumnLabel(i),
                                 sqlToIrij(rs, i, meta.getColumnType(i)));
                     }
-                    rows.add(new dev.irij.interpreter.Values.IrijMap(row));
+                    rows.add(new dev.irij.runtime.Values.IrijMap(row));
                 }
                 rs.close();
                 ps.close();
-                return new dev.irij.interpreter.Values.IrijVector(rows);
+                return new dev.irij.runtime.Values.IrijVector(rows);
             }
         } catch (java.sql.SQLException e) {
             throw new dev.irij.IrijRuntimeError("raw-db-query: " + e.getMessage());
@@ -1539,7 +1539,7 @@ public final class RuntimeSupport {
     }
 
     private static java.sql.Connection extractConnection(Object value, String op) {
-        if (value instanceof dev.irij.interpreter.Values.Tagged t
+        if (value instanceof dev.irij.runtime.Values.Tagged t
                 && "DbConn".equals(t.tag())
                 && !t.fields().isEmpty()
                 && t.fields().get(0) instanceof java.sql.Connection c) {
@@ -1550,7 +1550,7 @@ public final class RuntimeSupport {
     }
 
     private static java.util.List<Object> extractParams(Object value, String op) {
-        if (value instanceof dev.irij.interpreter.Values.IrijVector v) return v.elements();
+        if (value instanceof dev.irij.runtime.Values.IrijVector v) return v.elements();
         throw new dev.irij.IrijRuntimeError(op + ": params must be a vector #[...]");
     }
 
@@ -1562,10 +1562,10 @@ public final class RuntimeSupport {
             else if (p instanceof Double d)  ps.setDouble(i + 1, d);
             else if (p instanceof String s)  ps.setString(i + 1, s);
             else if (p instanceof Boolean b) ps.setBoolean(i + 1, b);
-            else if (p == dev.irij.interpreter.Values.UNIT || p == null) {
+            else if (p == dev.irij.runtime.Values.UNIT || p == null) {
                 ps.setNull(i + 1, java.sql.Types.NULL);
             } else {
-                ps.setString(i + 1, dev.irij.interpreter.Values.toIrijString(p));
+                ps.setString(i + 1, dev.irij.runtime.Values.toIrijString(p));
             }
         }
     }
@@ -1573,7 +1573,7 @@ public final class RuntimeSupport {
     private static Object sqlToIrij(java.sql.ResultSet rs, int col, int sqlType)
             throws java.sql.SQLException {
         Object val = rs.getObject(col);
-        if (val == null) return dev.irij.interpreter.Values.UNIT;
+        if (val == null) return dev.irij.runtime.Values.UNIT;
         return switch (sqlType) {
             case java.sql.Types.INTEGER, java.sql.Types.BIGINT,
                  java.sql.Types.SMALLINT, java.sql.Types.TINYINT ->
@@ -1588,7 +1588,7 @@ public final class RuntimeSupport {
             }
             default -> {
                 String s = rs.getString(col);
-                yield s != null ? s : dev.irij.interpreter.Values.UNIT;
+                yield s != null ? s : dev.irij.runtime.Values.UNIT;
             }
         };
     }
@@ -1596,7 +1596,7 @@ public final class RuntimeSupport {
     // ── SSE raw-sse-* (Phase R3 batch 3) ───────────────────────────────
 
     public static Object rawSseResponse(Object reqArg) {
-        if (!(reqArg instanceof dev.irij.interpreter.Values.IrijMap reqMap)) {
+        if (!(reqArg instanceof dev.irij.runtime.Values.IrijMap reqMap)) {
             throw new dev.irij.IrijRuntimeError(
                     "raw-sse-response: expected request map");
         }
@@ -1611,14 +1611,14 @@ public final class RuntimeSupport {
             ex.getResponseHeaders().set("Connection", "keep-alive");
             ex.getResponseHeaders().set("X-Accel-Buffering", "no");
             ex.sendResponseHeaders(200, 0);
-            return new dev.irij.interpreter.Values.SseWriter(ex, ex.getResponseBody());
+            return new dev.irij.runtime.Values.SseWriter(ex, ex.getResponseBody());
         } catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("raw-sse-response: " + e.getMessage());
         }
     }
 
     public static Object rawSseSend(Object sseArg, Object evtArg, Object dataArg) {
-        if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
+        if (!(sseArg instanceof dev.irij.runtime.Values.SseWriter sse)) {
             throw new dev.irij.IrijRuntimeError(
                     "raw-sse-send: first arg must be SseWriter");
         }
@@ -1628,20 +1628,20 @@ public final class RuntimeSupport {
         catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("raw-sse-send: " + e.getMessage());
         }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object rawSseClose(Object sseArg) {
-        if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
+        if (!(sseArg instanceof dev.irij.runtime.Values.SseWriter sse)) {
             throw new dev.irij.IrijRuntimeError(
                     "raw-sse-close: first arg must be SseWriter");
         }
         sse.close();
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     public static Object rawSseClosedQ(Object sseArg) {
-        if (!(sseArg instanceof dev.irij.interpreter.Values.SseWriter sse)) {
+        if (!(sseArg instanceof dev.irij.runtime.Values.SseWriter sse)) {
             throw new dev.irij.IrijRuntimeError(
                     "raw-sse-closed?: first arg must be SseWriter");
         }
@@ -1687,7 +1687,7 @@ public final class RuntimeSupport {
     }
 
     private static byte[] mpRequestBytes(Object reqArg, String op) {
-        if (!(reqArg instanceof dev.irij.interpreter.Values.IrijMap req)) {
+        if (!(reqArg instanceof dev.irij.runtime.Values.IrijMap req)) {
             throw new dev.irij.IrijRuntimeError(op + ": expects request Map");
         }
         Object bodyBytes = req.entries().get("__body_bytes");
@@ -1698,10 +1698,10 @@ public final class RuntimeSupport {
     }
 
     private static String mpBoundary(Object reqArg, String op) {
-        dev.irij.interpreter.Values.IrijMap req = (dev.irij.interpreter.Values.IrijMap) reqArg;
+        dev.irij.runtime.Values.IrijMap req = (dev.irij.runtime.Values.IrijMap) reqArg;
         String contentType = "";
         Object headers = req.entries().get("headers");
-        if (headers instanceof dev.irij.interpreter.Values.IrijMap hm) {
+        if (headers instanceof dev.irij.runtime.Values.IrijMap hm) {
             Object ct = hm.entries().get("content-type");
             if (ct instanceof String s) contentType = s;
         }
@@ -1789,10 +1789,10 @@ public final class RuntimeSupport {
                 try {
                     if (httpServeStatic(exchange, scriptDir, isBundled)) return;
 
-                    dev.irij.interpreter.Values.IrijMap req = buildRequestMap(exchange);
+                    dev.irij.runtime.Values.IrijMap req = buildRequestMap(exchange);
                     Object resp = callAny(handler, new Object[]{req});
 
-                    if (resp instanceof dev.irij.interpreter.Values.SseWriter sse) {
+                    if (resp instanceof dev.irij.runtime.Values.SseWriter sse) {
                         // Handler took over the exchange via SSE — block this
                         // dispatch thread until SSE writer closes so the
                         // connection stays open.
@@ -1822,7 +1822,7 @@ public final class RuntimeSupport {
             System.out.println("Irij HTTP server listening on http://localhost:" + port);
             try { Thread.currentThread().join(); }
             catch (InterruptedException e) { server.stop(0); }
-            return dev.irij.interpreter.Values.UNIT;
+            return dev.irij.runtime.Values.UNIT;
         } catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("raw-http-serve: " + e.getMessage());
         }
@@ -1876,7 +1876,7 @@ public final class RuntimeSupport {
         return true;
     }
 
-    private static dev.irij.interpreter.Values.IrijMap buildRequestMap(
+    private static dev.irij.runtime.Values.IrijMap buildRequestMap(
             com.sun.net.httpserver.HttpExchange exchange) throws java.io.IOException {
         java.util.LinkedHashMap<String, Object> reqMap = new java.util.LinkedHashMap<>();
         reqMap.put("method", exchange.getRequestMethod());
@@ -1884,17 +1884,17 @@ public final class RuntimeSupport {
         reqMap.put("path", uri.getPath());
         String rawQuery = uri.getQuery() != null ? uri.getQuery() : "";
         reqMap.put("query", rawQuery);
-        reqMap.put("params", new dev.irij.interpreter.Values.IrijMap(httpParseQueryParams(rawQuery)));
+        reqMap.put("params", new dev.irij.runtime.Values.IrijMap(httpParseQueryParams(rawQuery)));
         java.util.LinkedHashMap<String, Object> headers = new java.util.LinkedHashMap<>();
         exchange.getRequestHeaders().forEach((k, v) ->
                 headers.put(k.toLowerCase(),
                         v.size() == 1 ? v.get(0) : String.join(", ", v)));
-        reqMap.put("headers", new dev.irij.interpreter.Values.IrijMap(headers));
+        reqMap.put("headers", new dev.irij.runtime.Values.IrijMap(headers));
         byte[] bodyBytes = exchange.getRequestBody().readAllBytes();
         reqMap.put("body", new String(bodyBytes, java.nio.charset.StandardCharsets.UTF_8));
         reqMap.put("__body_bytes", bodyBytes);
         reqMap.put("__exchange", exchange);
-        return new dev.irij.interpreter.Values.IrijMap(reqMap);
+        return new dev.irij.runtime.Values.IrijMap(reqMap);
     }
 
     private static void writeResponse(com.sun.net.httpserver.HttpExchange exchange, Object resp)
@@ -1903,12 +1903,12 @@ public final class RuntimeSupport {
         String respBody = "";
         String filePath = null;
         java.util.Map<String, Object> respHeaders = java.util.Map.of();
-        if (resp instanceof dev.irij.interpreter.Values.IrijMap rm) {
+        if (resp instanceof dev.irij.runtime.Values.IrijMap rm) {
             java.util.Map<String, Object> e = rm.entries();
             if (e.get("status") instanceof Long s) status = s;
             if (e.get("body") instanceof String b) respBody = b;
             if (e.get("file") instanceof String f) filePath = f;
-            if (e.get("headers") instanceof dev.irij.interpreter.Values.IrijMap hm) {
+            if (e.get("headers") instanceof dev.irij.runtime.Values.IrijMap hm) {
                 respHeaders = hm.entries();
             }
         } else if (resp instanceof String s) {
@@ -1916,7 +1916,7 @@ public final class RuntimeSupport {
         }
         for (java.util.Map.Entry<String, Object> h : respHeaders.entrySet()) {
             exchange.getResponseHeaders().set(h.getKey(),
-                    dev.irij.interpreter.Values.toIrijString(h.getValue()));
+                    dev.irij.runtime.Values.toIrijString(h.getValue()));
         }
         if (!respHeaders.containsKey("content-type") && !respHeaders.containsKey("Content-Type")) {
             exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
@@ -1972,17 +1972,17 @@ public final class RuntimeSupport {
 
     /** Runtime type tag used for protocol dispatch. */
     public static String typeTag(Object v) {
-        if (v == null || v == dev.irij.interpreter.Values.UNIT) return "Unit";
+        if (v == null || v == dev.irij.runtime.Values.UNIT) return "Unit";
         if (v instanceof Long) return "Int";
         if (v instanceof Double) return "Float";
         if (v instanceof Boolean) return "Bool";
         if (v instanceof String) return "Str";
-        if (v instanceof dev.irij.interpreter.Values.Keyword) return "Keyword";
-        if (v instanceof dev.irij.interpreter.Values.IrijVector) return "Vector";
-        if (v instanceof dev.irij.interpreter.Values.IrijTuple) return "Tuple";
-        if (v instanceof dev.irij.interpreter.Values.IrijMap) return "Map";
-        if (v instanceof dev.irij.interpreter.Values.IrijSet) return "Set";
-        if (v instanceof dev.irij.interpreter.Values.Tagged t) {
+        if (v instanceof dev.irij.runtime.Values.Keyword) return "Keyword";
+        if (v instanceof dev.irij.runtime.Values.IrijVector) return "Vector";
+        if (v instanceof dev.irij.runtime.Values.IrijTuple) return "Tuple";
+        if (v instanceof dev.irij.runtime.Values.IrijMap) return "Map";
+        if (v instanceof dev.irij.runtime.Values.IrijSet) return "Set";
+        if (v instanceof dev.irij.runtime.Values.Tagged t) {
             return t.specName() != null ? t.specName() : t.tag();
         }
         return v.getClass().getSimpleName();
@@ -2047,14 +2047,14 @@ public final class RuntimeSupport {
 
     /** Emitted call-site for effect ops. Routes through EffectSystem.fireOp. */
     public static Object perform(String effectName, String opName, Object[] args) {
-        return dev.irij.interpreter.EffectSystem.fireOp(
+        return dev.irij.runtime.EffectSystem.fireOp(
                 effectName, opName, java.util.Arrays.asList(args));
     }
 
     /** `error "msg"` builtin — throws IrijRuntimeError, caught by `on-failure`. */
     public static Object errorBuiltin(Object msg) {
         throw new dev.irij.IrijRuntimeError(
-                msg == null ? "error" : dev.irij.interpreter.Values.toIrijString(msg));
+                msg == null ? "error" : dev.irij.runtime.Values.toIrijString(msg));
     }
 
     /** Extract message for `on-failure` binding — never null. */
@@ -2076,24 +2076,24 @@ public final class RuntimeSupport {
                     "with requires a handler, got " + typeTag(handlerObj));
         }
         var opChannel = new java.util.concurrent.SynchronousQueue<
-                dev.irij.interpreter.EffectSystem.EffectMessage>();
-        var ctx = new dev.irij.interpreter.EffectSystem.HandlerContext(
+                dev.irij.runtime.EffectSystem.EffectMessage>();
+        var ctx = new dev.irij.runtime.EffectSystem.HandlerContext(
                 h.effectName, h, opChannel);
         var parentStack = new java.util.ArrayDeque<>(
-                dev.irij.interpreter.EffectSystem.STACK.get());
+                dev.irij.runtime.EffectSystem.STACK.get());
 
         Thread bodyThread = Thread.startVirtualThread(() -> {
-            var bodyStack = dev.irij.interpreter.EffectSystem.STACK.get();
+            var bodyStack = dev.irij.runtime.EffectSystem.STACK.get();
             bodyStack.addAll(parentStack);
             bodyStack.push(ctx);
             try {
                 Object result = body.apply(new Object[0]);
-                opChannel.put(new dev.irij.interpreter.EffectSystem.EffectMessage.Done(result));
+                opChannel.put(new dev.irij.runtime.EffectSystem.EffectMessage.Done(result));
             } catch (InterruptedException e) {
                 // aborted by handler (no resume)
             } catch (Throwable t) {
                 try {
-                    opChannel.put(new dev.irij.interpreter.EffectSystem.EffectMessage.Err(t));
+                    opChannel.put(new dev.irij.runtime.EffectSystem.EffectMessage.Err(t));
                 } catch (InterruptedException ignored) {
                     Thread.currentThread().interrupt();
                 }
@@ -2116,26 +2116,26 @@ public final class RuntimeSupport {
 
     private static Object runHandlerLoop(
             CompiledHandler h,
-            java.util.concurrent.SynchronousQueue<dev.irij.interpreter.EffectSystem.EffectMessage> opChannel) {
+            java.util.concurrent.SynchronousQueue<dev.irij.runtime.EffectSystem.EffectMessage> opChannel) {
         while (true) {
-            dev.irij.interpreter.EffectSystem.EffectMessage msg;
+            dev.irij.runtime.EffectSystem.EffectMessage msg;
             try { msg = opChannel.take(); }
             catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new dev.irij.IrijRuntimeError("Handler loop interrupted");
             }
             switch (msg) {
-                case dev.irij.interpreter.EffectSystem.EffectMessage.Done d -> {
+                case dev.irij.runtime.EffectSystem.EffectMessage.Done d -> {
                     return d.value();
                 }
-                case dev.irij.interpreter.EffectSystem.EffectMessage.Err e -> {
+                case dev.irij.runtime.EffectSystem.EffectMessage.Err e -> {
                     Throwable t = e.error();
                     if (t instanceof dev.irij.IrijRuntimeError ire) throw ire;
                     if (t instanceof RuntimeException re) throw re;
                     throw new dev.irij.IrijRuntimeError(
                             "Effect body error: " + t.getMessage());
                 }
-                case dev.irij.interpreter.EffectSystem.EffectMessage.Op op -> {
+                case dev.irij.runtime.EffectSystem.EffectMessage.Op op -> {
                     IrijFn clause = h.clauses.get(op.opName());
                     if (clause == null) {
                         throw new dev.irij.IrijRuntimeError(
@@ -2150,7 +2150,7 @@ public final class RuntimeSupport {
                         try {
                             op.resumeChannel().put(resumeArgs.length > 0
                                     ? resumeArgs[0]
-                                    : dev.irij.interpreter.Values.UNIT);
+                                    : dev.irij.runtime.Values.UNIT);
                             return runHandlerLoop(h, opChannel);
                         } catch (InterruptedException e2) {
                             Thread.currentThread().interrupt();
@@ -2336,7 +2336,7 @@ public final class RuntimeSupport {
     /**
      * Sentinel returned by {@link #fireOpToSM} when no SM handler matches
      * — distinct from any legal Irij value so {@link
-     * dev.irij.interpreter.EffectSystem#fireOp} can fall through to
+     * dev.irij.runtime.EffectSystem#fireOp} can fall through to
      * "Unhandled effect" without ambiguity.
      */
     public static final Object SM_NO_MATCH = new Object();
@@ -2378,7 +2378,7 @@ public final class RuntimeSupport {
                         resumed[0] = true;
                         Object v = resumeArgs.length > 0
                                 ? resumeArgs[0]
-                                : dev.irij.interpreter.Values.UNIT;
+                                : dev.irij.runtime.Values.UNIT;
                         resumeBox[0] = v;
                         return v;
                     };
@@ -2455,7 +2455,7 @@ public final class RuntimeSupport {
      * than via a recursive JVM call.
      *
      * <p>Bridges to threaded outer {@code with}: if no SM handler matches,
-     * walk {@link dev.irij.interpreter.EffectSystem#STACK}; if a threaded
+     * walk {@link dev.irij.runtime.EffectSystem#STACK}; if a threaded
      * outer handles this effect, route via {@code fireOp} and continue the
      * loop with the result.
      */
@@ -2524,10 +2524,10 @@ public final class RuntimeSupport {
             if (h == null) {
                 // Bridge to threaded outer (EffectSystem.STACK).
                 boolean bridged = false;
-                var threadedStack = dev.irij.interpreter.EffectSystem.STACK.get();
+                var threadedStack = dev.irij.runtime.EffectSystem.STACK.get();
                 for (var ctx : threadedStack) {
                     if (ctx.effectName().equals(sigEffectName)) {
-                        resumeArg = dev.irij.interpreter.EffectSystem.fireOp(
+                        resumeArg = dev.irij.runtime.EffectSystem.fireOp(
                                 sigEffectName, sigOpName,
                                 java.util.Arrays.asList(sigArgs));
                         currentK = sigContinuation;
@@ -2559,7 +2559,7 @@ public final class RuntimeSupport {
                 }
                 Object v = resumeArgs.length > 0
                         ? resumeArgs[0]
-                        : dev.irij.interpreter.Values.UNIT;
+                        : dev.irij.runtime.Values.UNIT;
                 throw TailResume.of(v, expectedTarget);
             };
 
@@ -2606,7 +2606,7 @@ public final class RuntimeSupport {
      *  taken at fork time so the fiber can re-establish the parent's
      *  effect-handling context (both 14c.2 threaded and 14c.3 SM frames). */
     private record ParentSnapshot(
-            java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> effectStack,
+            java.util.Deque<dev.irij.runtime.EffectSystem.HandlerContext> effectStack,
             java.util.Deque<java.util.List<CompiledHandler>> smStack,
             java.util.Deque<java.util.Set<String>> effectRow,
             java.util.Map<String, Object> namespace,
@@ -2614,8 +2614,8 @@ public final class RuntimeSupport {
 
     /** Snapshot the current effect stack + push onto the child fiber's stack. */
     private static void inheritEffectStack(java.util.Deque<
-            dev.irij.interpreter.EffectSystem.HandlerContext> parentStack) {
-        var fiberStack = dev.irij.interpreter.EffectSystem.STACK.get();
+            dev.irij.runtime.EffectSystem.HandlerContext> parentStack) {
+        var fiberStack = dev.irij.runtime.EffectSystem.STACK.get();
         fiberStack.addAll(parentStack);
     }
 
@@ -2635,7 +2635,7 @@ public final class RuntimeSupport {
 
     private static ParentSnapshot snapParent() {
         return new ParentSnapshot(
-                new java.util.ArrayDeque<>(dev.irij.interpreter.EffectSystem.STACK.get()),
+                new java.util.ArrayDeque<>(dev.irij.runtime.EffectSystem.STACK.get()),
                 new java.util.ArrayDeque<>(SM_STACK.get()),
                 new java.util.ArrayDeque<>(EFFECT_ROW.get()),
                 NS.get(),
@@ -2658,9 +2658,9 @@ public final class RuntimeSupport {
         }
     }
 
-    private static java.util.Deque<dev.irij.interpreter.EffectSystem.HandlerContext> snapStack() {
+    private static java.util.Deque<dev.irij.runtime.EffectSystem.HandlerContext> snapStack() {
         return new java.util.ArrayDeque<>(
-                dev.irij.interpreter.EffectSystem.STACK.get());
+                dev.irij.runtime.EffectSystem.STACK.get());
     }
 
     /** Spawn a virtual thread running the thunk (IrijFn or BuiltinFn). */
@@ -2706,7 +2706,7 @@ public final class RuntimeSupport {
                 : 0L;
         try { Thread.sleep(ms); }
         catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-        return dev.irij.interpreter.Values.UNIT;
+        return dev.irij.runtime.Values.UNIT;
     }
 
     /** `await fiber` — block until fiber completes. */
@@ -2877,9 +2877,9 @@ public final class RuntimeSupport {
     public static Object tryFn(Object thunk) {
         try {
             Object r = callAny(thunk, new Object[0]);
-            return new dev.irij.interpreter.Values.Tagged("Ok", java.util.List.of(r));
+            return new dev.irij.runtime.Values.Tagged("Ok", java.util.List.of(r));
         } catch (dev.irij.IrijRuntimeError ex) {
-            return new dev.irij.interpreter.Values.Tagged("Err",
+            return new dev.irij.runtime.Values.Tagged("Err",
                     java.util.List.of(ex.getMessage() == null ? "" : ex.getMessage()));
         }
     }
@@ -2926,7 +2926,7 @@ public final class RuntimeSupport {
         public Object cancelAll() {
             for (Fiber f : fibers) f.thread.interrupt();
             for (Fiber f : fibers) { try { f.result.join(); } catch (Exception ignored) {} }
-            return dev.irij.interpreter.Values.UNIT;
+            return dev.irij.runtime.Values.UNIT;
         }
 
         private Object joinAll(Object bodyResult) {

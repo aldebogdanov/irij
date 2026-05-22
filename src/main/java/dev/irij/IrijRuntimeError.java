@@ -9,7 +9,7 @@ import dev.irij.ast.Node.SourceLoc;
  * and the bytecode runtime ({@link dev.irij.compiler.RuntimeSupport})
  * throw it — naming it after either backend would be misleading. A
  * stack trace from a compiled program no longer mentions
- * {@code dev.irij.interpreter} anywhere.
+ * {@code dev.irij.runtime} anywhere.
  */
 public class IrijRuntimeError extends RuntimeException {
     private final SourceLoc loc;

@@ -94,7 +94,14 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.7.0 &mdash; State-machine lowering hardened + `std.auth` shipped.
+0.7.0 &mdash; State-machine lowering hardened + `std.auth` shipped + `dev.irij.interpreter` retired.
+
+**Package rename:** `dev.irij.interpreter` → `dev.irij.runtime`. The
+interpreter class went away in v0.6.20 (R5d) but the package name
+kept misleading new readers. Five remaining runtime-support classes
+(`Values`, `Builtins`, `EffectSystem`, `JavaInterop`, `Environment`)
+moved to `dev.irij.runtime`; the emitter's ASM-internal names also
+updated. No behaviour change.
 
 **`std.auth`** — minimal auth toolkit built on three new builtins
 (`sha256-hex`, `hmac-sha256-hex`, `random-token`):

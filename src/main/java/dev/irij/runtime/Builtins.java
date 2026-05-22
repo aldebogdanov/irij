@@ -1,9 +1,9 @@
-package dev.irij.interpreter;
+package dev.irij.runtime;
 
 import dev.irij.IrijRuntimeError;
 
 import dev.irij.ast.Node.SourceLoc;
-import dev.irij.interpreter.Values.*;
+import dev.irij.runtime.Values.*;
 
 import com.google.gson.*;
 import com.moandjiezana.toml.Toml;

@@ -1,7 +1,7 @@
 package dev.irij.compiler;
 
 import dev.irij.IrijRuntimeError;
-import dev.irij.interpreter.Values;
+import dev.irij.runtime.Values;
 
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;

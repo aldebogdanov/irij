@@ -29,7 +29,7 @@ import java.util.Set;
 final class ClassEmitter implements Opcodes {
 
     private static final String RT = "dev/irij/compiler/RuntimeSupport";
-    private static final String VALUES = "dev/irij/interpreter/Values";
+    private static final String VALUES = "dev/irij/runtime/Values";
     private static final String OBJ = "java/lang/Object";
     private static final String OBJ_DESC = "Ljava/lang/Object;";
     private static final String BINOP_DESC = "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;";
@@ -1488,7 +1488,7 @@ final class ClassEmitter implements Opcodes {
     }
 
     private void emitListLiteral(List<Expr> elems, MethodVisitor mv, Locals locals, String innerName) {
-        // NEW dev/irij/interpreter/Values$IrijVector   (or IrijSet)
+        // NEW dev/irij/runtime/Values$IrijVector   (or IrijSet)
         // DUP
         // build List.of(e0, e1, ...) or ArrayList for >10; use Arrays.asList for simplicity
         mv.visitTypeInsn(NEW, VALUES + "$" + innerName);
@@ -1620,7 +1620,7 @@ final class ClassEmitter implements Opcodes {
 
     /** Returns true if the call was emitted as a built-in. */
     /** Builtins that have an associated effect (mirrors {@code BuiltinFn.requiredEffects}
-     *  in {@link dev.irij.interpreter.Builtins}). Emitting one of these triggers a
+     *  in {@link dev.irij.runtime.Builtins}). Emitting one of these triggers a
      *  {@code RT.checkPerformEffect} so the enclosing fn's row honors the requirement. */
     private static final java.util.Map<String, String> BUILTIN_EFFECT = java.util.Map.ofEntries(
         java.util.Map.entry("print",            "Console"),

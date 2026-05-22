@@ -3,7 +3,7 @@ package dev.irij.cli;
 import dev.irij.ast.AstBuilder;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.IrijRuntimeError;
-import dev.irij.interpreter.Values;
+import dev.irij.runtime.Values;
 import dev.irij.mcp.IrijMcpServer;
 import dev.irij.nrepl.NReplServer;
 import dev.irij.parser.IrijParseDriver;

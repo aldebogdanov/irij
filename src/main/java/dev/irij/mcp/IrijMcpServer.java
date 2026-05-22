@@ -3,7 +3,7 @@ package dev.irij.mcp;
 import com.google.gson.*;
 import dev.irij.ast.AstBuilder;
 import dev.irij.IrijRuntimeError;
-import dev.irij.interpreter.Values;
+import dev.irij.runtime.Values;
 import dev.irij.nrepl.BackgroundOutputStream;
 import dev.irij.nrepl.IndirectOutputStream;
 import dev.irij.parser.IrijParseDriver;
@@ -364,7 +364,7 @@ public final class IrijMcpServer {
         var filterProp = new JsonObject();
         filterProp.addProperty("type", "string");
         filterProp.addProperty("description",
-            "Gradle test filter (e.g. 'dev.irij.interpreter.InterpreterTest$Contracts'). Omit to run all tests.");
+            "Gradle test filter (e.g. 'dev.irij.runtime.InterpreterTest$Contracts'). Omit to run all tests.");
         props.add("filter", filterProp);
 
         var rerunProp = new JsonObject();

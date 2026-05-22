@@ -1,4 +1,4 @@
-package dev.irij.interpreter;
+package dev.irij.runtime;
 
 import dev.irij.IrijRuntimeError;
 

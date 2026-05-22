@@ -2,7 +2,7 @@ package dev.irij.compiler;
 
 import dev.irij.ast.SpecExpr;
 import dev.irij.IrijRuntimeError;
-import dev.irij.interpreter.Values;
+import dev.irij.runtime.Values;
 
 import java.util.ArrayList;
 import java.util.List;

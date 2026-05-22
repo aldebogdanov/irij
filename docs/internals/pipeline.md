@@ -50,12 +50,11 @@ the threaded handler protocol (14c.2) was removed in v0.6.13. The
 state-machine bytecode lowering (14c.3) handles every `with` —
 single execution model, single contract.
 
-A handful of helper classes still live under `dev.irij.interpreter`
-because they are *runtime* shapes the bytecode back-end uses too:
-`Values` (Irij value reps — `IrijMap`, `IrijVector`, `Unit`, etc.),
-`EffectSystem` (handler frame stack used by SM_STACK bridging for
-threaded → SM signalling on legacy effect ops), and `Builtins` (the
-builtin-name registry). They are *not* an interpreter.
+The runtime-support shapes the emitter depends on (`Values`,
+`Builtins`, `EffectSystem`, `JavaInterop`, `Environment`) live in
+`dev.irij.runtime` (renamed from `dev.irij.interpreter` in v0.7.0
+once it became clear the old name was misleading). They are *not*
+an interpreter.
 
 ## File / package map
 
@@ -63,7 +62,7 @@ builtin-name registry). They are *not* an interpreter.
 |---|---|
 | `dev.irij.parser` | ANTLR4 lexer + indent rewriter |
 | `dev.irij.ast` | AST node definitions + `AstBuilder` |
-| `dev.irij.interpreter` | Runtime value reps, builtin registry, effect-system frame stack (no interpreter) |
+| `dev.irij.runtime` | Runtime value reps, builtin registry, effect-system frame stack |
 | `dev.irij.compiler` | `ClassEmitter` + `RuntimeSupport` + `IrijCompiler` + `EffectRowChecker` |
 | `dev.irij.cli` | `irij run/build/repl/test/install` commands |
 | `dev.irij.nrepl` | nREPL server (bytecode-backed via `BytecodeSession`) |
