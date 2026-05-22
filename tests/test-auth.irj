@@ -1,0 +1,108 @@
+use std.test :open
+use std.auth :open
+use std.random :open
+use std.text :open
+
+;; ── sha256-hex ────────────────────────────────────────────
+
+;; SHA-256 of the empty string — well-known reference value.
+test "sha256-hex empty" (->
+  assert-eq (sha256-hex "")
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+
+;; SHA-256 of "abc" — another classic vector.
+test "sha256-hex abc" (->
+  assert-eq (sha256-hex "abc")
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+
+;; ── hmac-sha256-hex ───────────────────────────────────────
+
+test "hmac-sha256-hex length always 64" (->
+  assert-eq (length (hmac-sha256-hex "secret-key" "some message")) 64)
+
+test "hmac-sha256-hex changes with key" (->
+  assert-true ((hmac-sha256-hex "key1" "msg") /= (hmac-sha256-hex "key2" "msg")))
+
+;; ── random-token ──────────────────────────────────────────
+
+fn run-random-token ::: Random
+  _ =>
+    t := random-token 32
+    ;; 32 bytes ⇒ 43-char URL-safe base64 (no padding).
+    assert-eq (length t) 43
+
+fn wrap-random-token ::: Random
+  _ =>
+    with default-random
+      run-random-token ()
+
+test "random-token 32 bytes ⇒ 43 chars" (-> wrap-random-token ())
+
+fn run-random-token-uniqueness ::: Random
+  _ =>
+    a := random-token 32
+    b := random-token 32
+    assert-true (a /= b)
+
+fn wrap-random-token-uniqueness ::: Random
+  _ =>
+    with default-random
+      run-random-token-uniqueness ()
+
+test "random-token returns fresh values" (-> wrap-random-token-uniqueness ())
+
+;; ── hash-password / verify-password ───────────────────────
+
+fn run-roundtrip ::: Random
+  _ =>
+    salt := new-salt ()
+    stored := hash-password salt "hunter2"
+    assert-true (verify-password stored "hunter2")
+    assert-true (! (verify-password stored "wrong-password"))
+
+fn wrap-roundtrip ::: Random
+  _ =>
+    with default-random
+      run-roundtrip ()
+
+test "hash-password / verify-password round-trip" (-> wrap-roundtrip ())
+
+fn run-different-salts ::: Random
+  _ =>
+    salt-a := new-salt ()
+    salt-b := new-salt ()
+    h-a := hash-password salt-a "same-password"
+    h-b := hash-password salt-b "same-password"
+    ;; Different salts ⇒ different stored hashes for the same password.
+    assert-true (h-a /= h-b)
+    ;; Both still verify against the original password.
+    assert-true (verify-password h-a "same-password")
+    assert-true (verify-password h-b "same-password")
+
+fn wrap-different-salts ::: Random
+  _ =>
+    with default-random
+      run-different-salts ()
+
+test "salt makes identical passwords store differently" (-> wrap-different-salts ())
+
+test "verify-password rejects no-separator" (->
+  assert-true (! (verify-password "no-dollar-sign" "anything")))
+
+test "verify-password rejects empty stored" (->
+  assert-true (! (verify-password "" "anything")))
+
+;; ── sign-token / verify-signed-token ──────────────────────
+
+test "sign / verify signed token round-trip" (->
+  assert-eq (verify-signed-token "shared-secret"
+                                 (sign-token "shared-secret" "session-abc-123"))
+            "session-abc-123")
+
+test "verify-signed-token rejects wrong secret" (->
+  assert-eq (verify-signed-token "secret-B"
+                                 (sign-token "secret-A" "session-id"))
+            "")
+
+test "verify-signed-token rejects tampered envelope" (->
+  assert-eq (verify-signed-token "secret" "no-dot-here") "")

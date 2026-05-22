@@ -103,6 +103,11 @@ public final class EffectRowChecker {
                 "raw-session-cleanup")) {
             m.put(n, "Session");
         }
+        // Random — random-token is the auth-relevant entry; random-int /
+        // random-float are intentionally NOT gated at compile time today
+        // (they're called from many unannotated test fixtures), but
+        // random-token is new and audited as Random from day one.
+        m.put("random-token", "Random");
         BUILTIN_EFFECTS = java.util.Map.copyOf(m);
     }
 

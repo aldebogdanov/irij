@@ -1,0 +1,99 @@
+mod std.auth
+
+;; Password hashing + session-token helpers.
+;;
+;; Two surfaces:
+;;   1. Salted SHA-256 password hashing (for stored credentials).
+;;      Format: "<hex-salt>$<hex-hash>" where hash = sha256(salt ++ password).
+;;   2. URL-safe session tokens via `new-session-token`.
+;;
+;; This is a deliberately minimal API. For production-grade password
+;; storage prefer Argon2 / bcrypt / scrypt (memory-hard KDFs) once
+;; they reach the runtime; until then a per-credential salt + SHA-256
+;; covers a low-bar credentials use case.
+;;
+;; Usage:
+;;
+;;   use std.auth :open
+;;
+;;   ;; signup
+;;   with default-random
+;;     salt := new-salt ()
+;;     stored := hash-password salt "hunter2"
+;;     ;; persist `stored` in your DB row
+;;
+;;   ;; login check
+;;   valid? := verify-password stored "hunter2"     ;; true
+;;
+;;   ;; session
+;;   with default-random
+;;     token := new-session-token ()
+
+use std.random :open
+
+;; ── Constants ────────────────────────────────────────────────────────
+
+;; Salt size in bytes. 16 bytes ⇒ ~22 chars base64url; plenty against
+;; rainbow tables for a salted SHA-256 scheme.
+pub fn salt-bytes :: Int
+  (-> 16)
+
+;; Session-token entropy in bytes. 32 bytes (256 bits) ⇒ 43 base64url
+;; chars. Same shape as Django/Rails session IDs.
+pub fn session-token-bytes :: Int
+  (-> 32)
+
+;; ── Salts ────────────────────────────────────────────────────────────
+
+;; Fresh per-credential salt.
+pub fn new-salt :: Str ::: Random
+  (-> random-token (salt-bytes ()))
+
+;; ── Password hashing ─────────────────────────────────────────────────
+
+;; `hash-password salt password` → "<salt>$<sha256(salt ++ password)>".
+;; The returned string is opaque; pass it to `verify-password` as-is.
+pub fn hash-password :: Str Str Str
+  (salt password -> salt ++ "$" ++ (sha256-hex (salt ++ password)))
+
+;; Re-hash `password` under the stored salt and compare. Returns false
+;; if `stored` has the wrong shape (missing or extra `$` separator).
+pub fn verify-password :: Str Str Bool
+  => stored password
+  parts := split stored "$"
+  if ((length parts) /= 2)
+    false
+  else
+    verify-password-parts (nth 0 parts) (nth 1 parts) password
+
+fn verify-password-parts :: Str Str Str Bool
+  (salt digest password ->
+    digest == (sha256-hex (salt ++ password)))
+
+;; ── Sessions ─────────────────────────────────────────────────────────
+
+;; New opaque session ID. Use for cookie value or Authorization header.
+pub fn new-session-token :: Str ::: Random
+  (-> random-token (session-token-bytes ()))
+
+;; HMAC-signed session ID — for stateless signed cookies. Output is
+;; "<token>.<sig>" where sig is HMAC-SHA-256(secret, token).
+pub fn sign-token :: Str Str Str
+  (secret token -> token ++ "." ++ (hmac-sha256-hex secret token))
+
+;; Verify a "<token>.<sig>" envelope.
+;;   match    → the bare token
+;;   mismatch → "" (caller should treat as "unauthenticated")
+;; We avoid pulling in a Maybe so this module stays leaf-level.
+pub fn verify-signed-token :: Str Str Str
+  => secret signed
+  parts := split signed "."
+  if ((length parts) /= 2)
+    ""
+  else
+    verify-signed-token-parts secret (nth 0 parts) (nth 1 parts)
+
+fn verify-signed-token-parts :: Str Str Str Str
+  (secret token sig ->
+    if (sig == (hmac-sha256-hex secret token)) (token)
+    else (""))

@@ -1643,7 +1643,8 @@ final class ClassEmitter implements Opcodes {
         java.util.Map.entry("sleep",            "Time"),
         java.util.Map.entry("now-ms",           "Time"),
         java.util.Map.entry("random-int",       "Random"),
-        java.util.Map.entry("random-float",     "Random")
+        java.util.Map.entry("random-float",     "Random"),
+        java.util.Map.entry("random-token",     "Random")
     );
 
     private void emitBuiltinEffectCheck(String name, MethodVisitor mv) {
@@ -1887,6 +1888,10 @@ final class ClassEmitter implements Opcodes {
                         "()Ljava/lang/Object;", false);
                 return true;
             }
+            // ── crypto / auth ────────────────────────────────────────
+            case "sha256-hex"       -> { return emitRT1(args, mv, locals, "sha256Hex"); }
+            case "hmac-sha256-hex"  -> { return emitRT2(args, mv, locals, "hmacSha256Hex"); }
+            case "random-token"     -> { return emitRT1(args, mv, locals, "randomToken"); }
             // ── R3: string parsing / chars ───────────────────────────
             case "parse-int"      -> { return emitRT1(args, mv, locals, "parseInt"); }
             case "parse-float"    -> { return emitRT1(args, mv, locals, "parseFloat"); }

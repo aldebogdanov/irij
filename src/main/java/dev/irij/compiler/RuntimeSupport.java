@@ -1014,6 +1014,69 @@ public final class RuntimeSupport {
         return java.util.concurrent.ThreadLocalRandom.current().nextDouble();
     }
 
+    // ── Crypto / auth primitives ──────────────────────────────────────
+
+    private static final java.security.SecureRandom SECURE_RANDOM =
+            new java.security.SecureRandom();
+
+    /** SHA-256 of the input string (UTF-8), lower-case hex. */
+    public static Object sha256Hex(Object msgArg) {
+        String msg = asStr(msgArg, "sha256-hex");
+        try {
+            byte[] digest = java.security.MessageDigest
+                    .getInstance("SHA-256")
+                    .digest(msg.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return bytesToHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new dev.irij.IrijRuntimeError("sha256-hex: " + e.getMessage());
+        }
+    }
+
+    /** HMAC-SHA-256 of the message under the given key (both UTF-8), lower-case hex.
+     *  Rejects an empty key — Java's JCE refuses, and an empty signing key is
+     *  almost always a bug in the caller anyway. */
+    public static Object hmacSha256Hex(Object keyArg, Object msgArg) {
+        String key = asStr(keyArg, "hmac-sha256-hex");
+        String msg = asStr(msgArg, "hmac-sha256-hex");
+        if (key.isEmpty()) {
+            throw new dev.irij.IrijRuntimeError(
+                    "hmac-sha256-hex: secret key must not be empty");
+        }
+        try {
+            javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
+            mac.init(new javax.crypto.spec.SecretKeySpec(
+                    key.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                    "HmacSHA256"));
+            byte[] out = mac.doFinal(msg.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return bytesToHex(out);
+        } catch (java.security.NoSuchAlgorithmException
+                | java.security.InvalidKeyException e) {
+            throw new dev.irij.IrijRuntimeError("hmac-sha256-hex: " + e.getMessage());
+        }
+    }
+
+    /** {@code random-token n}: n bytes from {@link java.security.SecureRandom},
+     *  URL-safe base64-encoded (no padding). Suitable for session IDs. */
+    public static Object randomToken(Object lenArg) {
+        long n = asLongArg(lenArg, "random-token");
+        if (n <= 0 || n > 1024) {
+            throw new dev.irij.IrijRuntimeError(
+                    "random-token: byte length must be in [1, 1024], got " + n);
+        }
+        byte[] bytes = new byte[(int) n];
+        SECURE_RANDOM.nextBytes(bytes);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    }
+
+    private static String bytesToHex(byte[] bytes) {
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            sb.append(Character.forDigit((b >> 4) & 0xf, 16));
+            sb.append(Character.forDigit(b & 0xf, 16));
+        }
+        return sb.toString();
+    }
+
     // ── String parsing / chars ────────────────────────────────────────
 
     public static Object parseInt(Object strArg) {

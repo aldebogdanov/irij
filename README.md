@@ -94,7 +94,24 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.7.0 &mdash; State-machine lowering: all known correctness gaps closed.
+0.7.0 &mdash; State-machine lowering hardened + `std.auth` shipped.
+
+**`std.auth`** — minimal auth toolkit built on three new builtins
+(`sha256-hex`, `hmac-sha256-hex`, `random-token`):
+
+- `new-salt ()` — per-credential SecureRandom salt (gated by `Random`).
+- `hash-password salt password` — `"<salt>$<sha256(salt ++ password)>"`.
+- `verify-password stored password` — constant-shape re-hash + compare.
+- `new-session-token ()` — 256-bit URL-safe session ID.
+- `sign-token secret token` / `verify-signed-token secret signed` —
+  HMAC-SHA-256 envelope for stateless signed cookies.
+
+For password storage today; production deployments should still
+prefer a memory-hard KDF (Argon2/scrypt/bcrypt) once one lands in
+the runtime — `std.auth` is the dogfooding baseline, not the final
+shape.
+
+**State-machine lowering — all known correctness gaps closed.**
 
 Four SM bugs tracked in `StateMachineWithTest.java` as `@Disabled`
 tests are now fixed; zero disabled tests remain.

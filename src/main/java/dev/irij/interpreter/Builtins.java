@@ -504,6 +504,22 @@ public final class Builtins {
             return ThreadLocalRandom.current().nextDouble();
         }));
 
+        // ── Crypto / auth primitives ───────────────────────────────────
+        // Hashing is deterministic and pure; no effect gate. random-token
+        // is non-deterministic and gated under Random.
+
+        env.define("sha256-hex", new BuiltinFn("sha256-hex", 1, args -> {
+            return dev.irij.compiler.RuntimeSupport.sha256Hex(args.get(0));
+        }));
+
+        env.define("hmac-sha256-hex", new BuiltinFn("hmac-sha256-hex", 2, args -> {
+            return dev.irij.compiler.RuntimeSupport.hmacSha256Hex(args.get(0), args.get(1));
+        }));
+
+        env.define("random-token", new BuiltinFn("random-token", 1, List.of("Random"), args -> {
+            return dev.irij.compiler.RuntimeSupport.randomToken(args.get(0));
+        }));
+
         // ── Conversion primitives ──────────────────────────────────────
         env.define("parse-int", new BuiltinFn("parse-int", 1, args -> {
             var str = asString(args.get(0), "parse-int");

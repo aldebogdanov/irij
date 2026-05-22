@@ -20,6 +20,7 @@ Registered as `BuiltinFn` objects in the global environment:
 - Higher-order (`fold`)
 - Concurrency (`spawn`, `await`, `sleep`, `par`, `race`, `timeout`,
   `try`)
+- Crypto + auth (`sha256-hex`, `hmac-sha256-hex`, `random-token`)
 - Effect / handler internals (`raw-*` calls for HTTP, DB, SSE, session)
 
 Why some live in Java:
