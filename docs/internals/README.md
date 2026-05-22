@@ -23,8 +23,13 @@ why something is the way it is.
 13. [nREPL](nrepl.md) — protocol, sessions, bytecode-session eval
 14. [Glossary](glossary.md) — terms used throughout
 
-Note: the `dev.irij.interpreter` package was removed in v0.6.13.
-What remains under that name (`Values`, `Builtins`, `EffectSystem`,
-`JavaInterop`, `Environment`) is bytecode-mode **runtime support** —
-not the interpreter. The tree-walking evaluator is gone; bytecode is
+Note: the tree-walking `Interpreter` class was removed in v0.6.20
+(R5d). The threaded handler protocol (14c.2) had already been
+removed in v0.6.13. The state-machine bytecode lowering (14c.3) is
 the only execution model.
+
+What still lives under `dev.irij.interpreter` is bytecode-mode
+**runtime support** — `Values` (Irij value reps), `Builtins` (name
+registry), `EffectSystem` (handler frame stack used by SM_STACK
+bridging) and `JavaInterop`. They are referenced from
+`RuntimeSupport`, not driven by an interpreter.

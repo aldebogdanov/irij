@@ -17,9 +17,8 @@ Standard ops:
 
 | Op | Effect |
 |---|---|
-| `eval` | Compile to JVM bytecode + run. Stateful: top-level `:=` binds AND `fn` definitions carry across evals via a per-session namespace map. **R1 default since v0.6.x.** |
+| `eval` | Compile to JVM bytecode + run. Stateful: top-level `:=` binds AND `fn` definitions carry across evals via a per-session namespace map. |
 | `eval-bytecode` | Explicit alias for `eval`. Kept for editor clients that send the older op name. |
-| `eval-interp` | Legacy path: parse + interpret via the deprecated tree-walking interpreter. Kept during the interp-removal transition; will be removed with `dev.irij.interpreter`. |
 | `background-out` | Drain output from spawned threads since last eval. |
 | `describe` | Lists supported ops + version. |
 | `clone` | Create a child session. |
@@ -29,7 +28,8 @@ Standard ops:
 
 Each session owns:
 
-- An `Interpreter` instance with its own `globalEnv`.
+- A `BytecodeSession` with its own session-scoped `ClassLoader` and
+  `ConcurrentHashMap<String, Object>` namespace map.
 - A `BackgroundOutputStream` collecting output from spawned threads.
 - An `IndirectOutputStream` swapped between the BG buffer (default)
   and a per-eval `ByteArrayOutputStream` during eval ops.
@@ -119,16 +119,16 @@ Caveat: the embedded nREPL gets its OWN `BytecodeSession`, not
 the entry's. So it can't read the running app's bindings directly.
 What works:
 
-- Redefine top-level fns via `eval` — the nREPL's interp updates its
-  globalEnv; if the entry's interp uses hot-redef indy sites (which
-  it does by default), the swap propagates.
+- Redefine top-level fns via `eval` — the nREPL's `BytecodeSession`
+  updates its namespace map; if the entry uses hot-redef indy sites
+  (which it does by default), the swap propagates.
 - Ad-hoc eval against the bundled stdlib.
 
 What doesn't:
 
-- Inspect or mutate the entry's local state from nREPL. Need the
-  shared-interpreter refactor (`NReplSession.attach(existingInterp)`).
-  Future work.
+- Inspect or mutate the entry's local state from nREPL. Would need
+  the embedded session to share the entry's namespace map +
+  classloader. Future work.
 
 Auth: not implemented. Don't expose the port to the public internet
 without a TCP-level guard (firewall rule, SSH tunnel, etc.).

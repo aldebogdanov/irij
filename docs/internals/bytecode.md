@@ -27,7 +27,7 @@ the user's class).
 
 ## Value model
 
-Same as the interpreter — every value boxes to `java.lang.Object`. No
+Every value boxes to `java.lang.Object`. No
 specialised int/long arrays. Method signatures are
 `(Object, Object, ...) -> Object` everywhere except the
 `IrijFn.apply([Object[]) -> Object` SAM and a few primitive-typed
@@ -128,21 +128,22 @@ currently-being-emitted fn, the emitter rebinds param slots and emits
 `GOTO methodEntry` instead of `INVOKESTATIC`. Recursion stays in one
 JVM frame.
 
-## What's NOT in bytecode mode (gaps)
+## Remaining shortcuts (not user-visible)
 
-Honest list, as of v0.5.0 — most early gaps closed; what remains:
+These are emitter implementation choices that work for every program
+but leave some optimisations on the table:
 
-- **Module-boundary blame** for `in`/`out` contracts. Bytecode emits
-  the generic "Input contract violated in 'f'" message; the
-  interpreter's caller-side / module-prefixed variant requires
-  call-site provenance the emitter doesn't yet thread through.
-- **Match patterns more complex than `Tagged`/literal/var/wildcard** —
-  see `emitMatchExpr` for the supported shapes.
+- **Module-boundary blame** for `in`/`out` contracts. The emitter
+  prints a generic "Input contract violated in 'f'"; threading
+  call-site provenance for "caller-side blame" is future work.
+- **Match patterns** — `emitMatchExpr` covers `Tagged`/literal/var/
+  wildcard / vector splats. Some advanced shapes still fall back to
+  generic dispatch.
 - **Operator-section partials** (e.g. `(_ + 1)`) — only the binary
   infix form `(+)` is emitted.
-- **Builtins not in the emit table** — ~44 of the 91 interpreter
-  builtins lack a fast path. They still work transitively via stdlib
-  inlining + `RuntimeSupport.callAny` fallthrough, just not optimised.
+- **Builtins not in the emit table** — most are reached through the
+  `RuntimeSupport.callAny` fallthrough rather than a direct
+  `INVOKESTATIC`. Functionally identical, marginally slower.
 
 ### R5a fixes (v0.6.7)
 

@@ -27,8 +27,9 @@ Why virtual threads:
 - Block-friendly — `Thread.sleep`, `SynchronousQueue.put/take`, JDBC,
   HTTP clients all "just work" — the JVM yields the carrier when a
   vthread blocks.
-- Plays well with the effect system's threaded protocol (handler
-  vthread + body vthread + SynchronousQueue between them).
+- Plays well with the effect system's SM trampoline — every spawned
+  fiber inherits the parent's `SM_STACK` snapshot so its performs
+  reach the parent's handlers.
 
 ## Structured concurrency: `scope`
 
@@ -46,10 +47,9 @@ Modifiers:
 - `scope.supervised` — let children fail independently; main body
   result is what scope returns.
 
-Implementation: `RuntimeSupport.CompiledScopeHandle` (in bytecode
-mode) and an equivalent in the interpreter. `fork(thunk)` spawns a
-vthread tracked in the handle's fiber list; block-exit invokes
-`joinByModifier(modifier, fibers)`.
+Implementation: `RuntimeSupport.CompiledScopeHandle`. `fork(thunk)`
+spawns a vthread tracked in the handle's fiber list; block-exit
+invokes `joinByModifier(modifier, fibers)`.
 
 ## Inheriting effect contexts into fibers
 
@@ -58,8 +58,8 @@ at fork time. Two thread-local stacks need to be propagated:
 
 | Stack | Purpose |
 |---|---|
-| `EffectSystem.STACK` | Threaded handler contexts (interp + 14c.2 bytecode) |
-| `RuntimeSupport.SM_STACK` | State-machine handler frames (14c.3 bytecode) |
+| `RuntimeSupport.SM_STACK` | State-machine handler frames (the only effect dispatch path since v0.6.13) |
+| `EffectSystem.STACK` | Legacy handler-context stack; still walked as a fallback by `fireOp` for fibers spawned outside any SM `with` |
 
 `RuntimeSupport.snapParent()` snapshots both stacks (via
 `ParentSnapshot` record). Spawn / forkOne / par / race / timeout /
@@ -67,20 +67,20 @@ scope-fork all use it. The fiber installs both with
 `inheritEffectStack(...)` and `inheritSMStack(...)` at the top of its
 run.
 
-## Cross-mode fiber dispatch
+## Fiber-side perform dispatch
 
 A fiber spawned inside an SM `with` performs an op:
 
-1. Fiber's body code calls `emitPerform` → `RT.perform` →
-   `EffectSystem.fireOp`.
-2. `fireOp` walks `EffectSystem.STACK` first (threaded handlers).
-3. If no threaded match, falls through to `RuntimeSupport.fireOpToSM`.
-4. `fireOpToSM` walks the inherited `SM_STACK` and dispatches
+1. Fiber's body throws `PerformSignal` exactly like any other body.
+2. If the fiber is running inside its own `dispatchLoopSMImpl`, that
+   loop catches it. Otherwise the signal escapes into the fiber's
+   entry-point wrapper which delegates to `fireOpToSM`.
+3. `fireOpToSM` walks the inherited `SM_STACK` and dispatches
    synchronously: synthesise a resumeFn that just returns the resume
    value, invoke the clause on the calling (fiber) thread.
-5. Returns the resume value to the fiber's `fireOp` caller.
+4. Returns the resume value to the perform site.
 
-Trade-off: fiber-side performs work, but with synchronous-resume
+Trade-off: fiber-side performs work with synchronous-resume
 semantics (post-resume clause stmts run on the calling thread before
 the value propagates). Same property as the on-thread trampoline.
 Acceptable for idiomatic tail-position `resume v`; pathological
@@ -106,10 +106,10 @@ SynchronousQueue) are already there.
 - **Orphaned fibers** — `spawn` with no `await` and no enclosing
   scope. They run to completion or program-exit. Not currently
   tracked / leaked. Use `scope` to bound lifetime.
-- **Deadlock between SM and threaded modes** — unlikely (fiber dispatch
-  is synchronous via `fireOpToSM`), but a clause that performs a
-  threaded effect while holding an SM frame's lock could theoretically
-  deadlock. Hasn't surfaced in practice.
+- **Deadlock via synchronous fiber dispatch** — `fireOpToSM` runs the
+  clause on the calling fiber thread. A clause that blocks waiting for
+  its own fiber's progress could deadlock; in practice no idiomatic
+  handler shape produces this.
 - **Effect-stack drift** — if a fiber spawns *another* fiber, the
   grandchild inherits the parent's snapshot, not the child's current
   stack. By construction, grandchildren see handlers from when their

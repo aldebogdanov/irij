@@ -24,33 +24,38 @@ How a `.irj` source file becomes a running program.
                   └─────────────┘
                          │ Combined module tree
                          ▼
-              ┌─────────────────────┐
-              │      fork           │
-              ▼                     ▼
-        ┌─────────┐          ┌─────────────┐
-        │ Interp  │          │ ClassEmitter│
-        └─────────┘          └─────────────┘
-              │                     │ ASM bytecode
-              │                     ▼
-              │              ┌─────────────┐
-              │              │  Shadow JAR │
-              │              └─────────────┘
-              ▼                     │
-         output                     ▼
-                              `java -jar` / runtime
+                ┌────────────────────┐
+                │  EffectRowChecker  │   static effect-row lint
+                └────────────────────┘
+                         │
+                         ▼
+                  ┌─────────────┐
+                  │ ClassEmitter│   ASM bytecode (state-machine effect lowering)
+                  └─────────────┘
+                         │ bytes
+                         ▼
+                  ┌─────────────┐
+                  │  Shadow JAR │   for `irij build`; in-process for run/repl/test
+                  └─────────────┘
+                         │
+                         ▼
+                  `java -jar` / runtime
 ```
 
-## Two backends from one AST
+## One back-end since v0.6.13
 
-The AST is the contract between front-end (parser+inliner) and back-ends
-(interpreter, bytecode emitter). Both consume the same `List<Decl>`.
+Bytecode is the only execution path. The tree-walking interpreter
+(`dev.irij.interpreter.Interpreter`) was removed in v0.6.20 / R5d;
+the threaded handler protocol (14c.2) was removed in v0.6.13. The
+state-machine bytecode lowering (14c.3) handles every `with` —
+single execution model, single contract.
 
-This split matters: it forces every language feature to be expressible
-*at the AST level*. A feature you can only do "in the interpreter" can't
-be compiled — and vice versa. Throughout `ClassEmitter` you'll see hard
-errors like `"MVP: unsupported expression: X"` — those are the places the
-bytecode path hasn't grown a representation yet. The interpreter path is
-the older and more complete one.
+A handful of helper classes still live under `dev.irij.interpreter`
+because they are *runtime* shapes the bytecode back-end uses too:
+`Values` (Irij value reps — `IrijMap`, `IrijVector`, `Unit`, etc.),
+`EffectSystem` (handler frame stack used by SM_STACK bridging for
+threaded → SM signalling on legacy effect ops), and `Builtins` (the
+builtin-name registry). They are *not* an interpreter.
 
 ## File / package map
 
@@ -58,10 +63,10 @@ the older and more complete one.
 |---|---|
 | `dev.irij.parser` | ANTLR4 lexer + indent rewriter |
 | `dev.irij.ast` | AST node definitions + `AstBuilder` |
-| `dev.irij.interpreter` | Tree-walking interp + builtins + effect system |
-| `dev.irij.compiler` | `ClassEmitter` + `RuntimeSupport` + `IrijCompiler` |
-| `dev.irij.cli` | `irij run/build/repl/test` commands |
-| `dev.irij.nrepl` | nREPL server (interpreter-backed) |
+| `dev.irij.interpreter` | Runtime value reps, builtin registry, effect-system frame stack (no interpreter) |
+| `dev.irij.compiler` | `ClassEmitter` + `RuntimeSupport` + `IrijCompiler` + `EffectRowChecker` |
+| `dev.irij.cli` | `irij run/build/repl/test/install` commands |
+| `dev.irij.nrepl` | nREPL server (bytecode-backed via `BytecodeSession`) |
 
 ## Where time goes
 
@@ -72,22 +77,24 @@ For a typical `.irj` script:
 | Lex + parse | ~5% | ANTLR4 in interpreted mode |
 | AST build | ~3% | |
 | Module inline | ~10% | every `use` parses the imported module too |
-| Interp / emit | ~80% | depends on backend; emit caches via shadow JAR |
+| Effect-row lint | ~5% | |
+| Bytecode emit | ~75% | one ASM pass; JIT warm-up afterwards |
 
 For deploy (`irij build`), parse+emit happens once at build time; runtime
 is just `java -jar`. JVM startup dominates anything ≤ 100 ms.
 
 ## Why this shape
 
-- **One AST, two back-ends:** keeps feature semantics single-sourced.
-  Adding effect-rows, specs, etc. happens at AST level, not "per
-  back-end."
+- **AST → bytecode directly (no middle IR):** small project, JIT does
+  CSE / escape analysis for us. The two SM lowering shapes (Sequence
+  and EffIR) act as an implicit local IR inside `ClassEmitter`.
 - **Module inlining (not separate compilation):** avoids cross-class
   linkage at runtime; the whole program is one JVM class. Trade-off:
   no incremental compilation; rebuild is fast enough.
 - **ANTLR4 + indent rewriter (no hand-written lexer):** indent-sensitive
   grammars are painful to hand-roll; ANTLR4 with a custom token-stream
   filter handles it cleanly.
-- **No middle IR:** AST → bytecode directly. Skipping an IR means some
-  optimisations (CSE, escape analysis) we get from the JIT instead of
-  doing ourselves. Good trade for a small-team project.
+- **Static effect-row enforcement before emit:** every effect violation
+  fails at compile time. The runtime backstop (`checkPerformEffect`)
+  catches only what static analysis can't see — dynamically-typed
+  callback dispatch through `RT.callAny`.

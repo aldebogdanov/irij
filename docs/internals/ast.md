@@ -102,10 +102,9 @@ Most AST decisions assume runtime checking:
   boxes to `java.lang.Object` in bytecode.
 - Patterns carry no type discriminants — match arms test by tag at
   runtime via `instanceof` chains.
-- Spec annotations are *runtime* validators. Bytecode mode validates
-  both inputs and outputs via `SpecValidator.validateEncoded` (full
-  `SpecExpr` coverage as of v0.5.0); interpreter wraps fns in
-  `SpecContractFn`. Same semantics, different lowering.
+- Spec annotations are *runtime* validators. Inputs and outputs go
+  through `SpecValidator.validateEncoded` (full `SpecExpr` coverage),
+  emitted at fn entry and at every `ARETURN` site.
 
 ## Adding an AST node — checklist
 

@@ -4,8 +4,9 @@ Self-recursive calls in tail position lower to GOTO + arg rebind
 instead of `INVOKESTATIC`. The fn keeps reusing its JVM frame, so
 deep recursion runs in O(1) stack.
 
-Implemented in `ClassEmitter` only (bytecode). The interpreter does
-*not* TCO; deep recursion overflows ~5–10K frames in interp mode.
+Implemented in `ClassEmitter`. Bytecode is the only execution path
+since v0.6.20, so every Irij program enjoys self-tail-call TCO with
+no separate-mode caveats.
 
 ## Mechanism
 
@@ -79,20 +80,6 @@ Neither is shipped. Idiomatic Irij code rarely uses mutual recursion;
 when it appears, deep iteration via mutual calls would blow the stack.
 Documented limitation.
 
-## Interpreter TCO — deferred
-
-The interpreter walks the AST recursively via `eval`. Adding TCO would
-require either:
-
-- Threading a `boolean tail` flag through every `eval` call site (very
-  invasive — touches every case).
-- A thread-local "expected tail target" with a sentinel return value
-  for matching cases — less invasive but still needs taint analysis
-  to know which positions are tail.
-
-Dev workloads (REPL, single-script runs) rarely recurse > 1000 deep, so
-the gap doesn't bite in practice. Deploy uses bytecode which has TCO.
-
 ## Bench effect
 
 `bench/vec-sum/main.irj` uses `std.list.fold` over a vector built via
@@ -107,11 +94,9 @@ zero-cost abstraction at the bytecode level.
   fn-body level, *not* inside the SM step. SM step bodies don't
   themselves contain self-calls in the tail-call sense (the step is
   not the user's fn).
-- **`with` body**: Self-tail-call inside a `with` body in interpreter
-  mode still doesn't TCO (interp has no TCO). In bytecode SM mode,
-  the body is emitted as an SM step — different mechanism (perform
-  signals + trampoline) — so deep loops *also* don't overflow, but
-  via the SM trampoline, not TCO proper.
+- **`with` body**: The body is emitted as an SM step — different
+  mechanism (perform signals + trampoline) — so deep perform loops
+  don't overflow either, but via the SM trampoline, not TCO proper.
 - **Hot-redef**: not affected. TCO emits a `GOTO` to the same method
   — there's no call site to swap. Redefining the fn at runtime via
   `MutableCallSite` swaps the *target* of external call sites but the

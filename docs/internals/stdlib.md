@@ -1,11 +1,11 @@
 # Stdlib
 
-What lives in real `.irj` files vs Java. The split matters because
-Java code can only run in the interpreter (well, via runtime helper
-methods called from bytecode), while `.irj` files compile through
-both back-ends.
+What lives in real `.irj` files vs Java. The split is purely about
+hosting: Java-side builtins are reachable from the bytecode emitter
+via `RuntimeSupport` static methods; `.irj` files get inlined +
+compiled. Single execution model since v0.6.20 (R5d).
 
-## Java side — `Interpreter.installInterpreterBuiltins` + `Builtins.install`
+## Java side — `RuntimeSupport` static methods + `Builtins` registry
 
 Registered as `BuiltinFn` objects in the global environment:
 
@@ -86,15 +86,10 @@ into `ClassEmitter.emitBuiltinApp`:
 | `tail` | `INVOKESTATIC RT.tail` |
 | `fold` | `INVOKESTATIC RT.fold` (effect-transparent — callback runs in caller's row) |
 
-These names match the interpreter convention. A single source
-compiles + interprets identically. Other builtins (e.g. `fold`,
-`map` — when used in interpreter mode) currently DON'T compile to
-bytecode at all; they fail with "Unknown function: fold". The fix
-is to either (a) wire each into `emitBuiltinApp`, or (b) port to
-`.irj` stdlib (Phase 3 path, used for `fold`/`map`/`filter`/etc.).
-
 The general direction: stdlib is real Irij; Java provides the bare-
-metal building blocks.
+metal building blocks. Higher-order builtins like `fold`, `map`,
+`filter` are *.irj* (`src/main/resources/std/list.irj`) — Java is only
+where raw type access, JNI, or JVM-specific APIs need to live.
 
 ## Name conflicts: effect ops win over builtins
 
@@ -133,23 +128,18 @@ its Java home.
 
 ## Why the split persists
 
-Mostly historical + practical:
+- Some primitives (concurrency, raw-*, JDBC, HTTP, JVM interop) have
+  no Irij expression — they're irreducibly Java.
+- Direct emit (`INVOKESTATIC RT.foo`) for arithmetic + small list ops
+  beats the `IrijFn.apply` dispatch path; keeping them as builtins
+  avoids a needless allocation per call.
 
-- Bytecode mode is younger; the interpreter's `BuiltinFn` shape
-  predates the emitter.
-- Effect-row polymorphism is unsolved — see above.
-- Some builtins (concurrency, raw-*, JDBC, HTTP) have no Irij
-  expression — they're irreducibly Java.
-
-Refactor goal: a stable "stdlib in Irij" surface for everything
-*expressible* in Irij; Java for primitives that need raw type access
-or are effect-transparent.
+The principle: stdlib is real Irij where the language is enough;
+Java only when it isn't.
 
 ## Bench observations
 
-Bytecode `std.list.fold` runs ~the same speed as the Java builtin
-`fold` on `vec-sum` (both ~66ms at N=500). The .irj port is no
-slower thanks to TCO + JIT inlining of `IrijFn.apply`.
-
-Interpreter is ~3× slower for both (~210 ms) — tree-walking overhead
-+ no JIT.
+Bytecode `std.list.fold` runs ~the same speed as the direct-emit
+`fold` builtin on `vec-sum` (both ~66 ms at N=500). The .irj port is
+no slower thanks to TCO + JIT inlining of `IrijFn.apply`. There is no
+interpreter to compare against — the only execution path is bytecode.

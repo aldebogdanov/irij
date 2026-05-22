@@ -48,8 +48,8 @@ keyword outside the listed names raises:
 ## Compile-time effect-row lint
 
 `dev.irij.compiler.EffectRowChecker` runs after module inlining and
-before either back-end (interp or bytecode emit). It catches three
-classes of violation at compile time:
+before bytecode emit. It catches three classes of violation at
+compile time:
 
 1. **Call-site subsumption:** caller calls a fn whose declared row
    includes effects the caller doesn't declare.
@@ -77,14 +77,13 @@ Top-level decls run under AMBIENT (not constrained — they ARE the
 caller). Handler decls walk under `requiredEffects + ownEffect`.
 
 Errors throw `IrijCompiler.CompileException` with source location.
-Both interp and bytecode builds fail at parse-and-lint time before
-any runtime.
+Builds fail at parse-and-lint time before any runtime.
 
 ## Effect-row subsumption at fn-call
 
 The effect row of a fn is a *contract on the caller*, not just a
 description of what the body does. At every fn-call site, the
-interpreter checks:
+effect-row checker checks:
 
   required effects of callee ⊆ available effects of caller
 
@@ -234,15 +233,14 @@ fn-body tail positions. Lambda bodies, SM continuations, handler-
 build methods and the like emit raw ARETURN — they don't inherit
 the outer fn's output spec.
 
-`SpecValidator` covers every `SpecExpr` variant the interpreter
-validates: primitive Names (`Int Float Bool Str Keyword Rational
-Vec Map Set Tuple Fn Any Unit`), `App` (`Vec Set Map Tuple Fn` with
-parametric args), `Arrow` (callable check), `Enum` (keyword
-membership), `VecSpec` / `SetSpec` / `TupleSpec` (element-wise
-recursion), `Wildcard` / `Var` / `Unit`. User-declared product/sum
-specs fall through as accepted — bytecode mode has no
-`specRegistry` to consult; interp mode remains the full-coverage
-path for those.
+`SpecValidator` covers every `SpecExpr` variant the language has:
+primitive Names (`Int Float Bool Str Keyword Rational Vec Map Set
+Tuple Fn Any Unit`), `App` (`Vec Set Map Tuple Fn` with parametric
+args), `Arrow` (callable check), `Enum` (keyword membership),
+`VecSpec` / `SetSpec` / `TupleSpec` (element-wise recursion),
+`Wildcard` / `Var` / `Unit`. User-declared product/sum specs go
+through `SpecValidator.REGISTRY` (populated by `<clinit>` on each
+emitted class).
 
 Encoding (`SpecValidator.encode`):
 
@@ -286,8 +284,8 @@ product/sum specs are also enforced in bytecode mode.
   Post checks run before output-spec validation; both run before
   ARETURN.
 
-The blame strings match the interpreter byte-for-byte so existing
-`tests/test-contracts.irj` assertions pass under both runtimes.
+The blame strings are stable so `tests/test-contracts.irj` assertions
+keep passing across releases.
 
 **User-declared product/sum specs** (`SpecValidator.REGISTRY`):
 

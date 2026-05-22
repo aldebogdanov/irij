@@ -67,13 +67,11 @@ These are the same caveats Clojure has. Documented.
 
 ## REPL integration
 
-Currently the nREPL backend is the *interpreter*, which has its own
-hot-redef via `globalEnv.assign` — REPL just rebinds the name in the
-env. Bytecode-mode hot-redef (compile-on-eval, then `redefine` swap)
-is on the roadmap. See `nrepl.md` (tech-debt: not yet written).
-
-The mechanism is shipped at the bytecode layer — the nREPL is just
-not wired to use it yet.
+The nREPL backend is `BytecodeSession`: each connection owns its
+own classloader + namespace map. Re-evaluating an `fn` definition
+emits a fresh class, registers a new `IrijFn` in the namespace map,
+and swaps the underlying `MutableCallSite` target so existing call
+sites pick up the new implementation on their next invocation.
 
 ## Tests
 
