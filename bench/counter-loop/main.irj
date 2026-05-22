@@ -1,0 +1,65 @@
+;; Honest cross-language counter-bump.
+;;
+;; 50 trivial increments. All three languages do the same observable
+;; work: start at 0, add 1 fifty times, print the result.
+;;
+;; This is almost entirely a JVM-startup race — the actual loop is
+;; ~microseconds. Use this as the "what does cold startup cost" data
+;; point, not as a language micro-benchmark.
+
+fn run ::: Mut
+  =>
+  state :! 0
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state <- state + 1
+  state
+
+println (to-str (run ()))

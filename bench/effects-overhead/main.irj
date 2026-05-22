@@ -1,10 +1,17 @@
-;; Effect-heavy micro-benchmark: many `perform`s in a flat `with` body.
+;; Effect-dispatch overhead, Irij-only.
 ;;
-;; Stresses per-`perform` cost. Each `bump` is a top-level stmt in the
-;; with body so SM lowering classifies each as its own segment (avoids
-;; the helper-fn limitation where performs nested in non-SM fns cause
-;; resume to re-run the whole segment — needs tier-c continuation-style
-;; clauses, deferred from 14c.3).
+;; Stresses per-`perform` cost: 50 top-level `bump ()`s in a flat
+;; `with` body. SM lowering classifies each as its own segment.
+;;
+;; **Not** a cross-language comparison — the previous main.clj /
+;; main.py just bumped a counter 50 times, which is a different
+;; workload (no dispatch). Those were removed; if you want the
+;; counter-vs-counter cross-lang comparison, see `bench/counter-loop`.
+;;
+;; The wall-clock number here is dominated by JVM startup
+;; (~50 ms) — perform dispatch itself is single-digit ns/op once
+;; the JIT warms up. To see the dispatch cost directly, time
+;; inside the program with `now-ms` around a 1_000_000-iter loop.
 
 effect Counter
   bump :: () -> ()

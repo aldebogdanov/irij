@@ -114,7 +114,26 @@ build_irij_jar() {
 
 printf '\nIrij benchmark (iters=%s, lower is better)\n\n' "$ITERS"
 
+# Startup baseline — print once at the top so each bench's number can
+# be read as "startup + actual work". A noop main.irj built into a
+# bundled JAR is the fairest proxy for what every Irij bench pays.
+if [[ -f "$ROOT/noop/main.irj" ]] || [[ ! -f "$CACHE/noop.jar" ]]; then
+    mkdir -p "$ROOT/noop"
+    [[ -f "$ROOT/noop/main.irj" ]] || printf 'println 0\n' > "$ROOT/noop/main.irj"
+fi
+NOOP_JAR="$(build_irij_jar noop)"
+printf 'Startup baselines (subtract from each bench number for a fairer read):\n'
+run_variant "irij (noop jar)"    java --enable-native-access=ALL-UNNAMED -jar "$NOOP_JAR"
+[[ $HAVE_CLOJURE -eq 1 ]] && run_variant "clojure (noop)"     clojure -M -e '(println 0)'
+[[ $HAVE_BB      -eq 1 ]] && run_variant "babashka (noop)"    bb -e '(println 0)'
+[[ $HAVE_PYTHON  -eq 1 ]] && run_variant "python3 (noop)"     python3 -c 'print(0)'
+echo
+echo 'See bench/README.md for what these numbers do and do not mean.'
+echo
+
 for bench in "${BENCHES[@]}"; do
+    # Skip the noop dir if it ended up in the list (auto-discovery scoops it up).
+    [[ "$bench" == "noop" ]] && continue
     if [[ ! -d "$ROOT/$bench" ]]; then
         echo "skip: $bench (not a directory)"; continue
     fi
