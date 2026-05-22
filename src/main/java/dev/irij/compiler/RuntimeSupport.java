@@ -1715,10 +1715,12 @@ public final class RuntimeSupport {
                             new java.net.InetSocketAddress((int) port), 0);
 
             java.nio.file.Path scriptDir = java.nio.file.Path.of("").toAbsolutePath();
-            final boolean isBundled = RuntimeSupport.class
-                    .getClassLoader().getResource("__irij_resources/") != null
-                    || RuntimeSupport.class
-                    .getClassLoader().getResource("__irij_app/") != null;
+            // `isBundled` flag is informational only — `httpServeStatic`
+            // always probes classpath resources because shadow JARs may
+            // contain only file entries (no directory entries), so
+            // `getResource("__irij_resources/")` returns null even when
+            // the bundled files are present.
+            final boolean isBundled = true;
 
             server.createContext("/", exchange -> {
                 try {
