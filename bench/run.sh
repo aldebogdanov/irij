@@ -2,11 +2,11 @@
 # Irij benchmark harness.
 #
 # Runs each bench (subdirs of bench/ with main.{irj,clj,py}) across:
-#   irij-interp             — `irij build --mode=interp`
-#   irij-bytecode-threaded  — `irij build --mode=bytecode-threaded` (14c.2)
-#   irij-bytecode-sm        — `irij build --mode=bytecode-sm`       (14c.3)
-#   clojure                 — `clojure -M main.clj`    (skipped if not on PATH)
-#   python                  — `python3 main.py`        (skipped if not on PATH)
+#   irij        — `irij build main.irj` (state-machine bytecode lowering,
+#                  the only execution path since R5d / v0.6.20)
+#   clojure     — `clojure -M main.clj`    (skipped if not on PATH)
+#   babashka    — `bb main.clj`            (skipped if not on PATH)
+#   python      — `python3 main.py`        (skipped if not on PATH)
 #
 # Wall-clock timing, N iterations, reports median (and min) in milliseconds.
 #
@@ -97,11 +97,17 @@ run_variant() {
 }
 
 build_irij_jar() {
-    local bench="$1" mode="$2"
-    local jar="$CACHE/$bench-$mode.jar"
-    if [[ ! -f "$jar" || "$ROOT/$bench/main.irj" -nt "$jar" ]]; then
+    local bench="$1"
+    local jar="$CACHE/$bench.jar"
+    # Rebuild if the source is newer OR if the cached jar predates the
+    # installed irij binary (so a `gradle install` busts the cache too).
+    local irij_bin
+    irij_bin="$(command -v irij)"
+    if [[ ! -f "$jar" \
+            || "$ROOT/$bench/main.irj" -nt "$jar" \
+            || "$irij_bin" -nt "$jar" ]]; then
         ( cd "$ROOT/$bench" \
-            && irij build --mode="$mode" main.irj -o "$jar" >/dev/null )
+            && irij build main.irj -o "$jar" >/dev/null )
     fi
     echo "$jar"
 }
@@ -115,11 +121,9 @@ for bench in "${BENCHES[@]}"; do
     echo "── $bench ───────────────────────────────────────"
 
     if [[ -f "$ROOT/$bench/main.irj" ]]; then
-        for mode in interp bytecode-threaded bytecode-sm; do
-            jar="$(build_irij_jar "$bench" "$mode")"
-            run_variant "irij-$mode" \
-                java --enable-native-access=ALL-UNNAMED -jar "$jar"
-        done
+        jar="$(build_irij_jar "$bench")"
+        run_variant "irij" \
+            java --enable-native-access=ALL-UNNAMED -jar "$jar"
     fi
     if [[ -f "$ROOT/$bench/main.clj" && $HAVE_CLOJURE -eq 1 ]]; then
         run_variant "clojure" clojure -M "$ROOT/$bench/main.clj"
