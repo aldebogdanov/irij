@@ -22,27 +22,31 @@ mod std.fs
 ;;     read-config "config.json"
 
 pub effect FileIO
-  fs-read :: Str -> Str
-  fs-write :: Str Str -> ()
-  fs-append :: Str Str -> ()
-  fs-exists? :: Str -> Bool
-  fs-list-dir :: Str -> Vec
-  fs-delete :: Str -> ()
-  fs-mkdir :: Str -> ()
+  fs-read :: Str Str
+  fs-write :: Str Str ()
+  fs-append :: Str Str ()
+  fs-exists? :: Str Bool
+  fs-list-dir :: Str Vec
+  fs-delete :: Str ()
+  fs-mkdir :: Str ()
 
-pub handler default-fs :: FileIO ::: FileIO
-  fs-read path => resume (read-file path)
+;; Capability binding. `fs-files` resolves only inside FileIO-handler
+;; clauses (lint-enforced by EffectRowChecker).
+cap fs-files :: FileIO = "dev.irij.runtime.FsCapability"
+
+pub handler default-fs :: FileIO ::: JVM
+  fs-read path => resume (fs-files.read path)
   fs-write path content =>
-    write-file path content
+    fs-files.write path content
     resume ()
   fs-append path content =>
-    append-file path content
+    fs-files.append path content
     resume ()
-  fs-exists? path => resume (file-exists? path)
-  fs-list-dir path => resume (list-dir path)
+  fs-exists? path => resume (fs-files.existsQ path)
+  fs-list-dir path => resume (fs-files.listDir path)
   fs-delete path =>
-    delete-file path
+    fs-files.delete path
     resume ()
   fs-mkdir path =>
-    make-dir path
+    fs-files.mkdir path
     resume ()

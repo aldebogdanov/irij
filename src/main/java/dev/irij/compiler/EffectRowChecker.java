@@ -90,13 +90,8 @@ public final class EffectRowChecker {
         }
         // Time
         for (String n : java.util.List.of("sleep", "now-ms")) m.put(n, "Time");
-        // FileIO — read/write/list/delete/make-dir/append-file/file-exists?
-        for (String n : java.util.List.of(
-                "read-file", "write-file", "make-dir", "list-dir",
-                "delete-file", "append-file", "file-exists?",
-                "raw-multipart-save")) {
-            m.put(n, "FileIO");
-        }
+        // FileIO raw-* removed phase 3d — routed through FsCapability
+        // via std.fs.
         // Env
         for (String n : java.util.List.of("get-env", "env")) m.put(n, "Env");
         // Http client raw-* removed phase 3b — routed through

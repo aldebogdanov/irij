@@ -11,6 +11,11 @@ pub effect Serve
   sse-send :: _ Str Str ()
   sse-close :: _ ()
   sse-closed? :: _ Bool
+  ;; Multipart parsing — phase 3d. Also request-shaped, also lives
+  ;; behind the same ServeCapability. multipart-save writes to a
+  ;; path (creating parent dirs); the caller must own FileIO too.
+  multipart-field :: Map Str Str
+  multipart-save :: Map Str Str Str
 
 cap server :: Serve = "dev.irij.runtime.ServeCapability"
 
@@ -28,6 +33,10 @@ pub handler default-serve :: Serve ::: JVM
     resume ()
   sse-closed? sse =>
     resume (server.sseClosedQ sse)
+  multipart-field request field =>
+    resume (server.multipartField request field)
+  multipart-save request field path =>
+    resume (server.multipartSave request field path)
 
 pub fn route :: Str Str Fn Map
   (method path action ->

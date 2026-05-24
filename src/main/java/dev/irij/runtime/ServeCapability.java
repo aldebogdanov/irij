@@ -151,6 +151,117 @@ public final class ServeCapability {
         return sse.isClosed();
     }
 
+    // ── Multipart parsing ───────────────────────────────────────────
+    //
+    // Both methods read the request's `__body_bytes` + content-type
+    // boundary to locate the named part. `multipartField` returns the
+    // part body as a UTF-8 string; `multipartSave` writes it to a
+    // file path (creating parent dirs as needed) and returns the
+    // saved path. Lives on the Serve cap because multipart is
+    // request-shaped — same exchange the rest of the cap operates on.
+
+    public static Object multipartField(Object reqArg, Object fieldArg) {
+        byte[] body = mpRequestBytes(reqArg, "server.multipart-field");
+        String boundary = mpBoundary(reqArg, "server.multipart-field");
+        String field = asStr(fieldArg, "server.multipart-field");
+        int[] range = mpFindPartBody(body, boundary, field);
+        if (range == null) {
+            throw new IrijRuntimeError(
+                    "server.multipart-field: field '" + field + "' not found");
+        }
+        return new String(body, range[0], range[1] - range[0], StandardCharsets.UTF_8);
+    }
+
+    public static Object multipartSave(Object reqArg, Object fieldArg, Object pathArg) {
+        byte[] body = mpRequestBytes(reqArg, "server.multipart-save");
+        String boundary = mpBoundary(reqArg, "server.multipart-save");
+        String field = asStr(fieldArg, "server.multipart-save");
+        String savePath = asStr(pathArg, "server.multipart-save");
+        int[] range = mpFindPartBody(body, boundary, field);
+        if (range == null) {
+            throw new IrijRuntimeError(
+                    "server.multipart-save: field '" + field + "' not found");
+        }
+        try {
+            Path target = Path.of(savePath);
+            if (target.getParent() != null) Files.createDirectories(target.getParent());
+            Files.write(target, java.util.Arrays.copyOfRange(body, range[0], range[1]));
+            return savePath;
+        } catch (IOException e) {
+            throw new IrijRuntimeError("server.multipart-save: " + e.getMessage());
+        }
+    }
+
+    private static byte[] mpRequestBytes(Object reqArg, String op) {
+        if (!(reqArg instanceof IrijMap req)) {
+            throw new IrijRuntimeError(op + ": expects request Map");
+        }
+        Object bodyBytes = req.entries().get("__body_bytes");
+        if (!(bodyBytes instanceof byte[] bytes)) {
+            throw new IrijRuntimeError(op + ": no raw body bytes in request");
+        }
+        return bytes;
+    }
+
+    private static String mpBoundary(Object reqArg, String op) {
+        IrijMap req = (IrijMap) reqArg;
+        String contentType = "";
+        Object headers = req.entries().get("headers");
+        if (headers instanceof IrijMap hm) {
+            Object ct = hm.entries().get("content-type");
+            if (ct instanceof String s) contentType = s;
+        }
+        String boundary = mpExtractBoundary(contentType);
+        if (boundary == null) {
+            throw new IrijRuntimeError(op + ": no boundary in content-type");
+        }
+        return boundary;
+    }
+
+    private static String mpExtractBoundary(String contentType) {
+        if (contentType == null) return null;
+        for (String part : contentType.split(";")) {
+            String t = part.trim();
+            if (t.startsWith("boundary=")) return t.substring("boundary=".length()).trim();
+        }
+        return null;
+    }
+
+    private static int[] mpFindPartBody(byte[] data, String boundary, String fieldName) {
+        byte[] delim = ("--" + boundary).getBytes(StandardCharsets.UTF_8);
+        byte[] namePat = ("name=\"" + fieldName + "\"").getBytes(StandardCharsets.UTF_8);
+        byte[] crlfcrlf = "\r\n\r\n".getBytes(StandardCharsets.UTF_8);
+        int pos = 0;
+        while (pos < data.length) {
+            int delimPos = mpIndexOf(data, delim, pos);
+            if (delimPos < 0) break;
+            int nextDelim = mpIndexOf(data, delim, delimPos + delim.length);
+            if (nextDelim < 0) nextDelim = data.length;
+            int namePos = mpIndexOf(data, namePat, delimPos);
+            if (namePos >= 0 && namePos < nextDelim) {
+                int bodyStart = mpIndexOf(data, crlfcrlf, delimPos);
+                if (bodyStart >= 0) {
+                    bodyStart += crlfcrlf.length;
+                    int bodyEnd = nextDelim - 2;
+                    if (bodyEnd > bodyStart) return new int[]{bodyStart, bodyEnd};
+                }
+            }
+            pos = delimPos + delim.length;
+        }
+        return null;
+    }
+
+    private static int mpIndexOf(byte[] haystack, byte[] needle, int from) {
+        outer:
+        for (int i = from; i <= haystack.length - needle.length; i++) {
+            for (int j = 0; j < needle.length; j++) {
+                if (haystack[i + j] != needle[j]) continue outer;
+            }
+            return i;
+        }
+        return -1;
+    }
+
     // ── Helpers (file-private — production providers can't share) ───
 
     private static long asLong(Object v, String op) {

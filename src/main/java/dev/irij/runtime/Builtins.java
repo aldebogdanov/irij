@@ -28,16 +28,11 @@ public final class Builtins {
     private static final java.io.BufferedReader STDIN_READER =
         new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
 
-    /** Forbidden builtins in sandbox mode — I/O, file, DB, HTTP.
-     *  raw-db-* removed in phase 3a (now reachable only via the
-     *  {@code Db} effect ops + {@code JdbcCapability} provider, both
-     *  unreachable in sandbox because the cap class is not on the
-     *  sandbox classpath). */
-    private static final List<String> SANDBOX_FORBIDDEN = List.of(
-        "read-file", "write-file", "delete-file", "append-file",
-        "make-dir", "list-dir", "file-exists?",
-        "raw-multipart-field", "raw-multipart-save"  // raw-http-* + raw-sse-* removed phase 3b/3c
-    );
+    /** Forbidden builtins in sandbox mode. After phase 3d the raw FS
+     *  + multipart entries are gone too (FileIO + Serve effects route
+     *  through cap providers that aren't on the sandbox classpath; the
+     *  sandbox handlers reject those effect ops directly). */
+    private static final List<String> SANDBOX_FORBIDDEN = List.of();
 
     /**
      * Install sandboxed builtins — all standard builtins, but I/O, file, DB,
@@ -550,32 +545,9 @@ public final class Builtins {
             return String.valueOf(Character.toChars(cp));
         }));
 
-        // ── IO primitives ──────────────────────────────────────────────
-        env.define("read-file", new BuiltinFn("read-file", 1, List.of("FileIO"), args -> {
-            var path = asString(args.get(0), "read-file");
-            var resolved = resolvePath(path, pathResolver);
-            try { return Files.readString(resolved); }
-            catch (java.nio.file.NoSuchFileException e) {
-                throw new IrijRuntimeError("read-file: file not found: " + resolved);
-            }
-            catch (IOException e) {
-                throw new IrijRuntimeError("read-file: " + e.getMessage());
-            }
-        }));
-
-        env.define("write-file", new BuiltinFn("write-file", 2, List.of("FileIO"), args -> {
-            var path = asString(args.get(0), "write-file");
-            var content = asString(args.get(1), "write-file");
-            try { Files.writeString(resolvePath(path, pathResolver), content); }
-            catch (IOException e) {
-                throw new IrijRuntimeError("write-file: " + e.getMessage());
-            }
-            return Values.UNIT;
-        }));
-
-        env.define("file-exists?", new BuiltinFn("file-exists?", 1, List.of("FileIO"), args -> {
-            return Files.exists(resolvePath(asString(args.get(0), "file-exists?"), pathResolver));
-        }));
+        // FileIO primitives (read-file / write-file / file-exists?) —
+        // removed phase 3d. Reach via the FileIO effect (std.fs) +
+        // FsCapability.
 
         env.define("get-env", new BuiltinFn("get-env", 1, List.of("Env"), args -> {
             var name = asString(args.get(0), "get-env");
@@ -615,46 +587,8 @@ public final class Builtins {
             }
         }));
 
-        // ── Additional FS primitives ────────────────────────────────────
-        env.define("list-dir", new BuiltinFn("list-dir", 1, List.of("FileIO"), args -> {
-            var path = asString(args.get(0), "list-dir");
-            try (var stream = Files.list(resolvePath(path, pathResolver))) {
-                return new IrijVector(stream.map(p -> (Object) p.getFileName().toString()).toList());
-            } catch (IOException e) {
-                throw new IrijRuntimeError("list-dir: " + e.getMessage());
-            }
-        }));
-
-        env.define("delete-file", new BuiltinFn("delete-file", 1, List.of("FileIO"), args -> {
-            var path = asString(args.get(0), "delete-file");
-            try { Files.deleteIfExists(resolvePath(path, pathResolver)); }
-            catch (IOException e) {
-                throw new IrijRuntimeError("delete-file: " + e.getMessage());
-            }
-            return Values.UNIT;
-        }));
-
-        env.define("make-dir", new BuiltinFn("make-dir", 1, List.of("FileIO"), args -> {
-            var path = asString(args.get(0), "make-dir");
-            try { Files.createDirectories(resolvePath(path, pathResolver)); }
-            catch (IOException e) {
-                throw new IrijRuntimeError("make-dir: " + e.getMessage());
-            }
-            return Values.UNIT;
-        }));
-
-        env.define("append-file", new BuiltinFn("append-file", 2, List.of("FileIO"), args -> {
-            var path = asString(args.get(0), "append-file");
-            var content = asString(args.get(1), "append-file");
-            try {
-                Files.writeString(resolvePath(path, pathResolver), content,
-                    java.nio.file.StandardOpenOption.CREATE,
-                    java.nio.file.StandardOpenOption.APPEND);
-            } catch (IOException e) {
-                throw new IrijRuntimeError("append-file: " + e.getMessage());
-            }
-            return Values.UNIT;
-        }));
+        // list-dir / delete-file / make-dir / append-file — removed
+        // phase 3d. Reach via std.fs effect ops + FsCapability.
 
         // ── Database primitives — removed phase 3a ────────────────────────
         // The Db effect surface is now reached through the std.db handler
@@ -663,53 +597,9 @@ public final class Builtins {
         // ── HTTP client primitives — removed phase 3b ───────────────────
         // Http effect routes through HttpClientCapability + std.http now.
 
-        // ── Multipart parsing ──────────────────────────────────────────────
-
-        // raw-multipart-field request "fieldname" -> String (text value of named part)
-        env.define("raw-multipart-field", new BuiltinFn("raw-multipart-field", 2, args -> {
-            if (!(args.get(0) instanceof IrijMap req))
-                throw new IrijRuntimeError("raw-multipart-field: expects request Map");
-            var fieldName = asString(args.get(1), "raw-multipart-field");
-            var bodyBytes = req.entries().get("__body_bytes");
-            if (!(bodyBytes instanceof byte[] bytes))
-                throw new IrijRuntimeError("raw-multipart-field: no raw body bytes in request");
-            var contentType = "";
-            var headers = req.entries().get("headers");
-            if (headers instanceof IrijMap hm) {
-                var ct = hm.entries().get("content-type");
-                if (ct instanceof String s) contentType = s;
-            }
-            var boundary = extractBoundary(contentType);
-            if (boundary == null)
-                throw new IrijRuntimeError("raw-multipart-field: no boundary in content-type");
-            return extractMultipartField(bytes, boundary, fieldName);
-        }));
-
-        // raw-multipart-save request "fieldname" "/path/to/file" -> String (saved path)
-        env.define("raw-multipart-save", new BuiltinFn("raw-multipart-save", 3, List.of("FileIO"), args -> {
-            if (!(args.get(0) instanceof IrijMap req))
-                throw new IrijRuntimeError("raw-multipart-save: expects request Map");
-            var fieldName = asString(args.get(1), "raw-multipart-save");
-            var savePath = asString(args.get(2), "raw-multipart-save");
-            var bodyBytes = req.entries().get("__body_bytes");
-            if (!(bodyBytes instanceof byte[] bytes))
-                throw new IrijRuntimeError("raw-multipart-save: no raw body bytes in request");
-            var contentType = "";
-            var headers = req.entries().get("headers");
-            if (headers instanceof IrijMap hm) {
-                var ct = hm.entries().get("content-type");
-                if (ct instanceof String s) contentType = s;
-            }
-            var boundary = extractBoundary(contentType);
-            if (boundary == null)
-                throw new IrijRuntimeError("raw-multipart-save: no boundary in content-type");
-            try {
-                saveMultipartFile(bytes, boundary, fieldName, savePath);
-                return savePath;
-            } catch (Exception e) {
-                throw new IrijRuntimeError("raw-multipart-save: " + e.getMessage());
-            }
-        }));
+        // Multipart raw-multipart-* — removed phase 3d. Reach via the
+        // multipart-field / multipart-save effect ops on Serve, which
+        // route through ServeCapability.
 
         // ── Miscellaneous ──────────────────────────────────────────────
         env.define("env", new BuiltinFn("env", -1, List.of("Env"), args -> {
@@ -734,79 +624,8 @@ public final class Builtins {
         }));
     }
 
-    // ── Multipart helpers ──────────────────────────────────────────────
-
-    private static String extractBoundary(String contentType) {
-        if (contentType == null) return null;
-        for (var part : contentType.split(";")) {
-            var trimmed = part.trim();
-            if (trimmed.startsWith("boundary=")) {
-                return trimmed.substring("boundary=".length()).trim();
-            }
-        }
-        return null;
-    }
-
-    /** Find start/end byte offsets of a named multipart part's body. */
-    private static int[] findPartBody(byte[] data, String boundary, String fieldName) {
-        var delim = ("--" + boundary).getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        var namePattern = ("name=\"" + fieldName + "\"").getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        var crlfcrlf = "\r\n\r\n".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-
-        int pos = 0;
-        while (pos < data.length) {
-            int delimPos = indexOf(data, delim, pos);
-            if (delimPos < 0) break;
-
-            // Check if this part contains the field name
-            int nextDelim = indexOf(data, delim, delimPos + delim.length);
-            if (nextDelim < 0) nextDelim = data.length;
-
-            int namePos = indexOf(data, namePattern, delimPos);
-            if (namePos >= 0 && namePos < nextDelim) {
-                // Found the right part — find body start (after \r\n\r\n)
-                int bodyStart = indexOf(data, crlfcrlf, delimPos);
-                if (bodyStart >= 0) {
-                    bodyStart += crlfcrlf.length;
-                    // Body ends at \r\n before next delimiter
-                    int bodyEnd = nextDelim - 2; // skip \r\n before delimiter
-                    if (bodyEnd > bodyStart) {
-                        return new int[]{bodyStart, bodyEnd};
-                    }
-                }
-            }
-            pos = delimPos + delim.length;
-        }
-        return null;
-    }
-
-    private static String extractMultipartField(byte[] data, String boundary, String fieldName) {
-        var range = findPartBody(data, boundary, fieldName);
-        if (range == null)
-            throw new IrijRuntimeError("raw-multipart-field: field '" + fieldName + "' not found");
-        return new String(data, range[0], range[1] - range[0], java.nio.charset.StandardCharsets.UTF_8);
-    }
-
-    private static void saveMultipartFile(byte[] data, String boundary, String fieldName, String path)
-            throws java.io.IOException {
-        var range = findPartBody(data, boundary, fieldName);
-        if (range == null)
-            throw new IrijRuntimeError("raw-multipart-save: field '" + fieldName + "' not found");
-        var target = java.nio.file.Path.of(path);
-        java.nio.file.Files.createDirectories(target.getParent());
-        java.nio.file.Files.write(target, java.util.Arrays.copyOfRange(data, range[0], range[1]));
-    }
-
-    private static int indexOf(byte[] haystack, byte[] needle, int from) {
-        outer:
-        for (int i = from; i <= haystack.length - needle.length; i++) {
-            for (int j = 0; j < needle.length; j++) {
-                if (haystack[i + j] != needle[j]) continue outer;
-            }
-            return i;
-        }
-        return -1;
-    }
+    // (Multipart parsing helpers removed phase 3d — they live in
+    // ServeCapability now, beside the rest of the request-shaped ops.)
 
     // ═══════════════════════════════════════════════════════════════════
     // Utilities

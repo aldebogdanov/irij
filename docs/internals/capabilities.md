@@ -40,9 +40,14 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   Irij). `std.serve` Serve effect grew `sse-response`, `sse-send`,
   `sse-close`, `sse-closed?` ops; `std.datastar` rewritten to call
   them. `raw-http-serve` + `raw-sse-*` delisted from all registries.
-- **3d — FS / Multipart**: `FsCapability` (read-file, write-file,
-  list-dir, make-dir, delete-file, append-file, file-exists?),
-  `MultipartCapability` (raw-multipart-field, raw-multipart-save).
+- **3d — FS / Multipart (shipped)**: `FsCapability` for the
+  FileIO surface (read/write/append/exists?/list-dir/delete/mkdir);
+  multipart parsing folded into `ServeCapability` (request-shaped,
+  same exchange object). std.fs rewritten; std.serve grew
+  `multipart-field` + `multipart-save` ops. The raw file-* +
+  raw-multipart-* names + their RuntimeSupport / Builtins / emit-
+  table entries are all gone; sandbox's forbidden-list is empty
+  (the dangerous names just no longer exist).
 - **3e — Session**: `SessionCapability` for the Playground sandbox
   (raw-session-create, raw-session-eval, raw-session-destroy,
   raw-session-subscribe, raw-session-unsubscribe,

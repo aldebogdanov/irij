@@ -1637,14 +1637,7 @@ final class ClassEmitter implements Opcodes {
         java.util.Map.entry("println",          "Console"),
         java.util.Map.entry("dbg",              "Console"),
         java.util.Map.entry("read-line",        "Console"),
-        java.util.Map.entry("read-file",        "FileIO"),
-        java.util.Map.entry("write-file",       "FileIO"),
-        java.util.Map.entry("file-exists?",     "FileIO"),
-        java.util.Map.entry("list-dir",         "FileIO"),
-        java.util.Map.entry("delete-file",      "FileIO"),
-        java.util.Map.entry("make-dir",         "FileIO"),
-        java.util.Map.entry("append-file",      "FileIO"),
-        java.util.Map.entry("raw-multipart-save","FileIO"),
+        // FileIO entries removed phase 3d (FsCapability path)
         // raw-db-* entries removed phase 3a (JdbcCapability path)
         java.util.Map.entry("sleep",            "Time"),
         java.util.Map.entry("now-ms",           "Time"),
@@ -1829,20 +1822,13 @@ final class ClassEmitter implements Opcodes {
             // raw-db-* emit entries removed phase 3a; the Db effect ops
             // route through `db-jdbc.method` dispatch in std/db.irj.
             // raw-sse-* emit entries removed phase 3c (ServeCapability)
-            case "raw-multipart-field" -> { return emitRT2(args, mv, locals, "rawMultipartField"); }
-            case "raw-multipart-save"  -> { return emitRT3(args, mv, locals, "rawMultipartSave"); }
+            // raw-multipart-* emit entries removed phase 3d (ServeCapability)
             // raw-http-serve emit entry removed phase 3c (ServeCapability)
             // ── R3 batch 4: JSON + FileIO + env / time ───────────────
             case "json-parse"          -> { return emitRT1(args, mv, locals, "jsonParse"); }
             case "json-encode"         -> { return emitRT1(args, mv, locals, "jsonEncode"); }
             case "json-encode-pretty"  -> { return emitRT1(args, mv, locals, "jsonEncodePretty"); }
-            case "make-dir"            -> { return emitRT1(args, mv, locals, "makeDir"); }
-            case "list-dir"            -> { return emitRT1(args, mv, locals, "listDir"); }
-            case "delete-file"         -> { return emitRT1(args, mv, locals, "deleteFile"); }
-            case "read-file"           -> { return emitRT1(args, mv, locals, "readFile"); }
-            case "write-file"          -> { return emitRT2(args, mv, locals, "writeFile"); }
-            case "append-file"         -> { return emitRT2(args, mv, locals, "appendFile"); }
-            case "file-exists?"        -> { return emitRT1(args, mv, locals, "fileExistsQ"); }
+            // FileIO fast-paths removed phase 3d (FsCapability path)
             case "get-env"             -> { return emitRT1(args, mv, locals, "getEnv"); }
             case "now-ms"              -> {
                 if (!isZeroArgCall(args)) return false;
