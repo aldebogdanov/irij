@@ -11,19 +11,21 @@ escape hatch they provided.
 
 ## Status
 
-Phase 1 (this commit): parser + AST + lint. The `cap` decl form is
+Phase 1 (shipped): parser + AST + lint. The `cap` decl form is
 recognised, registered in `EffectRowChecker.capEffect`, and bare or
-cross-effect references are rejected at compile time. The emitter
-skips `CapDecl` (no runtime representation yet); `cap-name.method`
-calls in valid positions still need phase 2's lowering before they
-run end-to-end.
+cross-effect references are rejected at compile time.
 
-Phase 2 (next): emitter lowers `cap-name.method args` inside a
-matching handler clause to `INVOKEVIRTUAL` (or `INVOKESTATIC`) on
-the bound provider class. Once shipped, the existing `raw-*`
-builtins (`raw-db-*`, `raw-http-*`, `raw-fs-*`) become methods on
-capability providers and the `raw-` prefix is delisted from
-`Builtins` + `EffectRowChecker.BUILTIN_EFFECTS` + `ClassEmitter`.
+Phase 2 (shipped): emitter lowers `cap-name.method args` inside a
+matching handler clause to a JavaRef-equivalent dispatch on the
+bound provider class. End-to-end tests in `CapDispatchTest` verify
+a real Irij program reaches a Java provider method through the cap.
+
+Phase 3 (next): migrate `std.db`, `std.http`, `std.fs`, `std.serve`
+to the pattern. Each effect gets a provider class under
+`dev.irij.runtime.*`; raw method bodies move out of
+`RuntimeSupport`'s `raw*` static methods into provider classes;
+`raw-*` builtin names get delisted from `Builtins`,
+`EffectRowChecker.BUILTIN_EFFECTS`, and `ClassEmitter`'s emit table.
 
 ## Syntax
 
@@ -125,19 +127,32 @@ Allowed and expected — `cap db-jdbc-default :: Db = …` and
 its clauses reach for. This is how mock-handlers in tests get a
 different provider with the same surface.
 
-## Emitter (phase 2 sketch)
+## Emitter (phase 2)
 
-When the emitter sees `cap-name.method args` inside a handler
-clause, it will:
+The emit-time intercept lives near the top of
+`ClassEmitter.emitApp`: an `Expr.App` whose callee is
+`Expr.DotAccess(Var capName, methodName)` and whose `capName` is
+in `capProvider` gets rewritten into
 
-1. Look up `cap-name` in the global cap registry → provider class.
-2. Resolve `method` on that class via reflection at compile time
-   (to pick descriptor + static-vs-instance) — same machinery as
-   the existing `Class/method` Java interop path.
-3. Emit `INVOKESTATIC` or `INVOKEVIRTUAL` accordingly. For instance
-   providers, the provider singleton is fetched via a generated
-   `<clinit>` field; for static-method providers, the class itself
-   is enough.
+```
+Expr.App(Expr.JavaRef("<providerClass>/<methodName>"), args)
+```
+
+and re-dispatched through the existing JavaRef code path. `JavaRef`
+already produces a `BuiltinFn` via
+`RuntimeSupport.javaStaticRef` → `JavaInterop.resolveStaticRef`,
+which handles overload resolution + arg coercion at call time. So
+phase 2's whole emit contribution is a 5-line rewrite — no new
+bytecode shape, no descriptor reflection in the emitter, no
+singleton-field bookkeeping.
+
+**Provider contract (phase 2):** methods are `public static`, take
++ return `Object` (or autoboxable primitives). The class lives at
+a stable FQN that the `cap` decl references as a string literal.
+Instance / singleton providers will follow in phase 2.5 if needed;
+none of the planned migrations (`Jdbc`, `Fs`, `HttpClient`,
+`HttpServer`, `Jvm`) need them — each is naturally a utility class
+of static dispatchers around the underlying JDK API.
 
 ## Future work
 

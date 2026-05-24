@@ -64,6 +64,12 @@ final class ClassEmitter implements Opcodes {
     private final Map<String, Integer> protoArity = new HashMap<>();
     // effect op name → effect name
     private final Map<String, String> effectOps = new HashMap<>();
+    /** Capability registry: cap-name → provider-class FQN. Populated in
+     *  pass 1 from {@link Decl.CapDecl}. Consumed at {@link Expr.App} emit
+     *  time: a call shaped {@code cap-name.method args} is rewritten to
+     *  {@code "FQN/method"} and dispatched through the existing JavaInterop
+     *  reflection path (handles static + instance methods uniformly). */
+    private final Map<String, String> capProvider = new HashMap<>();
     // handler name → decl (14c.1 abort-only)
     private final Map<String, Decl.HandlerDecl> handlers = new HashMap<>();
     // handlerName -> (stateVarName -> internal static field name)
@@ -279,6 +285,9 @@ final class ClassEmitter implements Opcodes {
                 for (Decl.EffectOp op : ed.ops()) {
                     effectOps.put(op.name(), ed.name());
                 }
+            }
+            if (inner instanceof Decl.CapDecl cd) {
+                capProvider.put(cd.name(), cd.providerClass());
             }
             if (inner instanceof Decl.HandlerDecl hd) {
                 validateHandler14c2(hd);
@@ -4436,6 +4445,21 @@ final class ClassEmitter implements Opcodes {
                 && moduleAliases.contains(modVar.name())) {
             emitApp(new Expr.App(new Expr.Var(da.field(), null), app.args(), null),
                     mv, locals);
+            return;
+        }
+        // `cap-name.method args` where cap-name is registered → dispatch
+        // through JavaRef on the bound provider class. Phase-2 contract:
+        // provider methods are static (capability providers are utility
+        // classes whose methods take + return Object). Future phase-2.5
+        // can layer instance/singleton support without changing this
+        // call site.
+        if (app.fn() instanceof Expr.DotAccess da
+                && da.target() instanceof Expr.Var capVar
+                && capProvider.containsKey(capVar.name())) {
+            String providerClass = capProvider.get(capVar.name());
+            Expr.JavaRef ref = new Expr.JavaRef(
+                    providerClass + "/" + da.field(), da.loc());
+            emitApp(new Expr.App(ref, app.args(), app.loc()), mv, locals);
             return;
         }
         String fnName = null;
