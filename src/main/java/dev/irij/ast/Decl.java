@@ -73,6 +73,27 @@ public sealed interface Decl extends Node {
     /** Stub for cap declarations (parsed, not executed). */
     record StubDecl(String kind, String name, SourceLoc loc) implements Decl {}
 
+    /** Capability binding: {@code cap <name> :: <Effect> = <provider-class>}.
+     *
+     *  <p>The {@code name} is a lower-case binding that resolves ONLY inside
+     *  handler clauses for {@code effectName}. The {@code providerClass} is
+     *  the fully-qualified JVM class whose instance/static methods supply the
+     *  effect's implementation (e.g. {@code dev.irij.runtime.JdbcCapability}).
+     *
+     *  <p>Outside a matching handler clause, references to {@code name} are
+     *  rejected at compile time by {@link
+     *  dev.irij.compiler.EffectRowChecker} so the {@code raw-*} surface can be
+     *  delisted without losing platform-access escape hatches. Capability
+     *  references are restricted to dot-access targets (e.g.
+     *  {@code name.method args}); bare {@code name} as a value is also
+     *  rejected (the "option a" stance — caps are not first-class values).
+     *
+     *  <p>{@code isPub} controls re-export across modules; {@code pub cap ...}
+     *  surfaces the binding in importing modules, still subject to the
+     *  scope-restriction-to-clause-bodies rule. */
+    record CapDecl(boolean isPub, String name, String effectName,
+                   String providerClass, SourceLoc loc) implements Decl {}
+
     /** A binding used as a top-level declaration. */
     record BindingDecl(Stmt stmt, SourceLoc loc) implements Decl {}
 

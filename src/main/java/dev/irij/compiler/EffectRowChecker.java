@@ -43,6 +43,23 @@ import java.util.Set;
  */
 public final class EffectRowChecker {
 
+    /** Capability binding registry: cap-name → effect-name. Populated by
+     *  every top-level {@code cap <name> :: <Effect> = "<class>"} decl
+     *  (including {@code pub cap} re-exports — phase 1 treats both
+     *  identically since the binding lives in this single global map).
+     *
+     *  <p>A cap name resolves at compile time ONLY inside a handler
+     *  clause for the matching effect, AND only as the target of a
+     *  dot-access (e.g. {@code db-jdbc.open path}). Bare references or
+     *  references in unrelated handler clauses fail with a precise
+     *  error. */
+    private final Map<String, String> capEffect = new HashMap<>();
+
+    /** Effect name currently being inspected inside a handler clause —
+     *  set by {@link #checkHandler} before walking each clause body and
+     *  cleared after. {@code null} outside clause bodies. */
+    private String currentClauseEffect = null;
+
     private final Map<String, List<String>> fnRows = new HashMap<>();
     /** fn-name → spec annotations (inputs..., output). Used at call
      *  sites to find which input positions carry parametric row-var
@@ -144,6 +161,17 @@ public final class EffectRowChecker {
                 for (var op : ed.ops()) effectOps.put(op.name(), ed.name());
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 handlerEffect.put(hd.name(), hd.effectName());
+            } else if (inner instanceof Decl.CapDecl cap) {
+                String prev = capEffect.put(cap.name(), cap.effectName());
+                if (prev != null && !prev.equals(cap.effectName())) {
+                    throw new IrijCompiler.CompileException(
+                            "Capability '" + cap.name() + "' is bound to "
+                                    + "two different effects (" + prev + " and "
+                                    + cap.effectName() + ")"
+                                    + (cap.loc() != null
+                                            ? " at " + cap.loc().line() + ":" + cap.loc().col()
+                                            : ""));
+                }
             }
         }
         // Phase 5: reject `::: Any` in user code (non-stdlib modules).
@@ -207,8 +235,16 @@ public final class EffectRowChecker {
         if (inner != AMBIENT) inner.add(hd.effectName());
         String ctx = "handler " + hd.name();
         for (var s : hd.stateBindings()) walkStmt(s, inner, ctx);
-        for (var c : hd.clauses()) {
-            walkExpr(c.body(), inner, ctx + " clause " + c.opName());
+        // Surface the handler's effect to the walker so any cap references
+        // inside clause bodies are checked against it.
+        String savedClauseEffect = currentClauseEffect;
+        currentClauseEffect = hd.effectName();
+        try {
+            for (var c : hd.clauses()) {
+                walkExpr(c.body(), inner, ctx + " clause " + c.opName());
+            }
+        } finally {
+            currentClauseEffect = savedClauseEffect;
         }
     }
 
@@ -342,6 +378,35 @@ public final class EffectRowChecker {
             case Expr.JavaRef jr ->
                     requireEffect("JVM", "java-interop:" + jr.ref(), ctx, avail, jr.loc());
             case Expr.DotAccess da -> {
+                // Capability dot-access: `cap-name.method args` is the only
+                // legal way to use a cap. Three checks:
+                //   1. cap exists (always: it's in capEffect by definition).
+                //   2. we're inside a clause for the matching effect.
+                //   3. the cap-name itself is NOT walked as a bare Var
+                //      (would trip the bare-cap-reference check below).
+                if (da.target() instanceof Expr.Var v && capEffect.containsKey(v.name())) {
+                    String capEff = capEffect.get(v.name());
+                    if (currentClauseEffect == null
+                            || !currentClauseEffect.equals(capEff)) {
+                        throw new IrijCompiler.CompileException(
+                                "Capability '" + v.name() + "' is bound to effect '"
+                                        + capEff + "' and may only be used inside "
+                                        + "clauses of handlers for '" + capEff + "'"
+                                        + (currentClauseEffect != null
+                                                ? "; here we are inside a '"
+                                                  + currentClauseEffect + "' clause"
+                                                : "")
+                                        + (da.loc() != null
+                                                ? " at " + da.loc().line() + ":"
+                                                  + da.loc().col()
+                                                : ""));
+                    }
+                    // Legal cap use — short-circuit. Don't descend into the
+                    // target (would re-trigger the bare-Var cap check) and
+                    // don't run the per-ref-capability check below since
+                    // cap targets are not local-var bindings.
+                    return;
+                }
                 // Per-ref capability: if the receiver is a local var
                 // whose Bind spec named a declared effect, calling a
                 // method/field on it requires that effect — even if the
@@ -353,6 +418,24 @@ public final class EffectRowChecker {
                             ctx, avail, da.loc());
                 }
                 walkExpr(da.target(), avail, ctx);
+            }
+            case Expr.Var v -> {
+                // Option (a) stance: capabilities are not first-class
+                // values. A bare reference (assigning, returning, passing
+                // as an arg) is rejected. Use `cap-name.method args` to
+                // call through the cap; that path is handled in the
+                // DotAccess case above.
+                if (capEffect.containsKey(v.name())) {
+                    String capEff = capEffect.get(v.name());
+                    throw new IrijCompiler.CompileException(
+                            "Capability '" + v.name() + "' (bound to effect '"
+                                    + capEff + "') cannot be used as a value — "
+                                    + "only as a dot-access target like "
+                                    + "`" + v.name() + ".method args`"
+                                    + (v.loc() != null
+                                            ? " at " + v.loc().line() + ":" + v.loc().col()
+                                            : ""));
+                }
             }
             case Expr.IfExpr ie -> {
                 walkExpr(ie.cond(), avail, ctx);

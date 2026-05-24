@@ -183,4 +183,113 @@ class EffectRowLintTest {
         assertTrue(e.getMessage().contains("Console"),
                 () -> "expected Console-effect error, got: " + e.getMessage());
     }
+
+    // ── (4) capability declarations (cap … :: Eff = "JavaClass") ────
+    //
+    // Phase 1 surface: the `cap` decl parses + registers; references to
+    // a cap name are accepted only as dot-access targets inside clauses
+    // of handlers for the matching effect. Bare references and
+    // cross-effect references are rejected.
+
+    @Test
+    void capDeclParsesAndIsAcceptedInMatchingClause() {
+        // Cap bound to Db; used as dot-access target inside a Db-handler
+        // clause. (The clause body just calls a Java method on the cap
+        // and resumes; the emitter doesn't run this in phase 1 — the
+        // lint pass alone has to succeed.)
+        String src = """
+            effect Db
+              db-open :: Str -> Int
+            cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
+            handler default-db :: Db ::: JVM
+              db-open path => resume (db-jdbc.open path)
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void pubCapDeclParses() {
+        String src = """
+            effect Fs
+              fs-read :: Str -> Str
+            pub cap fs-files :: Fs = "dev.irij.runtime.FsCapability"
+            handler default-fs :: Fs ::: JVM
+              fs-read path => resume (fs-files.read path)
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void capRejectedOutsideAnyHandlerClause() {
+        // Reference to the cap from a plain user fn — not inside any
+        // handler clause — must be rejected.
+        String src = """
+            effect Db
+              db-open :: Str -> Int
+            cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
+            fn leak :: Str Int ::: JVM
+              (path -> db-jdbc.open path)
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("db-jdbc")
+                        && e.getMessage().toLowerCase().contains("cap"),
+                () -> "expected cap-misuse error, got: " + e.getMessage());
+    }
+
+    @Test
+    void capRejectedInWrongEffectClause() {
+        // Cap bound to Db, referenced from a Logger-handler clause body.
+        // Lint must reject the cross-effect reference.
+        String src = """
+            effect Db
+              db-open :: Str -> Int
+            effect Logger
+              log :: Str -> ()
+            cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
+            handler default-logger :: Logger ::: JVM
+              log msg => resume (db-jdbc.open msg)
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Db")
+                        && e.getMessage().contains("Logger"),
+                () -> "expected cross-effect cap error, got: " + e.getMessage());
+    }
+
+    @Test
+    void bareCapReferenceAsValueRejected() {
+        // Option (a) stance: caps are not first-class values. Using the
+        // cap-name in any non-dot-access position (here: as a bind RHS)
+        // is rejected even inside a matching-effect clause.
+        String src = """
+            effect Db
+              db-open :: Str -> Int
+            cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
+            handler default-db :: Db ::: JVM
+              db-open path =>
+                stashed := db-jdbc
+                resume (stashed.open path)
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().toLowerCase().contains("value")
+                        || e.getMessage().contains("dot-access"),
+                () -> "expected bare-cap-reference error, got: " + e.getMessage());
+    }
+
+    @Test
+    void duplicateCapNameWithDifferentEffectsRejected() {
+        // Two `cap` decls binding the same name to two different
+        // effects — should error at registration time, not silently
+        // overwrite.
+        String src = """
+            effect Db
+              db-open :: Str -> Int
+            effect Fs
+              fs-open :: Str -> Int
+            cap shared :: Db = "dev.irij.runtime.JdbcCapability"
+            cap shared :: Fs = "dev.irij.runtime.FsCapability"
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("shared"),
+                () -> "expected duplicate-cap error, got: " + e.getMessage());
+    }
 }

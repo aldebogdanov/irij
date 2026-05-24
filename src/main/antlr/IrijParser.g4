@@ -198,9 +198,21 @@ handlerClause
     ;
 
 // ── cap ──────────────────────────────────────────────────────────────
+//
+// `cap <name> :: <Effect> = "<provider-class>"`
+//
+// Binds a Java-side capability-provider class to an effect. The lower-case
+// `name` resolves only inside clauses of handlers for the matching effect
+// (enforced by EffectRowChecker). The provider class is given as a string
+// literal so the dotted classpath doesn't collide with expression-level
+// dot access (we can swap to a prettier form once we have a dedicated
+// JAVA_CLASS token; STRING keeps phase-1 unambiguous).
+//
+// `pub cap …` re-exports the binding through `use mod :open`; the name
+// is still only usable inside matching-effect handler clauses regardless.
 
 capDecl
-    : CAP upperName SPEC_ANN EFFECT (NEWLINE INDENT effectBody NEWLINE* DEDENT)?
+    : PUB? CAP IDENT SPEC_ANN upperName EQUALS STRING
     ;
 
 // ── proto ────────────────────────────────────────────────────────────

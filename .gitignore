@@ -27,3 +27,7 @@ entities.json
 
 # Bench harness cache (built JARs)
 bench/.cache/
+
+# Clojure editor caches
+.clj-kondo/
+.lsp/

@@ -107,7 +107,7 @@ build_irij_jar() {
             || "$ROOT/$bench/main.irj" -nt "$jar" \
             || "$irij_bin" -nt "$jar" ]]; then
         ( cd "$ROOT/$bench" \
-            && irij build main.irj -o "$jar" >/dev/null )
+            && irij build --direct-linking=true main.irj -o "$jar" >/dev/null )
     fi
     echo "$jar"
 }

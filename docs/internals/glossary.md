@@ -10,6 +10,7 @@ Terms used throughout the internals docs.
 | **Aardvark-DNS / Netavark** | Podman's networking stack — not relevant to Irij internals; mentioned only in deploy docs. |
 | **Blame** | In the spec system, the source location attributed for a spec or contract violation. Caller-side for input failures, callee-side for output failures (Findler/Felleisen 2002). |
 | **BuiltinFn** | Java-implemented function value (lives in `dev.irij.runtime`, referenced from the bytecode runtime). Effect-transparent — callback runs in caller's row. |
+| **Capability (cap)** | `cap <name> :: <Effect> = "<provider-class>"` top-level decl. Binds a lower-case name to a JVM provider class; the name resolves only as a dot-access target inside clauses of handlers for the matching effect. See `capabilities.md`. |
 | **CompiledHandler** | Bytecode-side handler value: `(name, effectName, clauses: Map<String, IrijFn>)`. Static fields hold handler state. |
 | **CompiledComposedHandler** | `(handlers: List<CompiledHandler>)` flattened from `>>` operator. |
 | **CompiledScopeHandle** | Runtime handle for `scope { fork ... }` blocks. Tracks spawned fibers + parent effect snapshots. |

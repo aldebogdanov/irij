@@ -48,7 +48,7 @@ public class AstBuilder {
         if (ctx.newtypeDecl() != null) return visitNewtypeDecl(ctx.newtypeDecl());
         if (ctx.effectDecl() != null) return visitEffectDecl(ctx.effectDecl());
         if (ctx.handlerDecl() != null) return visitHandlerDecl(ctx.handlerDecl());
-        if (ctx.capDecl() != null) return new Decl.StubDecl("cap", getText(ctx), loc);
+        if (ctx.capDecl() != null) return visitCapDecl(ctx.capDecl());
         if (ctx.protoDecl() != null) return visitProtoDecl(ctx.protoDecl());
         if (ctx.implDecl() != null) return visitImplDecl(ctx.implDecl());
         if (ctx.roleDecl() != null) return visitRoleDecl(ctx.roleDecl());
@@ -474,6 +474,22 @@ public class AstBuilder {
     private Decl visitNewtypeDecl(NewtypeDeclContext ctx) {
         String name = ctx.upperName().UPPER_NAME().getText();
         return new Decl.NewtypeDecl(name, loc(ctx));
+    }
+
+    // ── cap ─────────────────────────────────────────────────────────────
+
+    private Decl visitCapDecl(CapDeclContext ctx) {
+        boolean isPub = ctx.PUB() != null;
+        String name = ctx.IDENT().getText();
+        String effectName = ctx.upperName().UPPER_NAME().getText();
+        String rawString = ctx.STRING().getText();
+        // Strip the surrounding quotes and decode \\ + \" escapes; classpaths
+        // never contain newlines, tabs, or interpolation placeholders, so the
+        // minimal unescape here is enough.
+        String providerClass = rawString.substring(1, rawString.length() - 1)
+                .replace("\\\\", "\\")
+                .replace("\\\"", "\"");
+        return new Decl.CapDecl(isPub, name, effectName, providerClass, loc(ctx));
     }
 
     // ── effect / handler ────────────────────────────────────────────────
