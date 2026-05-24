@@ -1958,35 +1958,11 @@ final class ClassEmitter implements Opcodes {
                         "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
-            // ── R3 batch 6: sandboxed-interpreter tier ───────────────
-            case "raw-session-create" -> {
-                if (!isZeroArgCall(args)) return false;
-                mv.visitMethodInsn(INVOKESTATIC, SESSIONS, "rawSessionCreate",
-                        "()Ljava/lang/Object;", false);
-                return true;
-            }
-            case "raw-session-eval" -> {
-                if (args.size() != 3) return false;
-                emitExpr(args.get(0), mv, locals);
-                emitExpr(args.get(1), mv, locals);
-                emitExpr(args.get(2), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, SESSIONS, "rawSessionEval",
-                        "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
-                        false);
-                return true;
-            }
-            case "raw-session-destroy" -> {
-                return emitSessions1(args, mv, locals, "rawSessionDestroy");
-            }
-            case "raw-session-subscribe" -> {
-                return emitSessions2(args, mv, locals, "rawSessionSubscribe");
-            }
-            case "raw-session-unsubscribe" -> {
-                return emitSessions1(args, mv, locals, "rawSessionUnsubscribe");
-            }
-            case "raw-session-cleanup" -> {
-                return emitSessions1(args, mv, locals, "rawSessionCleanup");
-            }
+            // ── raw-session-* fast-paths removed phase 3e ────────────
+            //   Session effect now routes through std.session +
+            //   SessionCapability. raw-nrepl-eval-sandboxed kept as
+            //   an unannotated builtin for the standalone
+            //   `irij nrepl-eval-sandboxed` CLI path (no handler scope).
             case "raw-nrepl-eval-sandboxed" -> {
                 return emitSessions2(args, mv, locals, "rawNreplEvalSandboxed");
             }

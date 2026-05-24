@@ -102,13 +102,8 @@ public final class EffectRowChecker {
         // those).
         // Serve (HTTP server + SSE) raw-* removed phase 3c — routed
         // through ServeCapability via std.serve.
-        // Session (Playground sandbox)
-        for (String n : java.util.List.of(
-                "raw-session-create", "raw-session-eval", "raw-session-destroy",
-                "raw-session-subscribe", "raw-session-unsubscribe",
-                "raw-session-cleanup")) {
-            m.put(n, "Session");
-        }
+        // Session raw-* removed phase 3e — routed through
+        // SessionCapability via std.session.
         // Random — random-token is the auth-relevant entry; random-int /
         // random-float are intentionally NOT gated at compile time today
         // (they're called from many unannotated test fixtures), but

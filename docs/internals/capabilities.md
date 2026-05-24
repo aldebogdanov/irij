@@ -48,10 +48,13 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   raw-multipart-* names + their RuntimeSupport / Builtins / emit-
   table entries are all gone; sandbox's forbidden-list is empty
   (the dangerous names just no longer exist).
-- **3e — Session**: `SessionCapability` for the Playground sandbox
-  (raw-session-create, raw-session-eval, raw-session-destroy,
-  raw-session-subscribe, raw-session-unsubscribe,
-  raw-session-cleanup).
+- **3e — Session (shipped)**: `SessionCapability` (thin shim over
+  the existing `dev.irij.compiler.RuntimeSessions`, which can't
+  move to the runtime package because it instantiates
+  `BytecodeSession` directly). New `std.session` module exposes the
+  6-op Session effect; raw-session-* names + their emit fast-paths
+  delisted. `raw-nrepl-eval-sandboxed` kept as a plain builtin —
+  it's the CLI entry path with no handler scope.
 
 ## Syntax
 

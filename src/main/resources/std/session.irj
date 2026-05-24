@@ -1,0 +1,46 @@
+mod std.session
+
+;; Playground sandboxed-eval effect.
+;;
+;; Wraps the SessionCapability provider, which holds a server-wide
+;; map from session-id to BytecodeSession (per-connection class-
+;; loader + namespace) plus optional SSE writer for stdout streaming.
+;;
+;; Used by the irij.online playground subsystem. Not intended as a
+;; general user-facing API — production code that wants embedded
+;; eval should use std.nrepl or the BytecodeSession API directly.
+;;
+;; Usage:
+;;   use std.session :open
+;;
+;;   with default-session
+;;     id := session-create ()
+;;     result := session-eval id "1 + 1" 10000
+;;     session-destroy id
+
+pub effect Session
+  session-create :: Str
+  session-eval :: Str Str Int _
+  session-destroy :: Str ()
+  session-subscribe :: Str _ ()
+  session-unsubscribe :: Str ()
+  session-cleanup :: Int Int
+
+cap session-mgr :: Session = "dev.irij.runtime.SessionCapability"
+
+pub handler default-session :: Session ::: JVM
+  session-create =>
+    resume (session-mgr.create ())
+  session-eval id code timeout =>
+    resume (session-mgr.eval id code timeout)
+  session-destroy id =>
+    session-mgr.destroy id
+    resume ()
+  session-subscribe id sse =>
+    session-mgr.subscribe id sse
+    resume ()
+  session-unsubscribe id =>
+    session-mgr.unsubscribe id
+    resume ()
+  session-cleanup max-idle =>
+    resume (session-mgr.cleanup max-idle)
