@@ -34,8 +34,12 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
 - **3b — Http client (shipped)**: `HttpClientCapability`,
   `std.http` rewritten to route through `http-client.request`,
   `raw-http-request` delisted from all three registries.
-- **3c — Serve / SSE**: `HttpServerCapability` + `SseCapability`,
-  `std.serve` + `std.datastar`, `raw-http-serve` + `raw-sse-*`.
+- **3c — Serve / SSE (shipped)**: single `ServeCapability` holds
+  both the server loop and the SSE writer ops (they share the
+  `HttpExchange`, splitting would force shared plumbing back into
+  Irij). `std.serve` Serve effect grew `sse-response`, `sse-send`,
+  `sse-close`, `sse-closed?` ops; `std.datastar` rewritten to call
+  them. `raw-http-serve` + `raw-sse-*` delisted from all registries.
 - **3d — FS / Multipart**: `FsCapability` (read-file, write-file,
   list-dir, make-dir, delete-file, append-file, file-exists?),
   `MultipartCapability` (raw-multipart-field, raw-multipart-save).

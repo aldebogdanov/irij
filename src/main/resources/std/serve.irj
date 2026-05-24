@@ -3,12 +3,31 @@ mod std.serve
 ;; HTTP server framework for Irij.
 
 pub effect Serve
-  serve :: Int Fn -> ()
+  serve :: Int Fn ()
+  ;; SSE writer ops — phase 3c folded these into the Serve effect
+  ;; because the writer is per-HttpExchange and lives within the
+  ;; same dispatch surface as the request/response cycle.
+  sse-response :: _ _
+  sse-send :: _ Str Str ()
+  sse-close :: _ ()
+  sse-closed? :: _ Bool
 
-pub handler default-serve :: Serve ::: Console Serve
+cap server :: Serve = "dev.irij.runtime.ServeCapability"
+
+pub handler default-serve :: Serve ::: JVM
   serve port h =>
-    raw-http-serve port h
+    server.serve port h
     resume ()
+  sse-response request =>
+    resume (server.sseResponse request)
+  sse-send sse evt data =>
+    server.sseSend sse evt data
+    resume ()
+  sse-close sse =>
+    server.sseClose sse
+    resume ()
+  sse-closed? sse =>
+    resume (server.sseClosedQ sse)
 
 pub fn route :: Str Str Fn Map
   (method path action ->

@@ -1828,14 +1828,10 @@ final class ClassEmitter implements Opcodes {
             case "validate!"    -> { return emitRT2(args, mv, locals, "validateBang"); }
             // raw-db-* emit entries removed phase 3a; the Db effect ops
             // route through `db-jdbc.method` dispatch in std/db.irj.
-            // ── R3 batch 3: SSE + multipart + raw-http-serve ─────────
-            case "raw-sse-response"   -> { return emitRT1(args, mv, locals, "rawSseResponse"); }
-            case "raw-sse-send"       -> { return emitRT3(args, mv, locals, "rawSseSend"); }
-            case "raw-sse-close"      -> { return emitRT1(args, mv, locals, "rawSseClose"); }
-            case "raw-sse-closed?"    -> { return emitRT1(args, mv, locals, "rawSseClosedQ"); }
+            // raw-sse-* emit entries removed phase 3c (ServeCapability)
             case "raw-multipart-field" -> { return emitRT2(args, mv, locals, "rawMultipartField"); }
             case "raw-multipart-save"  -> { return emitRT3(args, mv, locals, "rawMultipartSave"); }
-            case "raw-http-serve"      -> { return emitRT2(args, mv, locals, "rawHttpServe"); }
+            // raw-http-serve emit entry removed phase 3c (ServeCapability)
             // ── R3 batch 4: JSON + FileIO + env / time ───────────────
             case "json-parse"          -> { return emitRT1(args, mv, locals, "jsonParse"); }
             case "json-encode"         -> { return emitRT1(args, mv, locals, "jsonEncode"); }

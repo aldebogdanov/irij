@@ -36,8 +36,7 @@ public final class Builtins {
     private static final List<String> SANDBOX_FORBIDDEN = List.of(
         "read-file", "write-file", "delete-file", "append-file",
         "make-dir", "list-dir", "file-exists?",
-        "raw-http-serve",  // raw-http-request removed phase 3b
-        "raw-multipart-field", "raw-multipart-save"
+        "raw-multipart-field", "raw-multipart-save"  // raw-http-* + raw-sse-* removed phase 3b/3c
     );
 
     /**

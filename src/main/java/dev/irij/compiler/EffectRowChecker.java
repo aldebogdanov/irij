@@ -105,12 +105,8 @@ public final class EffectRowChecker {
         // the cap path and are gated by the user-declared `effect Db` +
         // `handler default-db :: Db` (effect-row check already handles
         // those).
-        // Serve (HTTP server + SSE)
-        for (String n : java.util.List.of(
-                "raw-http-serve", "raw-sse-response", "raw-sse-send",
-                "raw-sse-close", "raw-sse-closed?")) {
-            m.put(n, "Serve");
-        }
+        // Serve (HTTP server + SSE) raw-* removed phase 3c — routed
+        // through ServeCapability via std.serve.
         // Session (Playground sandbox)
         for (String n : java.util.List.of(
                 "raw-session-create", "raw-session-eval", "raw-session-destroy",
