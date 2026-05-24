@@ -1645,11 +1645,7 @@ final class ClassEmitter implements Opcodes {
         java.util.Map.entry("make-dir",         "FileIO"),
         java.util.Map.entry("append-file",      "FileIO"),
         java.util.Map.entry("raw-multipart-save","FileIO"),
-        java.util.Map.entry("raw-db-open",      "Db"),
-        java.util.Map.entry("raw-db-query",     "Db"),
-        java.util.Map.entry("raw-db-exec",      "Db"),
-        java.util.Map.entry("raw-db-close",     "Db"),
-        java.util.Map.entry("raw-db-transaction","Db"),
+        // raw-db-* entries removed phase 3a (JdbcCapability path)
         java.util.Map.entry("sleep",            "Time"),
         java.util.Map.entry("now-ms",           "Time"),
         java.util.Map.entry("random-int",       "Random"),
@@ -1830,12 +1826,8 @@ final class ClassEmitter implements Opcodes {
             case "type-of"      -> { return emitRT1(args, mv, locals, "typeOf"); }
             case "validate"     -> { return emitRT2(args, mv, locals, "validate"); }
             case "validate!"    -> { return emitRT2(args, mv, locals, "validateBang"); }
-            // ── R3 batch 2: SQLite raw-db-* ──────────────────────────
-            case "raw-db-open"        -> { return emitRT1(args, mv, locals, "rawDbOpen"); }
-            case "raw-db-close"       -> { return emitRT1(args, mv, locals, "rawDbClose"); }
-            case "raw-db-query"       -> { return emitRT3(args, mv, locals, "rawDbQuery"); }
-            case "raw-db-exec"        -> { return emitRT3(args, mv, locals, "rawDbExec"); }
-            case "raw-db-transaction" -> { return emitRT2(args, mv, locals, "rawDbTransaction"); }
+            // raw-db-* emit entries removed phase 3a; the Db effect ops
+            // route through `db-jdbc.method` dispatch in std/db.irj.
             // ── R3 batch 3: SSE + multipart + raw-http-serve ─────────
             case "raw-sse-response"   -> { return emitRT1(args, mv, locals, "rawSseResponse"); }
             case "raw-sse-send"       -> { return emitRT3(args, mv, locals, "rawSseSend"); }

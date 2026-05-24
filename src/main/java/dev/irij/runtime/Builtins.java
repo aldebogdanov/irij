@@ -28,12 +28,15 @@ public final class Builtins {
     private static final java.io.BufferedReader STDIN_READER =
         new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
 
-    /** Forbidden builtins in sandbox mode — I/O, file, DB, HTTP. */
+    /** Forbidden builtins in sandbox mode — I/O, file, DB, HTTP.
+     *  raw-db-* removed in phase 3a (now reachable only via the
+     *  {@code Db} effect ops + {@code JdbcCapability} provider, both
+     *  unreachable in sandbox because the cap class is not on the
+     *  sandbox classpath). */
     private static final List<String> SANDBOX_FORBIDDEN = List.of(
         "read-file", "write-file", "delete-file", "append-file",
         "make-dir", "list-dir", "file-exists?",
         "raw-http-request", "raw-http-serve",
-        "raw-db-open", "raw-db-query", "raw-db-exec", "raw-db-close", "raw-db-transaction",
         "raw-multipart-field", "raw-multipart-save"
     );
 
@@ -654,77 +657,9 @@ public final class Builtins {
             return Values.UNIT;
         }));
 
-        // ── Database primitives (SQLite) ──────────────────────────────────
-
-        env.define("raw-db-open", new BuiltinFn("raw-db-open", 1, List.of("Db"), args -> {
-            var path = asString(args.get(0), "raw-db-open");
-            try {
-                var conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + path);
-                // Enable WAL mode for concurrent read support
-                try (var stmt = conn.createStatement()) {
-                    stmt.execute("PRAGMA journal_mode=WAL");
-                }
-                return new Tagged("DbConn", List.of(conn));
-            } catch (java.sql.SQLException e) {
-                throw new IrijRuntimeError("raw-db-open: " + e.getMessage());
-            }
-        }));
-
-        env.define("raw-db-query", new BuiltinFn("raw-db-query", 3, List.of("Db"), args -> {
-            var conn = extractConnection(args.get(0), "raw-db-query");
-            var sql = asString(args.get(1), "raw-db-query");
-            var params = extractParams(args.get(2), "raw-db-query");
-            try {
-                synchronized (conn) {
-                    var ps = conn.prepareStatement(sql);
-                    bindParams(ps, params);
-                    var rs = ps.executeQuery();
-                    var meta = rs.getMetaData();
-                    int cols = meta.getColumnCount();
-                    var rows = new ArrayList<Object>();
-                    while (rs.next()) {
-                        var row = new LinkedHashMap<String, Object>();
-                        for (int i = 1; i <= cols; i++) {
-                            var colName = meta.getColumnLabel(i);
-                            row.put(colName, sqlToIrij(rs, i, meta.getColumnType(i)));
-                        }
-                        rows.add(new IrijMap(row));
-                    }
-                    rs.close();
-                    ps.close();
-                    return new IrijVector(rows);
-                }
-            } catch (java.sql.SQLException e) {
-                throw new IrijRuntimeError("raw-db-query: " + e.getMessage());
-            }
-        }));
-
-        env.define("raw-db-exec", new BuiltinFn("raw-db-exec", 3, List.of("Db"), args -> {
-            var conn = extractConnection(args.get(0), "raw-db-exec");
-            var sql = asString(args.get(1), "raw-db-exec");
-            var params = extractParams(args.get(2), "raw-db-exec");
-            try {
-                synchronized (conn) {
-                    var ps = conn.prepareStatement(sql);
-                    bindParams(ps, params);
-                    long affected = ps.executeUpdate();
-                    ps.close();
-                    return affected;
-                }
-            } catch (java.sql.SQLException e) {
-                throw new IrijRuntimeError("raw-db-exec: " + e.getMessage());
-            }
-        }));
-
-        env.define("raw-db-close", new BuiltinFn("raw-db-close", 1, List.of("Db"), args -> {
-            var conn = extractConnection(args.get(0), "raw-db-close");
-            try {
-                conn.close();
-            } catch (java.sql.SQLException e) {
-                throw new IrijRuntimeError("raw-db-close: " + e.getMessage());
-            }
-            return Values.UNIT;
-        }));
+        // ── Database primitives — removed phase 3a ────────────────────────
+        // The Db effect surface is now reached through the std.db handler
+        // + JdbcCapability provider. Direct raw-db-* names are gone.
 
         // ── HTTP primitives ─────────────────────────────────────────────
         env.define("raw-http-request", new BuiltinFn("raw-http-request", 1, List.of("Http"),
@@ -1031,58 +966,8 @@ public final class Builtins {
         return new JsonPrimitive(Values.toIrijString(value));
     }
 
-    // ── Database helpers ──────────────────────────────────────────────
-
-    /** Extract the java.sql.Connection from a Tagged("DbConn", ...) value. */
-    static java.sql.Connection extractConnection(Object value, String context) {
-        if (value instanceof Tagged t && "DbConn".equals(t.tag()) && !t.fields().isEmpty()
-                && t.fields().get(0) instanceof java.sql.Connection c) {
-            return c;
-        }
-        throw new IrijRuntimeError(context + ": first argument must be a database connection (from db-open)");
-    }
-
-    /** Extract parameter list from an IrijVector. */
-    static List<Object> extractParams(Object value, String context) {
-        if (value instanceof IrijVector v) return v.elements();
-        throw new IrijRuntimeError(context + ": params must be a vector #[...]");
-    }
-
-    /** Bind Irij values to a PreparedStatement. */
-    static void bindParams(java.sql.PreparedStatement ps, List<Object> params) throws java.sql.SQLException {
-        for (int i = 0; i < params.size(); i++) {
-            var p = params.get(i);
-            if (p instanceof Long l)        ps.setLong(i + 1, l);
-            else if (p instanceof Double d) ps.setDouble(i + 1, d);
-            else if (p instanceof String s) ps.setString(i + 1, s);
-            else if (p instanceof Boolean b) ps.setBoolean(i + 1, b);
-            else if (p == Values.UNIT)      ps.setNull(i + 1, java.sql.Types.NULL);
-            else ps.setString(i + 1, Values.toIrijString(p));
-        }
-    }
-
-    /** Convert a SQL column value to an Irij value. */
-    static Object sqlToIrij(java.sql.ResultSet rs, int col, int sqlType) throws java.sql.SQLException {
-        var val = rs.getObject(col);
-        if (val == null) return Values.UNIT;
-        return switch (sqlType) {
-            case java.sql.Types.INTEGER, java.sql.Types.BIGINT, java.sql.Types.SMALLINT, java.sql.Types.TINYINT ->
-                rs.getLong(col);
-            case java.sql.Types.REAL, java.sql.Types.FLOAT, java.sql.Types.DOUBLE, java.sql.Types.DECIMAL,
-                 java.sql.Types.NUMERIC ->
-                rs.getDouble(col);
-            case java.sql.Types.BOOLEAN -> rs.getBoolean(col);
-            case java.sql.Types.BLOB -> {
-                var bytes = rs.getBytes(col);
-                yield java.util.Base64.getEncoder().encodeToString(bytes);
-            }
-            default -> {
-                // TEXT, VARCHAR, and anything else → String
-                var s = rs.getString(col);
-                yield s != null ? s : Values.UNIT;
-            }
-        };
-    }
+    // (DB extract/bind/conversion helpers removed in phase 3a; they live
+    // in JdbcCapability now.)
 
     static long asLong(Object value, String context) {
         if (value instanceof Long l) return l;

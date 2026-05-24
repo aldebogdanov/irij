@@ -101,12 +101,10 @@ public final class EffectRowChecker {
         for (String n : java.util.List.of("get-env", "env")) m.put(n, "Env");
         // Http (client)
         for (String n : java.util.List.of("raw-http-request")) m.put(n, "Http");
-        // Db
-        for (String n : java.util.List.of(
-                "raw-db-open", "raw-db-close", "raw-db-query",
-                "raw-db-exec", "raw-db-transaction")) {
-            m.put(n, "Db");
-        }
+        // Db raw-* entries removed phase 3a; the Db effect ops go through
+        // the cap path and are gated by the user-declared `effect Db` +
+        // `handler default-db :: Db` (effect-row check already handles
+        // those).
         // Serve (HTTP server + SSE)
         for (String n : java.util.List.of(
                 "raw-http-serve", "raw-sse-response", "raw-sse-send",

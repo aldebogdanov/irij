@@ -20,12 +20,28 @@ matching handler clause to a JavaRef-equivalent dispatch on the
 bound provider class. End-to-end tests in `CapDispatchTest` verify
 a real Irij program reaches a Java provider method through the cap.
 
-Phase 3 (next): migrate `std.db`, `std.http`, `std.fs`, `std.serve`
-to the pattern. Each effect gets a provider class under
-`dev.irij.runtime.*`; raw method bodies move out of
-`RuntimeSupport`'s `raw*` static methods into provider classes;
-`raw-*` builtin names get delisted from `Builtins`,
-`EffectRowChecker.BUILTIN_EFFECTS`, and `ClassEmitter`'s emit table.
+Phase 3 — stdlib migration, one effect at a time. Each sub-phase
+moves one provider class into `dev.irij.runtime.*`, rewrites the
+matching `std.*` module to use the cap, deletes the old `raw-*`
+surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
+`ClassEmitter` emit table, and updates the test fixture.
+
+- **3a — Db (shipped)**: `JdbcCapability` provider; `std.db`
+  exposes `db-open`, `db-close`, `db-query`, `db-exec`,
+  `db-transaction` as effect ops (was: open/close were plain fns
+  calling `raw-db-*`). `raw-db-*` names gone from the runtime
+  surface entirely; tests rewritten to use only effect ops.
+- **3b — Http client (next)**: `HttpClientCapability`,
+  `std.http` cleanup, `raw-http-request` delisted.
+- **3c — Serve / SSE**: `HttpServerCapability` + `SseCapability`,
+  `std.serve` + `std.datastar`, `raw-http-serve` + `raw-sse-*`.
+- **3d — FS / Multipart**: `FsCapability` (read-file, write-file,
+  list-dir, make-dir, delete-file, append-file, file-exists?),
+  `MultipartCapability` (raw-multipart-field, raw-multipart-save).
+- **3e — Session**: `SessionCapability` for the Playground sandbox
+  (raw-session-create, raw-session-eval, raw-session-destroy,
+  raw-session-subscribe, raw-session-unsubscribe,
+  raw-session-cleanup).
 
 ## Syntax
 

@@ -1436,162 +1436,17 @@ public final class RuntimeSupport {
     public static final IrijFn SEQ_ALL     = args -> seqAll(args[0]);
     public static final IrijFn SEQ_ANY     = args -> seqAny(args[0]);
 
-    // ── SQLite raw-db-* (Phase R3 batch 2) ─────────────────────────────
+    // ── SQLite raw-db-* — REMOVED phase 3a ──────────────────────────────
     //
-    // Mirrors the interpreter's `raw-db-*` builtins exactly: same
-    // jdbc:sqlite URL, same WAL pragma, same Tagged("DbConn", [conn])
-    // wrapper, same value coercion in/out. Both back-ends use the
-    // same Tagged wrapper, so a connection opened in interp mode can
-    // be passed to bytecode code and vice versa (within a JVM).
-
-    public static Object rawDbOpen(Object pathArg) {
-        String path = asStr(pathArg, "raw-db-open");
-        try {
-            java.sql.Connection conn = java.sql.DriverManager.getConnection("jdbc:sqlite:" + path);
-            try (var stmt = conn.createStatement()) {
-                stmt.execute("PRAGMA journal_mode=WAL");
-            }
-            return new dev.irij.runtime.Values.Tagged(
-                    "DbConn", java.util.List.of(conn), null, null);
-        } catch (java.sql.SQLException e) {
-            throw new dev.irij.IrijRuntimeError("raw-db-open: " + e.getMessage());
-        }
-    }
-
-    public static Object rawDbClose(Object connArg) {
-        java.sql.Connection conn = extractConnection(connArg, "raw-db-close");
-        try { conn.close(); }
-        catch (java.sql.SQLException e) {
-            throw new dev.irij.IrijRuntimeError("raw-db-close: " + e.getMessage());
-        }
-        return dev.irij.runtime.Values.UNIT;
-    }
-
-    public static Object rawDbQuery(Object connArg, Object sqlArg, Object paramsArg) {
-        java.sql.Connection conn = extractConnection(connArg, "raw-db-query");
-        String sql = asStr(sqlArg, "raw-db-query");
-        java.util.List<Object> params = extractParams(paramsArg, "raw-db-query");
-        try {
-            synchronized (conn) {
-                java.sql.PreparedStatement ps = conn.prepareStatement(sql);
-                bindParams(ps, params);
-                java.sql.ResultSet rs = ps.executeQuery();
-                java.sql.ResultSetMetaData meta = rs.getMetaData();
-                int cols = meta.getColumnCount();
-                java.util.List<Object> rows = new java.util.ArrayList<>();
-                while (rs.next()) {
-                    java.util.LinkedHashMap<String, Object> row = new java.util.LinkedHashMap<>();
-                    for (int i = 1; i <= cols; i++) {
-                        row.put(meta.getColumnLabel(i),
-                                sqlToIrij(rs, i, meta.getColumnType(i)));
-                    }
-                    rows.add(new dev.irij.runtime.Values.IrijMap(row));
-                }
-                rs.close();
-                ps.close();
-                return new dev.irij.runtime.Values.IrijVector(rows);
-            }
-        } catch (java.sql.SQLException e) {
-            throw new dev.irij.IrijRuntimeError("raw-db-query: " + e.getMessage());
-        }
-    }
-
-    public static Object rawDbExec(Object connArg, Object sqlArg, Object paramsArg) {
-        java.sql.Connection conn = extractConnection(connArg, "raw-db-exec");
-        String sql = asStr(sqlArg, "raw-db-exec");
-        java.util.List<Object> params = extractParams(paramsArg, "raw-db-exec");
-        try {
-            synchronized (conn) {
-                java.sql.PreparedStatement ps = conn.prepareStatement(sql);
-                bindParams(ps, params);
-                long affected = ps.executeUpdate();
-                ps.close();
-                return affected;
-            }
-        } catch (java.sql.SQLException e) {
-            throw new dev.irij.IrijRuntimeError("raw-db-exec: " + e.getMessage());
-        }
-    }
-
-    public static Object rawDbTransaction(Object connArg, Object thunk) {
-        java.sql.Connection conn = extractConnection(connArg, "raw-db-transaction");
-        try {
-            synchronized (conn) {
-                boolean savedAutoCommit = conn.getAutoCommit();
-                conn.setAutoCommit(false);
-                try {
-                    Object result = callAny(thunk, new Object[0]);
-                    conn.commit();
-                    return result;
-                } catch (Throwable t) {
-                    try { conn.rollback(); } catch (java.sql.SQLException ignored) {}
-                    if (t instanceof dev.irij.IrijRuntimeError ire) throw ire;
-                    if (t instanceof RuntimeException re) throw re;
-                    throw new dev.irij.IrijRuntimeError(
-                            "raw-db-transaction: " + t.getMessage());
-                } finally {
-                    try { conn.setAutoCommit(savedAutoCommit); } catch (java.sql.SQLException ignored) {}
-                }
-            }
-        } catch (java.sql.SQLException e) {
-            throw new dev.irij.IrijRuntimeError("raw-db-transaction: " + e.getMessage());
-        }
-    }
-
-    private static java.sql.Connection extractConnection(Object value, String op) {
-        if (value instanceof dev.irij.runtime.Values.Tagged t
-                && "DbConn".equals(t.tag())
-                && !t.fields().isEmpty()
-                && t.fields().get(0) instanceof java.sql.Connection c) {
-            return c;
-        }
-        throw new dev.irij.IrijRuntimeError(
-                op + ": first argument must be a database connection (from db-open)");
-    }
-
-    private static java.util.List<Object> extractParams(Object value, String op) {
-        if (value instanceof dev.irij.runtime.Values.IrijVector v) return v.elements();
-        throw new dev.irij.IrijRuntimeError(op + ": params must be a vector #[...]");
-    }
-
-    private static void bindParams(java.sql.PreparedStatement ps, java.util.List<Object> params)
-            throws java.sql.SQLException {
-        for (int i = 0; i < params.size(); i++) {
-            Object p = params.get(i);
-            if (p instanceof Long l)         ps.setLong(i + 1, l);
-            else if (p instanceof Double d)  ps.setDouble(i + 1, d);
-            else if (p instanceof String s)  ps.setString(i + 1, s);
-            else if (p instanceof Boolean b) ps.setBoolean(i + 1, b);
-            else if (p == dev.irij.runtime.Values.UNIT || p == null) {
-                ps.setNull(i + 1, java.sql.Types.NULL);
-            } else {
-                ps.setString(i + 1, dev.irij.runtime.Values.toIrijString(p));
-            }
-        }
-    }
-
-    private static Object sqlToIrij(java.sql.ResultSet rs, int col, int sqlType)
-            throws java.sql.SQLException {
-        Object val = rs.getObject(col);
-        if (val == null) return dev.irij.runtime.Values.UNIT;
-        return switch (sqlType) {
-            case java.sql.Types.INTEGER, java.sql.Types.BIGINT,
-                 java.sql.Types.SMALLINT, java.sql.Types.TINYINT ->
-                rs.getLong(col);
-            case java.sql.Types.REAL, java.sql.Types.FLOAT, java.sql.Types.DOUBLE,
-                 java.sql.Types.DECIMAL, java.sql.Types.NUMERIC ->
-                rs.getDouble(col);
-            case java.sql.Types.BOOLEAN -> rs.getBoolean(col);
-            case java.sql.Types.BLOB -> {
-                byte[] bytes = rs.getBytes(col);
-                yield java.util.Base64.getEncoder().encodeToString(bytes);
-            }
-            default -> {
-                String s = rs.getString(col);
-                yield s != null ? s : dev.irij.runtime.Values.UNIT;
-            }
-        };
-    }
+    // The Db effect surface (`db-open`, `db-close`, `db-query`,
+    // `db-exec`, `db-transaction`) is now routed through
+    // `cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"` in
+    // std/db.irj. The provider class owns every JDBC body + the
+    // param/connection extraction helpers. The old `rawDb*` statics
+    // here, the `raw-db-*` Builtins.install entries, and the
+    // matching emit-table entries in ClassEmitter were all deleted —
+    // single canonical path through the cap, no more two-paths-to-
+    // the-same-op footgun.
 
     // ── SSE raw-sse-* (Phase R3 batch 3) ───────────────────────────────
 
