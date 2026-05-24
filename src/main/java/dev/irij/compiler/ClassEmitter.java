@@ -1934,10 +1934,10 @@ final class ClassEmitter implements Opcodes {
                 mv.visitInsn(POP);
                 return true;
             }
-            // ── R3 final batch: toml-parse, println, raw-http-request,
-            //    flip handled below ───────────────────────────────────
+            // ── R3 final batch: toml-parse, println, flip handled below ─
             case "toml-parse"       -> { return emitRT1(args, mv, locals, "tomlParse"); }
-            case "raw-http-request" -> { return emitRT1(args, mv, locals, "rawHttpRequest"); }
+            // raw-http-request emit entry removed phase 3b
+            //   (HttpClientCapability path via std.http)
             case "flip" -> {
                 // flip f a b → f b a. Three-arg call form. The
                 // interpreter's BuiltinFn version errors because of

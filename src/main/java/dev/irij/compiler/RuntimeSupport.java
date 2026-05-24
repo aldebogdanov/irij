@@ -1277,11 +1277,9 @@ public final class RuntimeSupport {
         return dev.irij.runtime.Values.UNIT;
     }
 
-    public static Object rawHttpRequest(Object optsArg) {
-        // Delegate to interp's BuiltinFn via a single direct call.
-        // Move to standalone impl post-R5 (interp deletion).
-        return dev.irij.runtime.Builtins.rawHttpRequestImpl(optsArg);
-    }
+    // rawHttpRequest removed phase 3b — Http effect now routes through
+    // `cap http-client :: Http = "dev.irij.runtime.HttpClientCapability"`
+    // in std/http.irj.
 
     public static Object readLine() {
         try {

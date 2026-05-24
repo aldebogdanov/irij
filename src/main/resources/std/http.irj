@@ -23,20 +23,24 @@ mod std.http
 ;;     fetch-users "http://test"
 
 pub effect Http
-  http-get :: Str -> Map
-  http-post :: Str Str Map -> Map
-  http-put :: Str Str Map -> Map
-  http-delete :: Str -> Map
-  http-request :: Map -> Map
+  http-get :: Str Map
+  http-post :: Str Str Map Map
+  http-put :: Str Str Map Map
+  http-delete :: Str Map
+  http-request :: Map Map
 
-pub handler default-http :: Http ::: Http
+;; Capability binding. The `http-client` name resolves only inside
+;; Http-handler clauses.
+cap http-client :: Http = "dev.irij.runtime.HttpClientCapability"
+
+pub handler default-http :: Http ::: JVM
   http-get url =>
-    resume (raw-http-request {method= "GET" url= url})
+    resume (http-client.request {method= "GET" url= url})
   http-post url body headers =>
-    resume (raw-http-request {method= "POST" url= url body= body headers= headers})
+    resume (http-client.request {method= "POST" url= url body= body headers= headers})
   http-put url body headers =>
-    resume (raw-http-request {method= "PUT" url= url body= body headers= headers})
+    resume (http-client.request {method= "PUT" url= url body= body headers= headers})
   http-delete url =>
-    resume (raw-http-request {method= "DELETE" url= url})
+    resume (http-client.request {method= "DELETE" url= url})
   http-request opts =>
-    resume (raw-http-request opts)
+    resume (http-client.request opts)

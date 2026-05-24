@@ -31,8 +31,9 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   `db-transaction` as effect ops (was: open/close were plain fns
   calling `raw-db-*`). `raw-db-*` names gone from the runtime
   surface entirely; tests rewritten to use only effect ops.
-- **3b — Http client (next)**: `HttpClientCapability`,
-  `std.http` cleanup, `raw-http-request` delisted.
+- **3b — Http client (shipped)**: `HttpClientCapability`,
+  `std.http` rewritten to route through `http-client.request`,
+  `raw-http-request` delisted from all three registries.
 - **3c — Serve / SSE**: `HttpServerCapability` + `SseCapability`,
   `std.serve` + `std.datastar`, `raw-http-serve` + `raw-sse-*`.
 - **3d — FS / Multipart**: `FsCapability` (read-file, write-file,
