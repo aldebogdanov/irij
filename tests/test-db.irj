@@ -14,99 +14,99 @@ use std.db :open
 ;; ── open / close ─────────────────────────────────────────────────
 
 fn open-close-body ::: Db
-  _ =>
-    conn := db-open ":memory:"
-    result := type-of conn
-    db-close conn
-    result
+  =>
+  conn := db-open ":memory:"
+  result := type-of conn
+  db-close conn
+  result
 
 fn test-open-close ::: Db
-  _ =>
-    with default-db
-      open-close-body ()
+  =>
+  with default-db
+    open-close-body ()
 
 test "db-open and db-close" (-> assert-eq "DbConn" (test-open-close ()))
 
 ;; ── round-trip ────────────────────────────────────────────────────
 
 fn round-trip-body ::: Db
-  _ =>
-    conn := db-open ":memory:"
-    db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)" #[]
-    db-exec conn "INSERT INTO t (name) VALUES (?)" #["Alice"]
-    db-exec conn "INSERT INTO t (name) VALUES (?)" #["Bob"]
-    rows := db-query conn "SELECT * FROM t ORDER BY id" #[]
-    assert-eq 2 (length rows)
-    assert-eq "Alice" (head rows).name
-    assert-eq "Bob" (head (tail rows)).name
-    db-close conn
+  =>
+  conn := db-open ":memory:"
+  db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)" #[]
+  db-exec conn "INSERT INTO t (name) VALUES (?)" #["Alice"]
+  db-exec conn "INSERT INTO t (name) VALUES (?)" #["Bob"]
+  rows := db-query conn "SELECT * FROM t ORDER BY id" #[]
+  assert-eq 2 (length rows)
+  assert-eq "Alice" (head rows).name
+  assert-eq "Bob" (head (tail rows)).name
+  db-close conn
 
 fn test-round-trip ::: Db
-  _ =>
-    with default-db
-      round-trip-body ()
+  =>
+  with default-db
+    round-trip-body ()
 
 test "db-exec + db-query round-trip" (-> test-round-trip ())
 
 ;; ── affected count ───────────────────────────────────────────────
 
 fn affected-body ::: Db
-  _ =>
-    conn := db-open ":memory:"
-    db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)" #[]
-    db-exec conn "INSERT INTO t (v) VALUES (?)" #["a"]
-    db-exec conn "INSERT INTO t (v) VALUES (?)" #["b"]
-    db-exec conn "INSERT INTO t (v) VALUES (?)" #["c"]
-    n := db-exec conn "DELETE FROM t WHERE id > ?" #[1]
-    db-close conn
-    n
+  =>
+  conn := db-open ":memory:"
+  db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)" #[]
+  db-exec conn "INSERT INTO t (v) VALUES (?)" #["a"]
+  db-exec conn "INSERT INTO t (v) VALUES (?)" #["b"]
+  db-exec conn "INSERT INTO t (v) VALUES (?)" #["c"]
+  n := db-exec conn "DELETE FROM t WHERE id > ?" #[1]
+  db-close conn
+  n
 
 fn test-affected ::: Db
-  _ =>
-    with default-db
-      affected-body ()
+  =>
+  with default-db
+    affected-body ()
 
 test "db-exec returns affected count" (-> assert-eq 2 (test-affected ()))
 
 ;; ── type coercion ────────────────────────────────────────────────
 
 fn types-body ::: Db
-  _ =>
-    conn := db-open ":memory:"
-    db-exec conn "CREATE TABLE t (i INTEGER, r REAL, s TEXT)" #[]
-    db-exec conn "INSERT INTO t VALUES (?, ?, ?)" #[42 3.14 "hello"]
-    rows := db-query conn "SELECT * FROM t" #[]
-    row := head rows
-    assert-eq "Int" (type-of row.i)
-    assert-eq "Float" (type-of row.r)
-    assert-eq "Str" (type-of row.s)
-    assert-eq 42 row.i
-    db-close conn
+  =>
+  conn := db-open ":memory:"
+  db-exec conn "CREATE TABLE t (i INTEGER, r REAL, s TEXT)" #[]
+  db-exec conn "INSERT INTO t VALUES (?, ?, ?)" #[42 3.14 "hello"]
+  rows := db-query conn "SELECT * FROM t" #[]
+  row := head rows
+  assert-eq "Int" (type-of row.i)
+  assert-eq "Float" (type-of row.r)
+  assert-eq "Str" (type-of row.s)
+  assert-eq 42 row.i
+  db-close conn
 
 fn test-types ::: Db
-  _ =>
-    with default-db
-      types-body ()
+  =>
+  with default-db
+    types-body ()
 
 test "query returns correct types" (-> test-types ())
 
 ;; ── null round-trip ──────────────────────────────────────────────
 
 fn null-body ::: Db
-  _ =>
-    conn := db-open ":memory:"
-    db-exec conn "CREATE TABLE t (a TEXT, b TEXT)" #[]
-    db-exec conn "INSERT INTO t VALUES (?, ?)" #["x" ()]
-    rows := db-query conn "SELECT * FROM t" #[]
-    row := head rows
-    assert-eq "x" row.a
-    assert-eq "Unit" (type-of row.b)
-    db-close conn
+  =>
+  conn := db-open ":memory:"
+  db-exec conn "CREATE TABLE t (a TEXT, b TEXT)" #[]
+  db-exec conn "INSERT INTO t VALUES (?, ?)" #["x" ()]
+  rows := db-query conn "SELECT * FROM t" #[]
+  row := head rows
+  assert-eq "x" row.a
+  assert-eq "Unit" (type-of row.b)
+  db-close conn
 
 fn test-null ::: Db
-  _ =>
-    with default-db
-      null-body ()
+  =>
+  with default-db
+    null-body ()
 
 test "query with null values" (-> test-null ())
 
@@ -117,19 +117,19 @@ fn tx-commit-insert ::: Db
   db-exec conn "INSERT INTO t (v) VALUES (?)" #["inside-tx"]
 
 fn tx-commit-body ::: Db
-  _ =>
-    conn := db-open ":memory:"
-    db-exec conn "CREATE TABLE t (v TEXT)" #[]
-    db-transaction conn (-> tx-commit-insert conn)
-    rows := db-query conn "SELECT * FROM t" #[]
-    assert-eq 1 (length rows)
-    assert-eq "inside-tx" (head rows).v
-    db-close conn
+  =>
+  conn := db-open ":memory:"
+  db-exec conn "CREATE TABLE t (v TEXT)" #[]
+  db-transaction conn (-> tx-commit-insert conn)
+  rows := db-query conn "SELECT * FROM t" #[]
+  assert-eq 1 (length rows)
+  assert-eq "inside-tx" (head rows).v
+  db-close conn
 
 fn test-tx-commit ::: Db
-  _ =>
-    with default-db
-      tx-commit-body ()
+  =>
+  with default-db
+    tx-commit-body ()
 
 test "db-transaction commits" (-> test-tx-commit ())
 
@@ -143,18 +143,18 @@ fn tx-rollback-attempt ::: Db
   db-transaction conn (-> insert-and-fail conn)
 
 fn tx-rollback-body ::: Db
-  _ =>
-    conn := db-open ":memory:"
-    db-exec conn "CREATE TABLE t (v TEXT)" #[]
-    try (-> tx-rollback-attempt conn)
-    rows := db-query conn "SELECT * FROM t" #[]
-    assert-eq 0 (length rows)
-    db-close conn
+  =>
+  conn := db-open ":memory:"
+  db-exec conn "CREATE TABLE t (v TEXT)" #[]
+  try (-> tx-rollback-attempt conn)
+  rows := db-query conn "SELECT * FROM t" #[]
+  assert-eq 0 (length rows)
+  db-close conn
 
 fn test-tx-rollback ::: Db
-  _ =>
-    with default-db
-      tx-rollback-body ()
+  =>
+  with default-db
+    tx-rollback-body ()
 
 test "db-transaction rolls back on error" (-> test-tx-rollback ())
 
@@ -177,17 +177,17 @@ fn fetch-users ::: Db
   (conn -> db-query conn "SELECT * FROM users" #[])
 
 fn mock-body ::: Db
-  _ =>
-    conn := db-open "ignored"
-    users := fetch-users conn
-    db-close conn
-    assert-eq 1 (length users)
-    assert-eq "mock-alice" (head users).name
-    assert-eq 99 (head users).age
+  =>
+  conn := db-open "ignored"
+  users := fetch-users conn
+  db-close conn
+  assert-eq 1 (length users)
+  assert-eq "mock-alice" (head users).name
+  assert-eq 99 (head users).age
 
 fn test-mock ::: Db
-  _ =>
-    with mock-db
-      mock-body ()
+  =>
+  with mock-db
+    mock-body ()
 
 test "mock Db handler" (-> test-mock ())

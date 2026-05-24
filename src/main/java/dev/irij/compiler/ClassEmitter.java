@@ -4363,7 +4363,38 @@ final class ClassEmitter implements Opcodes {
                     for (Stmt t : ifs.elseBranch()) collectFreeVarsStmt(t, bElse, outer, out, seen);
                 }
             }
-            default -> { /* others rare inside clause bodies */ }
+            case Stmt.With w -> {
+                // The handler expression + body can both reference outer
+                // locals. Without this case, nested `with` blocks in a fn
+                // body would drop fn-param captures from the SM step's
+                // capture list — the inner step then can't see them and
+                // names fall through to the "Unbound variable" runtime
+                // lookup. Each `with` body opens its own scope; new binds
+                // inside the body don't leak out, so use a fresh bound-set
+                // copy (same shape as the IfStmt case above).
+                collectFreeVars(w.handler(), bound, outer, out, seen);
+                Set<String> bBody = new HashSet<>(bound);
+                for (Stmt t : w.body()) collectFreeVarsStmt(t, bBody, outer, out, seen);
+                if (w.onFailure() != null) {
+                    Set<String> bOf = new HashSet<>(bound);
+                    for (Stmt t : w.onFailure()) collectFreeVarsStmt(t, bOf, outer, out, seen);
+                }
+            }
+            case Stmt.Scope sc -> {
+                Set<String> bBody = new HashSet<>(bound);
+                bBody.add(sc.name());                  // scope handle name
+                for (Stmt t : sc.body()) collectFreeVarsStmt(t, bBody, outer, out, seen);
+            }
+            case Stmt.MatchStmt ms -> {
+                collectFreeVars(ms.scrutinee(), bound, outer, out, seen);
+                for (Expr.MatchArm arm : ms.arms()) {
+                    Set<String> b2 = new HashSet<>(bound);
+                    collectPatternBinds(arm.pattern(), b2);
+                    collectFreeVars(arm.guard(), b2, outer, out, seen);
+                    collectFreeVars(arm.body(), b2, outer, out, seen);
+                }
+            }
+            default -> {}
         }
     }
 

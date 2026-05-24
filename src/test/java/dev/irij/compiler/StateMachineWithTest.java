@@ -622,6 +622,34 @@ class StateMachineWithTest {
     // Outer `with h2 (with h1 body)`. Inner SM frame catches its own effect;
     // anything else propagates out and is caught by the outer SM frame.
 
+    @Test void nested_with_captures_fn_param_across_inner_step() throws Exception {
+        // Regression: prior to the fix in collectFreeVarsStmt, `Stmt.With`
+        // fell through the default arm so an inner `with` block's body
+        // never propagated its free vars up to the outer SM step's
+        // capture list. A fn-param referenced from inside two nested
+        // `with` frames showed up as "Unbound variable" at runtime.
+        // Verifies fn-param `name` reaches the inner clause body
+        // through two SM frames.
+        String src = """
+            effect Logger
+              log :: Str -> ()
+            effect Greet
+              greet :: Str -> Str
+            handler quiet-log :: Logger ::: Console
+              log msg => resume ()
+            handler friendly :: Greet ::: Console
+              greet n => resume ("Hi, " ++ n)
+            fn run :: Str Str ::: Console
+              => name
+              with quiet-log
+                with friendly
+                  log "before"
+                  greet name
+            println (run "Ana")
+            """;
+        assertEquals(nl("Hi, Ana"), runSM(src));
+    }
+
     @Test void nested_with_inner_handles_inner_effect() throws Exception {
         String src = """
             effect Logger

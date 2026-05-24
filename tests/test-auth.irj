@@ -26,63 +26,63 @@ test "hmac-sha256-hex changes with key" (->
 ;; ── random-token ──────────────────────────────────────────
 
 fn run-random-token ::: Random
-  _ =>
-    t := random-token 32
-    ;; 32 bytes ⇒ 43-char URL-safe base64 (no padding).
-    assert-eq (length t) 43
+  =>
+  t := random-token 32
+  ;; 32 bytes ⇒ 43-char URL-safe base64 (no padding).
+  assert-eq (length t) 43
 
 fn wrap-random-token ::: Random
-  _ =>
-    with default-random
-      run-random-token ()
+  =>
+  with default-random
+    run-random-token ()
 
 test "random-token 32 bytes ⇒ 43 chars" (-> wrap-random-token ())
 
 fn run-random-token-uniqueness ::: Random
-  _ =>
-    a := random-token 32
-    b := random-token 32
-    assert-true (a /= b)
+  =>
+  a := random-token 32
+  b := random-token 32
+  assert-true (a /= b)
 
 fn wrap-random-token-uniqueness ::: Random
-  _ =>
-    with default-random
-      run-random-token-uniqueness ()
+  =>
+  with default-random
+    run-random-token-uniqueness ()
 
 test "random-token returns fresh values" (-> wrap-random-token-uniqueness ())
 
 ;; ── hash-password / verify-password ───────────────────────
 
 fn run-roundtrip ::: Random
-  _ =>
-    salt := new-salt ()
-    stored := hash-password salt "hunter2"
-    assert-true (verify-password stored "hunter2")
-    assert-true (! (verify-password stored "wrong-password"))
+  =>
+  salt := new-salt ()
+  stored := hash-password salt "hunter2"
+  assert-true (verify-password stored "hunter2")
+  assert-true (! (verify-password stored "wrong-password"))
 
 fn wrap-roundtrip ::: Random
-  _ =>
-    with default-random
-      run-roundtrip ()
+  =>
+  with default-random
+    run-roundtrip ()
 
 test "hash-password / verify-password round-trip" (-> wrap-roundtrip ())
 
 fn run-different-salts ::: Random
-  _ =>
-    salt-a := new-salt ()
-    salt-b := new-salt ()
-    h-a := hash-password salt-a "same-password"
-    h-b := hash-password salt-b "same-password"
-    ;; Different salts ⇒ different stored hashes for the same password.
-    assert-true (h-a /= h-b)
-    ;; Both still verify against the original password.
-    assert-true (verify-password h-a "same-password")
-    assert-true (verify-password h-b "same-password")
+  =>
+  salt-a := new-salt ()
+  salt-b := new-salt ()
+  h-a := hash-password salt-a "same-password"
+  h-b := hash-password salt-b "same-password"
+  ;; Different salts ⇒ different stored hashes for the same password.
+  assert-true (h-a /= h-b)
+  ;; Both still verify against the original password.
+  assert-true (verify-password h-a "same-password")
+  assert-true (verify-password h-b "same-password")
 
 fn wrap-different-salts ::: Random
-  _ =>
-    with default-random
-      run-different-salts ()
+  =>
+  with default-random
+    run-different-salts ()
 
 test "salt makes identical passwords store differently" (-> wrap-different-salts ())
 

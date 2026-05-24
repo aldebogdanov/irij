@@ -35,69 +35,69 @@ fn load ::: FileIO
 ;; ── Tests with mock handler ───────────────────────────────────────
 
 fn run-write-read
-  _ =>
-    with mock-fs
-      save "test.txt" "hello"
-      load "test.txt"
+  =>
+  with mock-fs
+    save "test.txt" "hello"
+    load "test.txt"
 
 r1 := test "write then read" (-> assert-eq "hello" (run-write-read ()))
 
 fn run-exists
-  _ =>
-    with mock-fs
-      save "a.txt" "data"
-      fs-exists? "a.txt"
+  =>
+  with mock-fs
+    save "a.txt" "data"
+    fs-exists? "a.txt"
 
 r2 := test "file exists after write" (-> assert-true (run-exists ()))
 
 fn run-delete
-  _ =>
-    with mock-fs
-      save "a.txt" "data"
-      fs-delete "a.txt"
-      fs-exists? "a.txt"
+  =>
+  with mock-fs
+    save "a.txt" "data"
+    fs-delete "a.txt"
+    fs-exists? "a.txt"
 
 r3 := test "file gone after delete" (-> assert-false (run-delete ()))
 
 fn run-append
-  _ =>
-    with mock-fs
-      fs-write "log.txt" "line1"
-      fs-append "log.txt" " line2"
-      fs-read "log.txt"
+  =>
+  with mock-fs
+    fs-write "log.txt" "line1"
+    fs-append "log.txt" " line2"
+    fs-read "log.txt"
 
 r4 := test "append to file" (-> assert-eq "line1 line2" (run-append ()))
 
 fn run-list
-  _ =>
-    with mock-fs
-      before := fs-list-dir "."
-      fs-write "x.txt" "1"
-      fs-write "y.txt" "2"
-      after := fs-list-dir "."
-      (length after) - (length before)
+  =>
+  with mock-fs
+    before := fs-list-dir "."
+    fs-write "x.txt" "1"
+    fs-write "y.txt" "2"
+    after := fs-list-dir "."
+    (length after) - (length before)
 
 r5 := test "list dir adds entries" (-> assert-eq 2 (run-list ()))
 
 ;; ── Real FS (write + read + cleanup) ─────────────────────────────
 
 fn run-real-fs
-  _ =>
-    with default-fs
-      fs-write "/tmp/irij-test-fs.txt" "real data"
-      result := fs-read "/tmp/irij-test-fs.txt"
-      fs-delete "/tmp/irij-test-fs.txt"
-      result
+  =>
+  with default-fs
+    fs-write "/tmp/irij-test-fs.txt" "real data"
+    result := fs-read "/tmp/irij-test-fs.txt"
+    fs-delete "/tmp/irij-test-fs.txt"
+    result
 
 r6 := test "real fs write/read/delete" (-> assert-eq "real data" (run-real-fs ()))
 
 fn run-real-mkdir
-  _ =>
-    with default-fs
-      fs-mkdir "/tmp/irij-test-dir"
-      result := fs-exists? "/tmp/irij-test-dir"
-      fs-delete "/tmp/irij-test-dir"
-      result
+  =>
+  with default-fs
+    fs-mkdir "/tmp/irij-test-dir"
+    result := fs-exists? "/tmp/irij-test-dir"
+    fs-delete "/tmp/irij-test-dir"
+    result
 
 r7 := test "real fs mkdir + exists" (-> assert-true (run-real-mkdir ()))
 

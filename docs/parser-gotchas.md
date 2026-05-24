@@ -126,9 +126,32 @@ fn boot ::: Console
   println "ready"
 ```
 
-**Common mistake:** writing `_ =>` for a 0-arg imperative fn. That's
-a match-arm body (wildcard pattern → expression), not an imperative
-body. Use bare `=>` on its own line for 0 args.
+**Common mistake (worth re-reading):** writing `_ =>` for a 0-arg
+imperative fn:
+
+```
+fn boot ::: Console
+  _ =>                        ;; WRONG — match-arm body with wildcard
+    println "ready"
+```
+
+This parses, and `boot ()` happens to call it correctly (the Unit arg
+matches the wildcard), so it *looks* like the imperative form works.
+It isn't — it's a match-arms body with one arm. Idiomatic Irij:
+
+```
+fn boot ::: Console
+  =>                          ;; correct — 0-arity imperative body
+  println "ready"
+```
+
+The semantic difference: `_ =>` makes the fn a 1-arg fn that pattern-
+matches its single arg against `_`; `=>` makes it a 0-arity fn whose
+body runs imperatively. Both produce the same output for `boot ()`
+because Irij allows passing Unit to either, but the body indentation
+and the call-site contract are different — and any AI/code-generation
+tool that crops up later will write `_ =>` because it looks like
+"match anything". Re-write to `=>` on review.
 
 **Indentation:** the body lines after the `=> args` row sit at the
 SAME indent as `=>`, NOT one level deeper. The parser uses INDENT to

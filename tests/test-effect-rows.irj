@@ -13,9 +13,9 @@ fn greet ::: Console
   (name -> println ("Hello, " ++ name))
 
 fn run-greet ::: Console
-  _ =>
-    greet "world"
-    true
+  =>
+  greet "world"
+  true
 
 r1 := test "fn with ::: Console can call println" (-> assert-true (run-greet ()))
 
@@ -38,10 +38,10 @@ fn do-stuff ::: MyLog
   (x -> log-it x)
 
 fn run-user-effect ::: Console
-  _ =>
-    with my-logger
-      do-stuff "test-msg"
-    true
+  =>
+  with my-logger
+    do-stuff "test-msg"
+  true
 
 r3 := test "fn with ::: MyLog can call MyLog ops" (-> assert-true (run-user-effect ()))
 
@@ -59,10 +59,10 @@ fn multi ::: MyLog Beep
   beep ()
 
 fn run-multi ::: Console
-  _ =>
-    with my-logger >> beeper
-      multi ()
-    true
+  =>
+  with my-logger >> beeper
+    multi ()
+  true
 
 r4 := test "fn with multiple effects in row" (-> assert-true (run-multi ()))
 
@@ -72,9 +72,9 @@ fn typed-greet :: Str () ::: Console
   (name -> println ("Typed: " ++ name))
 
 fn run-typed ::: Console
-  _ =>
-    typed-greet "world"
-    true
+  =>
+  typed-greet "world"
+  true
 
 r5 := test "effect row from type annotation works" (-> assert-true (run-typed ()))
 
@@ -85,9 +85,9 @@ fn imp-greet ::: Console
   println ("Imp: " ++ name)
 
 fn run-imp ::: Console
-  _ =>
-    imp-greet "test"
-    true
+  =>
+  imp-greet "test"
+  true
 
 r6 := test "imperative fn with effect row" (-> assert-true (run-imp ()))
 
@@ -98,10 +98,10 @@ fn describe ::: Console
   n => println ("num: " ++ to-str n)
 
 fn run-describe ::: Console
-  _ =>
-    describe 0
-    describe 42
-    true
+  =>
+  describe 0
+  describe 42
+  true
 
 r7 := test "match fn with effect row" (-> assert-true (run-describe ()))
 
@@ -111,10 +111,10 @@ fn greet2 ::: Console
   (prefix name -> println (prefix ++ name))
 
 fn run-partial ::: Console
-  _ =>
-    hi := greet2 "Hi, "
-    hi "Irij"
-    true
+  =>
+  hi := greet2 "Hi, "
+  hi "Irij"
+  true
 
 r8 := test "partial app preserves effect row" (-> assert-true (run-partial ()))
 
@@ -125,12 +125,12 @@ fn safe-print ::: Console
   (x -> println x)
 
 fn check-contract-effect ::: Console
-  _ =>
-    safe-print "works"
-    r := try (-> safe-print "")
-    match r
-      (Err _) => true
-      _ => false
+  =>
+  safe-print "works"
+  r := try (-> safe-print "")
+  match r
+    (Err _) => true
+    _ => false
 
 r9 := test "contracted fn with effect row" (-> assert-true (check-contract-effect ()))
 
@@ -140,10 +140,10 @@ handler annotated-logger :: MyLog ::: Console
   log-it msg => resume (println msg)
 
 fn run-annotated-handler ::: Console
-  _ =>
-    with annotated-logger
-      do-stuff "test"
-    true
+  =>
+  with annotated-logger
+    do-stuff "test"
+  true
 
 r10 := test "handler with ::: Console allows println in clause" (-> assert-true (run-annotated-handler ()))
 

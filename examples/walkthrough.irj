@@ -210,9 +210,9 @@ handler cheerful2 :: Greet2
 
 ;; with block: execWith() in Interpreter.java
 fn greet-demo
-  _ =>
-    with cheerful2
-      greet2 "world"
+  =>
+  with cheerful2
+    greet2 "world"
 
 println ("effect: " ++ greet-demo ())
 
@@ -224,10 +224,10 @@ handler catch-fail2 :: Fail2
   fail2 msg => "CAUGHT: " ++ msg
 
 fn abort-demo
-  _ =>
-    with catch-fail2
-      fail2 "something broke"
-      "unreachable"
+  =>
+  with catch-fail2
+    fail2 "something broke"
+    "unreachable"
 
 println ("abort: " ++ abort-demo ())
 
@@ -250,12 +250,12 @@ handler tally :: Tally
   total () => resume state
 
 fn tally-demo
-  _ =>
-    with tally
-      tick ()
-      tick ()
-      tick ()
-      total ()
+  =>
+  with tally
+    tick ()
+    tick ()
+    tick ()
+    total ()
 
 println ("tally = " ++ to-str (tally-demo ()))
 
@@ -271,11 +271,11 @@ handler tally2 :: Tally
   total () => resume state
 
 fn composed-demo
-  _ =>
-    with (greeter2 >> tally2)
-      tick ()
-      msg := greet2 "Irij"
-      msg ++ " (ticks=" ++ to-str (total ()) ++ ")"
+  =>
+  with (greeter2 >> tally2)
+    tick ()
+    msg := greet2 "Irij"
+    msg ++ " (ticks=" ++ to-str (total ()) ++ ")"
 
 println ("composed: " ++ composed-demo ())
 
@@ -288,11 +288,11 @@ handler counter-for-dot :: Tally
   total () => resume state
 
 fn dot-demo
-  _ =>
-    with counter-for-dot
-      tick ()
-      tick ()
-    counter-for-dot.state
+  =>
+  with counter-for-dot
+    tick ()
+    tick ()
+  counter-for-dot.state
 
 println ("dot-access = " ++ to-str (dot-demo ()))
 
@@ -304,12 +304,12 @@ handler bomb :: Boom
   explode () => error "kaboom"
 
 fn on-failure-demo
-  _ =>
-    with bomb
-      explode ()
-      "never"
-    on-failure
-      "recovered: " ++ error
+  =>
+  with bomb
+    explode ()
+    "never"
+  on-failure
+    "recovered: " ++ error
 
 println ("on-failure: " ++ on-failure-demo ())
 
@@ -470,11 +470,11 @@ fn do-logging ::: MyLog
   (msg -> log-msg msg)
 
 fn run-logging
-  _ =>
-    with console-logger
-      do-logging "annotated handler"
-    with silent-logger
-      do-logging "silent handler"
+  =>
+  with console-logger
+    do-logging "annotated handler"
+  with silent-logger
+    do-logging "silent handler"
 
 run-logging ()
 

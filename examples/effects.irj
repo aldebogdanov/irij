@@ -36,11 +36,11 @@ handler console-log :: Logger ::: Console
 ;; The block's last expression is the overall result.
 
 fn basic-example ::: Console
-  _ =>
-    with friendly
-      greeting := greet "World"
-      println greeting
-      greeting
+  =>
+  with friendly
+    greeting := greet "World"
+    println greeting
+    greeting
 
 result := basic-example ()
 println ("Basic: " ++ result)
@@ -58,11 +58,11 @@ handler catch-fail :: Fail
   fail msg => "CAUGHT: " ++ msg
 
 fn abort-example
-  _ =>
-    with catch-fail
-      fail "something went wrong"
-      ;; this line never executes
-      "unreachable"
+  =>
+  with catch-fail
+    fail "something went wrong"
+    ;; this line never executes
+    "unreachable"
 
 println ("Abort: " ++ abort-example ())
 
@@ -85,14 +85,14 @@ handler counting :: Counter
   get-count () => resume state
 
 fn state-example
-  _ =>
-    with counting
-      bump ()
-      bump ()
-      bump ()
-      bump ()
-      bump ()
-      get-count ()
+  =>
+  with counting
+    bump ()
+    bump ()
+    bump ()
+    bump ()
+    bump ()
+    get-count ()
 
 println ("State: counted to " ++ to-str (state-example ()))
 
@@ -106,13 +106,13 @@ handler quiet-log :: Logger
   log msg => resume ()
 
 fn nested-example
-  _ =>
-    with quiet-log
-      log "entering"
-      with friendly
-        msg := greet "Nested"
-        log "greeted someone"
-        msg
+  =>
+  with quiet-log
+    log "entering"
+    with friendly
+      msg := greet "Nested"
+      log "greeted someone"
+      msg
 
 println ("Nested: " ++ nested-example ())
 
@@ -123,10 +123,10 @@ println ("Nested: " ++ nested-example ())
 ;; can handle multiple effects in a single `with` block.
 
 fn composition-example
-  _ =>
-    with quiet-log >> friendly
-      log "about to greet"
-      greet "Composed"
+  =>
+  with quiet-log >> friendly
+    log "about to greet"
+    greet "Composed"
 
 println ("Composed: " ++ composition-example ())
 
@@ -146,12 +146,12 @@ handler bomb :: Boom
   explode () => error "kaboom!"
 
 fn on-failure-example
-  _ =>
-    with bomb
-      explode ()
-      "never reached"
-    on-failure
-      "recovered from: " ++ error
+  =>
+  with bomb
+    explode ()
+    "never reached"
+  on-failure
+    "recovered from: " ++ error
 
 println ("on-failure: " ++ on-failure-example ())
 
@@ -169,13 +169,13 @@ handler accumulator :: Counter
   get-count () => resume state
 
 fn dot-access-example
-  _ =>
-    with accumulator
-      bump ()
-      bump ()
-      bump ()
-    ;; read the handler's internal state directly
-    accumulator.state
+  =>
+  with accumulator
+    bump ()
+    bump ()
+    bump ()
+  ;; read the handler's internal state directly
+  accumulator.state
 
 println ("Dot-access: state = " ++ to-str (dot-access-example ()))
 
@@ -201,16 +201,16 @@ handler memo :: Store
   history () => resume log
 
 fn multi-op-example ::: Console
-  _ =>
-    with memo
-      write-val "first"
-      write-val "second"
-      write-val "third"
-      val := read-val ()
-      hist := history ()
-      println ("Current: " ++ val)
-      println ("History: " ++ to-str hist)
-      hist
+  =>
+  with memo
+    write-val "first"
+    write-val "second"
+    write-val "third"
+    val := read-val ()
+    hist := history ()
+    println ("Current: " ++ val)
+    println ("History: " ++ to-str hist)
+    hist
 
 result := multi-op-example ()
 println ("Multi-op result: " ++ to-str result)

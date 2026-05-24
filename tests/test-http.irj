@@ -29,79 +29,79 @@ fn post-data ::: Http
 ;; ── Tests ─────────────────────────────────────────────────────────
 
 fn test-get
-  _ =>
-    with mock-http
-      resp := fetch-users "http://api.test"
-      resp.status
+  =>
+  with mock-http
+    resp := fetch-users "http://api.test"
+    resp.status
 
 r1 := test "http-get returns status" (-> assert-eq 200 (test-get ()))
 
 fn test-get-body
-  _ =>
-    with mock-http
-      resp := fetch-users "http://api.test"
-      users := json-parse resp.body
-      length users
+  =>
+  with mock-http
+    resp := fetch-users "http://api.test"
+    users := json-parse resp.body
+    length users
 
 r2 := test "http-get body parses as json" (-> assert-eq 2 (test-get-body ()))
 
 fn test-get-header
-  _ =>
-    with mock-http
-      resp := fetch-users "http://api.test"
-      resp.headers.content-type
+  =>
+  with mock-http
+    resp := fetch-users "http://api.test"
+    resp.headers.content-type
 
 r3 := test "http-get returns headers" (-> assert-eq "application/json" (test-get-header ()))
 
 fn test-404
-  _ =>
-    with mock-http
-      resp := http-get "http://api.test/404"
-      resp.status
+  =>
+  with mock-http
+    resp := http-get "http://api.test/404"
+    resp.status
 
 r4 := test "http-get 404" (-> assert-eq 404 (test-404 ()))
 
 fn test-post
-  _ =>
-    with mock-http
-      resp := post-data "http://api.test/data" "{\"x\":1}"
-      resp.status
+  =>
+  with mock-http
+    resp := post-data "http://api.test/data" "{\"x\":1}"
+    resp.status
 
 r5 := test "http-post returns 201" (-> assert-eq 201 (test-post ()))
 
 fn test-post-echo
-  _ =>
-    with mock-http
-      resp := post-data "http://api.test/data" "{\"x\":1}"
-      resp.body
+  =>
+  with mock-http
+    resp := post-data "http://api.test/data" "{\"x\":1}"
+    resp.body
 
 r6 := test "http-post echoes body" (-> assert-eq "{\"x\":1}" (test-post-echo ()))
 
 fn test-delete
-  _ =>
-    with mock-http
-      resp := http-delete "http://api.test/item"
-      resp.status
+  =>
+  with mock-http
+    resp := http-delete "http://api.test/item"
+    resp.status
 
 r7 := test "http-delete returns 204" (-> assert-eq 204 (test-delete ()))
 
 fn test-raw-request
-  _ =>
-    with mock-http
-      resp := http-request {method= "PATCH" url= "http://api.test/x"}
-      resp.body
+  =>
+  with mock-http
+    resp := http-request {method= "PATCH" url= "http://api.test/x"}
+    resp.body
 
 r8 := test "http-request raw" (-> assert-eq "raw" (test-raw-request ()))
 
 ;; ── JSON round-trip via HTTP ──────────────────────────────────────
 
 fn test-json-flow
-  _ =>
-    with mock-http
-      resp := fetch-users "http://api.test"
-      users := json-parse resp.body
-      first-user := head users
-      first-user.name
+  =>
+  with mock-http
+    resp := fetch-users "http://api.test"
+    users := json-parse resp.body
+    first-user := head users
+    first-user.name
 
 r9 := test "json round-trip via http" (-> assert-eq "Alice" (test-json-flow ()))
 
