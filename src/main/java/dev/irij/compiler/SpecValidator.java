@@ -495,6 +495,38 @@ public final class SpecValidator {
                 // without reflection).
                 yield value;
             }
+            // Handler:Effect spec (v0.8.x). `Handler Logger` validates
+            // that the value is a CompiledHandler (or a
+            // CompiledComposedHandler covering at least the named
+            // effect). First-class handler values land in 8.0b; this
+            // already lets fn signatures type-check handler-shaped
+            // args without surface gymnastics.
+            case "Handler" -> {
+                String required = app.args().isEmpty() ? null
+                        : (app.args().get(0) instanceof SpecExpr.Name n
+                                ? n.name() : null);
+                if (value instanceof dev.irij.compiler.RuntimeSupport.CompiledHandler ch) {
+                    if (required != null && !required.equals(ch.effectName)) {
+                        throw fail("expected Handler " + required
+                                + ", got Handler " + ch.effectName);
+                    }
+                    yield value;
+                }
+                if (value instanceof dev.irij.compiler.RuntimeSupport
+                        .CompiledComposedHandler cch) {
+                    if (required != null) {
+                        for (var h : cch.handlers) {
+                            if (required.equals(h.effectName)) yield value;
+                        }
+                        throw fail("expected composed Handler covering "
+                                + required + ", no matching effect found");
+                    }
+                    yield value;
+                }
+                throw fail("expected Handler"
+                        + (required != null ? " " + required : "")
+                        + ", got " + typeName(value));
+            }
             default -> value;
         };
     }

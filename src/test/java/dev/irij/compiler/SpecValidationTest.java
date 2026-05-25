@@ -9,6 +9,7 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -202,5 +203,53 @@ class SpecValidationTest {
         assertEquals(":ok|:error", encoded);
         var decoded = SpecValidator.decode(encoded);
         assertTrue(decoded instanceof dev.irij.ast.SpecExpr.Enum);
+    }
+
+    // ── Handler:Effect spec — v0.8.0a ───────────────────────────────
+
+    @Test
+    void handlerSpec_acceptsCompiledHandlerWithMatchingEffect() {
+        var spec = new dev.irij.ast.SpecExpr.App("Handler",
+                java.util.List.of(new dev.irij.ast.SpecExpr.Name("Logger")));
+        var handler = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+                "quiet-log", "Logger", java.util.Map.of());
+        assertSame(handler, SpecValidator.validate(handler, spec));
+    }
+
+    @Test
+    void handlerSpec_rejectsHandlerForWrongEffect() {
+        var spec = new dev.irij.ast.SpecExpr.App("Handler",
+                java.util.List.of(new dev.irij.ast.SpecExpr.Name("Logger")));
+        var greetHandler = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+                "hi", "Greet", java.util.Map.of());
+        var e = assertThrows(dev.irij.IrijRuntimeError.class,
+                () -> SpecValidator.validate(greetHandler, spec));
+        assertTrue(e.getMessage().contains("Logger"),
+                () -> "expected Logger in error, got: " + e.getMessage());
+        assertTrue(e.getMessage().contains("Greet"),
+                () -> "expected Greet in error, got: " + e.getMessage());
+    }
+
+    @Test
+    void handlerSpec_rejectsNonHandlerValue() {
+        var spec = new dev.irij.ast.SpecExpr.App("Handler",
+                java.util.List.of(new dev.irij.ast.SpecExpr.Name("Logger")));
+        var e = assertThrows(dev.irij.IrijRuntimeError.class,
+                () -> SpecValidator.validate(42L, spec));
+        assertTrue(e.getMessage().contains("Handler"),
+                () -> "expected Handler in error, got: " + e.getMessage());
+    }
+
+    @Test
+    void handlerSpec_acceptsComposedHandlerCoveringEffect() {
+        var spec = new dev.irij.ast.SpecExpr.App("Handler",
+                java.util.List.of(new dev.irij.ast.SpecExpr.Name("Logger")));
+        var loggerH = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+                "ql", "Logger", java.util.Map.of());
+        var greetH = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+                "hi", "Greet", java.util.Map.of());
+        var composed = new dev.irij.compiler.RuntimeSupport.CompiledComposedHandler(
+                java.util.List.of(greetH, loggerH));
+        assertSame(composed, SpecValidator.validate(composed, spec));
     }
 }
