@@ -684,7 +684,20 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
 - [ ] Dependent types / proofs (L5)
 - [ ] Content-addressed code (hash-based identity)
 - [ ] JVM interop perf (`MethodHandle` cache, type hints `^String` / `^int`)
-- [ ] GraalVM Native Image
+- [ ] **GraalVM Native Image** (deferred — ecosystem priority first)
+  - Scope decision: native binary only for non-codegen subcommands
+    (`irij lsp`, `format`, `lint`, `install`, `deps`, `version`); keep
+    `run`/`eval`/`repl`/`test`/`nrepl` on the JVM since they need
+    runtime bytecode emit + classloading which native-image can't AOT.
+  - Single `irij` entry-point that exec's into a bundled JVM jar for
+    the JVM-only subcommands.
+  - Spike target: `irij lsp` cold-start under 50 ms (vs ~400 ms JVM).
+  - Reachability config harvested via `native-image-agent` for LSP4J
+    + ANTLR; commit under `META-INF/native-image/dev.irij/`.
+  - Release pipeline: GH Actions matrix
+    (linux-amd64/arm64, macos-amd64/arm64).
+  - `irij build` AOT'd as second slice — output JARs still execute
+    on JVM, only the build pipeline goes native.
 - [ ] Channels: `send`, `recv`, `select`
 - [ ] LSP server
 - [ ] Dynamic/variable map keys in map literals (e.g. `{(expr)= val}`) — currently only bare identifiers; use `assoc` as workaround
@@ -694,6 +707,8 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
 ## Known Issues / Bugs
 
 - [x] **Parser line numbers are wrong** — Fixed. `measureNextIndent()` in `IrijLexerBase.java` consumed blank lines and comments via `input.consume()` without updating ANTLR's `_line`/`_charPositionInLine`. Added `setLine(getLine() + 1)` after newline consumption and `setCharPositionInLine(spaces)` after space measurement.
+- [x] **Per-request HTTP handler had empty effect stack** — Fixed (v0.8.1-fix). `ServeCapability.serve` registered the user's handler against `com.sun.net.httpserver.HttpServer`, whose `newVirtualThreadPerTaskExecutor` dispatches each request on a fresh virtual thread with empty `EFFECT_ROW` / `SM_STACK` thread-locals. Plain routes returning a Map worked (no `perform` inside the handler body), but routes that performed any `Serve` op (`sse-response`, `sse-send`, `multipart-*`) blew up with "Unhandled effect: Serve.X (no handler on stack)". Fix: added `RuntimeSupport.snapshotEffects()` + `runWithEffectSnapshot(snap, body)` mirroring the fiber-fork inheritance path, snapshot at `serve` call time, replay around each request callback.
+- [x] **`tryFn` only caught IrijRuntimeError** — Fixed. `try` is the user's only error-trapping primitive; division by zero (`ArithmeticException`), cast errors, NPEs etc. weren't trapped. Widened to `Throwable` with explicit `InterruptedException` re-raise so vthread cancellation still propagates.
 - [ ] **Multi-arg chained lambdas not supported** — `(acc -> pair -> body)` fails to parse. The grammar's `lambdaExpr` rule is `LPAREN lambdaParams ARROW exprSeq RPAREN` where `lambdaParams` is `pattern*`, so `(a b -> body)` works (multi-param), but curried `(a -> b -> body)` requires explicit nesting: `(a -> (b -> body))`. Consider whether the grammar should support `->` chaining or if explicit nesting is the intended design.
 
 ---

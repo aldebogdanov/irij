@@ -2097,6 +2097,46 @@ public final class RuntimeSupport {
         return new Fiber(future, t);
     }
 
+    /** Public, opaque snapshot of effect-handling state taken at the
+     *  call site. Capabilities that hand control to a fresh thread
+     *  (HTTP request handlers, scheduled callbacks, anything backed
+     *  by a Java executor) snapshot here and replay via
+     *  {@link #runWithEffectSnapshot} on the new thread so the user's
+     *  Irij code finds the same handler chain it would have on the
+     *  calling thread.
+     *
+     *  <p>Without this, fresh executor threads start with empty
+     *  {@code EFFECT_ROW} / {@code SM_STACK} thread-locals and any
+     *  {@code perform} blows up with "no handler on stack". */
+    public static final class EffectSnapshot {
+        private final ParentSnapshot inner;
+        private EffectSnapshot(ParentSnapshot p) { this.inner = p; }
+    }
+
+    /** Snapshot the current thread's effect-handling state. Cheap;
+     *  the underlying deques get shallow-copied. */
+    public static EffectSnapshot snapshotEffects() {
+        return new EffectSnapshot(snapParent());
+    }
+
+    /** Install {@code snap} onto the current thread's effect-row /
+     *  SM-stack / threaded-handler-stack / namespace / session-out,
+     *  then run {@code body}. Intended for fresh worker threads
+     *  whose thread-locals start empty (HTTP request handlers,
+     *  callback executors); the install is additive and the thread
+     *  is expected to die after the body returns, so no restore
+     *  step is performed. */
+    public static Object runWithEffectSnapshot(EffectSnapshot snap,
+            java.util.function.Supplier<Object> body) {
+        ParentSnapshot p = snap.inner;
+        inheritEffectStack(p.effectStack());
+        inheritSMStack(p.smStack());
+        inheritEffectRow(p.effectRow());
+        if (p.namespace() != null) NS.set(p.namespace());
+        if (p.sessionOut() != null) SESSION_OUT.set(p.sessionOut());
+        return body.get();
+    }
+
     /** `spawn thunk` — fire-and-forget vthread, returns the Thread. */
     public static Object spawn(Object thunk) {
         var parent = snapParent();
@@ -2321,14 +2361,30 @@ public final class RuntimeSupport {
                         + " in enclosing function's effect row");
     }
 
-    /** `try thunk` — return Ok(result) / Err(msg). */
+    /** `try thunk` — return Ok(result) / Err(msg).
+     *
+     *  <p>Catches every Throwable except {@link InterruptedException}
+     *  (must propagate so virtual-thread cancellation still works).
+     *  This lets {@code try} trap JVM-level failures like
+     *  {@code ArithmeticException} (division by zero),
+     *  {@code ClassCastException}, {@code NullPointerException}, etc.,
+     *  not just user-thrown {@link dev.irij.IrijRuntimeError}s. */
     public static Object tryFn(Object thunk) {
         try {
             Object r = callAny(thunk, new Object[0]);
             return new dev.irij.runtime.Values.Tagged("Ok", java.util.List.of(r));
-        } catch (dev.irij.IrijRuntimeError ex) {
+        } catch (Throwable ex) {
+            // Re-raise thread interruption — `try` mustn't swallow cancellation.
+            if (ex instanceof InterruptedException
+                    || ex.getCause() instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+                throw ex instanceof RuntimeException re
+                        ? re : new RuntimeException(ex);
+            }
+            String msg = ex.getMessage();
+            if (msg == null || msg.isEmpty()) msg = ex.getClass().getSimpleName();
             return new dev.irij.runtime.Values.Tagged("Err",
-                    java.util.List.of(ex.getMessage() == null ? "" : ex.getMessage()));
+                    java.util.List.of(msg));
         }
     }
 

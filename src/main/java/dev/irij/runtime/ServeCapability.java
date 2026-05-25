@@ -59,12 +59,23 @@ public final class ServeCapability {
             // null there and falls through to the filesystem branch.
             final boolean isBundled = true;
 
+            // Snapshot the current effect stack so each per-request
+            // virtual thread inherits the Serve/Session/etc. handlers
+            // that were installed by the surrounding `with` blocks.
+            // Without this, a perform in the user's handler body (e.g.
+            // sse-response) on a fresh request thread would see empty
+            // EFFECT_ROW / SM_STACK and die with "no handler on stack".
+            final RuntimeSupport.EffectSnapshot effectSnap =
+                    RuntimeSupport.snapshotEffects();
+
             server.createContext("/", exchange -> {
                 try {
                     if (httpServeStatic(exchange, scriptDir, isBundled)) return;
 
                     IrijMap req = buildRequestMap(exchange);
-                    Object resp = RuntimeSupport.callAny(handler, new Object[]{req});
+                    Object resp = RuntimeSupport.runWithEffectSnapshot(
+                            effectSnap,
+                            () -> RuntimeSupport.callAny(handler, new Object[]{req}));
 
                     if (resp instanceof SseWriter sse) {
                         // Handler took over via SSE — block until writer
