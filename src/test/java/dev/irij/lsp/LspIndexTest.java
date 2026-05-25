@@ -61,6 +61,29 @@ class LspIndexTest {
                 () -> "expected row-param in sig, got: " + spec.signature());
     }
 
+    @Test void docCommentAttachedToFn() {
+        String src = """
+            ;; Greets a person by name.
+            ;; Used in the welcome flow.
+            fn greet :: Str Str ::: Console
+              (n -> "Hi, " ++ n)
+            """;
+        List<LspIndex.Symbol> idx = LspIndex.build(src);
+        var fn = LspIndex.findByName(idx, "greet");
+        assertNotNull(fn);
+        assertTrue(fn.docComment().contains("Greets a person by name"),
+                () -> "expected doc, got: " + fn.docComment());
+        assertTrue(fn.docComment().contains("welcome flow"));
+    }
+
+    @Test void noDocCommentLeavesFieldEmpty() {
+        String src = "fn solo :: Str Str ::: Console\n  (x -> x)\n";
+        List<LspIndex.Symbol> idx = LspIndex.build(src);
+        var fn = LspIndex.findByName(idx, "solo");
+        assertNotNull(fn);
+        assertEquals("", fn.docComment());
+    }
+
     @Test void brokenSourceProducesPartialIndex() {
         // Half-typed source — the LSP must stay responsive. The
         // builder swallows parse errors and returns what it could

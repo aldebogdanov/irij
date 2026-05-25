@@ -146,9 +146,14 @@ public final class IrijLspServer implements LanguageServer,
         LspIndex.Symbol sym = LspIndex.findByName(idx, word);
         String body;
         if (sym != null) {
-            body = "```irij\n" + sym.signature() + "\n```\n\n"
-                    + "*" + sym.kind().name().toLowerCase() + "* "
-                    + "(line " + sym.loc().line() + ")";
+            StringBuilder b = new StringBuilder();
+            b.append("```irij\n").append(sym.signature()).append("\n```\n\n");
+            if (!sym.docComment().isEmpty()) {
+                b.append(sym.docComment()).append("\n\n");
+            }
+            b.append("*").append(sym.kind().name().toLowerCase()).append("* ")
+                    .append("(line ").append(sym.loc().line()).append(")");
+            body = b.toString();
         } else {
             body = "`" + word + "` — no definition in this file";
         }

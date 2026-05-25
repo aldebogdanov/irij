@@ -27,7 +27,14 @@ final class LspIndex {
 
     enum Kind { FN, EFFECT, HANDLER, CAP, SPEC, NEWTYPE, PROTO, ROLE }
 
-    record Symbol(String name, Kind kind, SourceLoc loc, String signature) {}
+    /** Per-document symbol. {@code docComment} carries any contiguous
+     *  {@code ;;} comment block found immediately above the decl in
+     *  source — empty string if none. */
+    record Symbol(String name, Kind kind, SourceLoc loc, String signature, String docComment) {
+        Symbol(String name, Kind kind, SourceLoc loc, String signature) {
+            this(name, kind, loc, signature, "");
+        }
+    }
 
     private LspIndex() {}
 
@@ -40,11 +47,36 @@ final class LspIndex {
             IrijParseDriver.ParseResult pr = IrijParseDriver.parse(source);
             if (pr.tree() == null) return out;
             List<Decl> decls = new AstBuilder().build(pr.tree());
-            for (Decl d : decls) collect(d, out);
+            String[] lines = source.split("\n", -1);
+            List<Symbol> bare = new ArrayList<>();
+            for (Decl d : decls) collect(d, bare);
+            for (Symbol s : bare) {
+                String doc = docCommentAbove(lines, s.loc().line());
+                out.add(doc.isEmpty() ? s
+                        : new Symbol(s.name(), s.kind(), s.loc(), s.signature(), doc));
+            }
         } catch (Exception ignored) {
             // Defensive — partial source while typing.
         }
         return out;
+    }
+
+    /** Walk upward from {@code declLine} (1-based) gathering any
+     *  contiguous {@code ;;}-prefixed comment block. Returns the
+     *  joined comment text (one paragraph, no leading {@code ;;}),
+     *  or empty string if the line above isn't a comment. */
+    private static String docCommentAbove(String[] lines, int declLine) {
+        int idx = declLine - 2; // 0-based index of the line above the decl
+        List<String> collected = new ArrayList<>();
+        while (idx >= 0) {
+            String line = lines[idx].stripLeading();
+            if (!line.startsWith(";;")) break;
+            String text = line.substring(2).stripLeading();
+            collected.add(0, text);
+            idx--;
+        }
+        if (collected.isEmpty()) return "";
+        return String.join("\n", collected).strip();
     }
 
     private static void collect(Decl d, List<Symbol> out) {
