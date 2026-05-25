@@ -59,9 +59,26 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
 ## Syntax
 
 ```
-cap <name> :: <Effect> = "<fully-qualified-Java-class>"
-pub cap <name> :: <Effect> = "<fully-qualified-Java-class>"
+cap <name> :: <Effect> = "<fully-qualified-Java-class>"    ;; Java provider
+cap <name> :: <Effect> = {op-name= (args -> ...) ...}      ;; Irij record
+pub cap <name> :: <Effect> = ...
 ```
+
+Two forms of cap provider:
+
+- **Java classpath (string):** the original v0.7.0 form. Provider
+  methods are public-static `Object → Object` methods on the named
+  class; use-sites lower to `INVOKESTATIC providerClass/method`.
+- **Irij record (map literal):** v0.7.x phase 3. The cap value is a
+  map whose keys are op names and values are IrijFn closures. The
+  emitter materialises the record once at class-load time
+  (`<clinit>`) into a private static field, then each use-site does
+  `GETSTATIC` + `getOp` + `callAny`. Zero per-call allocation;
+  same security envelope as classpath caps (the name resolves only
+  inside matching-effect handler clauses).
+
+Record caps are the natural shape for pure-Irij mocks in tests
+and for caps you want to write without leaving Irij.
 
 The provider class is given as a string literal. This keeps phase 1
 unambiguous against expression-level dot access (`a.b.c` could

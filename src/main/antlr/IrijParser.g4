@@ -212,7 +212,7 @@ handlerClause
 // is still only usable inside matching-effect handler clauses regardless.
 
 capDecl
-    : PUB? CAP IDENT SPEC_ANN upperName EQUALS STRING
+    : PUB? CAP IDENT SPEC_ANN upperName EQUALS (STRING | mapLiteral)
     ;
 
 // ── proto ────────────────────────────────────────────────────────────

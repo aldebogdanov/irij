@@ -70,6 +70,12 @@ final class ClassEmitter implements Opcodes {
      *  {@code "FQN/method"} and dispatched through the existing JavaInterop
      *  reflection path (handles static + instance methods uniformly). */
     private final Map<String, String> capProvider = new HashMap<>();
+
+    /** Phase 3 — Irij-record cap state. Maps cap-name → JVM static
+     *  field that holds the evaluated record; parallel map holds the
+     *  record-builder expression so clinit can materialise it. */
+    private final Map<String, String> recordCapField = new HashMap<>();
+    private final Map<String, Expr> recordCapExpr = new HashMap<>();
     // handler name → decl (14c.1 abort-only)
     private final Map<String, Decl.HandlerDecl> handlers = new HashMap<>();
     // handlerName -> (stateVarName -> internal static field name)
@@ -287,7 +293,18 @@ final class ClassEmitter implements Opcodes {
                 }
             }
             if (inner instanceof Decl.CapDecl cd) {
-                capProvider.put(cd.name(), cd.providerClass());
+                if (cd.isRecord()) {
+                    // Phase 3: Irij-record cap. Reserve a static field
+                    // for the evaluated record; populate at clinit; use
+                    // sites do GETSTATIC + get(field) + callAny.
+                    String fieldName = "cap$" + mangle(cd.name());
+                    cw.visitField(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                            fieldName, OBJ_DESC, null, null).visitEnd();
+                    recordCapField.put(cd.name(), fieldName);
+                    recordCapExpr.put(cd.name(), cd.recordExpr());
+                } else {
+                    capProvider.put(cd.name(), cd.providerClass());
+                }
             }
             if (inner instanceof Decl.HandlerDecl hd) {
                 validateHandler14c2(hd);
@@ -363,6 +380,7 @@ final class ClassEmitter implements Opcodes {
         // spec registry entries, or namespace-mode fn registrations
         // for cross-eval nREPL.
         if (!productFields.isEmpty() || !sumVariants.isEmpty()
+                || !recordCapField.isEmpty()
                 || (options.namespaceMode() && !fnArity.isEmpty())) {
             emitClinit(cw);
         }
@@ -444,6 +462,19 @@ final class ClassEmitter implements Opcodes {
             }
             cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerSum",
                     "(Ljava/lang/String;[Ljava/lang/Object;)V", false);
+        }
+        // Phase 3 — materialise every Irij-record cap once at class-load
+        // time. Each cap's recordExpr (a map-literal Expr) is evaluated
+        // inside clinit with a throwaway Locals frame and PUTSTATIC'd
+        // into the cap's reserved field. Subsequent `cap-name.method
+        // args` use-sites do GETSTATIC + getOp(field) + callAny(args).
+        if (!recordCapField.isEmpty()) {
+            Locals clinitLocals = new Locals();
+            for (var e : recordCapField.entrySet()) {
+                emitExpr(recordCapExpr.get(e.getKey()), cl, clinitLocals);
+                cl.visitFieldInsn(PUTSTATIC, internalName,
+                        e.getValue(), OBJ_DESC);
+            }
         }
         cl.visitInsn(RETURN);
         cl.visitMaxs(0, 0);
@@ -4441,6 +4472,26 @@ final class ClassEmitter implements Opcodes {
             Expr.JavaRef ref = new Expr.JavaRef(
                     providerClass + "/" + da.field(), da.loc());
             emitApp(new Expr.App(ref, app.args(), app.loc()), mv, locals);
+            return;
+        }
+        // Phase 3 — Irij-record cap call: `cap-name.method args` where
+        // cap-name is bound to a map literal. Load the method-name key,
+        // then the static field holding the materialised record, look
+        // up via RT.getOp(key, coll), and dispatch via RT.callAny with
+        // the boxed arg array. RT.getOp is (key, coll) — order matters.
+        if (app.fn() instanceof Expr.DotAccess da
+                && da.target() instanceof Expr.Var capVar
+                && recordCapField.containsKey(capVar.name())) {
+            String field = recordCapField.get(capVar.name());
+            mv.visitLdcInsn(da.field());
+            mv.visitFieldInsn(GETSTATIC, internalName, field, OBJ_DESC);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "getOp",
+                    "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
+                    false);
+            pushObjectArray(app.args(), mv, locals);
+            mv.visitMethodInsn(INVOKESTATIC, RT, "callAny",
+                    "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;",
+                    false);
             return;
         }
         String fnName = null;

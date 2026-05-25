@@ -351,6 +351,38 @@ class EffectRowLintTest {
     }
 
     @Test
+    void irijRecordCapAccepted() {
+        // Phase 3 — RHS of `cap` decl may be an Irij map literal,
+        // not just a JVM classpath string. Used as `cap.method args`
+        // inside matching-effect handler clauses, looks up the method
+        // by name in the record + dispatches.
+        String src = """
+            effect Greet
+              greet :: Str Str
+            cap mock-greet :: Greet = {greet= (n -> "Hi, " ++ n)}
+            handler default-greet :: Greet
+              greet n => resume (mock-greet.greet n)
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void irijRecordCapRejectedOutsideClause() {
+        // Same scope rule as Java-classpath caps: name only resolves
+        // inside clauses of handlers for the matching effect.
+        String src = """
+            effect Greet
+              greet :: Str Str
+            cap mock-greet :: Greet = {greet= (n -> n)}
+            fn leak :: Str Str
+              (n -> mock-greet.greet n)
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("mock-greet"),
+                () -> "expected cap-misuse error, got: " + e.getMessage());
+    }
+
+    @Test
     void namedSpecWithRowParamPropagatesEffectAcrossUseSites() {
         // Phase 2c — `spec Route ::: eff` declares a named record with
         // a row parameter. Use-site `(Route):eff` substitutes the

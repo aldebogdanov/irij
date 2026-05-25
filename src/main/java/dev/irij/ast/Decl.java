@@ -107,7 +107,18 @@ public sealed interface Decl extends Node {
      *  surfaces the binding in importing modules, still subject to the
      *  scope-restriction-to-clause-bodies rule. */
     record CapDecl(boolean isPub, String name, String effectName,
-                   String providerClass, SourceLoc loc) implements Decl {}
+                   String providerClass, Expr recordExpr,
+                   SourceLoc loc) implements Decl {
+        /** Java-provider form: classpath string, record nil. */
+        public CapDecl(boolean isPub, String name, String effectName,
+                       String providerClass, SourceLoc loc) {
+            this(isPub, name, effectName, providerClass, null, loc);
+        }
+        /** True for Irij-record providers (phase 3 — `cap x :: E = {…}`).
+         *  Use-sites lower to a static-field lookup + `get`-by-name
+         *  instead of a JavaRef. */
+        public boolean isRecord() { return recordExpr != null; }
+    }
 
     /** A binding used as a top-level declaration. */
     record BindingDecl(Stmt stmt, SourceLoc loc) implements Decl {}

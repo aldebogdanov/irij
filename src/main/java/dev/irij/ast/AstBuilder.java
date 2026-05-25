@@ -501,14 +501,24 @@ public class AstBuilder {
         boolean isPub = ctx.PUB() != null;
         String name = ctx.IDENT().getText();
         String effectName = ctx.upperName().UPPER_NAME().getText();
-        String rawString = ctx.STRING().getText();
-        // Strip the surrounding quotes and decode \\ + \" escapes; classpaths
-        // never contain newlines, tabs, or interpolation placeholders, so the
-        // minimal unescape here is enough.
-        String providerClass = rawString.substring(1, rawString.length() - 1)
-                .replace("\\\\", "\\")
-                .replace("\\\"", "\"");
-        return new Decl.CapDecl(isPub, name, effectName, providerClass, loc(ctx));
+        // RHS: either a STRING (JVM classpath) or a map literal (Irij record).
+        if (ctx.STRING() != null) {
+            String rawString = ctx.STRING().getText();
+            // Strip the surrounding quotes and decode \\ + \" escapes.
+            String providerClass = rawString.substring(1, rawString.length() - 1)
+                    .replace("\\\\", "\\")
+                    .replace("\\\"", "\"");
+            return new Decl.CapDecl(isPub, name, effectName, providerClass, loc(ctx));
+        }
+        // Irij-record provider (phase 3): RHS is a map literal whose
+        // fields are IrijFn values keyed by op name.
+        if (ctx.mapLiteral() != null) {
+            Expr recordExpr = visitMapLiteral(ctx.mapLiteral());
+            return new Decl.CapDecl(isPub, name, effectName,
+                    null, recordExpr, loc(ctx));
+        }
+        throw new IllegalStateException(
+                "cap decl: expected STRING or map literal as RHS at " + loc(ctx));
     }
 
     // ── effect / handler ────────────────────────────────────────────────
