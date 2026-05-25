@@ -94,6 +94,93 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.7.1 &mdash; Capabilities + named record specs + inline `with` + LSP MVP.
+
+**Capabilities — replaces the `raw-*` surface.** Effects that touch
+the host platform (Db, Http, Serve, FileIO, Session) now route through
+explicit capability providers; the old `raw-db-*`, `raw-http-*`,
+`raw-sse-*`, `raw-multipart-*`, `read-file` / `write-file` / etc.,
+`raw-session-*` builtins are gone from the user-reachable surface.
+
+```
+;; Java-backed cap
+cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
+
+;; Pure-Irij cap (mock for tests, or any record-shaped provider)
+cap mock-db :: Db = {
+  db-open=  (path -> "fake-conn")
+  db-query= (conn sql params -> #[{name= "Alice"}])
+  db-close= (_ -> ())
+}
+
+handler default-db :: Db ::: JVM
+  db-open path => resume (db-jdbc.open path)
+  ...
+```
+
+Cap names resolve *only* inside clauses of handlers for the matching
+effect — lint-enforced. The dangerous platform methods are
+unreachable from arbitrary user code by construction.
+
+**Named record specs with row parameters.** Drops the last
+`::: Any` from the stdlib by giving `std.serve` a proper route shape:
+
+```
+pub spec Route ::: eff
+  action :: (Fn):eff
+
+pub fn router :: #[(Route):eff] Fn ::: eff
+  (routes -> (req -> find-route routes req))
+```
+
+Each registered route's action carries its own effect row; the
+router's row is the union. Replaces four inline `{action :: (Fn):eff}`
+references with one named spec.
+
+**Inline `with`.** Saves the helper-fn boilerplate for one-expression
+handler bodies:
+
+```
+exists := with default-fs do (fs-exists? path)
+```
+
+`do` separator chosen to disambiguate from `with h App-args`. The
+block form `with handler\n  body` remains for multi-statement bodies.
+
+**LSP server.** `irij lsp` boots a Language Server over stdio:
+
+```elisp
+;; Emacs (eglot)
+(add-to-list 'eglot-server-programs
+             '(irij-mode . ("irij" "lsp")))
+(add-hook 'irij-mode-hook 'eglot-ensure)
+```
+
+MVP capabilities: `textDocument/sync` (FULL), diagnostics on parse
+errors, placeholder hover/definition/completion. Symbol-aware
+hover + goto-def + identifier completion are 2b.1.
+
+**Nested-with capture fix.** `Stmt.With`, `Stmt.Scope`, `Stmt.MatchStmt`
+now propagate free-var captures correctly through SM lowering. Was
+silently dropping fn-param captures from inner SM steps —
+manifested as `Unbound variable` at runtime in nested-with bodies.
+
+**Stdlib surface (v0.7.1)**
+
+| Module | Effect | Provider |
+|---|---|---|
+| `std.db` | Db | `JdbcCapability` |
+| `std.http` | Http | `HttpClientCapability` |
+| `std.serve` | Serve | `ServeCapability` (server + SSE + multipart) |
+| `std.fs` | FileIO | `FsCapability` |
+| `std.session` | Session | `SessionCapability` |
+| `std.auth` | — | crypto builtins only |
+
+356 Java tests + 296 integration tests pass. `irij.online` rebuilt
+end-to-end on v0.7.1 runtime; all routes green.
+
+---
+
 0.7.0 &mdash; State-machine lowering hardened + `std.auth` shipped + `dev.irij.interpreter` retired.
 
 **Package rename:** `dev.irij.interpreter` → `dev.irij.runtime`. The

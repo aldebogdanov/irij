@@ -1,0 +1,82 @@
+;; capabilities.irj — Irij v0.7.x capability features in one file.
+;;
+;; Demonstrates:
+;;   1. Java-backed cap        — bridges effect ops to a JVM class.
+;;   2. Pure-Irij record cap   — provider is a map of fns; great for
+;;                               tests + ad-hoc shims.
+;;   3. Named record specs     — DRY effect-polymorphic signatures.
+;;   4. Inline `with do …`     — single-expression handler bodies.
+;;
+;; Run:  irij examples/capabilities.irj
+
+use std.fs :open
+use std.list :open
+
+;; ═══════════════════════════════════════════════════════════════════
+;; 1. Java-backed cap is the default shape for stdlib modules.
+;;    std.fs already declares  cap fs-files :: FileIO = "..."
+;;    and exposes  fs-read / fs-write / fs-exists?  effect ops.
+;;    User code just runs `with default-fs do (op …)`.
+;; ═══════════════════════════════════════════════════════════════════
+
+irij-toml-exists := with default-fs do (fs-exists? "irij.toml")
+println ("irij.toml present: " ++ (to-str irij-toml-exists))
+
+;; ═══════════════════════════════════════════════════════════════════
+;; 2. Pure-Irij record cap. Cap RHS is a map literal; the methods
+;;    are IrijFn closures.  The named handler routes effect ops
+;;    through the cap.
+;; ═══════════════════════════════════════════════════════════════════
+
+effect Greet
+  greet :: Str Str
+
+cap mock-greet :: Greet = {greet= (name -> "Hello, " ++ name ++ "!")}
+
+handler default-greet :: Greet
+  greet name => resume (mock-greet.greet name)
+
+with default-greet
+  println (greet "world")
+
+;; ═══════════════════════════════════════════════════════════════════
+;; 3. Named record specs with a row parameter. `Route :: eff` carries
+;;    one row-param; use-sites bind it via `(Route):eff`. The router
+;;    family is precisely effect-polymorphic — no `::: Any`.
+;; ═══════════════════════════════════════════════════════════════════
+
+spec Route ::: eff
+  action :: (Fn):eff
+
+;; Three actions with different effect rows. The dispatcher
+;; sees the *union* of their rows.
+
+fn act-pure :: Str Str
+  (s -> "pure: " ++ s)
+
+fn act-console :: Str Str ::: Console
+  (s -> "console: " ++ s)
+
+fn run-one :: (Route):eff Str ::: eff
+  (r -> r.action "x")
+
+;; Caller declares only what it needs. ↓ accepted because the
+;; action's row is empty.
+println (run-one {action= act-pure})
+
+;; Caller declaring Console accepts an action that requires Console.
+fn console-run ::: Console
+  =>
+  println (run-one {action= act-console})
+
+console-run ()
+
+;; ═══════════════════════════════════════════════════════════════════
+;; 4. Inline `with do …` — saves the helper-fn dance.
+;; ═══════════════════════════════════════════════════════════════════
+
+fn list-count ::: FileIO
+  => dir
+  with default-fs do (length (fs-list-dir dir))
+
+println ("entries in `.': " ++ (to-str (list-count ".")))
