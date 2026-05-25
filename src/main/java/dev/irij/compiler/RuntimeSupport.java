@@ -2277,6 +2277,38 @@ public final class RuntimeSupport {
         EFFECT_ROW.get().pop();
     }
 
+    /** v0.8.0b — opaque-handler entry. The emitter doesn't know what
+     *  effect a fn-param or computed handler covers, so it can't push
+     *  effects at compile time. This helper introspects the runtime
+     *  handler value and pushes one effect-row frame for each
+     *  CompiledHandler in the value. Returns the number of frames
+     *  pushed; the caller passes that count to {@link #exitWithCount}
+     *  on exit so we always pop the same number we pushed. */
+    public static int enterWithFromValue(Object handlerObj) {
+        if (handlerObj instanceof CompiledHandler h) {
+            enterWith(h.effectName);
+            return 1;
+        }
+        if (handlerObj instanceof CompiledComposedHandler ch) {
+            int n = 0;
+            for (CompiledHandler h : ch.handlers) {
+                enterWith(h.effectName);
+                n++;
+            }
+            return n;
+        }
+        // Unknown shape — push an ambient-equivalent guard so the body
+        // doesn't blow up before runWithSM has a chance to fail with a
+        // clearer message. Pop one frame to match.
+        EFFECT_ROW.get().push(EFFECT_AMBIENT);
+        return 1;
+    }
+
+    public static void exitWithCount(int count) {
+        var stack = EFFECT_ROW.get();
+        for (int i = 0; i < count; i++) stack.pop();
+    }
+
     /** Called at every {@code perform} site. Throws if the effect
      *  isn't in the enclosing fn's declared row. */
     public static void checkPerformEffect(String effectName, String opName) {

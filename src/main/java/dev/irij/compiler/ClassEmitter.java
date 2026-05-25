@@ -2367,18 +2367,27 @@ final class ClassEmitter implements Opcodes {
      * EffectSystem; handler clauses compiled as IrijFns receiving (args…, resume).
      */
     private void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
-        // Runtime effect-row: push each handler's effect onto the
-        // RT.EFFECT_ROW stack so inner performs see them as available.
-        // Wrap the body in a try/catch-rethrow that pops the frames.
+        // Static path: handler expression resolves to known handler
+        // decls at compile time — push effects via constants, run SM
+        // lowering normally.
+        //
+        // Opaque path (v0.8.0b): handler is a fn-param, computed
+        // expression, or any value the compile-time analysis can't
+        // resolve to a known handler. Evaluate the handler expression
+        // at runtime, push its effects via RT.enterWithFromValue, run
+        // the SM lowering with the resulting Object, pop on exit.
+        boolean opaque = isOpaqueHandler(w.handler());
+
+        if (opaque) {
+            emitWithOpaque(w, mv, outer);
+            return;
+        }
+
+        // ── Static path (the original v0.7.x emit) ──────────────────
         java.util.List<String> pushedEffects = new java.util.ArrayList<>();
         for (String hName : collectHandlerNames(w.handler())) {
             Decl.HandlerDecl hd = handlers.get(hName);
             if (hd != null) {
-                // Push the effect the handler handles so the with-body
-                // can perform it without a row violation. The handler's
-                // own required effects (its `::: …` declaration) are
-                // pushed inside each clause lambda on entry — see
-                // {@code emitLambda} + {@code pendingClauseEffects}.
                 mv.visitLdcInsn(hd.effectName());
                 mv.visitMethodInsn(INVOKESTATIC, RT, "enterWith",
                         "(Ljava/lang/String;)V", false);
@@ -2418,6 +2427,103 @@ final class ClassEmitter implements Opcodes {
         mv.visitInsn(ATHROW);
         mv.visitTryCatchBlock(withStart, withEnd, withHandler, null);
         mv.visitLabel(afterWith);
+    }
+
+    /** True when the handler expression is something the compile-time
+     *  analysis can't resolve to a known handler decl — fn-param,
+     *  computed expression, conditional, etc. The opaque path
+     *  defers the work to runtime: evaluate the expression, push
+     *  effects from the resulting value, dispatch through runWithSM
+     *  generically. */
+    private boolean isOpaqueHandler(Expr handlerExpr) {
+        for (String name : collectHandlerNames(handlerExpr)) {
+            if ("__unknown__".equals(name)) return true;
+            if (!handlers.containsKey(name)) {
+                // Var pointing at a fn-param / non-decl — same opaque
+                // shape (collectHandlerNames added the bare name when
+                // there was no local-handler-binding to chase).
+                if (currentLocalHandlerBindings.containsKey(name)) continue;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Opaque-handler emit. Evaluates the handler expression to an
+     *  Object (must be a CompiledHandler / CompiledComposedHandler at
+     *  runtime — SpecValidator enforces this at fn boundaries when
+     *  a `(Handler Eff)` spec is declared). Pushes effects via
+     *  RT.enterWithFromValue, runs the SM body, pops via
+     *  RT.exitWithCount(n) where n is the int returned by the entry
+     *  helper. */
+    private void emitWithOpaque(Stmt.With w, MethodVisitor mv, Locals outer) {
+        int handlerSlot = outer.allocateAnon();
+        int countSlot = outer.allocateAnon();
+        emitExpr(w.handler(), mv, outer);
+        mv.visitInsn(DUP);
+        mv.visitVarInsn(ASTORE, handlerSlot);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "enterWithFromValue",
+                "(Ljava/lang/Object;)I", false);
+        mv.visitVarInsn(ISTORE, countSlot);
+
+        Label withStart = new Label();
+        Label withEnd = new Label();
+        Label withCatch = new Label();
+        Label after = new Label();
+        mv.visitLabel(withStart);
+
+        // Classify body shape — same as the static path; SM lowering
+        // accepts any body shape so long as the body itself is
+        // representable (Pure / SingleOp / Sequence / EffIR).
+        List<Stmt> body = new ANormalizer().normalize(w.body());
+        body = expandDestructureBindsForSM(body);
+        WithBodyShape shape = classifyWithBody(body);
+        if (shape instanceof WithBodyShape.Unsupported) {
+            throw new IrijCompiler.CompileException(
+                    "with: body shape not supported by state-machine lowering at "
+                            + (w.loc() != null ? w.loc().line() + ":" + w.loc().col() : "<unknown>"));
+        }
+
+        // Emit the step + runWithSM call, but with the handler coming
+        // from a JVM local instead of an `emitExpr(w.handler())`. Mirror
+        // emitWithSM's structure inline rather than refactor today.
+        int resultSlot = outer.allocateAnon();
+        mv.visitVarInsn(ALOAD, handlerSlot);          // handlerObj
+
+        Set<String> bound = new HashSet<>();
+        List<String> captures = new ArrayList<>();
+        for (Stmt s : body) collectFreeVarsStmt(s, bound, outer, captures, new HashSet<>());
+
+        emitSMStep(shape, body, captures, mv, outer);
+
+        int nFields = switch (shape) {
+            case WithBodyShape.Sequence seq -> seq.liftedLocals().size();
+            case WithBodyShape.EffIR eir -> eir.liftedLocals().size();
+            default -> 0;
+        };
+        pushIconst(mv, nFields);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "runWithSM",
+                "(Ljava/lang/Object;L" + IRIJ_FN + ";I)Ljava/lang/Object;", false);
+        mv.visitVarInsn(ASTORE, resultSlot);
+
+        mv.visitLabel(withEnd);
+        // Normal exit: pop the runtime frames + push the result.
+        mv.visitVarInsn(ILOAD, countSlot);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "exitWithCount", "(I)V", false);
+        mv.visitVarInsn(ALOAD, resultSlot);
+        mv.visitJumpInsn(GOTO, after);
+
+        // Exception exit: pop, rethrow.
+        mv.visitLabel(withCatch);
+        int excSlot = outer.allocateAnon();
+        mv.visitVarInsn(ASTORE, excSlot);
+        mv.visitVarInsn(ILOAD, countSlot);
+        mv.visitMethodInsn(INVOKESTATIC, RT, "exitWithCount", "(I)V", false);
+        mv.visitVarInsn(ALOAD, excSlot);
+        mv.visitInsn(ATHROW);
+        mv.visitTryCatchBlock(withStart, withEnd, withCatch, null);
+
+        mv.visitLabel(after);
     }
 
     /**

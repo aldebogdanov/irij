@@ -622,6 +622,35 @@ class StateMachineWithTest {
     // Outer `with h2 (with h1 body)`. Inner SM frame catches its own effect;
     // anything else propagates out and is caught by the outer SM frame.
 
+    @Test void handler_as_fn_param_dispatches_through_with() throws Exception {
+        // v0.8.0b — opaque-handler emit path. A fn parameter typed
+        // (Handler Logger) is used as the head of a `with` block;
+        // the emitter detects the fn-param as opaque, evaluates the
+        // value at runtime, pushes its effect via
+        // RT.enterWithFromValue, and dispatches through runWithSM.
+        String src = """
+            effect Logger
+              log :: Str ()
+            handler quiet :: Logger
+              log _ => resume ()
+            handler tag :: Logger
+              log msg => resume ()
+            fn run-it :: (Handler Logger) () ::: Logger
+              => h
+              with h
+                log "a"
+                log "b"
+            fn driver ::: Logger
+              =>
+              run-it quiet
+              run-it tag
+              "ok"
+            with quiet
+              println (driver ())
+            """;
+        assertEquals(nl("ok"), runSM(src));
+    }
+
     @Test void nested_with_captures_fn_param_across_inner_step() throws Exception {
         // Regression: prior to the fix in collectFreeVarsStmt, `Stmt.With`
         // fell through the default arm so an inner `with` block's body
