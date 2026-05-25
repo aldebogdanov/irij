@@ -335,6 +335,20 @@ public class AstBuilder {
             }
             return new SpecExpr.TupleSpec(elems);
         }
+        // `{field :: spec; field :: spec}` — record spec.
+        if (atom.recordSpecBody() != null) {
+            var rsb = atom.recordSpecBody();
+            var fields = new java.util.LinkedHashMap<String, SpecExpr>();
+            for (var fld : rsb.recordSpecField()) {
+                String name = fld.IDENT().getText();
+                if (fields.containsKey(name)) {
+                    throw new IllegalArgumentException(
+                            "duplicate field '" + name + "' in record spec");
+                }
+                fields.put(name, buildSpecExpr(fld.specExpr()));
+            }
+            return new SpecExpr.RecordSpec(fields);
+        }
         // Fallback: wildcard for unsupported forms (refinement, located)
         return new SpecExpr.Wildcard();
     }

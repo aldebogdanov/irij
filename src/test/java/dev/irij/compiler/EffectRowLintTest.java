@@ -292,4 +292,82 @@ class EffectRowLintTest {
         assertTrue(e.getMessage().contains("shared"),
                 () -> "expected duplicate-cap error, got: " + e.getMessage());
     }
+
+    // ── (5) record specs + nested row-vars (phase 2a) ───────────────
+    //
+    // A fn arg typed as `{action :: (Fn):eff …}` (or `Vec[…]` thereof)
+    // exposes the row-var `eff` to the fn's effect row. The caller's
+    // effects must subsume the union of all action fns' effect rows
+    // passed in the literal.
+
+    @Test
+    void recordSpecRowVarPropagatesFromMapLitField() {
+        // Caller passes a map literal whose `action` field is a fn
+        // requiring Console. `dispatch :: {action :: (Fn):eff …} ::: eff`
+        // — the caller (top-level) is ambient so accepted.
+        String src = """
+            fn act :: Str Str ::: Console
+              (s -> s)
+            fn dispatch :: {action :: (Fn):eff} Str ::: eff
+              (r -> r.action "go")
+            dispatch {action= act}
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void recordSpecRowVarRejectsCallerWithoutBoundEffect() {
+        // Same shape, but the caller `do-it` lacks Console in its row —
+        // dispatch's eff-binding (= {Console}) exceeds do-it's avail.
+        String src = """
+            fn act :: Str Str ::: Console
+              (s -> s)
+            fn dispatch :: {action :: (Fn):eff} Str ::: eff
+              (r -> r.action "go")
+            fn do-it :: Str
+              (_ -> dispatch {action= act})
+            (do-it ())
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Console"),
+                () -> "expected Console-effect error, got: " + e.getMessage());
+    }
+
+    @Test
+    void recordSpecRowVarInsideVecUnionsAllElementEffects() {
+        // Vec[{action :: (Fn):eff}] — eff binds to the union of every
+        // element's action-fn effects. Two routes, one Console one Time;
+        // caller (top-level ambient) accepted.
+        String src = """
+            fn echo :: Str Str ::: Console
+              (s -> s)
+            fn tick :: Str Int ::: Time
+              (_ -> now-ms ())
+            fn router :: #[{action :: (Fn):eff}] Str ::: eff
+              (routes -> "ok")
+            router #[{action= echo} {action= tick}]
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void recordSpecRowVarInsideVecRejectsMissingBoundEffect() {
+        // Same Vec[Record] sig, but caller (`do-it`) declares only
+        // Console. tick contributes Time → eff = {Console, Time};
+        // do-it's avail = {Console} doesn't subsume → reject.
+        String src = """
+            fn echo :: Str Str ::: Console
+              (s -> s)
+            fn tick :: Str Int ::: Time
+              (_ -> now-ms ())
+            fn router :: #[{action :: (Fn):eff}] Str ::: eff
+              (routes -> "ok")
+            fn do-it :: Str ::: Console
+              (_ -> router #[{action= echo} {action= tick}])
+            (do-it ())
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Time"),
+                () -> "expected Time-effect error, got: " + e.getMessage());
+    }
 }

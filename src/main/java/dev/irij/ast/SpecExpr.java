@@ -119,6 +119,37 @@ public sealed interface SpecExpr {
         }
     }
 
+    /**
+     * Record spec: {@code {field :: T; field :: T}}. Validates that the
+     * value is an IrijMap whose listed fields each match their declared
+     * spec. Extra fields on the map are allowed (records are open by
+     * default — mirrors most stdlib usage where extra metadata flows
+     * through).
+     *
+     * <p>The {@link java.util.LinkedHashMap} preserves declaration order
+     * for stable spec-encoding (matters for the EffectRowChecker's
+     * row-var-binding pass + for error-message stability).
+     *
+     * <p>Record specs unlock parametric effect rows on map-shaped args:
+     * a field declared {@code action :: (Fn):eff} surfaces the {@code
+     * eff} row-var to the enclosing fn signature, so a router fn whose
+     * argument is a vector of routes can propagate each action's
+     * effects to the caller without {@code ::: Any}.
+     */
+    record RecordSpec(java.util.LinkedHashMap<String, SpecExpr> fields)
+            implements SpecExpr {
+        @Override public String toString() {
+            var sb = new StringBuilder("{");
+            boolean first = true;
+            for (var e : fields.entrySet()) {
+                if (!first) sb.append("; ");
+                first = false;
+                sb.append(e.getKey()).append(" :: ").append(e.getValue());
+            }
+            return sb.append('}').toString();
+        }
+    }
+
     // ── Utility methods ─────────────────────────────────────────────────
 
     /**
@@ -137,6 +168,7 @@ public sealed interface SpecExpr {
             case VecSpec v -> v.elemSpec().isConcrete();
             case SetSpec s -> s.elemSpec().isConcrete();
             case TupleSpec t -> t.elemSpecs().stream().allMatch(SpecExpr::isConcrete);
+            case RecordSpec r -> r.fields().values().stream().allMatch(SpecExpr::isConcrete);
         };
     }
 }

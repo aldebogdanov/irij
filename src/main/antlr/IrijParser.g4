@@ -278,11 +278,23 @@ specAtom
     | SET_OPEN specExpr RBRACE                // #{a}
     | TUPLE_OPEN specExpr specExpr* RPAREN    // #(a b)
     | LBRACE refinementBody RBRACE            // {x :: Int | x >= 0}
+    | LBRACE recordSpecBody RBRACE            // {field :: T; field :: T}
     | specAtom MAP_AT ROLE_NAME               // located: T @$ROLE
     ;
 
 refinementBody
     : IDENT SPEC_ANN specExpr BAR expr
+    ;
+
+// Record-spec body: one or more `field :: specExpr` separated by SEMICOLON.
+// Used to give a precise spec to map/record-shaped values so row-vars can
+// propagate from field-fn types (e.g. `(Fn):eff`) to enclosing fn signatures.
+recordSpecBody
+    : recordSpecField (SEMICOLON recordSpecField)*
+    ;
+
+recordSpecField
+    : IDENT SPEC_ANN specExpr
     ;
 
 // ═══════════════════════════════════════════════════════════════════════

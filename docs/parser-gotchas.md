@@ -158,6 +158,33 @@ SAME indent as `=>`, NOT one level deeper. The parser uses INDENT to
 open the body scope at the `=>` line; subsequent lines must dedent
 back to the same column.
 
+## Record specs (0.7.x)
+
+`{field :: spec; field :: spec}` declares a record (map) spec.
+Fields are separated by `;` (NEWLINEs are suppressed inside
+braces, so semicolon is the only inline delimiter). Records are
+*open* — extra fields on the value are accepted.
+
+Row-vars work inside record specs: a field declared
+`action :: (Fn):eff` surfaces `eff` to the enclosing fn signature
+so polymorphic dispatchers (router-shaped fns) propagate their
+elements' effects to callers. Example:
+
+```
+pub fn router :: #[{action :: (Fn):eff}] Fn ::: eff
+  (routes -> (req -> find-route routes req))
+```
+
+Routes vector → each element is a record with at least `action`
+→ each action's effect row binds `eff` → router's effect row is
+the union of all action effects. Replaces the old `::: Any`
+escape hatch.
+
+Mismatch shape:
+- spec field declared but absent from value → "missing required
+  field" at validation
+- value field with wrong inner spec → "field 'X': expected …"
+
 ## Fixed in recent versions (0.2.7+)
 
 Previously listed gotchas that no longer apply:

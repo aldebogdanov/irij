@@ -138,6 +138,19 @@ public final class SpecValidator {
                 }
                 sb.append(']');
             }
+            case SpecExpr.RecordSpec r -> {
+                // Record[field=spec,field=spec]. Field order preserved
+                // (LinkedHashMap iteration matches insertion order).
+                sb.append("Record[");
+                boolean first = true;
+                for (var e : r.fields().entrySet()) {
+                    if (!first) sb.append(',');
+                    first = false;
+                    sb.append(e.getKey()).append('=');
+                    encodeInto(e.getValue(), sb);
+                }
+                sb.append(']');
+            }
         }
     }
 
@@ -175,6 +188,19 @@ public final class SpecValidator {
             String name = readName();
             if (pos < src.length() && src.charAt(pos) == '[') {
                 pos++; // consume [
+                // Record: head is "Record", body is field=spec pairs.
+                if ("Record".equals(name)) {
+                    var fields = new java.util.LinkedHashMap<String, SpecExpr>();
+                    if (src.charAt(pos) != ']') {
+                        parseRecordField(fields);
+                        while (pos < src.length() && src.charAt(pos) == ',') {
+                            pos++;
+                            parseRecordField(fields);
+                        }
+                    }
+                    expect(']');
+                    return new SpecExpr.RecordSpec(fields);
+                }
                 List<SpecExpr> args = new ArrayList<>();
                 if (src.charAt(pos) != ']') {
                     args.add(parseSpec());
@@ -187,6 +213,13 @@ public final class SpecValidator {
                 return normaliseApp(name, args);
             }
             return new SpecExpr.Name(name);
+        }
+
+        private void parseRecordField(java.util.LinkedHashMap<String, SpecExpr> out) {
+            String fname = readName();
+            expect('=');
+            SpecExpr fspec = parseSpec();
+            out.put(fname, fspec);
         }
 
         SpecExpr parseGroup() {
@@ -321,7 +354,30 @@ public final class SpecValidator {
             case SpecExpr.VecSpec v -> validateVec(value, v.elemSpec());
             case SpecExpr.SetSpec s -> validateSet(value, s.elemSpec());
             case SpecExpr.TupleSpec t -> validateTuple(value, t.elemSpecs());
+            case SpecExpr.RecordSpec r -> validateRecord(value, r.fields());
         };
+    }
+
+    /** Validate that {@code value} is an IrijMap whose listed fields
+     *  each match their declared spec. Records are open by default —
+     *  extra fields on the map are silently accepted. */
+    private static Object validateRecord(Object value,
+            java.util.LinkedHashMap<String, SpecExpr> fields) {
+        if (!(value instanceof Values.IrijMap m)) {
+            throw fail("expected Map (record), got " + typeName(value));
+        }
+        var entries = m.entries();
+        for (var e : fields.entrySet()) {
+            String name = e.getKey();
+            if (!entries.containsKey(name)) {
+                throw fail("missing required field '" + name + "' in record");
+            }
+            try { validate(entries.get(name), e.getValue()); }
+            catch (IrijRuntimeError re) {
+                throw fail("field '" + name + "': " + re.getMessage());
+            }
+        }
+        return value;
     }
 
     private static Object validateNamed(Object value, String name) {

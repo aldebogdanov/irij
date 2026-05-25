@@ -498,15 +498,21 @@ public final class EffectRowChecker {
             // Last spec is the return spec; earlier are inputs in order.
             int inputCount = specs.size() - 1;
             for (int i = 0; i < inputCount && i < args.size(); i++) {
-                String rv = rowVarOf(specs.get(i));
-                if (rv == null) continue;
-                Set<String> argEffects = collectExprEffects(args.get(i));
-                bindings.merge(rv, argEffects, (a, b) -> {
-                    Set<String> u = new HashSet<>(a);
-                    u.addAll(b);
-                    return u;
-                });
-                bindingArgIdx.putIfAbsent(rv, i);
+                SpecExpr spec = specs.get(i);
+                Expr arg = args.get(i);
+                // Top-level row-var (e.g. `(Fn):eff` as a positional arg) —
+                // the original Phase 14 form, preserved verbatim.
+                String rv = rowVarOf(spec);
+                if (rv != null) {
+                    Set<String> argEffects = collectExprEffects(arg);
+                    bindings.merge(rv, argEffects, EffectRowChecker::union);
+                    bindingArgIdx.putIfAbsent(rv, i);
+                }
+                // Nested row-vars (Phase 2a): dig into VecSpec / RecordSpec
+                // / SetSpec / TupleSpec to find row-vars on inner Fn-typed
+                // positions, then walk the matching arg-expr shape to
+                // collect each inner fn's effects.
+                collectNestedRowVarBindings(spec, arg, bindings, bindingArgIdx, i);
             }
         }
         // Substitute the callee's row using the collected bindings.
@@ -536,6 +542,95 @@ public final class EffectRowChecker {
             case SpecExpr.App a -> a.rowVar();
             default -> null;
         };
+    }
+
+    /** Phase 2a — walk a spec / arg-expr pair in parallel to find every
+     *  row-var attached to an inner Fn/Arrow position and collect the
+     *  effects of the matching sub-expression.
+     *
+     *  <p>Supported shapes:
+     *  <ul>
+     *    <li>{@code Vec[X]} matched against a {@code VectorLit} —
+     *        recurse element-wise.</li>
+     *    <li>{@code Set[X]} matched against a {@code SetLit} —
+     *        recurse element-wise.</li>
+     *    <li>{@code Tuple[a, b]} matched against a {@code TupleLit} —
+     *        recurse positionally.</li>
+     *    <li>{@code Record[f=X, g=Y]} matched against a {@code MapLit} —
+     *        recurse field-wise. Extra map fields ignored; missing
+     *        spec fields likewise (the SpecValidator catches both at
+     *        runtime).</li>
+     *    <li>Bare row-var on the inner spec at any depth — bind it
+     *        to the sub-expression's effects.</li>
+     *  </ul>
+     *
+     *  Unsupported shapes (e.g. a record-typed arg passed as a
+     *  bare {@code Var} pointing at a known value) silently no-op;
+     *  the row-var stays unbound and {@link #checkParametricCall}
+     *  treats it as empty. */
+    private void collectNestedRowVarBindings(SpecExpr spec, Expr arg,
+            Map<String, Set<String>> bindings,
+            Map<String, Integer> bindingArgIdx, int argIdx) {
+        if (spec == null || arg == null) return;
+        // Row-var directly on the inner spec.
+        String rv = rowVarOf(spec);
+        if (rv != null) {
+            Set<String> effs = collectExprEffects(arg);
+            bindings.merge(rv, effs, EffectRowChecker::union);
+            bindingArgIdx.putIfAbsent(rv, argIdx);
+            return;
+        }
+        switch (spec) {
+            case SpecExpr.VecSpec vs -> {
+                if (arg instanceof Expr.VectorLit vl) {
+                    for (Expr el : vl.elements()) {
+                        collectNestedRowVarBindings(vs.elemSpec(), el,
+                                bindings, bindingArgIdx, argIdx);
+                    }
+                }
+            }
+            case SpecExpr.SetSpec ss -> {
+                if (arg instanceof Expr.SetLit sl) {
+                    for (Expr el : sl.elements()) {
+                        collectNestedRowVarBindings(ss.elemSpec(), el,
+                                bindings, bindingArgIdx, argIdx);
+                    }
+                }
+            }
+            case SpecExpr.TupleSpec ts -> {
+                if (arg instanceof Expr.TupleLit tl) {
+                    int n = Math.min(ts.elemSpecs().size(), tl.elements().size());
+                    for (int j = 0; j < n; j++) {
+                        collectNestedRowVarBindings(ts.elemSpecs().get(j),
+                                tl.elements().get(j), bindings, bindingArgIdx, argIdx);
+                    }
+                }
+            }
+            case SpecExpr.RecordSpec rs -> {
+                if (arg instanceof Expr.MapLit ml) {
+                    java.util.Map<String, Expr> argFields = new java.util.HashMap<>();
+                    for (var e : ml.entries()) {
+                        if (e instanceof Expr.MapEntry.Field f) {
+                            argFields.put(f.key(), f.value());
+                        }
+                    }
+                    for (var e : rs.fields().entrySet()) {
+                        Expr fv = argFields.get(e.getKey());
+                        if (fv != null) {
+                            collectNestedRowVarBindings(e.getValue(), fv,
+                                    bindings, bindingArgIdx, argIdx);
+                        }
+                    }
+                }
+            }
+            default -> { /* Name / Var / Wildcard / Unit / Enum — no row-vars */ }
+        }
+    }
+
+    private static Set<String> union(Set<String> a, Set<String> b) {
+        Set<String> u = new HashSet<>(a);
+        u.addAll(b);
+        return u;
     }
 
     /** Render a multi-line error chain that points at the row-var
