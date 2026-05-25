@@ -30,6 +30,12 @@ dependencies {
     implementation("org.ow2.asm:asm:9.7")
     implementation("org.ow2.asm:asm-util:9.7")
     implementation("org.ow2.asm:asm-analysis:9.7")
+    // LSP4J — Eclipse JSON-RPC + LSP message classes. Used by
+    // `irij lsp` to drive the standard Language Server Protocol over
+    // stdio. Pulls in only the protocol layer (no SWT, no Eclipse
+    // framework).
+    implementation("org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1")
+    implementation("org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc:0.23.1")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

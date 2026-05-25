@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  */
 public final class IrijCli {
 
-    private static final String VERSION = loadVersion();
+    public static final String VERSION = loadVersion();
     private static final int DEFAULT_NREPL_PORT = 7888;
 
     private static String loadVersion() {
@@ -82,6 +82,12 @@ public final class IrijCli {
         // ── compile subcommand (experimental bytecode compiler) ─────────
         if (args[0].equals("compile")) {
             CompileCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
+            return;
+        }
+
+        // ── lsp subcommand (language server over stdio) ─────────────────
+        if (args[0].equals("lsp")) {
+            dev.irij.lsp.IrijLspServer.run();
             return;
         }
 
@@ -533,6 +539,7 @@ public final class IrijCli {
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
               irij --no-spec-lint <file> disable spec lint warnings (on by default)
+              irij lsp                   start LSP server (stdio, for editor integration)
               irij --mcp-server          start MCP server (stdio, for Claude Code)
               irij --nrepl-server        start nREPL server (port 7888)
               irij --nrepl-server=PORT   start nREPL server on PORT
