@@ -351,6 +351,44 @@ class EffectRowLintTest {
     }
 
     @Test
+    void namedSpecWithRowParamPropagatesEffectAcrossUseSites() {
+        // Phase 2c — `spec Route ::: eff` declares a named record with
+        // a row parameter. Use-site `(Route):eff` substitutes the
+        // declared row-param with the caller's row-var, then the
+        // row-var walk binds eff from the actual map literal's
+        // `action` field's effects.
+        String src = """
+            fn act :: Str Str ::: Console
+              (s -> s)
+            spec Route ::: eff
+              action :: (Fn):eff
+            fn dispatch :: (Route):eff Str ::: eff
+              (r -> r.action "go")
+            dispatch {action= act}
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void namedSpecRejectsCallerWithoutBoundEffect() {
+        // Same named-spec sig; caller's row lacks Console — reject.
+        String src = """
+            fn act :: Str Str ::: Console
+              (s -> s)
+            spec Route ::: eff
+              action :: (Fn):eff
+            fn dispatch :: (Route):eff Str ::: eff
+              (r -> r.action "go")
+            fn do-it :: Str
+              (_ -> dispatch {action= act})
+            (do-it ())
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Console"),
+                () -> "expected Console-effect error, got: " + e.getMessage());
+    }
+
+    @Test
     void recordSpecRowVarInsideVecRejectsMissingBoundEffect() {
         // Same Vec[Record] sig, but caller (`do-it`) declares only
         // Console. tick contributes Time → eff = {Console, Time};

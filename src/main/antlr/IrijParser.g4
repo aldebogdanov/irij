@@ -140,7 +140,7 @@ contractClause
 // ── spec / newtype ──────────────────────────────────────────────────
 
 specDecl
-    : SPEC upperName specParams? NEWLINE INDENT specBody NEWLINE* DEDENT
+    : SPEC upperName specParams? effectAnnotation? NEWLINE INDENT specBody NEWLINE* DEDENT
     ;
 
 upperName

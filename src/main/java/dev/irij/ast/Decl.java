@@ -35,7 +35,22 @@ public sealed interface Decl extends Node {
     }
 
     /** Spec declaration: spec Name params  variants|fields. */
-    record SpecDecl(String name, List<String> specParams, SpecBody body, SourceLoc loc) implements Decl {}
+    /** Spec declaration.
+     *
+     *  <p>{@code rowParams} is the row-variable list declared after
+     *  {@code :::} — e.g. {@code spec Route ::: eff { action :: (Fn):eff
+     *  }} declares one row-parameter {@code eff} that gets bound at use
+     *  sites like {@code (Route):Console}. Empty list means no row
+     *  parameters. (Type-variable parameters live in
+     *  {@code specParams}; row vs. type is distinguished by the
+     *  position in the decl: pre-`:::` IDENTs are type vars, post-`:::`
+     *  IDENTs are row vars.) */
+    record SpecDecl(String name, List<String> specParams, List<String> rowParams,
+                    SpecBody body, SourceLoc loc) implements Decl {
+        public SpecDecl(String name, List<String> specParams, SpecBody body, SourceLoc loc) {
+            this(name, specParams, List.of(), body, loc);
+        }
+    }
 
     /** Newtype declaration: newtype Name := Type. */
     record NewtypeDecl(String name, SourceLoc loc) implements Decl {}
@@ -149,7 +164,14 @@ public sealed interface Decl extends Node {
     }
 
     record Variant(String name, int arity) {}
-    record SpecField(String name) {}
+    /** Spec field: `name :: SpecExpr` inside a product/record spec body.
+     *  Pre-0.7.x stored only the field name; the per-field spec was
+     *  discarded. Now keeps the spec so phase-2c row-var propagation
+     *  through named specs can substitute row-params correctly. The
+     *  spec may be {@code null} for legacy callers; treat as Wildcard. */
+    record SpecField(String name, SpecExpr spec) {
+        public SpecField(String name) { this(name, null); }
+    }
 
     // ── Effect / Handler helpers ─────────────────────────────────────────
 

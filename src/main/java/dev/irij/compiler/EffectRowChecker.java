@@ -65,6 +65,18 @@ public final class EffectRowChecker {
      *  sites to find which input positions carry parametric row-var
      *  bindings (e.g. the {@code (_ -> _):eff} in fold's signature). */
     private final Map<String, List<SpecExpr>> fnSpecs = new HashMap<>();
+    /** Named spec lookup — populated by SpecDecl pass. Each entry
+     *  carries the spec's row-parameter list + a record-shaped view
+     *  of its body so use-sites can inline + substitute row-vars.
+     *  Sum-typed specs aren't registered here (no fields to traverse
+     *  for row-var binding). */
+    private final Map<String, NamedSpec> namedSpecs = new HashMap<>();
+
+    /** Record-shape view of a named spec, kept in a flat form so the
+     *  call-site row-var walk can substitute the spec's declared row-
+     *  parameter with whatever the use-site provided. */
+    private record NamedSpec(List<String> rowParams,
+                             java.util.LinkedHashMap<String, SpecExpr> fields) {}
     private final Map<String, String> effectOps = new HashMap<>();
     private final Map<String, String> handlerEffect = new HashMap<>();
     /** Set of declared effect names (from EffectDecl). Used to detect
@@ -145,6 +157,19 @@ public final class EffectRowChecker {
                 for (var op : ed.ops()) effectOps.put(op.name(), ed.name());
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 handlerEffect.put(hd.name(), hd.effectName());
+            } else if (inner instanceof Decl.SpecDecl sd
+                    && sd.body() instanceof Decl.SpecBody.ProductSpec ps) {
+                // Convert ProductSpec to a flat field map so call sites
+                // can walk record-shape arg literals against the spec
+                // body. SumSpec deliberately skipped — its variant args
+                // are positional, not field-named, so the row-var walk
+                // can't bind from them.
+                var fields = new java.util.LinkedHashMap<String, SpecExpr>();
+                for (var f : ps.fields()) {
+                    fields.put(f.name(), f.spec());
+                }
+                namedSpecs.put(sd.name(),
+                        new NamedSpec(sd.rowParams(), fields));
             } else if (inner instanceof Decl.CapDecl cap) {
                 String prev = capEffect.put(cap.name(), cap.effectName());
                 if (prev != null && !prev.equals(cap.effectName())) {
@@ -623,8 +648,69 @@ public final class EffectRowChecker {
                     }
                 }
             }
+            case SpecExpr.App app when namedSpecs.containsKey(app.head()) -> {
+                // Named-spec use site (Phase 2c). Inline the spec's field
+                // map, substitute the spec's declared row-parameter with
+                // whatever the use-site supplied via `:rowVar`, then
+                // recurse exactly as for an inline RecordSpec.
+                NamedSpec ns = namedSpecs.get(app.head());
+                if (arg instanceof Expr.MapLit ml) {
+                    String useSiteRowVar = app.rowVar();
+                    java.util.Map<String, Expr> argFields = new java.util.HashMap<>();
+                    for (var e : ml.entries()) {
+                        if (e instanceof Expr.MapEntry.Field f) {
+                            argFields.put(f.key(), f.value());
+                        }
+                    }
+                    for (var e : ns.fields().entrySet()) {
+                        Expr fv = argFields.get(e.getKey());
+                        if (fv == null) continue;
+                        SpecExpr fieldSpec = e.getValue();
+                        // Substitute the named spec's row-params with the
+                        // use-site row-var. One row-param supported per
+                        // spec today (matches what the grammar accepts);
+                        // generalises trivially once the parser permits
+                        // multiple `:::` row-params.
+                        if (!ns.rowParams().isEmpty() && useSiteRowVar != null) {
+                            fieldSpec = substituteRowVar(fieldSpec,
+                                    ns.rowParams().get(0), useSiteRowVar);
+                        }
+                        collectNestedRowVarBindings(fieldSpec, fv,
+                                bindings, bindingArgIdx, argIdx);
+                    }
+                }
+            }
             default -> { /* Name / Var / Wildcard / Unit / Enum — no row-vars */ }
         }
+    }
+
+    /** Substitute every occurrence of {@code from} in row-var positions of
+     *  {@code spec} with {@code to}. Used to inline named specs at their
+     *  use-sites: the spec body references its row-parameter; the use-site
+     *  supplies a different row-var that bubbles up to a fn signature. */
+    private static SpecExpr substituteRowVar(SpecExpr spec, String from, String to) {
+        return switch (spec) {
+            case SpecExpr.App a -> new SpecExpr.App(
+                    a.head(),
+                    a.args().stream().map(s -> substituteRowVar(s, from, to)).toList(),
+                    from.equals(a.rowVar()) ? to : a.rowVar());
+            case SpecExpr.Arrow a -> new SpecExpr.Arrow(
+                    a.inputs().stream().map(s -> substituteRowVar(s, from, to)).toList(),
+                    substituteRowVar(a.output(), from, to),
+                    from.equals(a.rowVar()) ? to : a.rowVar());
+            case SpecExpr.VecSpec v -> new SpecExpr.VecSpec(substituteRowVar(v.elemSpec(), from, to));
+            case SpecExpr.SetSpec s -> new SpecExpr.SetSpec(substituteRowVar(s.elemSpec(), from, to));
+            case SpecExpr.TupleSpec t -> new SpecExpr.TupleSpec(
+                    t.elemSpecs().stream().map(s -> substituteRowVar(s, from, to)).toList());
+            case SpecExpr.RecordSpec r -> {
+                var out = new java.util.LinkedHashMap<String, SpecExpr>();
+                for (var e : r.fields().entrySet()) {
+                    out.put(e.getKey(), substituteRowVar(e.getValue(), from, to));
+                }
+                yield new SpecExpr.RecordSpec(out);
+            }
+            default -> spec;
+        };
     }
 
     private static Set<String> union(Set<String> a, Set<String> b) {

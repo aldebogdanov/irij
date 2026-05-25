@@ -47,24 +47,31 @@ pub fn route-prefix :: Str Str Fn Map
     {method= method path= prefix action= action prefix= true})
 
 ;; The router family is effect-polymorphic via row-vars on the
-;; route-record's `action` field. `(Fn):eff` says "each action's
-;; effect row binds the variable eff"; the row is then propagated
-;; upward through every router/find/apply fn so each call site sees
-;; precisely the union of effects of the routes it registered.
-pub fn router :: #[{action :: (Fn):eff}] Fn ::: eff
+;; route record's `action` field. The named spec below carries one
+;; row-parameter `eff`; use-sites `(Route):eff` substitute it. The
+;; row then propagates upward through every router/find/apply fn so
+;; each call site sees precisely the union of effects of the routes
+;; it registered.
+;;
+;; Route is an open record — other fields (method, path, prefix)
+;; on the actual route values are accepted but not row-bound.
+pub spec Route ::: eff
+  action :: (Fn):eff
+
+pub fn router :: #[(Route):eff] Fn ::: eff
   (routes -> (req -> find-route routes req))
 
 fn match-route
   => r req
   if (r.prefix == true) ((r.method == req.method) && (starts-with? req.path r.path)) else ((r.method == req.method) && (r.path == req.path))
 
-fn apply-action :: {action :: (Fn):eff} _ _ ::: eff
+fn apply-action :: (Route):eff _ _ ::: eff
   (r req -> r.action req)
 
-fn find-route :: #[{action :: (Fn):eff}] _ _ ::: eff
+fn find-route :: #[(Route):eff] _ _ ::: eff
   (routes req -> if (empty? routes) ({status= 404 body= (default-404 req.path) headers= {}}) else (try-first (head routes) (tail routes) req))
 
-fn try-first :: {action :: (Fn):eff} #[{action :: (Fn):eff}] _ _ ::: eff
+fn try-first :: (Route):eff #[(Route):eff] _ _ ::: eff
   (r rest req -> if (match-route r req) (apply-action r req) else (find-route rest req))
 
 ;; Extract path segments after a prefix.

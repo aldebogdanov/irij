@@ -160,25 +160,37 @@ back to the same column.
 
 ## Record specs (0.7.x)
 
-`{field :: spec; field :: spec}` declares a record (map) spec.
-Fields are separated by `;` (NEWLINEs are suppressed inside
+`{field :: spec; field :: spec}` declares an *inline* record (map)
+spec. Fields are separated by `;` (NEWLINEs are suppressed inside
 braces, so semicolon is the only inline delimiter). Records are
 *open* — extra fields on the value are accepted.
 
 Row-vars work inside record specs: a field declared
 `action :: (Fn):eff` surfaces `eff` to the enclosing fn signature
 so polymorphic dispatchers (router-shaped fns) propagate their
-elements' effects to callers. Example:
+elements' effects to callers.
+
+## Named record specs with row params (0.7.x)
 
 ```
-pub fn router :: #[{action :: (Fn):eff}] Fn ::: eff
+pub spec Route ::: eff
+  action :: (Fn):eff
+```
+
+`spec Name ::: rowParam` declares a *named* record spec carrying
+a row parameter. Use-sites bind it via `(Name):rowVar`:
+
+```
+pub fn router :: #[(Route):eff] Fn ::: eff
   (routes -> (req -> find-route routes req))
 ```
 
-Routes vector → each element is a record with at least `action`
-→ each action's effect row binds `eff` → router's effect row is
-the union of all action effects. Replaces the old `::: Any`
-escape hatch.
+The row-var walk inlines the named spec at the use-site,
+substitutes the spec's declared `eff` with the use-site's row-var,
+then recurses into the result the same way it would for an inline
+`{action :: (Fn):eff}`. Refactor benefit: the route shape lives
+in one place; all router/find/apply fns share `(Route):eff` in
+their signatures.
 
 Mismatch shape:
 - spec field declared but absent from value → "missing required

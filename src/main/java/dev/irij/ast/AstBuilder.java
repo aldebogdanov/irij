@@ -460,8 +460,11 @@ public class AstBuilder {
                 typeParams.add(id.getText());
             }
         }
+        List<String> rowParams = ctx.effectAnnotation() != null
+                ? collectEffectRowEntries(ctx.effectAnnotation())
+                : java.util.List.of();
         var body = visitSpecBody(ctx.specBody());
-        return new Decl.SpecDecl(name, typeParams, body, loc(ctx));
+        return new Decl.SpecDecl(name, typeParams, rowParams, body, loc(ctx));
     }
 
     private Decl.SpecBody visitSpecBody(SpecBodyContext ctx) {
@@ -478,7 +481,9 @@ public class AstBuilder {
         if (!ctx.specField().isEmpty()) {
             var fields = new ArrayList<Decl.SpecField>();
             for (var f : ctx.specField()) {
-                fields.add(new Decl.SpecField(f.IDENT().getText()));
+                fields.add(new Decl.SpecField(
+                        f.IDENT().getText(),
+                        buildSpecExpr(f.specExpr())));
             }
             return new Decl.SpecBody.ProductSpec(fields);
         }
