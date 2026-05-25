@@ -67,6 +67,46 @@ scope-fork all use it. The fiber installs both with
 `inheritEffectStack(...)` and `inheritSMStack(...)` at the top of its
 run.
 
+## Capability callbacks on foreign executor threads
+
+Same inheritance need shows up outside `spawn`: any Java capability
+that hands user-supplied IrijFn control to a thread it didn't create
+(typically an executor inside the JDK or a third-party lib) sees the
+same empty-thread-local trap. Concrete case: `ServeCapability.serve`
+registers a callback against `com.sun.net.httpserver.HttpServer`,
+whose `newVirtualThreadPerTaskExecutor` dispatches each request on a
+fresh virtual thread. Empty `EFFECT_ROW` / `SM_STACK` on that thread
+means any `perform` in the user's handler body dies with "Unhandled
+effect: X.op (no handler on stack)".
+
+The public snapshot API for capabilities:
+
+```java
+RuntimeSupport.EffectSnapshot snap = RuntimeSupport.snapshotEffects();
+// later, on the worker thread:
+Object result = RuntimeSupport.runWithEffectSnapshot(snap,
+        () -> RuntimeSupport.callAny(userHandler, new Object[]{arg}));
+```
+
+`snapshotEffects()` is `snapParent` exposed as an opaque token.
+`runWithEffectSnapshot` installs `SM_STACK`, `EFFECT_ROW`, the legacy
+`EffectSystem.STACK`, `NS`, and `SESSION_OUT` from the snapshot, then
+runs the supplied body. No restore step — the worker thread is
+assumed to be one-shot (a request handler that dies after the
+response, a scheduled callback that fires once).
+
+When to use:
+- Capability schedules user code on a JDK executor (HTTP server,
+  WebSocket frame dispatcher, file watcher, scheduled task).
+- Capability invokes a user callback from a callback-style
+  third-party library (DB driver event listener, queue consumer
+  loop).
+
+When *not* to use:
+- The cap method runs synchronously on the calling thread — no
+  thread hop, no need to snapshot.
+- The cap intentionally wants an isolated effect context (rare).
+
 ## Fiber-side perform dispatch
 
 A fiber spawned inside an SM `with` performs an op:

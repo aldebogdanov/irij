@@ -94,6 +94,36 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.8.1 &mdash; Runtime fixes: per-request effect inheritance + `try` widening.
+
+**HTTP per-request effect inheritance.** Routes that performed any
+`Serve` op inside the request callback (SSE `sse-response` /
+`sse-send` / `sse-close`, multipart parsing) blew up with
+"Unhandled effect: Serve.X (no handler on stack)". Root cause:
+`com.sun.net.httpserver.HttpServer` dispatches each request on a
+fresh virtual thread; thread-local effect stacks start empty, so
+the `with default-serve` handler installed on the calling thread
+was invisible.
+
+Fix mirrors the fiber-fork inheritance path: new public API
+`RuntimeSupport.snapshotEffects()` / `runWithEffectSnapshot(snap,
+body)`. `ServeCapability.serve` snapshots at registration time
+(SM_STACK still holds the default-serve frame), replays around
+each request callback. Plain Map-returning routes were unaffected
+because their bodies never `perform`ed.
+
+**`try` now traps every Throwable.** Was only catching
+`IrijRuntimeError`; division by zero (`ArithmeticException`),
+casts, NPEs unwound the whole fiber. Widened to `Throwable`,
+keeping `InterruptedException` propagating for vthread
+cancellation; falls back to the exception class name when
+`getMessage()` is null/empty.
+
+**GraalVM Native Image** moved from v0.8.1 → techdebt. Ecosystem
+priority (more stdlib, more apps, more battle-testing) ahead of
+binary distribution. Plan captured in `TODO.md` under
+Future/Deferred.
+
 0.8.0 &mdash; First-class handler values + symbol-aware LSP.
 
 **Handler:Effect specs.** The `(Handler Eff)` spec form types
