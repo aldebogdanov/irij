@@ -94,6 +94,54 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.8.0 &mdash; First-class handler values + symbol-aware LSP.
+
+**Handler:Effect specs.** The `(Handler Eff)` spec form types
+handler values, so handlers are first-class: pass them as fn
+arguments, return them from fns (config-driven choice), compose
+them at runtime with `>>`. Runtime validation in `SpecValidator`
+proves a handler argument covers the required effect (single or
+composed).
+
+```
+fn say-hello :: (Handler Logger) (Handler Greet) Str ::: Logger Greet
+  => log-h greet-h
+  with log-h >> greet-h
+    log "preamble"
+    greet "Ana"
+
+fn pick-logger :: Bool (Handler Logger)
+  (debug? -> if debug? counter else quiet)
+```
+
+`ClassEmitter` grew an *opaque* `with` path: when the handler
+expression isn't a compile-time name (e.g. a fn parameter), it
+gets evaluated at runtime and the effect row is pushed/popped via
+`enterWithFromValue` / `exitWithCount`. The existing static path
+keeps the fast lane for `with handler-name body`.
+
+See [`examples/handler-values.irj`](examples/handler-values.irj)
+for the worked example.
+
+**LSP 2b.1 — usable, not just a toy.**
+
+- **Symbol index** — every fn / effect / handler / cap / spec /
+  newtype / proto / role decl is indexed on every keystroke. Hover,
+  goto-def, and completion query it.
+- **Symbol-aware hover** — markdown payload with a fenced
+  signature, the decl's leading `;;` doc-comment paragraph (if
+  any), kind, and source line.
+- **Goto-definition** — jumps to the decl's source location.
+- **Identifier completion** — keywords + in-scope identifiers
+  with `CompletionItemKind` per decl kind.
+- **Effect-row diagnostics** — `EffectRowChecker` errors surface
+  as red squiggles with the location parsed back out of the
+  checker's error message. Single-file pass (cross-module checks
+  still need workspace-aware module resolution).
+
+Editor wiring is unchanged: eglot or any LSP client speaking the
+standard wire format.
+
 0.7.2 &mdash; Roadmap reshuffle. No language changes.
 
 The two language-maturity gaps from v0.7.x — first-class handler
