@@ -94,6 +94,18 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.7.2 &mdash; Roadmap reshuffle. No language changes.
+
+The two language-maturity gaps from v0.7.x — first-class handler
+values (dynamic-handler typing) and a *useful* LSP — are now the
+v0.8.0 priority, ahead of GraalVM native and new stdlib modules.
+Linear types moved from v0.8 → Future since the use-cases that
+need them (channels, transactional resource ownership, stronger
+cap guarantees) aren't on a near-term path yet. Choreographic
+programming stays in Future as a "big but niche" item.
+
+Updated roadmap on irij.online; matching version stamp here.
+
 0.7.1 &mdash; Capabilities + named record specs + inline `with` + LSP MVP.
 
 **Capabilities — replaces the `raw-*` surface.** Effects that touch
