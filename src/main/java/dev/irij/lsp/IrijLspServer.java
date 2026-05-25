@@ -44,6 +44,11 @@ public final class IrijLspServer implements LanguageServer,
      *  copy is needed for re-parses + hover / goto-def lookups. */
     private final ConcurrentHashMap<String, String> docs = new ConcurrentHashMap<>();
 
+    /** Per-document symbol index, rebuilt on every didOpen/didChange.
+     *  Used by hover (signature + kind), definition (jump to decl
+     *  location), and completion (in-scope identifiers). */
+    private final ConcurrentHashMap<String, List<LspIndex.Symbol>> indices = new ConcurrentHashMap<>();
+
     private LanguageClient client;
 
     /** Entry from {@link dev.irij.cli.IrijCli}. Blocks on stdio
@@ -94,6 +99,7 @@ public final class IrijLspServer implements LanguageServer,
     public void didOpen(DidOpenTextDocumentParams params) {
         TextDocumentItem doc = params.getTextDocument();
         docs.put(doc.getUri(), doc.getText());
+        indices.put(doc.getUri(), LspIndex.build(doc.getText()));
         publishDiagnostics(doc.getUri(), doc.getText());
     }
 
@@ -104,12 +110,15 @@ public final class IrijLspServer implements LanguageServer,
         for (TextDocumentContentChangeEvent ev : params.getContentChanges()) {
             docs.put(uri, ev.getText());
         }
+        indices.put(uri, LspIndex.build(docs.get(uri)));
         publishDiagnostics(uri, docs.get(uri));
     }
 
     @Override
     public void didClose(DidCloseTextDocumentParams params) {
-        docs.remove(params.getTextDocument().getUri());
+        String uri = params.getTextDocument().getUri();
+        docs.remove(uri);
+        indices.remove(uri);
     }
 
     @Override public void didSave(DidSaveTextDocumentParams params) {}
@@ -133,40 +142,78 @@ public final class IrijLspServer implements LanguageServer,
         if (word == null || word.isEmpty()) {
             return CompletableFuture.completedFuture(null);
         }
-        MarkupContent md = new MarkupContent(MarkupKind.MARKDOWN,
-                "**`" + word + "`** — Irij " + dev.irij.cli.IrijCli.VERSION
-                        + "\n\n*Hover details (signature, doc-string, "
-                        + "effect row) coming in 2b.1.*");
+        List<LspIndex.Symbol> idx = indices.getOrDefault(uri, List.of());
+        LspIndex.Symbol sym = LspIndex.findByName(idx, word);
+        String body;
+        if (sym != null) {
+            body = "```irij\n" + sym.signature() + "\n```\n\n"
+                    + "*" + sym.kind().name().toLowerCase() + "* "
+                    + "(line " + sym.loc().line() + ")";
+        } else {
+            body = "`" + word + "` — no definition in this file";
+        }
+        MarkupContent md = new MarkupContent(MarkupKind.MARKDOWN, body);
         return CompletableFuture.completedFuture(new Hover(md));
     }
 
-    // ── Definition (placeholder) ────────────────────────────────────
+    // ── Definition ──────────────────────────────────────────────────
 
     @Override
     public CompletableFuture<
             org.eclipse.lsp4j.jsonrpc.messages.Either<List<? extends Location>, List<? extends LocationLink>>>
     definition(DefinitionParams params) {
-        // MVP: no symbol index yet — return empty list so the editor
-        // gracefully shows "no definition found".
+        String uri = params.getTextDocument().getUri();
+        String src = docs.get(uri);
+        if (src == null) {
+            return CompletableFuture.completedFuture(
+                    org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(List.of()));
+        }
+        String word = LspText.wordAt(src, params.getPosition());
+        if (word == null || word.isEmpty()) {
+            return CompletableFuture.completedFuture(
+                    org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(List.of()));
+        }
+        List<LspIndex.Symbol> idx = indices.getOrDefault(uri, List.of());
+        LspIndex.Symbol sym = LspIndex.findByName(idx, word);
+        if (sym == null) {
+            return CompletableFuture.completedFuture(
+                    org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(List.of()));
+        }
+        Location loc = new Location(uri,
+                LspText.zeroWidthAt(sym.loc().line(), sym.loc().col() + 1));
         return CompletableFuture.completedFuture(
-                org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(List.of()));
+                org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(List.of(loc)));
     }
 
-    // ── Completion (placeholder) ────────────────────────────────────
+    // ── Completion: keywords + in-scope identifiers ─────────────────
 
     @Override
     public CompletableFuture<
             org.eclipse.lsp4j.jsonrpc.messages.Either<List<CompletionItem>, CompletionList>>
     completion(CompletionParams params) {
-        // MVP: surface the language keywords as completions. A real
-        // identifier index lives in 2b.1.
         List<CompletionItem> items = new java.util.ArrayList<>();
+        // Keywords first
         for (String kw : List.of(
                 "fn", "pub", "if", "else", "match", "with", "scope",
                 "do", "spec", "effect", "handler", "cap", "mod", "use",
                 "newtype", "proto", "impl")) {
             CompletionItem it = new CompletionItem(kw);
             it.setKind(CompletionItemKind.Keyword);
+            items.add(it);
+        }
+        // In-scope identifiers from the symbol index
+        String uri = params.getTextDocument().getUri();
+        for (LspIndex.Symbol s : indices.getOrDefault(uri, List.of())) {
+            CompletionItem it = new CompletionItem(s.name());
+            it.setKind(switch (s.kind()) {
+                case FN -> CompletionItemKind.Function;
+                case EFFECT -> CompletionItemKind.Interface;
+                case HANDLER, CAP -> CompletionItemKind.Module;
+                case SPEC, NEWTYPE -> CompletionItemKind.Struct;
+                case PROTO -> CompletionItemKind.Interface;
+                case ROLE -> CompletionItemKind.Constant;
+            });
+            it.setDetail(s.signature());
             items.add(it);
         }
         return CompletableFuture.completedFuture(
