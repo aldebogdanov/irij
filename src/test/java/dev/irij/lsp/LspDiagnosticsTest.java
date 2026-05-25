@@ -30,6 +30,40 @@ class LspDiagnosticsTest {
         assertTrue(d.getRange().getStart().getLine() >= 0);
     }
 
+    @Test void effectRow_missingRowSurfacedAsDiagnostic() {
+        // `log` is declared in effect Logger, but `driver` doesn't list
+        // Logger in its effect row — perform should fail with an
+        // effect-row error.
+        String src = """
+            effect Logger
+              log :: Str ()
+            fn driver :: Str ::: Console
+              () => log "hello"
+            """;
+        List<Diagnostic> diags = LspDiagnostics.all(src);
+        assertFalse(diags.isEmpty(),
+                "expected effect-row diagnostic, got none");
+        Diagnostic d = diags.get(0);
+        assertEquals(DiagnosticSeverity.Error, d.getSeverity());
+        assertEquals("irij", d.getSource());
+        // Non-default location — checker emitted "at L:C" suffix.
+        assertTrue(d.getRange().getStart().getLine() > 0,
+                () -> "expected non-trivial line, got " + d.getRange());
+    }
+
+    @Test void effectRow_cleanProgramHasNoEffectDiagnostic() {
+        // Logger is declared and Logger row is on `driver`; should pass.
+        String src = """
+            effect Logger
+              log :: Str ()
+            fn driver :: Str ::: Logger
+              () => log "hello"
+            """;
+        List<Diagnostic> diags = LspDiagnostics.all(src);
+        assertTrue(diags.isEmpty(),
+                () -> "expected no diagnostics, got: " + diags);
+    }
+
     @Test void parseError_rangeMatchesAntlrLineCol() {
         // Bad token at column 9 on line 1. After parse, the diagnostic
         // range's start should be (line 0, character 9) — LSP 0-based.

@@ -127,7 +127,7 @@ public final class IrijLspServer implements LanguageServer,
 
     private void publishDiagnostics(String uri, String source) {
         if (client == null) return;
-        List<Diagnostic> diags = LspDiagnostics.parseErrors(source);
+        List<Diagnostic> diags = LspDiagnostics.all(source);
         client.publishDiagnostics(new PublishDiagnosticsParams(uri, diags));
     }
 

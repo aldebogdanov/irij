@@ -6,15 +6,17 @@ JSON-RPC framed messages on stdin/stdout.
 
 ## Status
 
-MVP shipped in v0.7.x. Capabilities currently advertised:
+MVP shipped in v0.7.x; v0.8.0 added the 2b.1 slice (symbol-aware
+hover, goto-def, identifier completion, doc-comment hover,
+effect-row diagnostics).
 
 | Capability | Status |
 |---|---|
 | `textDocument/sync` (FULL) | ✅ — full text sent on every change; server re-parses |
-| `textDocument/publishDiagnostics` | ✅ — parse errors as red squiggles |
-| `textDocument/hover` | 🟡 placeholder — shows word + version; symbol-aware payload in 2b.1 |
-| `textDocument/definition` | 🟡 placeholder — empty result; AST symbol index in 2b.1 |
-| `textDocument/completion` | 🟡 placeholder — keyword list only; identifier index in 2b.1 |
+| `textDocument/publishDiagnostics` | ✅ — parse errors + single-file effect-row errors |
+| `textDocument/hover` | ✅ — signature in a code-fence, leading `;;` doc-comment, kind + line |
+| `textDocument/definition` | ✅ — AST symbol index; jumps to decl location |
+| `textDocument/completion` | ✅ — keywords + in-scope identifiers from the symbol index |
 
 ## Architecture
 
@@ -91,37 +93,70 @@ Trade-off:
 If/when needed, switching to incremental is a one-line capability
 change + a merge helper in `LspText`.
 
-## Why no compile-pipeline diagnostics yet
+## Symbol index (2b.1)
 
-Parse errors are file-local — running ANTLR on the current text
-gives a clean answer. The later passes (ModuleInliner,
-EffectRowChecker) need workspace-shaped resolution:
+`LspIndex.build(source)` parses the source into an AST and emits
+one `Symbol(name, kind, loc, signature, docComment)` per surface
+decl. Supported kinds: `FN, EFFECT, HANDLER, CAP, SPEC, NEWTYPE,
+PROTO, ROLE`.
 
-- ModuleInliner needs to find `use mod.X` imports on disk relative
-  to the project root (`irij.toml`).
-- EffectRowChecker needs the inlined tree.
+Doc-comment extraction walks upward from the decl line gathering
+any contiguous `;;`-prefixed lines, strips the leading `;;`, and
+joins them into one paragraph. Empty string if the line above
+isn't a comment.
 
-That requires workspace-aware document resolution + an incremental
-build cache. Tracked for 2b.1.
+The index is rebuilt on every `didOpen`/`didChange` (FULL sync
+already re-parses). No incremental update logic — one document's
+worth of symbols is small.
 
-## What 2b.1 will add
+`Decl.PubDecl` is unwrapped before classification so `pub fn foo`
+surfaces as `Symbol(name=foo, kind=FN, …)` rather than a wrapper.
 
-- Symbol index built off the AST: every `fn`, `effect`, `handler`,
-  `cap`, `spec` decl gets a `(name, location, kind, signature)`
-  record.
-- `textDocument/definition` looks up by name.
-- `textDocument/hover` reads the decl's signature + leading
-  doc-comment (`;;` lines above).
-- `textDocument/completion` returns the in-scope identifier set
-  in addition to the keywords.
-- Diagnostics from EffectRowChecker (once module resolution lands).
+## Hover / definition / completion (2b.1)
+
+- **hover** — `LspText.wordAt(src, position)` extracts the
+  kebab-case identifier under the cursor; `LspIndex.findByName`
+  looks it up. Body renders a fenced signature, the doc-comment
+  paragraph (if any), then `*<kind>* (line N)`. Unindexed words
+  fall back to `\`word\` — no definition in this file`.
+
+- **definition** — returns a `Location` pointing at the decl's
+  `SourceLoc`. Column gets bumped to 1-based for LSP.
+
+- **completion** — keyword list first, then in-scope identifiers
+  from the index with `CompletionItemKind` mapped per decl kind
+  (`FN→Function`, `EFFECT/PROTO→Interface`, `HANDLER/CAP→Module`,
+  `SPEC/NEWTYPE→Struct`, `ROLE→Constant`). Each item carries the
+  symbol signature in `detail`.
+
+## Effect-row diagnostics (2b.1.d)
+
+`LspDiagnostics.all(source)` runs parse + a single-file
+`EffectRowChecker.check(decls)` pass. The checker throws
+`IrijCompiler.CompileException`s with an `at L:C` suffix in the
+message; the regex `\bat (\d+):(\d+)` recovers the location into
+an LSP range. If no location matches, the diagnostic anchors at
+(1,1).
+
+The effect-row pass is skipped when parse errors exist — a
+half-typed file already has visible squiggles and the checker
+would just trip on a partial AST.
+
+Cross-module checks remain future work: `ModuleInliner` needs
+workspace-aware module resolution relative to `irij.toml`. The
+single-file pass already catches perform-without-row and
+intra-file fn-row-mismatch issues.
 
 ## Tests
 
 - `LspTextTest` — `wordAt` over kebab-case identifiers, predicate
   suffixes, whitespace positions.
-- `LspDiagnosticsTest` — clean source → empty diagnostics; parse
-  error → at least one Error-severity diagnostic with source `irij`.
+- `LspDiagnosticsTest` — parse error → Error-severity diagnostic;
+  effect-row violation surfaces with a non-trivial line range;
+  clean program (parse + effect rows) → empty diagnostics.
+- `LspIndexTest` — each surfaced decl kind round-trips through the
+  index; doc-comment block above a decl attaches; absent doc
+  leaves the field empty; partial source doesn't throw.
 
 Smoke-testing the live server requires a JSON-RPC driver; that
 loop isn't covered by automated tests today. Manual smoke:
