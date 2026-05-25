@@ -651,6 +651,32 @@ class StateMachineWithTest {
         assertEquals(nl("ok"), runSM(src));
     }
 
+    @Test void composed_fn_param_handlers_dispatch_correctly() throws Exception {
+        // v0.8.0c — runtime handler composition. Two handler values
+        // arrive as fn parameters; `>>` composes them at runtime
+        // (RuntimeSupport.compose is a normal Object→Object op) and
+        // the resulting CompiledComposedHandler flows through the
+        // opaque-handler emit path. Both handlers' effects are
+        // pushed to EFFECT_ROW via enterWithFromValue.
+        String src = """
+            effect Logger
+              log :: Str ()
+            effect Greet
+              greet :: Str Str
+            handler quiet :: Logger
+              log _ => resume ()
+            handler hi :: Greet
+              greet n => resume ("Hi, " ++ n)
+            fn use-pair :: (Handler Logger) (Handler Greet) Str ::: Logger Greet
+              => log-h greet-h
+              with log-h >> greet-h
+                log "preamble"
+                greet "Alice"
+            println (use-pair quiet hi)
+            """;
+        assertEquals(nl("Hi, Alice"), runSM(src));
+    }
+
     @Test void nested_with_captures_fn_param_across_inner_step() throws Exception {
         // Regression: prior to the fix in collectFreeVarsStmt, `Stmt.With`
         // fell through the default arm so an inner `with` block's body

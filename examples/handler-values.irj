@@ -1,0 +1,56 @@
+;; handler-values.irj — first-class handler values (v0.8.0).
+;;
+;; Demonstrates:
+;;   1. (Handler Eff) spec — types a fn parameter as a handler value.
+;;   2. Pass a handler as a fn argument.
+;;   3. Return a handler from a fn (config-driven choice).
+;;   4. Compose handlers at runtime (`>>` works on values, not just
+;;      static names).
+;;
+;; Run:  irij examples/handler-values.irj
+
+effect Logger
+  log :: Str ()
+
+effect Greet
+  greet :: Str Str
+
+;; ── Three concrete handlers ────────────────────────────────────────
+
+handler quiet :: Logger
+  log _ => resume ()
+
+handler counter :: Logger
+  state :! 0
+  log _ =>
+    state <- state + 1
+    resume ()
+
+handler friendly :: Greet
+  greet name => resume ("Hi, " ++ name)
+
+;; ── 1. Pass a handler as a fn arg ──────────────────────────────────
+
+fn say-hello :: (Handler Logger) (Handler Greet) Str ::: Logger Greet
+  => log-h greet-h
+  with log-h >> greet-h
+    log "preamble"
+    greet "Ana"
+
+println (say-hello quiet friendly)        ;; ⇒ "Hi, Ana"
+
+;; ── 2. Return a handler from a fn (config-driven choice) ───────────
+
+fn pick-logger :: Bool (Handler Logger)
+  (debug? -> if debug? counter else quiet)
+
+fn run-logging :: Bool () ::: Logger
+  => debug?
+  with pick-logger debug?
+    log "first"
+    log "second"
+    log "third"
+
+run-logging false        ;; uses quiet; nothing visible
+run-logging true         ;; uses counter; state bumps three times
+println "done"
