@@ -687,7 +687,18 @@ public class AstBuilder {
     }
 
     private Stmt.With visitWithExpr(WithExprContext ctx) {
-        var handler = visitExpr(ctx.expr());
+        // Inline form `WITH expr DO expr`: two expr children, no
+        // stmtList. The body is a single expression wrapped in an
+        // ExprStmt so the SM lowering treats it uniformly with the
+        // block-form body.
+        if (ctx.DO() != null) {
+            var handler = visitExpr(ctx.expr(0));
+            var bodyExpr = visitExpr(ctx.expr(1));
+            var body = List.<Stmt>of(new Stmt.ExprStmt(bodyExpr, loc(ctx)));
+            return new Stmt.With(handler, body, List.<Stmt>of(), loc(ctx));
+        }
+        // Block form: handler expr + stmtList body + optional on-failure.
+        var handler = visitExpr(ctx.expr(0));
         var body = visitStmtList(ctx.stmtList(0));
         var onFailure = ctx.stmtList().size() > 1 ? visitStmtList(ctx.stmtList(1)) : List.<Stmt>of();
         return new Stmt.With(handler, body, onFailure, loc(ctx));

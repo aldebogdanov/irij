@@ -44,7 +44,8 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
       app ()
   ```
   Deferred design question: whether to introduce first-class handler values (would require a handler type, op-name reification, and bigger runtime changes). For now, duplicate the `with` block per branch.
-- **`with` is block-form only.** `with h (expr)` on a single line does NOT parse — the body must start on the next indented line (`with h\n  body`).
+- **`with` block form** uses a newline-indented body: `with h\n  body`.
+- **`with` inline form (0.7.x):** `with handler do body-expr` produces a `with` whose body is the single expression after `do`. Works as a statement or as the RHS of `:=` — `exists := with default-fs do (fs-exists? p)`. Block form remains for multi-statement bodies; inline saves the helper-fn boilerplate when you just want one expression evaluated under the handler.
 - **Zero-arg effect ops require `()` at call site.** Bare `op-name` inside a function body returns the builtin value, not the invocation result. Write `op-name ()`. This is consistent with zero-arg builtins generally (`now-ms ()`, `rand-float ()`).
 
 ## Vectors and calls

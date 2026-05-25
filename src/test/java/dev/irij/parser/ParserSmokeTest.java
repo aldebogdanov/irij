@@ -268,6 +268,19 @@ class ParserSmokeTest {
                   greet "world"
                 """);
         }
+
+        @Test void withHandlerInlineDo() {
+            // Phase 4 inline form: `with handler do body-expr`. Works
+            // anywhere a block-form `with` would — at the top level,
+            // inside a fn body, on the RHS of a binding.
+            assertParses("""
+                use std.fs :open
+                result := with default-fs do (fs-exists? "/tmp")
+                fn check
+                  => p
+                  with default-fs do (fs-exists? p)
+                """);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

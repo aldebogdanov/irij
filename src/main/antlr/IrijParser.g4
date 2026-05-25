@@ -590,6 +590,7 @@ selectArm
 withExpr
     : WITH expr NEWLINE INDENT stmtList NEWLINE* DEDENT
       (NEWLINE? ON_FAILURE NEWLINE INDENT stmtList NEWLINE* DEDENT)?
+    | WITH expr DO expr                          // inline: with handler do body
     ;
 
 // ── scope ────────────────────────────────────────────────────────────
