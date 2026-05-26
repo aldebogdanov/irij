@@ -399,10 +399,17 @@ public final class ServeCapability {
             try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         } else {
             byte[] bytes = respBody.getBytes(StandardCharsets.UTF_8);
-            if (bytes.length > 0) {
-                exchange.sendResponseHeaders((int) status, bytes.length);
+            // Always send response headers — including for empty bodies
+            // (redirects, 204 No Content, etc.). Passing -1 as length
+            // tells HttpServer "no body", which closes the stream
+            // cleanly without the PlaceholderOutputStream "headers not
+            // sent yet" crash that used to fire when handler returned
+            // body="" (e.g. std.serve.redirect).
+            exchange.sendResponseHeaders((int) status,
+                    bytes.length == 0 ? -1L : bytes.length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                if (bytes.length > 0) os.write(bytes);
             }
-            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
         }
     }
 
