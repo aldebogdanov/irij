@@ -862,4 +862,30 @@ class ParserSmokeTest {
             assertParses("fn abstract-fn ::: IO\n");
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════
+    // §Lexer: snake_case identifiers (v0.8.4 — for SQL/JSON fields)
+    // ═══════════════════════════════════════════════════════════════
+
+    @Nested class SnakeCaseIdentifiers {
+        @Test void snakeCaseMapKey() {
+            assertParses("m := {pw_hash= \"abc\" user_id= 42}\n");
+        }
+
+        @Test void snakeCaseDotAccess() {
+            assertParses("println row.pw_hash\n");
+        }
+
+        @Test void mixedKebabAndSnake() {
+            // Real-world shape — Irij-conventional fn name with
+            // underscore-bearing field accessor inside.
+            assertParses("println user-row.session_token_hash\n");
+        }
+
+        @Test void leadingUnderscoreStillWildcard() {
+            // `_x` should NOT lex as a single IDENT — `_` stays
+            // Wildcard so pattern matching still works.
+            assertParses("(_ -> 42)\n");
+        }
+    }
 }

@@ -139,9 +139,15 @@ CAMEL_IDENT : [a-z] [a-z0-9]* [A-Z] [a-zA-Z0-9]* ;
 // Upper names: PascalCase (start with uppercase) — specs, effects, protocols, constructors
 UPPER_NAME  : [A-Z] [a-zA-Z0-9]* ;
 
-// Value names: kebab-case, may contain -> and ?, !
-// NOTE: must come after keywords to let keywords win
-IDENT       : [a-z] [a-z0-9]* ('-' [a-z0-9]+)* [?!]? ;
+// Value names: kebab- or snake-case. May contain ? !
+// NOTE: must come after keywords to let keywords win.
+// Underscore separator is allowed (in addition to dash) so SQL/JSON
+// field names like `pw_hash`, `user_id` round-trip through Irij as
+// single IDENT tokens — necessary for dot-access on map/record
+// fields whose names came from snake-case data sources. Must START
+// with a lowercase letter so a bare `_` still tokenizes as
+// UNDERSCORE (Wildcard) and `_foo` as UNDERSCORE + IDENT.
+IDENT       : [a-z] [a-z0-9]* (('-' | '_') [a-z0-9]+)* [?!]? ;
 
 // Attribute-style identifier with internal colons (for HTML/DOM map keys).
 // Only matches when there is at least one `:name` segment, so it never

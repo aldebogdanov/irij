@@ -2839,6 +2839,30 @@ final class ClassEmitter implements Opcodes {
                             ? ifs.elseBranch() : List.of();
                     lower(el, elseB, merge);
                     cur = merge;
+                } else if (s instanceof Stmt.IfStmt ifs
+                        && isLast && exitJump == null) {
+                    // Pure if/else at the tail of a with-body whose value
+                    // is the with-block's result. The branches contain no
+                    // ops, but each branch's last expression is the with's
+                    // return value (caller observed it as Unit before this
+                    // fix — the branches Jumped to a merge block that
+                    // never got finalized with a Return). Lower each
+                    // branch with `null` exitJump so its tail ExprStmt
+                    // becomes a Return; skip the merge entirely.
+                    if (containsOpCallExpr(ifs.cond())) { ok = false; return cur; }
+                    int thenB = newBlock();
+                    int elseB = newBlock();
+                    finalize(cur, new Term.Branch(ifs.cond(), thenB, elseB));
+                    int thenTail = lower(ifs.thenBranch(), thenB, null);
+                    List<Stmt> el = ifs.elseBranch() != null
+                            ? ifs.elseBranch() : List.of();
+                    int elseTail = lower(el, elseB, null);
+                    // Either branch may have been the "value-producing"
+                    // tail — record the one whose Return carries the
+                    // tail expr; emitWith uses lastValueBlock to know
+                    // which leaf supplied the body's result.
+                    lastValueBlock = thenTail;
+                    return cur;
                 } else if (stmtContainsOpRecursive(s)) {
                     // Ops nested inside non-If stmt (match, with, block...): 3c
                     ok = false;
@@ -3030,6 +3054,18 @@ final class ClassEmitter implements Opcodes {
     private boolean bodyHasBranchingOp(List<Stmt> body) {
         for (Stmt s : body) {
             if (s instanceof Stmt.IfStmt && stmtContainsOpRecursive(s)) return true;
+        }
+        // Pure if/else at the tail of a body that performs an op in
+        // an earlier segment — the if becomes the with-block's
+        // return value and only the EffIR lowering reconstructs that
+        // tail correctly. The segment classifier would otherwise
+        // treat the if as a pure stmt without value and the with
+        // returns Unit. Found wiring the irij.online seed registry.
+        if (!body.isEmpty()
+                && body.get(body.size() - 1) instanceof Stmt.IfStmt) {
+            for (int i = 0; i < body.size() - 1; i++) {
+                if (stmtContainsOpRecursive(body.get(i))) return true;
+            }
         }
         return false;
     }

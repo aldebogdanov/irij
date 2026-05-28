@@ -44,6 +44,31 @@ class StateMachineWithTest {
         return sb.toString();
     }
 
+    @Test void with_body_tail_pure_if_returns_value() throws Exception {
+        // Regression: a `with` block whose body performs an op and
+        // then ends in a pure if/else used to drop the if's value.
+        // Caller saw Unit. The EffIR lowering now reconstructs the
+        // tail-position if so the with-block's return is the branch's
+        // tail expression.
+        String src = """
+            effect E
+              op :: Int
+            handler h :: E
+              op => resume 42
+            fn pick :: Int ::: E
+              =>
+              with h
+                x := op ()
+                if (x == 42)
+                  100
+                else
+                  200
+            with h
+              println (to-str (pick ()))
+            """;
+        assertEquals(nl("100"), runSM(src));
+    }
+
     @Test void pure_body_no_ops() throws Exception {
         String src = """
             effect Log

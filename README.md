@@ -94,6 +94,33 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.8.4 &mdash; Two language-level fixes from the multi-tenant registry slab.
+
+**`with handler` body ending in `if/else` now returns the branch's
+value.** Previously the EffIR lowerer entered its branching path only
+when an `if/else` itself contained perform-ops; a pure if/else at
+the tail of a with-block that performed an op in an earlier segment
+was treated as a void statement, so the branches each Jumped to a
+merge block that never got finalized with a Return. Caller observed
+Unit. Now `bodyHasBranchingOp` also enters EffIR when the body's
+last stmt is an IfStmt preceded by an op-bearing segment, and the
+branches lower with `null` exitJump so each tail ExprStmt becomes a
+Return. Found by every signup/login chain on irij.online: the
+classic `with default-db / SELECT / if-existing / else / insert`
+pattern was returning Unit instead of the response map.
+
+**Snake_case identifiers now lex as a single IDENT.** The lexer
+rule was `[a-z] [a-z0-9]* ('-' [a-z0-9]+)* [?!]?` — kebab only.
+SQL- and JSON-shaped field names (`pw_hash`, `user_id`,
+`session_token_hash`) split into two tokens with `_` parsing as
+Wildcard, which the bytecode emitter rejected as
+"unsupported expression: Wildcard". Extended the underscore to a
+separator alongside `-`: `[a-z] [a-z0-9]* (('-' | '_') [a-z0-9]+)*
+[?!]?`. Bare `_` and leading-`_` still tokenize as Wildcard so
+pattern matching and ignored-arg lambdas are unchanged.
+
+Five new tests (4 parser, 1 SM-with), 379 Java total.
+
 0.8.3 &mdash; `Map` spec accepts records (Tagged values with named fields).
 
 Records and Maps used to be ontologically distinct: `:: Map ...`
