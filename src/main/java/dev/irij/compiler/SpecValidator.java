@@ -389,7 +389,18 @@ public final class SpecValidator {
             case "Keyword" -> requireType(value, Values.Keyword.class, "Keyword");
             case "Rational" -> requireType(value, Values.Rational.class, "Rational");
             case "Vec", "Vector" -> requireType(value, Values.IrijVector.class, "Vec");
-            case "Map" -> requireType(value, Values.IrijMap.class, "Map");
+            case "Map" -> {
+                // IrijMap obviously matches.
+                if (value instanceof Values.IrijMap) yield value;
+                // Records (Values.Tagged with namedFields) read like
+                // maps via dot-access already; accept them here so
+                // user code stops having to choose between record
+                // ergonomics and Map-typed boundaries. Common case:
+                // vrata's `El`/`Node` values flowing into fns
+                // declared with `:: Map ...`.
+                if (value instanceof Values.Tagged t && t.namedFields() != null) yield value;
+                throw fail("expected Map, got " + typeName(value));
+            }
             case "Set" -> requireType(value, Values.IrijSet.class, "Set");
             case "Tuple" -> requireType(value, Values.IrijTuple.class, "Tuple");
             case "Fn" -> {

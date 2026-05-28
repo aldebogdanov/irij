@@ -59,6 +59,50 @@ class SpecValidationTest {
                 () -> "expected '" + expectedFragment + "' in error, got: " + msg);
     }
 
+    // ── Map spec accepts records (v0.8.2 loosening) ────────────────────
+
+    @Test
+    void mapSpecAcceptsTaggedRecord() {
+        // Pass a Tagged value (Values.Tagged with namedFields) to the
+        // Map spec. Records read like maps via dot-access already; the
+        // v0.8.2 loosening lets vrata-style El/Node values flow into
+        // fns declared with `:: Map ...` without ceremony.
+        var tagged = new dev.irij.runtime.Values.Tagged(
+                "El",
+                java.util.List.of(),
+                java.util.Map.of("tag", "div",
+                        "attrs", new dev.irij.runtime.Values.IrijMap(java.util.Map.of())),
+                "El");
+        Object result = SpecValidator.validate(tagged,
+                new dev.irij.ast.SpecExpr.Name("Map"));
+        assertSame(tagged, result,
+                "Map spec should pass a Tagged record through unchanged");
+    }
+
+    @Test
+    void mapSpecRejectsBareTaggedWithoutNamedFields() {
+        // Tagged values WITHOUT namedFields are positional constructors
+        // (e.g. `Some 42`, `Cons 1 nil`) — those aren't record-shaped
+        // and should still fail the Map check.
+        var positional = new dev.irij.runtime.Values.Tagged(
+                "Some", java.util.List.of(42L));
+        assertThrows(IrijRuntimeError.class,
+                () -> SpecValidator.validate(positional,
+                        new dev.irij.ast.SpecExpr.Name("Map")));
+    }
+
+    @Test
+    void mapSpecStillRejectsPrimitives() {
+        // Loosening targets records only; primitives (Int/Str/Bool)
+        // still fail the Map check — keeps the spec's discrimination
+        // value for the common cases.
+        expectFailure("""
+            fn shape :: Map Str
+              (m -> "ok")
+            println (shape 42)
+            """, "expected Map");
+    }
+
     // ── Primitive input ─────────────────────────────────────────────────
 
     @Test

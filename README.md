@@ -94,6 +94,27 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.8.3 &mdash; `Map` spec accepts records (Tagged values with named fields).
+
+Records and Maps used to be ontologically distinct: `:: Map ...`
+on a fn boundary rejected any `Values.Tagged` with `namedFields`
+even though both shapes already read identically through
+dot-access. Vrata's stricter specs (`pub fn render :: Map Str`,
+etc.) hit the wall — `(div {} #[])` returned an `El` record that
+its own caller wouldn't accept.
+
+Loosened: `SpecValidator` now accepts either `IrijMap` or a
+record-shaped `Tagged` (one with `namedFields`) for `Map`.
+Positional constructors (`Some 42`, `Cons hd tl`) still fail —
+they aren't record-shaped and the discrimination there is real.
+
+Future work tracked: structural `Map[tag: Str, attrs: Map]` specs
+would let users tighten back where they need precision. Today's
+loosening is the permissive fix that unblocks vrata and any other
+library standing at the records-vs-maps fence.
+
+373 Java tests green.
+
 0.8.2 &mdash; Patch: empty-body HTTP responses no longer crash.
 
 `ServeCapability.writeResponse` previously skipped
