@@ -710,6 +710,18 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
 - [x] **Per-request HTTP handler had empty effect stack** — Fixed (v0.8.1-fix). `ServeCapability.serve` registered the user's handler against `com.sun.net.httpserver.HttpServer`, whose `newVirtualThreadPerTaskExecutor` dispatches each request on a fresh virtual thread with empty `EFFECT_ROW` / `SM_STACK` thread-locals. Plain routes returning a Map worked (no `perform` inside the handler body), but routes that performed any `Serve` op (`sse-response`, `sse-send`, `multipart-*`) blew up with "Unhandled effect: Serve.X (no handler on stack)". Fix: added `RuntimeSupport.snapshotEffects()` + `runWithEffectSnapshot(snap, body)` mirroring the fiber-fork inheritance path, snapshot at `serve` call time, replay around each request callback.
 - [x] **`tryFn` only caught IrijRuntimeError** — Fixed. `try` is the user's only error-trapping primitive; division by zero (`ArithmeticException`), cast errors, NPEs etc. weren't trapped. Widened to `Throwable` with explicit `InterruptedException` re-raise so vthread cancellation still propagates.
 - [ ] **Multi-arg chained lambdas not supported** — `(acc -> pair -> body)` fails to parse. The grammar's `lambdaExpr` rule is `LPAREN lambdaParams ARROW exprSeq RPAREN` where `lambdaParams` is `pattern*`, so `(a b -> body)` works (multi-param), but curried `(a -> b -> body)` requires explicit nesting: `(a -> (b -> body))`. Consider whether the grammar should support `->` chaining or if explicit nesting is the intended design.
+- [ ] **`with handler` block followed by trailing `if/else` body drops the return value.** Reproduces on v0.8.3 against the bytecode-SM lowering:
+  ```
+  fn f
+    with default-db
+      x := db-query ...
+      if (...)
+        a
+      else
+        b           ;; caller sees Unit, not a/b
+  ```
+  Workaround so far: pull the query into its own fn, branch on the result outside the `with` block. Found while wiring auth + token lookup on irij.online's seed registry — every chain that did `with default-db / SELECT / if-else` had to be split. Need to trace how SM lowering compiles the with's body slot; likely the if's resulting expression isn't bound as the with-block's tail expr.
+- [ ] **Snake_case field dot-access blows up bytecode emit** with "MVP: unsupported expression: Wildcard". `row.pw_hash` (where `pw_hash` is a Tagged-namedFields key) sees the `_` somewhere in the access chain and yields `Expr.Wildcard`, which ClassEmitter rejects in expression position. Workaround: `get "pw_hash" row`. Identifiers with `_` should either be banned in dot-access (with a clear parser error) or compile correctly to the same `get` lookup. Hit while reading SQL row results that kept their snake_case column names. Trace through `atomExpr` → `UNDERSCORE` branch in AstBuilder.
 
 ---
 
