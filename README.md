@@ -94,6 +94,20 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.8.2 &mdash; Patch: empty-body HTTP responses no longer crash.
+
+`ServeCapability.writeResponse` previously skipped
+`sendResponseHeaders` when the response body was empty, so any
+route returning from `std.serve.redirect` (login/logout flows,
+form-POST 302s) or any handler intentionally emitting a 0-byte
+body exploded with `IOException: response headers not sent yet`.
+
+Now `sendResponseHeaders(status, -1)` fires for empty bodies,
+which `com.sun.net.httpserver` interprets as "no body" and emits
+`Content-Length: 0` cleanly. Real callers seeing this in the wild
+include `irij publish` against the live registry: error responses
+with empty bodies were unreachable.
+
 0.8.1 &mdash; Runtime fixes: per-request effect inheritance + `try` widening.
 
 **HTTP per-request effect inheritance.** Routes that performed any
