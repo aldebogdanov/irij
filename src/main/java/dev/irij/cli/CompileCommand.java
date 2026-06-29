@@ -51,9 +51,10 @@ public final class CompileCommand {
         }
 
         Path src = Path.of(input);
-        byte[] bytes;
+        java.util.Map<String, byte[]> classes;
         try {
-            bytes = IrijCompiler.compileFile(src, CLASS_NAME);
+            classes = IrijCompiler.compileFileMulti(src, CLASS_NAME,
+                    dev.irij.compiler.CompileOptions.defaults(), java.util.List.of());
         } catch (IrijCompiler.CompileException e) {
             System.err.println("Compile error: " + e.getMessage());
             System.exit(1);
@@ -62,10 +63,20 @@ public final class CompileCommand {
 
         String outPath = output != null ? output : defaultOutput(src);
         if (outPath.endsWith(".jar")) {
-            writeJar(Path.of(outPath), bytes);
+            writeJar(Path.of(outPath), classes);
             System.out.println("Wrote " + outPath + " (runnable: java -jar " + outPath + ")");
         } else {
-            Files.write(Path.of(outPath), bytes);
+            // Write the main class to the requested path; any per-module
+            // classes (multi-class emission) land alongside it named by
+            // their binary name so the JVM can find them on the classpath.
+            Files.write(Path.of(outPath), classes.get(CLASS_NAME));
+            Path dir = Path.of(outPath).toAbsolutePath().getParent();
+            for (var e : classes.entrySet()) {
+                if (e.getKey().equals(CLASS_NAME)) continue;
+                Path aux = dir.resolve(e.getKey().replace('.', '/') + ".class");
+                Files.createDirectories(aux.getParent());
+                Files.write(aux, e.getValue());
+            }
             System.out.println("Wrote " + outPath + " (class: " + CLASS_NAME + ")");
         }
     }
@@ -77,7 +88,7 @@ public final class CompileCommand {
         return base + ".class";
     }
 
-    private static void writeJar(Path jar, byte[] classBytes) throws Exception {
+    private static void writeJar(Path jar, java.util.Map<String, byte[]> classes) throws Exception {
         Manifest mf = new Manifest();
         mf.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         mf.getMainAttributes().put(Attributes.Name.MAIN_CLASS, CLASS_NAME);
@@ -85,11 +96,14 @@ public final class CompileCommand {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (JarOutputStream jos = new JarOutputStream(baos, mf)) {
             Set<String> written = new HashSet<>();
-            // User program
-            jos.putNextEntry(new JarEntry(CLASS_NAME.replace('.', '/') + ".class"));
-            jos.write(classBytes);
-            jos.closeEntry();
-            written.add(CLASS_NAME.replace('.', '/') + ".class");
+            // User program — main class plus any per-module classes.
+            for (var e : classes.entrySet()) {
+                String entry = e.getKey().replace('.', '/') + ".class";
+                jos.putNextEntry(new JarEntry(entry));
+                jos.write(e.getValue());
+                jos.closeEntry();
+                written.add(entry);
+            }
             // Bundle the runtime classes from the irij jar itself so it's self-contained.
             bundleRuntimeClasses(jos, written);
         }

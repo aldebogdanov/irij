@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Entry point for Irij bytecode compilation (MVP spike).
@@ -71,14 +72,58 @@ public final class IrijCompiler {
      *  callers like {@link BytecodeSession} transform the AST before
      *  emission — e.g. capture the last top-level expression's value
      *  into the session namespace so Playground / REPL can surface
-     *  it. */
+     *  it.
+     *
+     *  <p>Returns only the main class's bytes. Use {@link
+     *  #compileDeclsMulti} when the program may inline modules (so the
+     *  loader can define the per-source-file classes too). This
+     *  single-byte form is safe for module-free snippets — most test
+     *  callers — where the main class is the only one emitted. */
     public static byte[] compileDecls(List<Decl> decls, String className,
                                        Path sourceRoot, CompileOptions opts,
                                        List<Path> seedRoots, String sourceFile) {
+        return compileDeclsMulti(decls, className, sourceRoot, opts, seedRoots, sourceFile)
+                .get(className);
+    }
+
+    /** Multi-class compile: returns every emitted class keyed by its
+     *  dotted binary name. The main class is keyed by {@code className}.
+     *  Loaders must define all entries before invoking {@code main}. */
+    public static Map<String, byte[]> compileDeclsMulti(List<Decl> decls, String className,
+                                       Path sourceRoot, CompileOptions opts,
+                                       List<Path> seedRoots, String sourceFile) {
+        // Resolve the root source-file name ONCE so the inliner (which
+        // stamps each root fn's origin) and the emitter (which derives
+        // the root class's SourceFile) agree. A mismatch would split
+        // root fns into a phantom per-file class.
+        String rootFile = sourceFile != null ? sourceFile
+                : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
         var inliner = new ModuleInliner(sourceRoot, seedRoots);
-        List<Decl> inlined = inliner.inline(decls);
+        List<Decl> inlined = inliner.inline(decls, rootFile);
         EffectRowChecker.check(inlined);
-        return new ClassEmitter(className, inliner.aliases(), opts, sourceFile).emit(inlined);
+        return new ClassEmitter(className, inliner.aliases(), opts, rootFile, inliner.fnFile())
+                .emitProgram(inlined);
+    }
+
+    /** Multi-class compile from source text. */
+    public static Map<String, byte[]> compileSourceMulti(String source, String className,
+                                        Path sourceRoot, CompileOptions opts,
+                                        List<Path> seedRoots, String sourceFile) {
+        var parsed = IrijParseDriver.parse(source);
+        if (parsed.hasErrors()) {
+            throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
+        }
+        List<Decl> decls = new AstBuilder().build(parsed.tree());
+        return compileDeclsMulti(decls, className, sourceRoot, opts, seedRoots, sourceFile);
+    }
+
+    /** Multi-class compile from a file. */
+    public static Map<String, byte[]> compileFileMulti(Path path, String className,
+                                        CompileOptions opts, List<Path> seedRoots)
+            throws IOException {
+        return compileSourceMulti(Files.readString(path), className,
+                path.toAbsolutePath().getParent(), opts, seedRoots,
+                path.getFileName().toString());
     }
 
     /** Compile an Irij file to a classfile byte[]. */

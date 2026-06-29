@@ -46,15 +46,42 @@ final class ModuleInliner {
     /** Short-name aliases registered via `use` (e.g. "json" for "std.json"). */
     Set<String> aliases() { return aliases; }
 
-    List<Decl> inline(List<Decl> decls) {
+    /** fn name → source file it came from. Built during inlining so
+     *  the emitter can group functions into per-source-file classes
+     *  (multi-class emission → correct {@code SourceFile} in stack
+     *  traces). Last definition wins, matching the emitter's
+     *  last-wins fn dedup. Keyed by bare fn name; root-program fns
+     *  map to {@code rootFile}. */
+    private final java.util.Map<String, String> fnFile = new java.util.LinkedHashMap<>();
+
+    java.util.Map<String, String> fnFile() { return fnFile; }
+
+    /** @param rootFile source filename of the top-level program (used
+     *  as the origin for its own fns; module fns get their module's
+     *  derived file). */
+    List<Decl> inline(List<Decl> decls, String rootFile) {
         List<Decl> out = new ArrayList<>();
-        expand(decls, out);
+        expand(decls, out, rootFile != null ? rootFile : "Program.irj");
         return out;
     }
 
-    private void expand(List<Decl> decls, List<Decl> out) {
+    /** Back-compat: inline without origin tracking. */
+    List<Decl> inline(List<Decl> decls) {
+        return inline(decls, "Program.irj");
+    }
+
+    /** Module qualified name → display source file. {@code vrata.html}
+     *  → {@code vrata/html.irj}. Used for the SourceFile attribute. */
+    private static String moduleFile(String qualifiedName) {
+        return qualifiedName.replace('.', '/') + ".irj";
+    }
+
+    private void expand(List<Decl> decls, List<Decl> out, String currentFile) {
         for (Decl d : decls) {
             Decl inner = d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di ? di : d;
+            if (inner instanceof Decl.FnDecl fn) {
+                fnFile.put(fn.name(), currentFile);
+            }
             // ModDecls are preserved so downstream passes (notably
             // EffectRowChecker) can determine which module each fn
             // came from — needed for stdlib-only escape hatches like
@@ -88,6 +115,7 @@ final class ModuleInliner {
                 loadAndInline(ud.qualifiedName(), out);
                 continue;
             }
+            // (FnDecl origin already recorded above.)
             // Unwrap PubDecl for the emitter's benefit (treat pub fn as fn).
             if (d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di) {
                 out.add(di);
@@ -112,7 +140,7 @@ final class ModuleInliner {
                                 + String.join("\n", parsed.errors()));
             }
             List<Decl> modDecls = new AstBuilder().build(parsed.tree());
-            expand(modDecls, out);
+            expand(modDecls, out, moduleFile(qualifiedName));
         } finally {
             loading.remove(qualifiedName);
         }

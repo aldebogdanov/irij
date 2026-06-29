@@ -299,9 +299,9 @@ public final class BuildCommand {
         // entry source can be inlined from `~/.irij/seeds/<name>/<ver>/`
         // or any other resolved location DependencyResolver returned.
         List<Path> seedRoots = new java.util.ArrayList<>(deps.values());
-        byte[] classBytes;
+        java.util.Map<String, byte[]> programClasses;
         try {
-            classBytes = IrijCompiler.compileFile(entryFile, BYTECODE_CLASS_NAME, opts, seedRoots);
+            programClasses = IrijCompiler.compileFileMulti(entryFile, BYTECODE_CLASS_NAME, opts, seedRoots);
         } catch (IrijCompiler.CompileException e) {
             System.err.println("Compile error: " + e.getMessage());
             System.exit(1);
@@ -321,12 +321,15 @@ public final class BuildCommand {
             Set<String> written = new HashSet<>();
             written.add("META-INF/MANIFEST.MF");
 
-            // 1. User program class
-            String classEntry = BYTECODE_CLASS_NAME.replace('.', '/') + ".class";
-            jos.putNextEntry(new JarEntry(classEntry));
-            jos.write(classBytes);
-            jos.closeEntry();
-            written.add(classEntry);
+            // 1. User program classes — main class plus any per-module
+            //    classes from multi-class emission.
+            for (var e : programClasses.entrySet()) {
+                String classEntry = e.getKey().replace('.', '/') + ".class";
+                jos.putNextEntry(new JarEntry(classEntry));
+                jos.write(e.getValue());
+                jos.closeEntry();
+                written.add(classEntry);
+            }
 
             // 2. Bundle the runtime (everything under dev/irij/** except cli/repl/nrepl/mcp)
             //    and the packaged stdlib (std/*.irj).
