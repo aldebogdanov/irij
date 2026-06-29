@@ -64,13 +64,13 @@ public final class BytecodeRunner {
         List<Path> seedRoots = new ArrayList<>(deps.values());
 
         String className = "irij.CliRun$" + COUNTER.incrementAndGet();
-        byte[] bytes = IrijCompiler.compileFile(sourceFile, className,
+        Map<String, byte[]> classes = IrijCompiler.compileFileMulti(sourceFile, className,
                 CompileOptions.defaults(), seedRoots);
 
         // Run in a fresh classloader so subsequent runs don't see
         // each other's static state (e.g. SpecValidator registry).
         BytesLoader loader = new BytesLoader();
-        Class<?> cls = loader.define(className, bytes);
+        Class<?> cls = loader.defineAll(classes, className);
 
         PrintStream prevOut = System.out;
         if (captureOut != null) System.setOut(captureOut);
@@ -93,10 +93,10 @@ public final class BytecodeRunner {
      *  irij eval} and the REPL line evaluator. */
     public static void runSource(String source, String fileLabel, PrintStream captureOut) {
         String className = "irij.CliEval$" + COUNTER.incrementAndGet();
-        byte[] bytes = IrijCompiler.compileSource(source, className,
+        Map<String, byte[]> classes = IrijCompiler.compileSourceMulti(source, className,
                 null, CompileOptions.defaults(), List.of(), fileLabel);
         BytesLoader loader = new BytesLoader();
-        Class<?> cls = loader.define(className, bytes);
+        Class<?> cls = loader.defineAll(classes, className);
 
         PrintStream prevOut = System.out;
         if (captureOut != null) System.setOut(captureOut);
@@ -128,6 +128,19 @@ public final class BytecodeRunner {
         BytesLoader() { super(BytecodeRunner.class.getClassLoader()); }
         Class<?> define(String name, byte[] bytes) {
             return defineClass(name, bytes, 0, bytes.length);
+        }
+
+        /** Define every emitted class, then return the main one.
+         *  Cross-class references resolve lazily at link time, so
+         *  definition order doesn't matter as long as all are loaded
+         *  in the same loader before {@code main} runs. */
+        Class<?> defineAll(Map<String, byte[]> classes, String mainName) {
+            Class<?> main = null;
+            for (var e : classes.entrySet()) {
+                Class<?> c = defineClass(e.getKey(), e.getValue(), 0, e.getValue().length);
+                if (e.getKey().equals(mainName)) main = c;
+            }
+            return main;
         }
     }
 }

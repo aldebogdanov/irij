@@ -96,11 +96,11 @@ public final class BytecodeSession {
 
         CompileOptions opts = CompileOptions.defaults().withNamespaceMode(true);
         String className = classPrefix + "$" + COUNTER.incrementAndGet();
-        byte[] bytes = IrijCompiler.compileDecls(
+        java.util.Map<String, byte[]> classes = IrijCompiler.compileDeclsMulti(
                 decls, className, null, opts,
                 java.util.List.of(),
                 fileLabel != null ? fileLabel : (className + ".irj"));
-        Class<?> cls = loader.define(className, bytes);
+        Class<?> cls = loader.defineAll(classes, className);
 
         // Install the session's namespace + (optional) session
         // PrintStream on this thread. SESSION_OUT routes println /
@@ -163,6 +163,17 @@ public final class BytecodeSession {
         Loader() { super(BytecodeSession.class.getClassLoader()); }
         Class<?> define(String name, byte[] bytes) {
             return defineClass(name, bytes, 0, bytes.length);
+        }
+
+        /** Define every emitted class, return the main one. See
+         *  {@code BytecodeRunner.BytesLoader.defineAll}. */
+        Class<?> defineAll(java.util.Map<String, byte[]> classes, String mainName) {
+            Class<?> main = null;
+            for (var e : classes.entrySet()) {
+                Class<?> c = defineClass(e.getKey(), e.getValue(), 0, e.getValue().length);
+                if (e.getKey().equals(mainName)) main = c;
+            }
+            return main;
         }
     }
 }

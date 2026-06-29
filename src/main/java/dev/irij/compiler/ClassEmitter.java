@@ -162,6 +162,7 @@ final class ClassEmitter implements Opcodes {
 
     ClassEmitter(String className, Set<String> moduleAliases,
                   CompileOptions options, String sourceFile) {
+        this.binaryName = className;
         this.internalName = className.replace('.', '/');
         this.moduleAliases = moduleAliases;
         this.options = options;
@@ -170,6 +171,26 @@ final class ClassEmitter implements Opcodes {
         // path didn't pass a real filename through.
         this.sourceFile = sourceFile != null ? sourceFile
                 : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
+    }
+
+    /** Dotted binary name of the main class (e.g. {@code irij.Program}).
+     *  Key used in the multi-class emission map; what
+     *  {@code ClassLoader.defineClass} expects. */
+    private final String binaryName;
+
+    /** Multi-class program emission. Returns a map from each emitted
+     *  class's dotted binary name to its bytes. The caller (a loader)
+     *  must define every entry, then resolve {@code main} on the
+     *  {@code binaryName} class.
+     *
+     *  <p>Today this returns a single entry — the whole program is one
+     *  class. Stage B of the multi-class refactor splits inlined module
+     *  functions into per-source-file classes so JVM stack frames carry
+     *  the right {@code SourceFile}; from then on the map has N entries.
+     *  Loaders that go through this method need no further change when
+     *  that lands. */
+    Map<String, byte[]> emitProgram(List<Decl> decls) {
+        return new java.util.LinkedHashMap<>(Map.of(binaryName, emit(decls)));
     }
 
     /** Irij source filename for the JVM SourceFile attribute. Set
