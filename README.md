@@ -94,6 +94,39 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.8.5 &mdash; Stack frames name the right source file (multi-class emission).
+
+Inlined-module functions used to report the **root program's**
+filename in stack traces — a crash in a seed's `el` showed up as
+`irij.Program.el(server.irj:40)`, pointing at an unrelated line of
+the main program. The JVM allows one `SourceFile` attribute per class
+and `printStackTrace` reads only that (it ignores SMAP), so the whole
+inlined program shared one filename.
+
+Now each inlined source file gets its own class with its own
+`SourceFile`:
+
+```
+at irij.Program$vrata_html.el(vrata/html.irj:40)
+at irij.Program.main(server.irj:2)
+```
+
+Only named fn bodies move to per-file classes; statics, `main`,
+clinit, and all synthetic methods stay on the root class. The
+hot-redef `invokedynamic` bootstrap now carries the owner class as a
+static arg so cross-class dev-mode calls resolve. Generated members
+went `private` → package-private (one package, one classloader).
+Module-free programs still emit exactly one class — identical to
+before.
+
+The compile→load contract changed too: `IrijCompiler` exposes
+`compile*Multi` returning `Map<className, byte[]>`, and every loader
+(`irij run` / `build` / `compile` / nREPL) defines all classes before
+invoking `main`.
+
+382 Java tests (+3 MultiClassEmissionTest) + 296 integration tests
+green.
+
 0.8.4 &mdash; Two language-level fixes from the multi-tenant registry slab.
 
 **`with handler` body ending in `if/else` now returns the branch's
