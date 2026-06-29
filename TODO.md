@@ -675,6 +675,38 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
 
 ---
 
+## Near-term (high priority)
+
+- [ ] **Primitives as sum-spec variants (proper union types)** — a
+  `spec` sum must be able to mix named record/constructor variants
+  with primitive specs:
+  ```
+  spec Node
+    Raw            ;; record variant
+    El             ;; record variant
+    Str            ;; primitive — a bare string is a valid Node
+  ```
+  Today sum specs only admit named variants (Tagged values); a bare
+  `Str`/`Int`/`Bool` against such a sum fails with
+  "expected <T> variant, got Str". We are spec-oriented — this is a
+  must-have, not a nicety: it's the difference between modeling
+  `Node = element | raw | text` honestly and falling back to `_`
+  (unchecked). Surfaced building vrata 0.2.x: HTML children are
+  element-or-raw-**or-text**, and text nodes are bare strings, so
+  `children :: #[Node]` rejected every text child until we loosened
+  to `#[_]` (vrata 0.2.1). Once this lands, vrata tightens back to
+  `#[Node]` with `Node = Raw | El | Str` and regains full child
+  type-checking.
+  - Validator change: in the sum-spec branch, a variant whose name is
+    a known primitive spec (`Str`, `Int`, `Float`, `Bool`, `Keyword`,
+    `Rational`, `Unit`) matches by *type*, not by tag.
+  - Parser/spec-decl: allow primitive names in the variant list
+    alongside `UpperName` constructors.
+  - Arbitrary/gen + exhaustiveness: a primitive variant generates via
+    its primitive Arbitrary; pattern-match exhaustiveness treats it as
+    an open set (no constructor enumeration).
+  - Docs: `docs/internals/specs.md` sum-spec section + the spec.
+
 ## Future / Deferred
 
 - [ ] Choreographic programming (located types, EPP, `~>`, `<~`, roles)
