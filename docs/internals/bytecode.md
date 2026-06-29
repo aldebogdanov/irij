@@ -8,22 +8,71 @@ low-level bytes.
 
 For `irij.Program`:
 
-- One `public final class irij.Program`.
+- One `public final class irij.Program` (the **root class**).
 - `public static main(String[])` — entry point.
 - `public static <name>(Object, Object, ...) -> Object` per top-level
-  user `fn`.
-- `private static synthetic lambda$N(captures..., Object[] args) -> Object`
+  user `fn` **from the root source file**.
+- `static synthetic lambda$N(captures..., Object[] args) -> Object`
   per `Expr.Lambda` literal.
-- `private static synthetic smstep$N` / `clauseStep$tierC$N` /
+- `static synthetic smstep$N` / `clauseStep$tierC$N` /
   `clauseWrap$tierC$N` / `f$irijfn` / handler builder methods —
   generated as the emitter needs them.
 - Per-handler static fields for mutable handler state.
 - Per-user-fn static `IrijFn` adapter (`f$irijfn`) only emitted when
   the fn is referenced as a value.
 
+Generated members are package-private (not `private`): inlined module
+fns live in *separate* classes (see below) and must reach the root
+class's static fields + synthetic methods across the class boundary.
+All classes share package `irij` and one classloader, so
+package-private is sufficient and avoids nestmate machinery.
+
+## Multi-class emission (per-source-file SourceFile)
+
+The JVM allows exactly one `SourceFile` attribute per class, and
+`Throwable.printStackTrace()` reads only that attribute (it ignores
+`SourceDebugExtension`/SMAP — debugger-only). So to make stack frames
+name the *right* file, each inlined source file gets its own class:
+
+- Root program fns → `irij.Program`, `SourceFile = server.irj`.
+- `use vrata.html` fns → `irij.Program$vrata_html`,
+  `SourceFile = vrata/html.irj`.
+
+Frames then read `irij.Program$vrata_html.el(vrata/html.irj:40)`
+instead of the misleading `irij.Program.el(server.irj:40)`.
+
+How it works:
+
+- `ModuleInliner` records `fnName → sourceFile` (`fnFile()`) as it
+  inlines, tracking the current file (root file for the program,
+  `qn.replace('.','/')+".irj"` for a module). `IrijCompiler`
+  resolves the root file name **once** and hands the same value to
+  both the inliner and the emitter so root fns aren't mis-split.
+- `ClassEmitter.writerForFn` returns the root `ClassWriter` for root
+  fns, or a lazily-created per-file `ClassWriter` (own `visitSource`)
+  for module fns. Only **named fn method bodies** move; statics,
+  clinit, `main`, and **all** synthetic methods stay on the root
+  class. Synthetic handles keep pointing at root.
+- `ownerOf(fnName)` routes the two instructions that reach a real fn
+  method — the fn-as-value wrapper's `INVOKESTATIC` and the
+  direct-linked call — to the owning class.
+- Dev-mode calls go through `invokedynamic` + `RuntimeSupport.redefBootstrap`.
+  The owner class internal name is passed as a **static bootstrap arg**
+  so the hot-redef site resolves the target on the owning class, not
+  the caller's (a root→module call would otherwise `NoSuchMethodError`).
+- `emitProgram()` returns `Map<binaryName, byte[]>` — the root class
+  plus one entry per module file. Every loader (`BytecodeRunner`,
+  `BuildCommand`, `CompileCommand`, `BytecodeSession`) defines all of
+  them in one classloader before invoking `main`; cross-class
+  references resolve lazily at link time, so definition order is
+  irrelevant.
+
+A module-free program still emits exactly one class — the map has a
+single entry and behaviour is identical to before.
+
 Everything is `static`. No instance state. No subclasses except for
 internal helpers (`IrijContinuation` lives in `RuntimeSupport`, not in
-the user's class).
+the user's class) and the per-source-file fn classes above.
 
 ## Value model
 

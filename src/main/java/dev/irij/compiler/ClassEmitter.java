@@ -162,6 +162,12 @@ final class ClassEmitter implements Opcodes {
 
     ClassEmitter(String className, Set<String> moduleAliases,
                   CompileOptions options, String sourceFile) {
+        this(className, moduleAliases, options, sourceFile, Map.of());
+    }
+
+    ClassEmitter(String className, Set<String> moduleAliases,
+                  CompileOptions options, String sourceFile,
+                  Map<String, String> fnFile) {
         this.binaryName = className;
         this.internalName = className.replace('.', '/');
         this.moduleAliases = moduleAliases;
@@ -171,6 +177,55 @@ final class ClassEmitter implements Opcodes {
         // path didn't pass a real filename through.
         this.sourceFile = sourceFile != null ? sourceFile
                 : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
+        this.fnFile = fnFile;
+    }
+
+    /** fn name → source file (from {@link ModuleInliner}). Drives the
+     *  per-source-file class split: fns sharing a file land in one
+     *  class whose {@code SourceFile} is that file, so JVM stack
+     *  frames name the right module instead of the root program. */
+    private final Map<String, String> fnFile;
+
+    /** Lazily-created per-source-file ClassWriters, keyed by the
+     *  owner class's internal name. The root program's writer is the
+     *  main {@code classWriter}; module files get extra writers. */
+    private final Map<String, ClassWriter> fileWriters = new java.util.LinkedHashMap<>();
+
+    /** Internal name of the class that owns a given source file's fns.
+     *  Root file → main class; module file → {@code <main>$<sanitized>}. */
+    private String classForFile(String file) {
+        if (file == null || file.equals(sourceFile)) return internalName;
+        return internalName + "$" + sanitizeFilePart(file);
+    }
+
+    /** Internal name of the class that owns {@code fnName}'s method.
+     *  Falls back to the main class for unknown names (lambdas,
+     *  builtins, fns with no recorded origin). */
+    private String ownerOf(String fnName) {
+        String f = fnFile.get(fnName);
+        return f == null ? internalName : classForFile(f);
+    }
+
+    private static String sanitizeFilePart(String file) {
+        String base = file.endsWith(".irj") ? file.substring(0, file.length() - 4) : file;
+        return base.replaceAll("[^A-Za-z0-9]", "_");
+    }
+
+    /** The ClassWriter a named fn's method body belongs to: the root
+     *  {@code classWriter} for root-program fns, or a lazily-created
+     *  per-module-file writer (with its own {@code SourceFile}) for
+     *  inlined module fns. Synthetic methods (lambdas, SM steps,
+     *  wrappers) always stay on the root writer regardless. */
+    private ClassWriter writerForFn(Decl.FnDecl fn) {
+        String file = fnFile.get(fn.name());
+        String owner = classForFile(file);
+        if (owner.equals(internalName)) return classWriter;
+        return fileWriters.computeIfAbsent(owner, o -> {
+            ClassWriter w = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
+            w.visit(V21, ACC_PUBLIC | ACC_FINAL, o, null, OBJ, null);
+            w.visitSource(file, null);
+            return w;
+        });
     }
 
     /** Dotted binary name of the main class (e.g. {@code irij.Program}).
@@ -190,7 +245,15 @@ final class ClassEmitter implements Opcodes {
      *  Loaders that go through this method need no further change when
      *  that lands. */
     Map<String, byte[]> emitProgram(List<Decl> decls) {
-        return new java.util.LinkedHashMap<>(Map.of(binaryName, emit(decls)));
+        byte[] rootBytes = emit(decls);   // also populates fileWriters
+        Map<String, byte[]> out = new java.util.LinkedHashMap<>();
+        out.put(binaryName, rootBytes);
+        // Per-module-file classes, keyed by dotted binary name.
+        for (var e : fileWriters.entrySet()) {
+            String dotted = e.getKey().replace('/', '.');
+            out.put(dotted, e.getValue().toByteArray());
+        }
+        return out;
     }
 
     /** Irij source filename for the JVM SourceFile attribute. Set
@@ -319,7 +382,7 @@ final class ClassEmitter implements Opcodes {
                     // for the evaluated record; populate at clinit; use
                     // sites do GETSTATIC + get(field) + callAny.
                     String fieldName = "cap$" + mangle(cd.name());
-                    cw.visitField(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                    cw.visitField(ACC_STATIC | ACC_SYNTHETIC,
                             fieldName, OBJ_DESC, null, null).visitEnd();
                     recordCapField.put(cd.name(), fieldName);
                     recordCapExpr.put(cd.name(), cd.recordExpr());
@@ -336,7 +399,7 @@ final class ClassEmitter implements Opcodes {
                         String stateName = stateBindingName(hd.name(), sb);
                         String fieldName = "handler$" + mangle(hd.name()) + "$state$" + mangle(stateName);
                         fields.put(stateName, fieldName);
-                        cw.visitField(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                        cw.visitField(ACC_STATIC | ACC_SYNTHETIC,
                                 fieldName, OBJ_DESC, null, null).visitEnd();
                     }
                     handlerStateFields.put(hd.name(), fields);
@@ -364,7 +427,7 @@ final class ClassEmitter implements Opcodes {
             Decl.FnDecl fn = asFnDecl(d);
             if (fn != null) uniqueFns.put(fn.name(), fn); // overwrites: last wins
         }
-        for (Decl.FnDecl fn : uniqueFns.values()) emitFn(fn, cw);
+        for (Decl.FnDecl fn : uniqueFns.values()) emitFn(fn, writerForFn(fn));
 
         // Pass 2b: emit impl methods + protocol dispatchers.
         for (var entry : protoImpls.entrySet()) {
@@ -407,6 +470,8 @@ final class ClassEmitter implements Opcodes {
         }
 
         cw.visitEnd();
+        // Finalize any per-module-file classes spun up by writerForFn.
+        for (ClassWriter w : fileWriters.values()) w.visitEnd();
         return cw.toByteArray();
     }
 
@@ -1433,7 +1498,7 @@ final class ClassEmitter implements Opcodes {
     private void ensureUserFnWrapper(String fnName, int arity) {
         if (!emittedFnWrappers.add(fnName)) return; // already emitted
         MethodVisitor w = classWriter.visitMethod(
-                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                ACC_STATIC | ACC_SYNTHETIC,
                 userFnWrapperName(fnName), APPLY_DESC, null, null);
         w.visitCode();
         int argsSlot = 0;
@@ -1445,7 +1510,7 @@ final class ClassEmitter implements Opcodes {
         StringBuilder desc = new StringBuilder("(");
         for (int i = 0; i < arity; i++) desc.append(OBJ_DESC);
         desc.append(")").append(OBJ_DESC);
-        w.visitMethodInsn(INVOKESTATIC, internalName, mangle(fnName),
+        w.visitMethodInsn(INVOKESTATIC, ownerOf(fnName), mangle(fnName),
                 desc.toString(), false);
         w.visitInsn(ARETURN);
         w.visitMaxs(0, 0);
@@ -2284,7 +2349,7 @@ final class ClassEmitter implements Opcodes {
     private void emitHandlerBuilder(Decl.HandlerDecl h, ClassWriter cw) {
         // Find effect name: handler's effectName field.
         String effectName = h.effectName();
-        MethodVisitor mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC,
+        MethodVisitor mv = cw.visitMethod(ACC_STATIC,
                 handlerBuildName(h.name()),
                 "()L" + COMP_HANDLER + ";",
                 null, null);
@@ -3469,7 +3534,7 @@ final class ClassEmitter implements Opcodes {
         for (int i = 0; i < captures.size(); i++) desc.append(OBJ_DESC);
         desc.append("[Ljava/lang/Object;)Ljava/lang/Object;");
         MethodVisitor sm = classWriter.visitMethod(
-                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                ACC_STATIC | ACC_SYNTHETIC,
                 methodName, desc.toString(), null, null);
         sm.visitCode();
 
@@ -4056,7 +4121,7 @@ final class ClassEmitter implements Opcodes {
         StringBuilder desc = new StringBuilder("(");
         for (int i = 0; i < arity; i++) desc.append(OBJ_DESC);
         desc.append(")").append(OBJ_DESC);
-        MethodVisitor mv = cw.visitMethod(ACC_PRIVATE | ACC_STATIC,
+        MethodVisitor mv = cw.visitMethod(ACC_STATIC,
                 implMethodName(method, forType), desc.toString(), null, null);
         mv.visitCode();
         Locals locals = new Locals();
@@ -4192,7 +4257,7 @@ final class ClassEmitter implements Opcodes {
         String stepName = "clauseStep$tierC$" + id;
         String stepDesc = "([Ljava/lang/Object;)Ljava/lang/Object;";
         MethodVisitor sm = classWriter.visitMethod(
-                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                ACC_STATIC | ACC_SYNTHETIC,
                 stepName, stepDesc, null, null);
         sm.visitCode();
         Locals stepLocals = new Locals();
@@ -4211,7 +4276,7 @@ final class ClassEmitter implements Opcodes {
         String wrapperName = "clauseWrap$tierC$" + wrapperId;
         String wrapperDesc = "([Ljava/lang/Object;)Ljava/lang/Object;";
         MethodVisitor w = classWriter.visitMethod(
-                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                ACC_STATIC | ACC_SYNTHETIC,
                 wrapperName, wrapperDesc, null, null);
         w.visitCode();
         int wArgsSlot = 0;
@@ -4320,7 +4385,7 @@ final class ClassEmitter implements Opcodes {
     private String ensureTopLevelField(String irijName) {
         return topLevelFields.computeIfAbsent(irijName, n -> {
             String field = "top$" + mangle(n);
-            classWriter.visitField(ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+            classWriter.visitField(ACC_STATIC | ACC_SYNTHETIC,
                     field, OBJ_DESC, null, null).visitEnd();
             return field;
         });
@@ -4386,7 +4451,7 @@ final class ClassEmitter implements Opcodes {
         for (int i = 0; i < captures.size(); i++) desc.append(OBJ_DESC);
         desc.append("[Ljava/lang/Object;)Ljava/lang/Object;");
         MethodVisitor lm = classWriter.visitMethod(
-                ACC_PRIVATE | ACC_STATIC | ACC_SYNTHETIC,
+                ACC_STATIC | ACC_SYNTHETIC,
                 methodName, desc.toString(), null, null);
         lm.visitCode();
 
@@ -4743,22 +4808,27 @@ final class ClassEmitter implements Opcodes {
         desc.append(")").append(OBJ_DESC);
         if (options.directLinking()) {
             // Direct-linked deploy build: max JIT inlinability, no hot-redef.
-            mv.visitMethodInsn(INVOKESTATIC, internalName, mangle(fnName),
+            mv.visitMethodInsn(INVOKESTATIC, ownerOf(fnName), mangle(fnName),
                     desc.toString(), false);
         } else {
             // Dev/REPL build: indy + MutableCallSite so REPL can swap impls
             // without restarting the JVM. Bootstrap registers the site in
             // RuntimeSupport.REDEF_SITES; redefine() updates it later.
+            // The owner class (multi-class emission may place the fn in a
+            // per-module-file class) is passed as a static bootstrap arg
+            // so the target resolves on the right class, not the caller.
             Handle bootstrap = new Handle(
                     H_INVOKESTATIC,
                     RT,
                     "redefBootstrap",
                     "(Ljava/lang/invoke/MethodHandles$Lookup;"
                             + "Ljava/lang/String;"
-                            + "Ljava/lang/invoke/MethodType;)"
+                            + "Ljava/lang/invoke/MethodType;"
+                            + "Ljava/lang/String;)"
                             + "Ljava/lang/invoke/CallSite;",
                     false);
-            mv.visitInvokeDynamicInsn(mangle(fnName), desc.toString(), bootstrap);
+            mv.visitInvokeDynamicInsn(mangle(fnName), desc.toString(), bootstrap,
+                    ownerOf(fnName));
         }
     }
 

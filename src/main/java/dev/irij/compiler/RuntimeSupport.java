@@ -2520,7 +2520,36 @@ public final class RuntimeSupport {
             String name,
             java.lang.invoke.MethodType mt) throws NoSuchMethodException,
                                                     IllegalAccessException {
-        Class<?> owner = lookup.lookupClass();
+        // Legacy 3-arg form: the fn lives on the caller's own class.
+        // Retained for any call site emitted before multi-class
+        // emission added the owner argument.
+        return redefBootstrap(lookup, name, mt, null);
+    }
+
+    /** Hot-redef bootstrap with an explicit owner class. Multi-class
+     *  emission puts inlined-module fns in their own classes, so a
+     *  call from the root program to a module fn can't resolve the
+     *  target on the caller's class. {@code ownerInternal} (e.g.
+     *  {@code irij/Program$vrata_html}) names the class that actually
+     *  holds the method; null means "the caller's class" (root fns). */
+    public static java.lang.invoke.CallSite redefBootstrap(
+            java.lang.invoke.MethodHandles.Lookup lookup,
+            String name,
+            java.lang.invoke.MethodType mt,
+            String ownerInternal) throws NoSuchMethodException,
+                                         IllegalAccessException {
+        Class<?> owner;
+        if (ownerInternal == null) {
+            owner = lookup.lookupClass();
+        } else {
+            try {
+                owner = Class.forName(ownerInternal.replace('/', '.'),
+                        false, lookup.lookupClass().getClassLoader());
+            } catch (ClassNotFoundException e) {
+                throw new NoSuchMethodException(
+                        "redef owner class not found: " + ownerInternal);
+            }
+        }
         java.lang.invoke.MethodHandle target = lookup.findStatic(owner, name, mt);
         java.lang.invoke.MutableCallSite cs = new java.lang.invoke.MutableCallSite(target);
         REDEF_SITES.put(redefKey(owner, name, mt), cs);

@@ -92,10 +92,16 @@ public final class IrijCompiler {
     public static Map<String, byte[]> compileDeclsMulti(List<Decl> decls, String className,
                                        Path sourceRoot, CompileOptions opts,
                                        List<Path> seedRoots, String sourceFile) {
+        // Resolve the root source-file name ONCE so the inliner (which
+        // stamps each root fn's origin) and the emitter (which derives
+        // the root class's SourceFile) agree. A mismatch would split
+        // root fns into a phantom per-file class.
+        String rootFile = sourceFile != null ? sourceFile
+                : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
         var inliner = new ModuleInliner(sourceRoot, seedRoots);
-        List<Decl> inlined = inliner.inline(decls);
+        List<Decl> inlined = inliner.inline(decls, rootFile);
         EffectRowChecker.check(inlined);
-        return new ClassEmitter(className, inliner.aliases(), opts, sourceFile)
+        return new ClassEmitter(className, inliner.aliases(), opts, rootFile, inliner.fnFile())
                 .emitProgram(inlined);
     }
 
