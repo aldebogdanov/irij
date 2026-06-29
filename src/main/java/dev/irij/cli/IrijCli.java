@@ -388,6 +388,23 @@ public final class IrijCli {
 
     // ── Publish ─────────────────────────────────────────────────────────
 
+    /** Resolve the registry Bearer token: $IRIJ_TOKEN first, then
+     *  ~/.config/irij/token (first non-blank line). Null if neither. */
+    private static String resolvePublishToken() {
+        var env = System.getenv("IRIJ_TOKEN");
+        if (env != null && !env.isBlank()) return env.trim();
+        try {
+            var tokenFile = Path.of(System.getProperty("user.home"),
+                    ".config", "irij", "token");
+            if (Files.exists(tokenFile)) {
+                for (var line : Files.readAllLines(tokenFile)) {
+                    if (!line.isBlank()) return line.trim();
+                }
+            }
+        } catch (Exception ignored) { /* fall through to null */ }
+        return null;
+    }
+
     private static void runPublish() {
         var projectRoot = Path.of(System.getProperty("user.dir"));
         var tomlFile = projectRoot.resolve("irij.toml");
@@ -481,10 +498,25 @@ public final class IrijCli {
                 bodyBaos.write(Files.readAllBytes(tarball));
                 bodyBaos.write(("\r\n--" + boundary + "--\r\n").getBytes());
 
+                // Bearer token for the multi-tenant registry. Sources, in
+                // priority order: $IRIJ_TOKEN, then ~/.config/irij/token.
+                // Create one at <registry>/dashboard → "Create token".
+                var token = resolvePublishToken();
+                if (token == null || token.isBlank()) {
+                    System.err.println("No registry token found. Publishing requires one.");
+                    System.err.println("  1. Create a token at " + registryUrl + "/dashboard");
+                    System.err.println("  2. Provide it via either:");
+                    System.err.println("       export IRIJ_TOKEN=<token>");
+                    System.err.println("       echo <token> > ~/.config/irij/token");
+                    System.exit(1);
+                    return;
+                }
+
                 var client = java.net.http.HttpClient.newHttpClient();
                 var request = java.net.http.HttpRequest.newBuilder()
                     .uri(java.net.URI.create(url))
                     .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                    .header("Authorization", "Bearer " + token.trim())
                     .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(bodyBaos.toByteArray()))
                     .build();
 

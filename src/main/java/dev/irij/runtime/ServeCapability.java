@@ -78,12 +78,25 @@ public final class ServeCapability {
                             () -> RuntimeSupport.callAny(handler, new Object[]{req}));
 
                     if (resp instanceof SseWriter sse) {
-                        // Handler took over via SSE — block until writer
-                        // closes so the connection stays open.
+                        // Handler returned the writer → long-lived stream
+                        // (e.g. session output). Block until it closes so
+                        // the connection stays open.
                         while (!sse.isClosed()) {
                             try { Thread.sleep(500); }
                             catch (InterruptedException ie) { sse.close(); break; }
                         }
+                        return;
+                    }
+
+                    // The handler promoted the exchange to SSE (ds-sse) but
+                    // returned a non-writer value — the "patch once and
+                    // done" pattern (ds-patch writes an event, returns
+                    // Unit). Headers are already committed; close the
+                    // stream so the request completes, and DON'T call
+                    // writeResponse (it would re-send headers).
+                    Object promoted = exchange.getAttribute("__irij_sse");
+                    if (promoted instanceof SseWriter sse) {
+                        if (!sse.isClosed()) sse.close();
                         return;
                     }
 
@@ -134,7 +147,15 @@ public final class ServeCapability {
             ex.getResponseHeaders().set("Connection", "keep-alive");
             ex.getResponseHeaders().set("X-Accel-Buffering", "no");
             ex.sendResponseHeaders(200, 0);
-            return new SseWriter(ex, ex.getResponseBody());
+            SseWriter writer = new SseWriter(ex, ex.getResponseBody());
+            // Mark the exchange as SSE-promoted so the serve dispatcher
+            // knows headers are already committed — even if the handler
+            // doesn't return the writer (e.g. it calls ds-patch, which
+            // writes an event and returns Unit). Without this the
+            // dispatcher would fall through to writeResponse and try to
+            // send headers a second time ("headers already sent").
+            ex.setAttribute("__irij_sse", writer);
+            return writer;
         } catch (IOException e) {
             throw new IrijRuntimeError("server.sse-response: " + e.getMessage());
         }

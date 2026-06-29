@@ -94,6 +94,28 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.8.6 &mdash; SSE "patch once" responses + `irij publish` Bearer auth.
+
+**SSE dispatcher fix.** A handler that promotes its exchange to
+Server-Sent Events (`ds-sse`) and then *returns* — the Datastar
+"patch once and done" pattern, where `ds-patch` writes an event and
+yields `()` — used to crash with `IOException: headers already sent`.
+The serve dispatcher only recognized SSE when the handler *returned*
+the writer, so a Unit return fell through to `writeResponse`, which
+(since the v0.8.2 empty-body fix) re-sent already-committed headers.
+Now `sse-response` tags the exchange, and the dispatcher closes the
+stream cleanly for the patch-once case instead of re-sending headers.
+Long-lived streams (handler returns the writer) are unchanged. This
+unbroke the registry's `/api/seeds` Datastar list.
+
+**`irij publish` now authenticates.** The multi-tenant registry
+requires `Authorization: Bearer <token>`, but the CLI sent none →
+every publish 401'd. `irij publish` now reads a token from
+`$IRIJ_TOKEN` or `~/.config/irij/token` and sends it; a missing token
+prints how to create one at `<registry>/dashboard`.
+
+382 Java tests green.
+
 0.8.5 &mdash; Stack frames name the right source file (multi-class emission).
 
 Inlined-module functions used to report the **root program's**
