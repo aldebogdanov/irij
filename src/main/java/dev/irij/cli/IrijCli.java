@@ -73,6 +73,12 @@ public final class IrijCli {
             return;
         }
 
+        // ── version subcommand (commit-count version of the CWD project) ──
+        if (args[0].equals("version")) {
+            runVersion(java.util.Arrays.copyOfRange(args, 1, args.length));
+            return;
+        }
+
         // ── build subcommand ────────────────────────────────────────────
         if (args[0].equals("build")) {
             BuildCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
@@ -405,6 +411,51 @@ public final class IrijCli {
         return null;
     }
 
+    /**
+     * {@code irij version [--base|--count|--full]} — print the
+     * commit-count version of the project in the current directory.
+     * Default (and {@code --full}) prints {@code MAJOR.MINOR.<count>} on
+     * main, or {@code MAJOR.MINOR.<count>-<branch>} on a dev branch.
+     * {@code --base} prints the 2-part base from irij.toml; {@code --count}
+     * prints just the commit count.
+     */
+    private static void runVersion(String[] args) {
+        var projectRoot = Path.of(System.getProperty("user.dir"));
+        var tomlFile = projectRoot.resolve("irij.toml");
+        if (!Files.exists(tomlFile)) {
+            System.err.println("No irij.toml in " + projectRoot + " — `irij version` "
+                + "reports the version of an Irij project.");
+            System.exit(1);
+            return;
+        }
+        String mode = args.length > 0 ? args[0] : "--full";
+        try {
+            var meta = dev.irij.module.ProjectFile.parseFile(tomlFile).meta();
+            String base = meta == null ? "" : meta.version();
+            switch (mode) {
+                case "--count" -> System.out.println(
+                        dev.irij.module.ProjectVersion.commitCount(projectRoot).orElse(0));
+                case "--base" -> {
+                    dev.irij.module.ProjectVersion.requireMajorMinorBase(base);
+                    System.out.println(base.trim());
+                }
+                case "--full", "" -> System.out.println(
+                        dev.irij.module.ProjectVersion.buildVersion(projectRoot, base));
+                default -> {
+                    System.err.println("Unknown flag: " + mode
+                        + " (expected --full, --base, or --count)");
+                    System.exit(1);
+                }
+            }
+        } catch (IllegalArgumentException e) {
+            System.err.println("Error: " + e.getMessage());
+            System.exit(1);
+        } catch (Exception e) {
+            System.err.println("Error reading irij.toml: " + e.getMessage());
+            System.exit(1);
+        }
+    }
+
     private static void runPublish() {
         var projectRoot = Path.of(System.getProperty("user.dir"));
         var tomlFile = projectRoot.resolve("irij.toml");
@@ -426,6 +477,39 @@ public final class IrijCli {
                 System.exit(1);
                 return;
             }
+
+            // Commit-count versioning: the [project] version is a 2-part
+            // MAJOR.MINOR base; the published version is base + "." + the
+            // git commit count. Reject a hand-picked patch (decision: a
+            // manual patch must never collide with the commit-count one).
+            try {
+                dev.irij.module.ProjectVersion.requireMajorMinorBase(meta.version());
+            } catch (IllegalArgumentException e) {
+                System.err.println("Error: " + e.getMessage());
+                System.exit(1);
+                return;
+            }
+            // Releases come from main only, from a clean tree (the branch
+            // guard lives here, not in the version string).
+            var curBranch = dev.irij.module.ProjectVersion.branch(projectRoot).orElse("");
+            if (!dev.irij.module.ProjectVersion.isReleaseBranch(curBranch)) {
+                System.err.println("Error: `irij publish` must run on the main branch "
+                    + "(on '" + (curBranch.isBlank() ? "<detached/unknown>" : curBranch) + "').");
+                System.err.println("  Commit-count releases come from main only; a feature "
+                    + "branch would mint a different patch.");
+                System.exit(1);
+                return;
+            }
+            if (!dev.irij.module.ProjectVersion.isClean(projectRoot)) {
+                System.err.println("Error: working tree is not clean — commit or stash first.");
+                System.err.println("  The published version is derived from the commit count, so "
+                    + "uncommitted work would be mis-stamped.");
+                System.exit(1);
+                return;
+            }
+            // The full MAJOR.MINOR.<count> version used for the rest of publish.
+            final String publishVersion =
+                    dev.irij.module.ProjectVersion.releaseVersion(projectRoot, meta.version());
 
             // Reject path deps
             for (var dep : result.deps()) {
@@ -477,12 +561,12 @@ public final class IrijCli {
                 var registryUrl = System.getenv().getOrDefault("IRIJ_REGISTRY", "https://irij.online");
                 var url = registryUrl + "/api/seeds/publish";
 
-                System.out.println("Publishing " + meta.name() + " " + meta.version() + " ...");
+                System.out.println("Publishing " + meta.name() + " " + publishVersion + " ...");
 
                 // Multipart upload: metadata JSON + tarball
                 var boundary = "----IrijPublish" + System.currentTimeMillis();
                 var metaJson = "{\"name\":" + jsonStr(meta.name())
-                    + ",\"version\":" + jsonStr(meta.version())
+                    + ",\"version\":" + jsonStr(publishVersion)
                     + ",\"description\":" + jsonStr(meta.description())
                     + ",\"author\":" + jsonStr(meta.author())
                     + ",\"license\":" + jsonStr(meta.license()) + "}";
@@ -493,7 +577,7 @@ public final class IrijCli {
                 bodyBaos.write(metaJson.getBytes());
                 bodyBaos.write(("\r\n--" + boundary + "\r\n").getBytes());
                 bodyBaos.write(("Content-Disposition: form-data; name=\"tarball\"; filename=\""
-                    + meta.name() + "-" + meta.version() + ".tar.gz\"\r\n"
+                    + meta.name() + "-" + publishVersion + ".tar.gz\"\r\n"
                     + "Content-Type: application/gzip\r\n\r\n").getBytes());
                 bodyBaos.write(Files.readAllBytes(tarball));
                 bodyBaos.write(("\r\n--" + boundary + "--\r\n").getBytes());
@@ -524,7 +608,7 @@ public final class IrijCli {
                     java.net.http.HttpResponse.BodyHandlers.ofString());
 
                 if (response.statusCode() == 200 || response.statusCode() == 201) {
-                    System.out.println("Published " + meta.name() + " " + meta.version() + " ✓");
+                    System.out.println("Published " + meta.name() + " " + publishVersion + " ✓");
                 } else {
                     System.err.println("Publish failed (HTTP " + response.statusCode() + "): " + response.body());
                     System.exit(1);
@@ -564,6 +648,8 @@ public final class IrijCli {
               irij compile <file> -o j.jar  (experimental) compile to runnable jar
               irij install               fetch seeds from irij.toml (alias: seed)
               irij publish               publish seed to registry (alias: sow)
+              irij version               print this project's MAJOR.MINOR.<commit-count> version
+              irij version --base|--count   print just the base / commit count
               irij test                  run all test-*.irj in ./tests/
               irij test <file.irj>       run a specific test file
               irij test <dir/>           run all test-*.irj in directory

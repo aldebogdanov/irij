@@ -97,7 +97,16 @@ public final class DependencyResolver {
     }
 
     private Path resolveRegistry(String name, DepSource.RegistryDep reg) throws IOException {
-        var seedDir = CACHE_DIR.resolve(name).resolve(reg.version());
+        // Commit-count versioning: a 2-part MAJOR.MINOR pin resolves to the
+        // highest published patch in that line (the patch is a commit count,
+        // so you almost always want the latest). An exact 3-part pin is
+        // honoured verbatim for reproducible builds.
+        var version = reg.version();
+        if (ProjectVersion.isMajorMinor(version)) {
+            version = resolveLatestPatch(name, version);
+        }
+
+        var seedDir = CACHE_DIR.resolve(name).resolve(version);
 
         if (Files.isDirectory(seedDir)) {
             return seedDir;
@@ -105,9 +114,9 @@ public final class DependencyResolver {
 
         // Download from registry
         Files.createDirectories(seedDir);
-        out.println("Fetching " + name + " " + reg.version() + " from registry ...");
+        out.println("Fetching " + name + " " + version + " from registry ...");
 
-        var url = registryUrl + "/api/seeds/" + name + "/" + reg.version() + "/download";
+        var url = registryUrl + "/api/seeds/" + name + "/" + version + "/download";
         try {
             var client = java.net.http.HttpClient.newHttpClient();
             var request = java.net.http.HttpRequest.newBuilder()
@@ -118,7 +127,7 @@ public final class DependencyResolver {
 
             if (response.statusCode() != 200) {
                 cleanup(seedDir);
-                throw new IOException("Seed '" + name + "' version " + reg.version()
+                throw new IOException("Seed '" + name + "' version " + version
                     + " not found in registry (HTTP " + response.statusCode() + ")");
             }
 
@@ -131,6 +140,49 @@ public final class DependencyResolver {
         }
 
         return seedDir;
+    }
+
+    /**
+     * Resolve a 2-part {@code MAJOR.MINOR} pin to the highest published
+     * {@code MAJOR.MINOR.PATCH} by querying the registry's seed detail
+     * endpoint ({@code GET /api/seeds/<name>} → {@code {versions:[...]}}).
+     */
+    private String resolveLatestPatch(String name, String minorBase) throws IOException {
+        var url = registryUrl + "/api/seeds/" + name;
+        try {
+            var client = java.net.http.HttpClient.newHttpClient();
+            var request = java.net.http.HttpRequest.newBuilder()
+                .uri(java.net.URI.create(url))
+                .GET().build();
+            var response = client.send(request,
+                java.net.http.HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                throw new IOException("Seed '" + name + "' not found in registry "
+                    + "(HTTP " + response.statusCode() + ") while resolving "
+                    + minorBase + ".*");
+            }
+            var versions = new ArrayList<String>();
+            var root = com.google.gson.JsonParser.parseString(response.body());
+            if (root.isJsonObject()) {
+                var arr = root.getAsJsonObject().getAsJsonArray("versions");
+                if (arr != null) {
+                    for (var el : arr) {
+                        var v = el.getAsJsonObject().get("version");
+                        if (v != null && !v.isJsonNull()) versions.add(v.getAsString());
+                    }
+                }
+            }
+            var picked = ProjectVersion.latestPatch(versions, minorBase);
+            if (picked.isEmpty()) {
+                throw new IOException("No published version of '" + name + "' in the "
+                    + minorBase + ".* line (available: "
+                    + (versions.isEmpty() ? "none" : String.join(", ", versions)) + ")");
+            }
+            return picked.get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IOException("Registry query interrupted", e);
+        }
     }
 
     private Path resolveGit(String name, DepSource.GitDep git, Path contextRoot) throws IOException {

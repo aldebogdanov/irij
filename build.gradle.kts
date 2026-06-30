@@ -4,7 +4,21 @@ plugins {
 }
 
 group = "dev.irij"
-version = "0.8.7"
+
+// ── Commit-count versioning (replikativ-style) ──────────────────────
+// The engine version is MAJOR.MINOR.<git-commit-count>. Bump the 2-part
+// base by hand for a MAJOR/MINOR release; the patch is the commit count,
+// so every commit advances it and nobody hand-picks a patch. CI checks
+// out with fetch-depth: 0 (a shallow clone would count as 1).
+val baseVersion = "0.8"
+fun gitCommitCount(): String =
+    try {
+        val p = ProcessBuilder("git", "rev-list", "--count", "HEAD")
+            .redirectErrorStream(true).start()
+        val out = p.inputStream.bufferedReader().readText().trim()
+        if (p.waitFor() == 0 && out.matches(Regex("\\d+"))) out else "0"
+    } catch (e: Exception) { "0" }
+version = "$baseVersion.${gitCommitCount()}"
 
 java {
     toolchain {
@@ -78,6 +92,10 @@ tasks.compileJava {
 }
 
 tasks.processResources {
+    // Without this, Gradle caches the expanded irij-version.properties on
+    // the template file's content (unchanged) and the embedded version goes
+    // stale — fatal here since `version` changes on every commit.
+    inputs.property("version", project.version)
     filesMatching("irij-version.properties") {
         expand("version" to project.version)
     }

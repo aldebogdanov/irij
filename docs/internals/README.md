@@ -17,13 +17,14 @@ why something is the way it is.
 7. [Hot redefinition](hot-redef.md) — `invokedynamic` + `MutableCallSite`
 8. [Spec system](specs.md) — runtime validation, contract layers, blame
 9. [Modules](modules.md) — `mod`/`use`, inlining, alias rewriting
-10. [Concurrency](concurrency.md) — virtual threads, structured concurrency, SM_STACK
-11. [JVM capability](jvm-capability.md) — `::: JVM`, why Java is impure
-12. [Capabilities](capabilities.md) — `cap` decls, bridging effects to host code
-13. [Stdlib](stdlib.md) — what lives in Irij vs Java, the boundary
-14. [nREPL](nrepl.md) — protocol, sessions, bytecode-session eval
-15. [LSP](lsp.md) — `irij lsp`, capabilities, editor integration
-16. [Glossary](glossary.md) — terms used throughout
+10. [Versioning](versioning.md) — commit-count releases, publish guards, dep resolution
+11. [Concurrency](concurrency.md) — virtual threads, structured concurrency, SM_STACK
+12. [JVM capability](jvm-capability.md) — `::: JVM`, why Java is impure
+13. [Capabilities](capabilities.md) — `cap` decls, bridging effects to host code
+14. [Stdlib](stdlib.md) — what lives in Irij vs Java, the boundary
+15. [nREPL](nrepl.md) — protocol, sessions, bytecode-session eval
+16. [LSP](lsp.md) — `irij lsp`, capabilities, editor integration
+17. [Glossary](glossary.md) — terms used throughout
 
 Note: the tree-walking `Interpreter` class was removed in v0.6.20
 (R5d). The threaded handler protocol (14c.2) had already been
