@@ -62,6 +62,33 @@ catching frame.
   tier-c resume-value flow-through) are all closed as of v0.7.0 —
   zero `@Disabled` SM tests remain.
 
+### Tail-position value of a `with` body
+
+A `with` block is an expression: its value is the value of its body's
+last statement. The catch is that **block-form** `if`/`match` parse to
+`Stmt.IfStmt` / `Stmt.MatchStmt` (statements), not the inline
+`IfExpr`/`MatchExpr`. A naive "last statement's value" emitter that only
+recognises `ExprStmt` silently returns Unit when the body ends in a
+multi-line if/match — exactly what white-screened the irij.online
+seed-detail page (`with default-db { row := db-query …; if (empty? row)
+… else { rows := db-query …; render … } }` returned an empty body).
+
+Two places enforce the rule now:
+
+- **EffIR** (`EffIRBuilder.lower`): a tail-position `IfStmt`
+  (`isLast && exitJump == null`) lowers each branch with a `null`
+  exitJump so the branch's tail expression becomes a `Term.Return` —
+  **checked before** the op-bearing-if case, because routing a tail if
+  through a merge block leaves the merge with `Return(null)` and
+  discards the branch value. The merge-block path is only for *non-tail*
+  ifs (used for effect, the value thrown away).
+- **Pure / SingleOp / Sequence** (`emitBlockStmtsReturning`, and the
+  handler-join and `on-failure` block emitters): all route the final
+  statement through `emitTailStmtValue`, the single helper mirroring
+  `emitBlock` — it emits a tail `ExprStmt`/`With`/`MatchStmt`/`IfStmt`
+  as a value and returns `false` only for genuine non-value statements
+  (a bare `:=`), where the caller pushes Unit.
+
 For each shape, the emitter:
 
 1. Allocates a static `smstep$N` method holding the state machine.

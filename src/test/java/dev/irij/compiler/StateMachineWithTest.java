@@ -69,6 +69,85 @@ class StateMachineWithTest {
         assertEquals(nl("100"), runSM(src));
     }
 
+    @Test void with_body_tail_if_branch_binds_and_performs() throws Exception {
+        // Regression (irij.online seed-detail page white-screen): a `with`
+        // body that performs an op, then ends in an if whose TAKEN branch
+        // has a leading `:=` bind AND itself performs an op. The tail if
+        // used to fall through to the op-bearing merge case, whose merge
+        // block returned null — so the whole `with` (and the page) yielded
+        // Unit / an empty body. The tail-position case now lowers each
+        // branch with a Return of its tail expression.
+        String src = """
+            effect E
+              op :: Str
+            handler h :: E
+              op => resume "R"
+            fn pick :: Str ::: E
+              =>
+              with h
+                a := op ()
+                if (a == "R")
+                  b := op ()
+                  ("then:" ++ b)
+                else
+                  "else"
+            with h
+              println (pick ())
+            """;
+        assertEquals(nl("then:R"), runSM(src));
+    }
+
+    @Test void with_body_tail_if_else_branch_binds_and_performs() throws Exception {
+        // Same shape as above but the value-producing work is in the ELSE
+        // branch (matching seed-detail-page's `if (empty? pkg) … else
+        // { versions := db-query …; render … }`).
+        String src = """
+            effect E
+              op :: Str
+            handler h :: E
+              op => resume "R"
+            fn pick :: Str ::: E
+              =>
+              with h
+                a := op ()
+                if (a == "X")
+                  "then"
+                else
+                  b := op ()
+                  ("else:" ++ b)
+            with h
+              println (pick ())
+            """;
+        assertEquals(nl("else:R"), runSM(src));
+    }
+
+    @Test void with_pure_body_tail_if_branch_has_bindings() throws Exception {
+        // Regression (Pure with-body path): a `with` whose body performs
+        // NO op and is just a block-form tail if/else whose taken branch
+        // has a leading `:=` bind. emitBlockStmtsReturning treated the
+        // tail IfStmt as a value-less statement and returned Unit; it now
+        // emits the tail if as an expression (each branch's last expr is
+        // the value). Inline `if c a else b` parsed as an IfExpr and
+        // already worked — only the block form was broken.
+        String src = """
+            effect E
+              op :: Str
+            handler h :: E
+              op => resume "R"
+            fn pick :: Str ::: E
+              =>
+              with h
+                if (1 == 1)
+                  z := "then-z"
+                  z
+                else
+                  "else-z"
+            with h
+              println (pick ())
+            """;
+        assertEquals(nl("then-z"), runSM(src));
+    }
+
     @Test void pure_body_no_ops() throws Exception {
         String src = """
             effect Log

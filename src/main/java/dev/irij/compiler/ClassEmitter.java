@@ -996,19 +996,7 @@ final class ClassEmitter implements Opcodes {
         }
         for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, inner);
         Stmt last = stmts.get(stmts.size() - 1);
-        if (last instanceof Stmt.ExprStmt es) {
-            emitExpr(es.expr(), mv, inner);
-        } else if (last instanceof Stmt.With w) {
-            emitWith(w, mv, inner);
-        } else if (last instanceof Stmt.MatchStmt ms) {
-            // Tail-position match in a Block — propagate the matched
-            // arm's value out as the Block's value.
-            emitMatchExpr(new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc()),
-                    mv, inner);
-        } else if (last instanceof Stmt.IfStmt ifs) {
-            // Tail-position if — propagate each branch's value.
-            emitImperativeIfAsExpr(ifs, mv, inner);
-        } else {
+        if (!emitTailStmtValue(last, mv, inner)) {
             emitStmt(last, mv, inner);
             mv.visitInsn(ACONST_NULL);
         }
@@ -1033,6 +1021,34 @@ final class ClassEmitter implements Opcodes {
             mv.visitInsn(ACONST_NULL);
         }
         mv.visitLabel(endL);
+    }
+
+    /** Emit {@code last} in value/tail position, leaving its value on the
+     *  operand stack. Handles every value-producing tail-statement shape:
+     *  a bare expression, or a block-form tail {@code if} / {@code match} /
+     *  {@code with} whose taken branch / arm / body supplies the value.
+     *  Returns {@code true} if a value was pushed; {@code false} when
+     *  {@code last} is a non-value statement (e.g. a {@code :=} bind) — the
+     *  caller then emits it as a statement and pushes its own Unit.
+     *
+     *  <p>Block-form {@code if}/{@code match} parse to {@link Stmt.IfStmt} /
+     *  {@link Stmt.MatchStmt} (not the inline {@code IfExpr}/{@code MatchExpr}),
+     *  so without this a {@code with}-body or handler block ending in a
+     *  multi-line if/match silently returned Unit. */
+    private boolean emitTailStmtValue(Stmt last, MethodVisitor mv, Locals locals) {
+        if (last instanceof Stmt.ExprStmt es) {
+            emitExpr(es.expr(), mv, locals);
+        } else if (last instanceof Stmt.With w) {
+            emitWith(w, mv, locals);
+        } else if (last instanceof Stmt.MatchStmt ms) {
+            emitMatchExpr(new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc()),
+                    mv, locals);
+        } else if (last instanceof Stmt.IfStmt ifs) {
+            emitImperativeIfAsExpr(ifs, mv, locals);
+        } else {
+            return false;
+        }
+        return true;
     }
 
     /** Mangle Irij kebab-case names to JVM-safe identifiers. */
@@ -2247,11 +2263,7 @@ final class ClassEmitter implements Opcodes {
         } else {
             for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), mv, inner);
             Stmt last = stmts.get(stmts.size() - 1);
-            if (last instanceof Stmt.ExprStmt es) {
-                emitExpr(es.expr(), mv, inner);
-            } else if (last instanceof Stmt.With w) {
-                emitWith(w, mv, inner);
-            } else {
+            if (!emitTailStmtValue(last, mv, inner)) {
                 emitStmt(last, mv, inner);
                 mv.visitFieldInsn(GETSTATIC, VALUES, "UNIT", OBJ_DESC);
             }
@@ -2914,7 +2926,40 @@ final class ClassEmitter implements Opcodes {
                             tl.args, tl.bindName, next));
                     cur = next;
                 } else if (s instanceof Stmt.IfStmt ifs
+                        && isLast && exitJump == null) {
+                    // If/else at the tail of a with-body: its taken branch's
+                    // value IS the with-block's result. Lower each branch
+                    // with `null` exitJump so the branch's tail expression
+                    // becomes a Return — works whether or not the branches
+                    // perform ops (the recursive lower turns op statements
+                    // into perform segments and the final expr into a
+                    // Return). This MUST come before the op-bearing-if case
+                    // below: routing a tail if through a merge block gives
+                    // the merge `Return(null)`, discarding the branch value
+                    // and making the whole with return Unit. (Pure-branch
+                    // tail ifs hit this too; op-bearing tail ifs — e.g.
+                    // `with default-db { row := db-query …; if (empty? row) …
+                    // else { rows := db-query …; render … } }` on
+                    // irij.online's seed-detail page — used to fall through
+                    // to the merge case and white-screen the page.)
+                    if (containsOpCallExpr(ifs.cond())) { ok = false; return cur; }
+                    int thenB = newBlock();
+                    int elseB = newBlock();
+                    finalize(cur, new Term.Branch(ifs.cond(), thenB, elseB));
+                    int thenTail = lower(ifs.thenBranch(), thenB, null);
+                    List<Stmt> el = ifs.elseBranch() != null
+                            ? ifs.elseBranch() : List.of();
+                    int elseTail = lower(el, elseB, null);
+                    // Either branch may have been the "value-producing"
+                    // tail — record one whose Return carries the tail expr.
+                    lastValueBlock = thenTail;
+                    return cur;
+                } else if (s instanceof Stmt.IfStmt ifs
                         && stmtContainsOpRecursive(s)) {
+                    // Non-tail if whose branches perform ops: each branch
+                    // Jumps to a shared merge block, and lowering continues
+                    // from there (the if's value, if any, is discarded —
+                    // a non-tail if is used for effect, not value).
                     if (containsOpCallExpr(ifs.cond())) { ok = false; return cur; }
                     int thenB = newBlock();
                     int elseB = newBlock();
@@ -2925,30 +2970,6 @@ final class ClassEmitter implements Opcodes {
                             ? ifs.elseBranch() : List.of();
                     lower(el, elseB, merge);
                     cur = merge;
-                } else if (s instanceof Stmt.IfStmt ifs
-                        && isLast && exitJump == null) {
-                    // Pure if/else at the tail of a with-body whose value
-                    // is the with-block's result. The branches contain no
-                    // ops, but each branch's last expression is the with's
-                    // return value (caller observed it as Unit before this
-                    // fix — the branches Jumped to a merge block that
-                    // never got finalized with a Return). Lower each
-                    // branch with `null` exitJump so its tail ExprStmt
-                    // becomes a Return; skip the merge entirely.
-                    if (containsOpCallExpr(ifs.cond())) { ok = false; return cur; }
-                    int thenB = newBlock();
-                    int elseB = newBlock();
-                    finalize(cur, new Term.Branch(ifs.cond(), thenB, elseB));
-                    int thenTail = lower(ifs.thenBranch(), thenB, null);
-                    List<Stmt> el = ifs.elseBranch() != null
-                            ? ifs.elseBranch() : List.of();
-                    int elseTail = lower(el, elseB, null);
-                    // Either branch may have been the "value-producing"
-                    // tail — record the one whose Return carries the
-                    // tail expr; emitWith uses lastValueBlock to know
-                    // which leaf supplied the body's result.
-                    lastValueBlock = thenTail;
-                    return cur;
                 } else if (stmtContainsOpRecursive(s)) {
                     // Ops nested inside non-If stmt (match, with, block...): 3c
                     ok = false;
@@ -3506,9 +3527,7 @@ final class ClassEmitter implements Opcodes {
             List<Stmt> of = w.onFailure();
             for (int i = 0; i < of.size() - 1; i++) emitStmt(of.get(i), mv, ofLocals);
             Stmt last = of.get(of.size() - 1);
-            if (last instanceof Stmt.ExprStmt es) {
-                emitExpr(es.expr(), mv, ofLocals);
-            } else {
+            if (!emitTailStmtValue(last, mv, ofLocals)) {
                 emitStmt(last, mv, ofLocals);
                 mv.visitInsn(ACONST_NULL);
             }
@@ -3851,9 +3870,7 @@ final class ClassEmitter implements Opcodes {
             List<Stmt> of = w.onFailure();
             for (int i = 0; i < of.size() - 1; i++) emitStmt(of.get(i), sm, ofLocals);
             Stmt last = of.get(of.size() - 1);
-            if (last instanceof Stmt.ExprStmt es) {
-                emitExpr(es.expr(), sm, ofLocals);
-            } else {
+            if (!emitTailStmtValue(last, sm, ofLocals)) {
                 emitStmt(last, sm, ofLocals);
                 sm.visitInsn(ACONST_NULL);
             }
@@ -4002,9 +4019,7 @@ final class ClassEmitter implements Opcodes {
         }
         for (int i = 0; i < stmts.size() - 1; i++) emitStmt(stmts.get(i), sm, inner);
         Stmt last = stmts.get(stmts.size() - 1);
-        if (last instanceof Stmt.ExprStmt es) {
-            emitExpr(es.expr(), sm, inner);
-        } else {
+        if (!emitTailStmtValue(last, sm, inner)) {
             emitStmt(last, sm, inner);
             sm.visitInsn(ACONST_NULL);
         }
