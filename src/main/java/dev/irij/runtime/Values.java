@@ -173,16 +173,16 @@ public final class Values {
     }
 
     /**
-     * SSE (Server-Sent Events) writer — wraps an HTTP exchange for streaming.
-     * The exchange is kept open; calling send() writes SSE-formatted events.
+     * SSE (Server-Sent Events) writer — wraps the connection's output
+     * stream for streaming. The stream is kept open; calling send() writes
+     * SSE-formatted events. Closing it closes the underlying connection
+     * (the {@code IrijHttpServer} connection is Connection: close).
      */
     public static final class SseWriter {
         private final java.io.OutputStream outputStream;
-        private final com.sun.net.httpserver.HttpExchange exchange;
         private volatile boolean closed = false;
 
-        public SseWriter(com.sun.net.httpserver.HttpExchange exchange, java.io.OutputStream os) {
-            this.exchange = exchange;
+        public SseWriter(java.io.OutputStream os) {
             this.outputStream = os;
         }
 
@@ -202,11 +202,21 @@ public final class Values {
             outputStream.flush();
         }
 
+        /** Write an SSE comment line (":\n\n") and flush. A no-op payload
+         *  the client ignores, but the flush touches the socket — so on a
+         *  disconnected peer it throws {@link java.io.IOException}, which is
+         *  how a long-lived stream detects the client is gone. */
+        public synchronized void heartbeat() throws java.io.IOException {
+            if (closed) throw new java.io.IOException("SSE stream closed");
+            outputStream.write(":\n\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            outputStream.flush();
+        }
+
         public synchronized void close() {
             if (!closed) {
                 closed = true;
+                try { outputStream.flush(); } catch (Exception ignored) {}
                 try { outputStream.close(); } catch (Exception ignored) {}
-                try { exchange.close(); } catch (Exception ignored) {}
             }
         }
 

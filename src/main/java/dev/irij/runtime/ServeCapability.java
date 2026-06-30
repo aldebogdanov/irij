@@ -1,20 +1,17 @@
 package dev.irij.runtime;
 
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 import dev.irij.IrijRuntimeError;
 import dev.irij.compiler.RuntimeSupport;
+import dev.irij.runtime.IrijHttpServer.IrijExchange;
 import dev.irij.runtime.Values.IrijMap;
 import dev.irij.runtime.Values.SseWriter;
 
 import java.io.IOException;
 import java.io.OutputStream;
-import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
-import java.util.concurrent.Executors;
 
 /**
  * Capability provider for the {@code Serve} effect (HTTP server +
@@ -47,9 +44,6 @@ public final class ServeCapability {
     public static Object serve(Object portArg, Object handler) {
         long port = asLong(portArg, "server.serve");
         try {
-            HttpServer server = HttpServer.create(
-                    new InetSocketAddress((int) port), 0);
-
             Path scriptDir = Path.of("").toAbsolutePath();
             // `isBundled` always-on rationale: shadow JARs emit file
             // entries without directory entries, so the historic probe
@@ -68,8 +62,8 @@ public final class ServeCapability {
             final RuntimeSupport.EffectSnapshot effectSnap =
                     RuntimeSupport.snapshotEffects();
 
-            server.createContext("/", exchange -> {
-                try {
+            IrijHttpServer.serve((int) port, exchange -> {
+                {
                     if (httpServeStatic(exchange, scriptDir, isBundled)) return;
 
                     IrijMap req = buildRequestMap(exchange);
@@ -79,11 +73,23 @@ public final class ServeCapability {
 
                     if (resp instanceof SseWriter sse) {
                         // Handler returned the writer → long-lived stream
-                        // (e.g. session output). Block until it closes so
-                        // the connection stays open.
+                        // (e.g. Playground session output). Hold this
+                        // connection's virtual thread open until the writer
+                        // closes, probing liveness with a periodic heartbeat:
+                        // when the client disconnects the write throws, so we
+                        // close and return — promptly freeing the vthread and
+                        // socket instead of sleeping forever on a dead peer.
                         while (!sse.isClosed()) {
-                            try { Thread.sleep(500); }
-                            catch (InterruptedException ie) { sse.close(); break; }
+                            try {
+                                Thread.sleep(500);
+                                sse.heartbeat();
+                            } catch (InterruptedException ie) {
+                                sse.close();
+                                break;
+                            } catch (java.io.IOException io) {
+                                sse.close();   // client disconnected
+                                break;
+                            }
                         }
                         return;
                     }
@@ -101,24 +107,12 @@ public final class ServeCapability {
                     }
 
                     writeResponse(exchange, resp);
-                } catch (Exception e) {
-                    System.err.println("HTTP 500 " + exchange.getRequestMethod()
-                            + " " + exchange.getRequestURI() + ": " + e.getMessage());
-                    e.printStackTrace(System.err);
-                    try {
-                        String errMsg = "Internal Server Error: " + e.getMessage();
-                        byte[] errBytes = errMsg.getBytes(StandardCharsets.UTF_8);
-                        exchange.sendResponseHeaders(500, errBytes.length);
-                        try (var os = exchange.getResponseBody()) { os.write(errBytes); }
-                    } catch (Exception ignored) {}
                 }
             });
-
-            server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
-            server.start();
-            System.out.println("Irij HTTP server listening on http://localhost:" + port);
-            try { Thread.currentThread().join(); }
-            catch (InterruptedException e) { server.stop(0); }
+            // IrijHttpServer.serve blocks on the accept loop forever; any
+            // per-request throwable becomes a 500 inside the server
+            // (IrijExchange.fail) on that one connection, so the loop never
+            // dies and one bad/disconnected request can't stall others.
             return Values.UNIT;
         } catch (IOException e) {
             throw new IrijRuntimeError("server.serve: " + e.getMessage());
@@ -136,7 +130,7 @@ public final class ServeCapability {
             throw new IrijRuntimeError("server.sse-response: expected request map");
         }
         Object exchange = reqMap.entries().get("__exchange");
-        if (!(exchange instanceof HttpExchange ex)) {
+        if (!(exchange instanceof IrijExchange ex)) {
             throw new IrijRuntimeError(
                     "server.sse-response: no __exchange in request "
                             + "(only works inside a serve handler)");
@@ -147,7 +141,7 @@ public final class ServeCapability {
             ex.getResponseHeaders().set("Connection", "keep-alive");
             ex.getResponseHeaders().set("X-Accel-Buffering", "no");
             ex.sendResponseHeaders(200, 0);
-            SseWriter writer = new SseWriter(ex, ex.getResponseBody());
+            SseWriter writer = new SseWriter(ex.getResponseBody());
             // Mark the exchange as SSE-promoted so the serve dispatcher
             // knows headers are already committed — even if the handler
             // doesn't return the writer (e.g. it calls ds-patch, which
@@ -313,7 +307,7 @@ public final class ServeCapability {
         throw new IrijRuntimeError(op + ": first arg must be SseWriter");
     }
 
-    private static boolean httpServeStatic(HttpExchange exchange,
+    private static boolean httpServeStatic(IrijExchange exchange,
                                            Path scriptDir,
                                            boolean isBundled) throws IOException {
         String reqPath = exchange.getRequestURI().getPath();
@@ -336,7 +330,7 @@ public final class ServeCapability {
         return false;
     }
 
-    private static boolean serveClasspathResource(HttpExchange exchange,
+    private static boolean serveClasspathResource(IrijExchange exchange,
                                                   String resourcePath,
                                                   String reqPath) throws IOException {
         var is = ServeCapability.class.getClassLoader().getResourceAsStream(resourcePath);
@@ -345,22 +339,22 @@ public final class ServeCapability {
             byte[] bytes = is.readAllBytes();
             exchange.getResponseHeaders().set("Content-Type", httpGuessMime(reqPath));
             exchange.sendResponseHeaders(200, bytes.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+            exchange.getResponseBody().write(bytes);
             return true;
         }
     }
 
-    private static boolean sendFile(HttpExchange exchange, Path path, String reqPath) throws IOException {
+    private static boolean sendFile(IrijExchange exchange, Path path, String reqPath) throws IOException {
         byte[] bytes = Files.readAllBytes(path);
         String mime = Files.probeContentType(path);
         if (mime == null) mime = httpGuessMime(reqPath);
         exchange.getResponseHeaders().set("Content-Type", mime);
         exchange.sendResponseHeaders(200, bytes.length);
-        try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+        exchange.getResponseBody().write(bytes); // flushed/closed by IrijHttpServer
         return true;
     }
 
-    private static IrijMap buildRequestMap(HttpExchange exchange) throws IOException {
+    private static IrijMap buildRequestMap(IrijExchange exchange) throws IOException {
         LinkedHashMap<String, Object> reqMap = new LinkedHashMap<>();
         reqMap.put("method", exchange.getRequestMethod());
         var uri = exchange.getRequestURI();
@@ -392,7 +386,7 @@ public final class ServeCapability {
         return out;
     }
 
-    private static void writeResponse(HttpExchange exchange, Object resp) throws IOException {
+    private static void writeResponse(IrijExchange exchange, Object resp) throws IOException {
         long status = 200;
         String respBody = "";
         String filePath = null;
@@ -417,20 +411,16 @@ public final class ServeCapability {
         if (filePath != null) {
             byte[] bytes = Files.readAllBytes(Path.of(filePath));
             exchange.sendResponseHeaders((int) status, bytes.length);
-            try (OutputStream os = exchange.getResponseBody()) { os.write(bytes); }
+            exchange.getResponseBody().write(bytes);
         } else {
             byte[] bytes = respBody.getBytes(StandardCharsets.UTF_8);
             // Always send response headers — including for empty bodies
-            // (redirects, 204 No Content, etc.). Passing -1 as length
-            // tells HttpServer "no body", which closes the stream
-            // cleanly without the PlaceholderOutputStream "headers not
-            // sent yet" crash that used to fire when handler returned
-            // body="" (e.g. std.serve.redirect).
+            // (redirects, 204 No Content, etc.). Length -1 means "no body"
+            // (Content-Length: 0). The stream is flushed and the connection
+            // closed by IrijHttpServer, not here.
             exchange.sendResponseHeaders((int) status,
                     bytes.length == 0 ? -1L : bytes.length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                if (bytes.length > 0) os.write(bytes);
-            }
+            if (bytes.length > 0) exchange.getResponseBody().write(bytes);
         }
     }
 

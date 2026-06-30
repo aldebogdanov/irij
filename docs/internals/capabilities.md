@@ -35,11 +35,26 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   `std.http` rewritten to route through `http-client.request`,
   `raw-http-request` delisted from all three registries.
 - **3c — Serve / SSE (shipped)**: single `ServeCapability` holds
-  both the server loop and the SSE writer ops (they share the
-  `HttpExchange`, splitting would force shared plumbing back into
+  both the server loop and the SSE writer ops (they share one
+  exchange object, splitting would force shared plumbing back into
   Irij). `std.serve` Serve effect grew `sse-response`, `sse-send`,
   `sse-close`, `sse-closed?` ops; `std.datastar` rewritten to call
   them. `raw-http-serve` + `raw-sse-*` delisted from all registries.
+  - **HTTP backend — `IrijHttpServer` (not `com.sun.net.httpserver`)**:
+    a virtual-thread-per-connection `ServerSocket` server. The old
+    `com.sun.net.httpserver` has a single selector dispatcher thread
+    that **wedges on JDK 25** when a client disconnects from an SSE /
+    streaming response — it then accepts no new connection server-wide
+    until restart (this took down irij.online after the server's JDK was
+    bumped 21→25; reproduced, fixed in JDK 26 but 26 isn't packaged for
+    the deploy). With one vthread per connection doing blocking I/O, a
+    dead peer only ends its own thread. Responses are `Connection: close`
+    (one request per connection) — behind a pooling proxy the cost is nil
+    and it drops the keep-alive framing hazards. `IrijExchange` mirrors
+    the small `HttpExchange` surface the cap used, so the request/response
+    helpers were a near-mechanical port. Regression guard:
+    `IrijHttpServerTest.sseDisconnectDoesNotWedgeOtherConnections` (hangs
+    on the old model under JDK 25). See `versioning.md` for the JDK pin.
 - **3d — FS / Multipart (shipped)**: `FsCapability` for the
   FileIO surface (read/write/append/exists?/list-dir/delete/mkdir);
   multipart parsing folded into `ServeCapability` (request-shaped,

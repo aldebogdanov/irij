@@ -41,19 +41,17 @@ jobs:
           name: irij-jar
           path: build/libs/irij.jar
 
-      # Releasing is GATED. With commit-count versioning every push would
-      # otherwise mint a new version, so we cut a release only on explicit
-      # opt-in: a `[release]` marker in the HEAD commit message, or a manual
-      # workflow_dispatch run. The version is MAJOR.MINOR.<commit-count> —
-      # the base is `val baseVersion` in build.gradle.kts, the patch is
-      # `git rev-list --count HEAD`. Doing tag+release in one step sidesteps
-      # the GitHub safeguard that stops GITHUB_TOKEN-pushed tags from
-      # triggering a follow-up workflow.
-      - name: Gated release (main / dispatch)
-        if: >-
-          github.event_name == 'workflow_dispatch' ||
-          (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-           contains(github.event.head_commit.message, '[release]'))
+      # Releasing is GATED to a MANUAL run only (`gh workflow run ci.yml`
+      # or the Actions "Run workflow" button). With commit-count versioning
+      # every push would otherwise mint a version; a commit-message marker
+      # was the first idea but it false-fires when the message merely
+      # *mentions* the marker, so dispatch-only is the unambiguous gate.
+      # Version is MAJOR.MINOR.<commit-count> — base is `val baseVersion`
+      # in build.gradle.kts, patch is `git rev-list --count HEAD`. Tag +
+      # release in one step sidesteps the GitHub safeguard that stops
+      # GITHUB_TOKEN-pushed tags from triggering a follow-up workflow.
+      - name: Gated release (manual dispatch only)
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
