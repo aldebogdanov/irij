@@ -141,6 +141,25 @@ class ProjectFileTest {
             assertEquals("My Irij application", result.meta().description());
             assertEquals("user", result.meta().author());
             assertEquals("MIT", result.meta().license());
+            // Link fields absent → empty strings, never null
+            assertEquals("", result.meta().website());
+            assertEquals("", result.meta().repo());
+            assertEquals("", result.meta().docs());
+        }
+
+        @Test void parseProjectMetaLinks() {
+            var result = ProjectFile.parse("""
+                [project]
+                name = "my-app"
+                version = "0.1"
+                website = "https://example.org"
+                repo = "https://github.com/u/my-app"
+                docs = "https://example.org/docs"
+                """);
+            assertNotNull(result.meta());
+            assertEquals("https://example.org", result.meta().website());
+            assertEquals("https://github.com/u/my-app", result.meta().repo());
+            assertEquals("https://example.org/docs", result.meta().docs());
         }
 
         @Test void parseProjectMetaWithSeeds() {

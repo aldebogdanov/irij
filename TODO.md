@@ -468,6 +468,8 @@ Design principle: collection literals mirror their spec syntax.
   - Path inline: `dev = { path = "../lib" }`
   - Full table syntax: `[seeds.name]` with git/path/version keys
   - Project metadata: name, version, description, author, license
+  - Optional link fields: website, repo, docs — must be http(s) URLs
+    (CLI-validated + registry re-validated); shown on the seed page
 - [x] **`DependencyResolver.java`** — registry, git, path resolution with transitive support
   - Registry seeds downloaded from irij.online, cached at `~/.irij/seeds/<name>/<version>/`
   - Git seeds cached at `~/.irij/seeds/<name>/<ref>/`

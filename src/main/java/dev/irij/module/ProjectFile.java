@@ -19,6 +19,9 @@ import java.util.List;
  * description = "My Irij application"
  * author = "user"
  * license = "MIT"
+ * website = "https://example.org"       # optional — shown on the registry seed page
+ * repo = "https://github.com/u/my-app"  # optional
+ * docs = "https://example.org/docs"     # optional
  *
  * [seeds]
  * vrata = "0.1.1"                                          # registry shorthand
@@ -56,7 +59,10 @@ public final class ProjectFile {
         String version,
         String description,
         String author,
-        String license
+        String license,
+        String website,
+        String repo,
+        String docs
     ) {}
 
     private ProjectFile() {}
@@ -83,7 +89,10 @@ public final class ProjectFile {
                 projectTable.getString("version", ""),
                 projectTable.getString("description", ""),
                 projectTable.getString("author", ""),
-                projectTable.getString("license", "")
+                projectTable.getString("license", ""),
+                projectTable.getString("website", ""),
+                projectTable.getString("repo", ""),
+                projectTable.getString("docs", "")
             );
         }
 

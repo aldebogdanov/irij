@@ -478,6 +478,19 @@ public final class IrijCli {
                 return;
             }
 
+            // Optional link fields must be real web URLs — a typo'd link on
+            // the registry seed page is worse than none.
+            for (var link : new String[][] {
+                    {"website", meta.website()}, {"repo", meta.repo()}, {"docs", meta.docs()}}) {
+                if (!link[1].isBlank()
+                        && !link[1].startsWith("https://") && !link[1].startsWith("http://")) {
+                    System.err.println("Error: irij.toml [project] " + link[0]
+                        + " must be an http(s):// URL (got '" + link[1] + "').");
+                    System.exit(1);
+                    return;
+                }
+            }
+
             // Commit-count versioning: the [project] version is a 2-part
             // MAJOR.MINOR base; the published version is base + "." + the
             // git commit count. Reject a hand-picked patch (decision: a
@@ -569,7 +582,10 @@ public final class IrijCli {
                     + ",\"version\":" + jsonStr(publishVersion)
                     + ",\"description\":" + jsonStr(meta.description())
                     + ",\"author\":" + jsonStr(meta.author())
-                    + ",\"license\":" + jsonStr(meta.license()) + "}";
+                    + ",\"license\":" + jsonStr(meta.license())
+                    + ",\"website\":" + jsonStr(meta.website())
+                    + ",\"repo\":" + jsonStr(meta.repo())
+                    + ",\"docs\":" + jsonStr(meta.docs()) + "}";
 
                 var bodyBaos = new ByteArrayOutputStream();
                 bodyBaos.write(("--" + boundary + "\r\n").getBytes());

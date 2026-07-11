@@ -48,9 +48,10 @@ branches" is enforced at the boundary, not in the string:
 
 - `irij publish` → hard-requires `main` (or `master`) **and** a clean
   tree, else a documented error.
-- Engine CI (`.github/workflows/ci.yml`) → release is **gated**: it fires
-  only on a `[release]` marker in the HEAD commit message or a manual
-  `workflow_dispatch` (commit-count would otherwise release every push).
+- Engine CI (`.github/workflows/ci.yml`) → release is **gated** to a
+  manual `workflow_dispatch` only (commit-count would otherwise release
+  every push; a commit-message marker was tried and false-fired when a
+  message merely *mentioned* it).
 - `irij.online` → released on-demand via `./scripts/release`, which tags
   `v<base>.<count>`; `release.yml` re-derives and verifies the tag.
 
