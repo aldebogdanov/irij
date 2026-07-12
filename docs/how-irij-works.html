@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Irij Works — Under the Hood</title>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1a1d21; --muted: #5c6570; --line: #e2e6ea;
+    --accent: #6b4fbb; --accent2: #2a7f62; --code-bg: #f4f2f9;
+    --card: #fafbfc; --warn: #b3591e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a; --fg: #e6e4df; --muted: #9aa3ad; --line: #2a2f36;
+      --accent: #a58fe8; --accent2: #5fbf9a; --code-bg: #1e2027;
+      --card: #191c21; --warn: #e09055;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0 1.2rem 4rem;
+    font: 16px/1.65 -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    background: var(--bg); color: var(--fg);
+  }
+  main { max-width: 52rem; margin: 0 auto; }
+  h1 { font-size: 2rem; margin: 2.5rem 0 .3rem; letter-spacing: -.02em; }
+  h1 + p.sub { color: var(--muted); margin-top: 0; font-size: 1.05rem; }
+  h2 {
+    font-size: 1.35rem; margin: 3rem 0 .8rem; padding-top: .6rem;
+    border-top: 1px solid var(--line); letter-spacing: -.01em;
+  }
+  h2 .no { color: var(--accent); font-variant-numeric: tabular-nums; margin-right: .45rem; }
+  h3 { font-size: 1.05rem; margin: 1.6rem 0 .4rem; }
+  p { margin: .6rem 0; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code, pre {
+    font: 13.5px/1.55 "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    background: var(--code-bg); border-radius: 5px;
+  }
+  code { padding: .1em .35em; }
+  pre {
+    padding: .85rem 1rem; overflow-x: auto; border: 1px solid var(--line);
+    margin: .8rem 0;
+  }
+  pre code { padding: 0; background: none; }
+  table {
+    border-collapse: collapse; width: 100%; margin: .8rem 0; font-size: .92rem;
+    display: block; overflow-x: auto;
+  }
+  th, td { border: 1px solid var(--line); padding: .4rem .65rem; text-align: left; vertical-align: top; }
+  th { background: var(--card); font-weight: 600; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: .9rem 1.1rem; margin: 1rem 0;
+  }
+  .k { color: var(--accent2); font-weight: 600; }
+  .toc { columns: 2; column-gap: 2.5rem; font-size: .95rem; }
+  .toc a { display: block; padding: .12rem 0; }
+  @media (max-width: 40rem) { .toc { columns: 1; } }
+  figure { margin: 1.2rem 0; }
+  figure svg { width: 100%; height: auto; }
+  figcaption { color: var(--muted); font-size: .85rem; margin-top: .3rem; text-align: center; }
+  .src { color: var(--muted); font-size: .85rem; }
+  .pill {
+    display: inline-block; font-size: .78rem; border: 1px solid var(--line);
+    border-radius: 999px; padding: .05rem .6rem; margin-right: .3rem;
+    color: var(--muted); white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How Irij ℑ Works</h1>
+<p class="sub">Under the hood of a token-efficient, effect-oriented language on the JVM —
+from source text to running bytecode. Reflects the codebase as of v0.8.x
+(post the 2026-07 refactor). Deep dives live in
+<a href="internals/README.md">docs/internals/</a>.</p>
+
+<div class="card toc">
+  <a href="#pipeline">1. The pipeline at a glance</a>
+  <a href="#lexer">2. Lexing: indentation &amp; dense ASCII</a>
+  <a href="#ast">3. Parsing &amp; the AST</a>
+  <a href="#emit">4. Bytecode emission</a>
+  <a href="#values">5. The value model</a>
+  <a href="#tco">6. Tail-call optimization</a>
+  <a href="#effects">7. Effects: state-machine lowering</a>
+  <a href="#hotredef">8. Hot redefinition</a>
+  <a href="#specs">9. Specs &amp; contracts</a>
+  <a href="#modules">10. Modules, seeds &amp; versioning</a>
+  <a href="#concurrency">11. Concurrency</a>
+  <a href="#caps">12. Capabilities &amp; Java interop</a>
+  <a href="#stdlib">13. The stdlib boundary</a>
+  <a href="#tooling">14. Tooling: REPL to LSP</a>
+  <a href="#map">15. Source map</a>
+</div>
+
+<h2 id="pipeline"><span class="no">1</span>The pipeline at a glance</h2>
+
+<p>Irij is <strong>bytecode-only</strong>: there is no interpreter (the tree-walker
+was removed in v0.6.20). Every run — a file, a REPL line, an nREPL eval, a
+packaged app — goes through the same four stages and executes as JVM
+classfiles.</p>
+
+<figure>
+<svg viewBox="0 0 760 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pipeline diagram">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g fill="none" stroke="currentColor" stroke-width="1.3">
+    <rect x="8"   y="30" width="120" height="46" rx="8"/>
+    <rect x="168" y="30" width="120" height="46" rx="8"/>
+    <rect x="328" y="30" width="120" height="46" rx="8"/>
+    <rect x="488" y="30" width="120" height="46" rx="8"/>
+    <rect x="648" y="30" width="104" height="46" rx="8"/>
+    <line x1="128" y1="53" x2="164" y2="53" marker-end="url(#arr)"/>
+    <line x1="288" y1="53" x2="324" y2="53" marker-end="url(#arr)"/>
+    <line x1="448" y1="53" x2="484" y2="53" marker-end="url(#arr)"/>
+    <line x1="608" y1="53" x2="644" y2="53" marker-end="url(#arr)"/>
+  </g>
+  <g font-family="sans-serif" font-size="13" fill="currentColor" text-anchor="middle">
+    <text x="68"  y="50">source.irj</text><text x="68"  y="66" font-size="10" opacity=".65">UTF-8 text</text>
+    <text x="228" y="50">tokens</text><text x="228" y="66" font-size="10" opacity=".65">ANTLR4 + indent</text>
+    <text x="388" y="50">AST</text><text x="388" y="66" font-size="10" opacity=".65">sealed records</text>
+    <text x="548" y="50">classfiles</text><text x="548" y="66" font-size="10" opacity=".65">ASM, V21</text>
+    <text x="700" y="50">JVM</text><text x="700" y="66" font-size="10" opacity=".65">defineClass</text>
+  </g>
+</svg>
+<figcaption>One path for everything: <code>irij run</code>, REPL, nREPL sessions, and <code>irij build</code> JARs.</figcaption>
+</figure>
+
+<p>Before emission, two whole-program passes run over the AST:
+<strong>ModuleInliner</strong> splices <code>use</code>d modules into one
+declaration list, and <strong>EffectRowChecker</strong> verifies declared
+effect rows (<code>::: Console Db</code>) at compile time. Emission itself is
+multi-pass (signatures → methods → dispatchers → <code>main</code> →
+<code>&lt;clinit&gt;</code>), so forward references just work.</p>
+
+<h2 id="lexer"><span class="no">2</span>Lexing: indentation &amp; dense ASCII</h2>
+
+<p>Irij's surface syntax is built around two ideas: <em>blocks by
+indentation</em> (strictly 2 spaces per level, hard error otherwise) and
+<em>1–2 character operators</em> chosen to be single BPE tokens for LLMs
+(<code>:=</code> <code>|&gt;</code> <code>@</code> <code>/?</code>
+<code>/+</code> <code>~&gt;</code> …).</p>
+
+<p>ANTLR can't produce Python-style INDENT/DEDENT tokens natively, so
+<code>IrijLexerBase</code> measures leading spaces at each newline and
+synthesizes them, maintaining an indent stack. Blank lines and comments are
+consumed without emitting tokens (and, since a v0.8 fix, without desyncing
+line numbers). Maximal-munch ordering matters: <code>:::</code> (effect row)
+must lex before <code>::</code> (spec annotation), <code>..&lt;</code> before
+<code>..</code>.</p>
+
+<p>Identifiers are kebab-case with optional <code>?</code>/<code>!</code>
+suffix (<code>empty?</code>, <code>validate!</code>); <code>_</code> works as
+a separator too (<code>pw_hash</code>), while bare <code>_</code> stays the
+wildcard pattern. Strings interpolate with <code>${expr}</code>.</p>
+
+<h2 id="ast"><span class="no">3</span>Parsing &amp; the AST</h2>
+
+<p>The ANTLR4 grammar (<code>IrijParser.g4</code>) feeds
+<code>AstBuilder</code>, which produces a small, regular AST of Java
+<strong>sealed interfaces + records</strong>:</p>
+
+<table>
+<tr><th>Family</th><th>Variants (abridged)</th></tr>
+<tr><td><code>Decl</code></td><td>FnDecl, SpecDecl, EffectDecl, HandlerDecl, CapDecl, ImplDecl, BindingDecl, PubDecl…</td></tr>
+<tr><td><code>Expr</code></td><td>literals, Var, App, Lambda, IfExpr, MatchExpr, Block, Pipe, SeqOp, MapLit, StringInterp, Range, DotAccess…</td></tr>
+<tr><td><code>Stmt</code></td><td>Bind, MutBind, Assign, ExprStmt, IfStmt, MatchStmt, With, Scope</td></tr>
+<tr><td><code>Pattern</code></td><td>literal, Var, Wildcard, ConstructorPat, VectorPat (with spread), TuplePat, DestructurePat</td></tr>
+<tr><td><code>SpecExpr</code></td><td>Name, App, ArrowSpec, RecordSpec, enum/refinement forms</td></tr>
+</table>
+
+<p>Sealed hierarchies mean every consumer is an exhaustive
+<code>switch</code> over records — the compiler enforces coverage when a new
+node appears. Function bodies come in three forms, disambiguated by the first
+token after the indent: <code>(</code> → lambda body, <code>pattern =&gt;</code>
+→ match arms, bare <code>=&gt;</code> → imperative block. Lambda chains curry:
+<code>(a -&gt; b -&gt; body)</code> ≡ <code>(a -&gt; (b -&gt; body))</code>.</p>
+
+<h2 id="emit"><span class="no">4</span>Bytecode emission</h2>
+
+<p>The emitter lives in <code>dev.irij.compiler</code> as an orchestrator plus
+focused modules (one concern per class since the 2026-07 split):</p>
+
+<table>
+<tr><th>Class</th><th>Job</th></tr>
+<tr><td><code>ClassEmitter</code></td><td>passes, per-source-file class management, <code>&lt;clinit&gt;</code>, shared state (arities, effect rows, spec/proto/handler registries)</td></tr>
+<tr><td><code>FnEmitter</code></td><td>named fns, tail returns, spec checks, pre/post contracts, fn-as-value wrappers</td></tr>
+<tr><td><code>ExprEmitter</code></td><td>expressions &amp; statements: literals, binds, calls, pipes, collections</td></tr>
+<tr><td><code>PatternEmitter</code></td><td><code>match</code> lowering: test-and-bind chains per pattern kind</td></tr>
+<tr><td><code>LambdaEmitter</code></td><td>lambda bodies as synthetic statics + free-variable capture analysis</td></tr>
+<tr><td><code>IntrinsicsEmitter</code></td><td>builtin fast paths — direct INVOKESTATIC into the runtime</td></tr>
+<tr><td><code>EffectEmitter</code> / <code>SmClassifier</code> / <code>SmEmitter</code></td><td>the effect system (§7)</td></tr>
+<tr><td><code>ProtoEmitter</code></td><td>protocol dispatchers: type-tag switch → <code>impl$method$Type</code> statics</td></tr>
+</table>
+
+<p>Each program becomes one root class (<code>irij.Program</code>) holding
+<code>main</code>, statics for top-level binds, and all synthetic methods.
+Functions inlined from other source files move to <em>sibling classes</em>
+(<code>irij.Program$vrata_html</code>) whose JVM <code>SourceFile</code>
+attribute names the real file — so stack traces read
+<code>at irij.Program$vrata_html.el(vrata/html.irj:40)</code> instead of
+blaming the root program. Per-expression <code>LineNumber</code> entries make
+those traces line-accurate.</p>
+
+<p>The runtime the emitted code calls into is split by domain:
+<code>RuntimeSupport</code> (callable dispatch, nREPL namespace, hot-redef
+bootstrap) plus <code>RtOps</code>, <code>RtMath</code>, <code>RtStrings</code>,
+<code>RtCollections</code>, <code>RtEffects</code>, <code>RtConcurrency</code>,
+<code>RtInterop</code>, <code>RtIo</code>. Emit sites don't hard-code an owner:
+<code>RtOwners.of("conj")</code> resolves the declaring class reflectively at
+compile time and fails fast if a name is missing or ambiguous — the runtime
+classes are the single source of truth.</p>
+
+<h2 id="values"><span class="no">5</span>The value model</h2>
+
+<table>
+<tr><th>Irij</th><th>JVM representation</th></tr>
+<tr><td><code>Int</code> / <code>Float</code> / <code>Bool</code> / <code>Str</code></td><td>boxed <code>Long</code> / <code>Double</code> / <code>Boolean</code> / <code>String</code></td></tr>
+<tr><td><code>()</code></td><td><code>Values.UNIT</code> singleton</td></tr>
+<tr><td><code>:keyword</code>, <code>3/4</code></td><td><code>Values.Keyword</code>, <code>Values.Rational</code> records</td></tr>
+<tr><td><code>#[…]</code> <code>#(…)</code> <code>#{…}</code> <code>{k= v}</code></td><td><code>IrijVector</code> / <code>IrijTuple</code> / <code>IrijSet</code> / <code>IrijMap</code> — immutable copies (<code>List.copyOf</code> et al.)</td></tr>
+<tr><td>ADT / record values</td><td><code>Values.Tagged(tag, fields, namedFields, specName)</code> — <code>specName</code> is the certification stamp</td></tr>
+<tr><td>functions</td><td><code>RuntimeSupport.IrijFn</code> SAM (<code>Object[] → Object</code>), built by LambdaMetafactory at call sites</td></tr>
+</table>
+
+<p>Everything is <code>Object</code> in method signatures; HotSpot's boxing
+elimination and inlining recover most of the cost at hot sites. Maps are
+string-keyed (JSON-shaped); a dynamic key <code>{(expr)= v}</code> must
+evaluate to <code>Str</code>.</p>
+
+<h2 id="tco"><span class="no">6</span>Tail-call optimization</h2>
+
+<p>Self-recursive calls in tail position compile to <code>GOTO</code> back to
+the function entry with parameter slots rebound in place — O(1) stack, no
+trampoline. <code>emitTailExpr</code> walks tail positions (if-branches, last
+block expression, match arm bodies); everything else falls through to
+<code>emitExpr + ARETURN</code>. New argument values are all evaluated on the
+JVM stack <em>before</em> any slot is overwritten, so
+<code>sum-to (acc + n) (n - 1)</code> can't read a half-updated frame.
+Mutual recursion is deliberately deferred (no JVM-level general TCO).</p>
+
+<h2 id="effects"><span class="no">7</span>Effects: state-machine lowering</h2>
+
+<p>Algebraic effects are Irij's universal joint — IO, state, concurrency and
+mocking all flow through <code>effect</code> declarations, <code>perform</code>
+call sites, and <code>with handler</code> blocks. The lowering (“14c.3”) turns
+each <code>with</code> body into a <strong>resumable state machine</strong>;
+there are no threads or queues in the dispatch path.</p>
+
+<h3>Classification</h3>
+<p><code>SmClassifier</code> A-normalizes the body (every op call becomes
+<code>x := op args</code> or a bare op statement), then classifies it into a
+<code>WithBodyShape</code>:</p>
+<table>
+<tr><th>Shape</th><th>Meaning</th></tr>
+<tr><td><code>Pure</code></td><td>no op calls — body runs directly</td></tr>
+<tr><td><code>SingleOp</code></td><td>exactly one op call at top level</td></tr>
+<tr><td><code>Sequence</code></td><td>a straight line of segments split at op calls; locals crossing a split are <em>lifted</em> into continuation fields</td></tr>
+<tr><td><code>EffIR</code></td><td>branching control flow with ops — lowered to basic blocks with <code>Term</code>s (Return / Jump / Branch / Perform)</td></tr>
+</table>
+
+<h3>Runtime protocol</h3>
+<figure>
+<svg viewBox="0 0 760 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="SM dispatch loop">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g fill="none" stroke="currentColor" stroke-width="1.3">
+    <rect x="20"  y="20" width="200" height="52" rx="8"/>
+    <rect x="300" y="20" width="180" height="52" rx="8"/>
+    <rect x="560" y="20" width="180" height="52" rx="8"/>
+    <rect x="300" y="118" width="180" height="52" rx="8"/>
+    <line x1="220" y1="46" x2="296" y2="46" marker-end="url(#arr2)"/>
+    <line x1="480" y1="46" x2="556" y2="46" marker-end="url(#arr2)"/>
+    <path d="M 650 72 L 650 144 L 484 144" marker-end="url(#arr2)"/>
+    <path d="M 300 144 L 110 144 L 110 76" marker-end="url(#arr2)"/>
+  </g>
+  <g font-family="sans-serif" font-size="12.5" fill="currentColor" text-anchor="middle">
+    <text x="120" y="42">smstep$N(k)</text>
+    <text x="120" y="58" opacity=".65" font-size="10.5">switch (k.state) — runs a segment</text>
+    <text x="390" y="42">throw PerformSignal</text>
+    <text x="390" y="58" opacity=".65" font-size="10.5">stackless; carries op + continuation</text>
+    <text x="650" y="42">dispatch loop</text>
+    <text x="650" y="58" opacity=".65" font-size="10.5">catch → find handler clause</text>
+    <text x="390" y="140">clause runs; resume v</text>
+    <text x="390" y="156" opacity=".65" font-size="10.5">throw TailResume(v, target)</text>
+    <text x="200" y="132" opacity=".8" font-size="11">loop re-enters step with k.state = next</text>
+  </g>
+</svg>
+<figcaption>A perform = one stackless throw; a resume = one more. The loop iterates — no stack growth per op.</figcaption>
+</figure>
+
+<p>The continuation object (<code>IrijContinuation</code>) holds
+<code>state</code> (which segment runs next) and <code>fields</code> (lifted
+locals). Handler mutable state (<code>state :! 0</code>, <code>&lt;-</code>)
+lives in per-handler static fields, readable from outside via dot-access.
+Handlers compose with <code>&gt;&gt;</code>
+(<code>CompiledComposedHandler</code>); nested <code>with</code> persists the
+inner continuation in the outer's fields. A clause body that performs its own
+<em>foreign</em> effect compiles as its own SM continuation (“tier-c”); ops
+the native machinery can't route fall back to <code>SM_STACK</code> — a
+thread-local stack of handler frames — so semantics never depend on which
+path was taken. <code>PerformSignal</code>/<code>TailResume</code> are created
+fresh per throw (stackless construction; pooling was benchmarked at ~zero and
+removed).</p>
+
+<h2 id="hotredef"><span class="no">8</span>Hot redefinition</h2>
+
+<p>Dev builds compile each user-fn call site as <code>invokedynamic</code>;
+the bootstrap (<code>RuntimeSupport.redefBootstrap</code>) links a
+<code>MutableCallSite</code> and registers it in a global map keyed by
+<code>owner.method:descriptor</code>. Redefining a fn (REPL, nREPL) swaps the
+call site's target method handle — every previously-JITted caller re-links to
+the new code. <code>irij build --direct-linking</code> emits plain
+<code>invokestatic</code> instead: no indirection, maximal JIT inlining,
+Clojure-style deploy semantics.</p>
+
+<h2 id="specs"><span class="no">9</span>Specs &amp; contracts</h2>
+
+<p>Irij is spec-oriented rather than statically typed: annotations are
+<em>runtime-validated</em> shapes on function boundaries, with a gradual
+spectrum (dynamic → schemas → contracts).</p>
+
+<pre><code>pub fn greet :: Str Int Str ::: Console
+  pre  (n -&gt; n &gt;= 0)
+  post (r -&gt; length r &gt; 0)
+  (name n -&gt; ...)</code></pre>
+
+<ul>
+<li><strong>Input specs</strong> validate each annotated param at entry
+(<code>SpecValidator.validateEncoded</code>, driven by an encoded spec string
+baked into the bytecode); <strong>output specs</strong> validate at every
+tail-return site.</li>
+<li><strong>Product/sum specs</strong> register in a global descriptor
+registry at <code>&lt;clinit&gt;</code>. Validated values get
+<em>certified</em> — <code>Tagged.specName</code> — enabling an O(1)
+revalidation fast path.</li>
+<li><strong>Union types:</strong> a sum spec may list primitive specs as
+variants (<code>spec Node / Raw Str / El Str / Str</code>); a bare primitive
+matches by type, not tag.</li>
+<li><strong>Contracts</strong> (<code>pre</code>/<code>post</code>,
+module-boundary <code>in</code>/<code>out</code> with blame) compile to
+IrijFn slots checked around the body.</li>
+<li><strong>Effect rows</strong> (<code>::: Console Db</code>, row variables,
+<code>Any</code>) are enforced at compile time by
+<code>EffectRowChecker</code> — call-site subsumption included — plus a thin
+runtime row stack for dynamic dispatch through fn values.</li>
+</ul>
+
+<h2 id="modules"><span class="no">10</span>Modules, seeds &amp; versioning</h2>
+
+<p><code>use vrata.html</code> is resolved by <code>ModuleInliner</code> at
+compile time: the module's source is parsed, its <code>pub</code> decls are
+unwrapped, short-name aliases are rewritten at call and dot-access positions,
+and everything lands in one decl list (per-file classes keep stack traces
+honest, §4). Lookup order: stdlib classpath (<code>std/*.irj</code>) →
+project source roots → installed seeds.</p>
+
+<p><strong>Seeds</strong> are Irij's packages: <code>irij.toml</code> declares
+metadata + deps (registry / git); <code>irij install</code> resolves them,
+<code>irij publish</code> tars sources and uploads to the registry
+(irij.online) with Bearer auth. Versions are
+<strong>commit-count based</strong> — <code>MAJOR.MINOR.&lt;git rev-list
+--count HEAD&gt;</code>; publish runs only from a clean main so patch numbers
+are monotone and nobody hand-picks them. The engine itself versions the same
+way.</p>
+
+<h2 id="concurrency"><span class="no">11</span>Concurrency</h2>
+
+<p>Everything is <strong>virtual threads</strong>. <code>spawn</code> starts a
+fire-and-forget vthread; <code>scope</code>/<code>fork</code>/<code>await</code>
+give structured concurrency (<code>CompiledScopeHandle</code>), with
+<code>par</code>, <code>race</code>, <code>timeout</code> on top. The built-in
+HTTP server (<code>IrijHttpServer</code>) is vthread-per-connection with
+blocking IO — a dead SSE peer kills only its own thread (the
+<code>com.sun.net.httpserver</code> selector-wedge bug that motivated it is
+gone).</p>
+
+<p>Effect context crosses threads by <strong>snapshot</strong>: at fork time
+the parent's handler stacks (<code>SM_STACK</code>, threaded
+<code>EffectSystem.STACK</code>, effect row) are copied into a
+<code>ParentSnapshot</code> and installed in the child before its body runs;
+HTTP request handlers replay a snapshot taken at <code>serve</code> time. The
+session-scoped values — nREPL namespace <code>NS</code> and stdout capture
+<code>SESSION_OUT</code> — are JDK 25 <code>ScopedValue</code>s: bound
+lexically around each eval/fiber/request, structurally unable to leak. The
+mutable handler stacks stay <code>ThreadLocal</code> on purpose: emitted code
+pushes/pops them in generated-code scope, and children need copies, not
+shared references.</p>
+
+<h2 id="caps"><span class="no">12</span>Capabilities &amp; Java interop</h2>
+
+<p>Effects abstract <em>what</em>; capabilities bind <em>how</em>. Stdlib
+effect modules (<code>std.db</code>, <code>std.http</code>,
+<code>std.serve</code>, <code>std.fs</code>, <code>std.session</code>,
+<code>std.log</code>…) pair a <code>pub effect</code> with a default handler
+whose clauses call <code>raw-*</code> builtins backed by Java capability
+classes (<code>JdbcCapability</code>, <code>ServeCapability</code>, …). Tests
+swap the handler; production code never changes.</p>
+
+<p>Java interop is reflective and unified: <code>Class/member</code> resolves
+statics, <code>obj.method args</code> falls through dot-access to instance
+reflection, both via <code>JavaInterop</code>'s coercion/overload resolution.
+Calling arbitrary Java is impure by definition, so it demands the
+<code>::: JVM</code> row — purity stays honest at the boundary.</p>
+
+<h2 id="stdlib"><span class="no">13</span>The stdlib boundary</h2>
+
+<p>The standard library is <em>real Irij</em>
+(<code>src/main/resources/std/*.irj</code>, 18 modules) except where Java is
+irreducible: raw access to internal collection types, JDBC/HTTP/crypto, and
+hot arithmetic. Since the 2026-07 dedup there is <strong>one implementation
+per builtin</strong>: the <code>Rt*</code> statics serve call-position
+intrinsics directly, and value-position <code>BuiltinFn</code> registry
+entries delegate to the same statics. Higher-order builtins are
+effect-transparent — a callback runs in the caller's effect row.</p>
+
+<h2 id="tooling"><span class="no">14</span>Tooling: REPL to LSP</h2>
+
+<table>
+<tr><th>Surface</th><th>How it works</th></tr>
+<tr><td><code>irij</code> / <code>irij repl</code></td><td>JLine3 REPL; each form compiles as a namespace-mode class and evals in a persistent <code>BytecodeSession</code></td></tr>
+<tr><td><code>irij --nrepl-server</code></td><td>bencode nREPL; cross-eval state via <code>RT.nsGet/nsPut</code> against the session's ScopedValue-bound namespace; powers the Emacs client and the irij.online Playground</td></tr>
+<tr><td><code>irij lsp</code></td><td>LSP4J over stdio: diagnostics from the real parser + effect-row checker, symbols from the AST index</td></tr>
+<tr><td><code>irij --mcp-server</code></td><td>MCP over stdio so AI agents can eval/run/test a project directly</td></tr>
+<tr><td><code>irij build</code></td><td>self-contained runnable JAR: emitted classes + <code>dev/irij/**</code> runtime + stdlib + <code>resources/</code>; <code>--direct-linking</code> for deploy</td></tr>
+<tr><td><code>irij test</code></td><td>discovers <code>test-*.irj</code>, counts std.test's <code>[ok]</code>/<code>[FAIL]</code> lines, per-file + grand totals</td></tr>
+</table>
+
+<h2 id="map"><span class="no">15</span>Source map</h2>
+
+<table>
+<tr><th>Area</th><th>Where</th></tr>
+<tr><td>Grammar</td><td><code>src/main/antlr/IrijLexer.g4</code>, <code>IrijParser.g4</code>, <code>parser/IrijLexerBase.java</code></td></tr>
+<tr><td>AST</td><td><code>ast/</code> — <code>Expr</code>, <code>Stmt</code>, <code>Decl</code>, <code>Pattern</code>, <code>SpecExpr</code>, <code>AstBuilder</code></td></tr>
+<tr><td>Compiler</td><td><code>compiler/</code> — <code>IrijCompiler</code>, <code>ClassEmitter</code> + emitter modules, <code>SpecValidator</code>, <code>EffectRowChecker</code>, <code>ModuleInliner</code></td></tr>
+<tr><td>Runtime</td><td><code>compiler/RuntimeSupport</code> + <code>Rt*</code>, runtime types (<code>IrijContinuation</code>, <code>PerformSignal</code>…), <code>runtime/Values</code>, capabilities</td></tr>
+<tr><td>Tooling</td><td><code>cli/</code>, <code>repl/</code>, <code>nrepl/</code>, <code>lsp/</code>, <code>mcp/</code>, <code>module/</code> (seeds, registry, versioning)</td></tr>
+<tr><td>Deep dives</td><td><a href="internals/README.md"><code>docs/internals/</code></a> — 18 topic pages, kept in lockstep with the code</td></tr>
+</table>
+
+<p class="src">Generated for Irij v0.8.x · 2026-07 · This page is a curated
+overview; the internals pages are the source of truth for details.</p>
+
+</main>
+</body>
+</html>
