@@ -51,6 +51,7 @@ Real Irij code, parsed + compiled like user code:
 | `std.math` | Math helpers (some delegate to `java.lang.Math` via `::: JVM`) |
 | `std.random` | `Random` effect + `default-random` handler |
 | `std.env` | `Env` effect + handler |
+| `std.log` | `Log` effect — leveled logging; `default-log`/`silent-log` handlers |
 | `std.fs` | `FileIO` effect + handlers |
 | `std.http` | HTTP client (`http-get`, `http-post`) + server |
 | `std.db` | `Db` effect + SQLite handler |
