@@ -1,0 +1,32 @@
+;; ── PR4 language fixes: curried lambdas, dynamic map keys, captures ──
+
+use std.test :open
+
+;; curried lambda chains
+add := (a -> b -> a + b)
+f3 := (a -> b -> c -> a + b + c)
+r1 := test "curried two levels" (-> assert-eq ((add 1) 2) 3)
+r2 := test "curried three levels" (-> assert-eq (((f3 1) 2) 3) 6)
+r3 := test "curried as mapper" (-> assert-eq (#[1 2 3] |> @ (add 10)) #[11 12 13])
+
+;; dynamic map keys
+k := "nm"
+m1 := {(k)= "jo" age= 5}
+m2 := {("a" ++ "b")= 1}
+base := {a= 1}
+m3 := {...base (k)= 2}
+r4 := test "dynamic key from var" (-> assert-eq m1.nm "jo")
+r5 := test "static key beside dynamic" (-> assert-eq m1.age 5)
+r6 := test "dynamic key from expr" (-> assert-eq m2.ab 1)
+r7 := test "dynamic key in record update" (-> assert-eq m3.nm 2)
+r8 := test "dynamic key must be Str" (-> assert-throws (-> {(42)= 1}))
+
+;; nested-lambda captures (regressions for the free-var fixes)
+mk-map := (v -> (_ -> {val= v}))
+mk-interp := (nm -> (_ -> "hi ${nm}"))
+mk-range := (n -> (_ -> 1..n))
+r9  := test "map value captures outer var" (-> assert-eq ((mk-map 7) 0).val 7)
+r10 := test "interp captures outer var" (-> assert-eq ((mk-interp "jo") 0) "hi jo")
+r11 := test "range captures outer var" (-> assert-eq (length ((mk-range 3) 0)) 3)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11]

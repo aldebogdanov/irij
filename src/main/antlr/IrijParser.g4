@@ -102,7 +102,7 @@ fnBodyContent
     ;
 
 lambdaBody
-    : LPAREN lambdaParams ARROW exprSeq RPAREN
+    : LPAREN lambdaChain RPAREN
     ;
 
 lambdaParams
@@ -499,7 +499,12 @@ ifExpr
 // ── Lambda ───────────────────────────────────────────────────────────
 
 lambdaExpr
-    : LPAREN lambdaParams ARROW exprSeq RPAREN
+    : LPAREN lambdaChain RPAREN
+    ;
+
+// Curried chain: (a -> b -> body) nests to (a -> (b -> body)).
+lambdaChain
+    : lambdaParams ARROW (lambdaChain | exprSeq)
     ;
 
 // ── Parenthesized Expression (with optional semicolons) ──────────────
@@ -545,6 +550,7 @@ mapEntry
     | IDENT EQUALS expr                       // name= "jo"
     | ATTR_IDENT EQUALS expr                  // data-on:click= "..."
     | STRING EQUALS expr                      // "content-type"= "text/html"
+    | LPAREN expr RPAREN EQUALS expr          // {(expr)= val} dynamic key
     ;
 
 exprList

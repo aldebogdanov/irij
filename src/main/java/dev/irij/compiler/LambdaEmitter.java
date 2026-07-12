@@ -202,6 +202,10 @@ final class LambdaEmitter implements Opcodes {
                     switch (en) {
                         case Expr.MapEntry.Field f ->
                                 collectFreeVars(f.value(), bound, outer, out, seen);
+                        case Expr.MapEntry.DynField df -> {
+                            collectFreeVars(df.keyExpr(), bound, outer, out, seen);
+                            collectFreeVars(df.value(), bound, outer, out, seen);
+                        }
                         case Expr.MapEntry.Spread sp ->
                                 collectFreeVars(new Expr.Var(sp.name(), null), bound, outer, out, seen);
                     }

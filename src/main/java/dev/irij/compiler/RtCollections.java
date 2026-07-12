@@ -123,6 +123,14 @@ public final class RtCollections {
     }
 
 
+    /** Coerce a dynamic map-literal key ({@code {(expr)= val}}) to the
+     *  String key IrijMap requires. */
+    public static String asMapKey(Object v) {
+        if (v instanceof String s) return s;
+        throw new dev.irij.IrijRuntimeError(
+                "map key must evaluate to Str, got " + RuntimeSupport.typeTag(v));
+    }
+
     /** `conj v x` — append x, return new vector (immutable semantics). */
     public static Object conj(Object v, Object x) {
         if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
