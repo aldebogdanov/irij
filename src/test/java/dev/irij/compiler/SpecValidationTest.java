@@ -296,4 +296,86 @@ class SpecValidationTest {
                 java.util.List.of(greetH, loggerH));
         assertSame(composed, SpecValidator.validate(composed, spec));
     }
+
+    // ── Union types: primitives as sum-spec variants (PR4 2026-07) ──
+
+    @Test void sumSpecAcceptsBarePrimitiveVariant() throws Exception {
+        String out = run("""
+                spec Node
+                  Raw Str
+                  El Str
+                  Str
+
+                fn same :: Node Node
+                  (n -> n)
+
+                println (same "plain-text")
+                println (same (Raw "<b>"))
+                """);
+        assertEquals("plain-text\nRaw \"<b>\"", out.replace("\r", ""));
+    }
+
+    @Test void sumSpecPrimitiveVariantsMatchByType() throws Exception {
+        String out = run("""
+                spec Mixed
+                  Tagged Int
+                  Int
+                  Str
+                  Bool
+
+                fn same :: Mixed Mixed
+                  (v -> v)
+
+                println (same 42)
+                println (same "s")
+                println (same true)
+                """);
+        assertEquals("42\ns\ntrue", out.replace("\r", ""));
+    }
+
+    @Test void sumSpecRejectsUnlistedPrimitive() {
+        expectFailure("""
+                spec Node
+                  Raw Str
+                  Str
+
+                fn same :: Node Node
+                  (n -> n)
+
+                println (same 42)
+                """, "expected Node variant");
+    }
+
+    @Test void sumSpecWithoutPrimitivesStillRejectsBareValue() {
+        expectFailure("""
+                spec Shape
+                  Circle Float
+
+                fn same :: Shape Shape
+                  (s -> s)
+
+                println (same "nope")
+                """, "expected Shape variant");
+    }
+
+    @Test void validateBuiltinSeesPrimitiveVariant() throws Exception {
+        String out = run("""
+                spec Node
+                  Raw Str
+                  Str
+
+                println (validate! "Node" "text")
+                """);
+        assertEquals("text", out.replace("\r", ""));
+    }
+
+    @Test void validateBangRejectsUnlistedPrimitiveVariant() {
+        expectFailure("""
+                spec Node
+                  Raw Str
+                  Str
+
+                println (validate! "Node" 42)
+                """, "expected Node variant");
+    }
 }

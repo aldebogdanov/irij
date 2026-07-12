@@ -89,6 +89,9 @@ public sealed interface Expr extends Node {
     /** A map entry: either a key=value or a spread. */
     sealed interface MapEntry {
         record Field(String key, Expr value) implements MapEntry {}
+        /** {@code {(expr)= val}} — key computed at runtime; must
+         *  evaluate to Str. */
+        record DynField(Expr keyExpr, Expr value) implements MapEntry {}
         record Spread(String name) implements MapEntry {}
     }
 

@@ -467,7 +467,14 @@ public final class EffectRowChecker {
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) walkExpr(x, avail, ctx); }
             case Expr.MapLit ml -> {
                 for (var me : ml.entries()) {
-                    if (me instanceof Expr.MapEntry.Field f) walkExpr(f.value(), avail, ctx);
+                    switch (me) {
+                        case Expr.MapEntry.Field f -> walkExpr(f.value(), avail, ctx);
+                        case Expr.MapEntry.DynField df -> {
+                            walkExpr(df.keyExpr(), avail, ctx);
+                            walkExpr(df.value(), avail, ctx);
+                        }
+                        default -> {}
+                    }
                 }
             }
             case Expr.Compose c -> { walkExpr(c.left(), avail, ctx); walkExpr(c.right(), avail, ctx); }
@@ -850,7 +857,14 @@ public final class EffectRowChecker {
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) collectInto(x, out); }
             case Expr.MapLit ml -> {
                 for (var me : ml.entries()) {
-                    if (me instanceof Expr.MapEntry.Field f) collectInto(f.value(), out);
+                    switch (me) {
+                        case Expr.MapEntry.Field f -> collectInto(f.value(), out);
+                        case Expr.MapEntry.DynField df -> {
+                            collectInto(df.keyExpr(), out);
+                            collectInto(df.value(), out);
+                        }
+                        default -> {}
+                    }
                 }
             }
             case Expr.Pipe p -> { collectInto(p.left(), out); collectInto(p.right(), out); }

@@ -692,13 +692,22 @@ final class ExprEmitter implements Opcodes {
                 "(Ljava/lang/Object;)Ljava/util/LinkedHashMap;", false);
         // For each Field entry, DUP map, push key/value, put, pop result.
         for (Expr.MapEntry me : ru.updates()) {
-            if (!(me instanceof Expr.MapEntry.Field f)) {
-                throw new IrijCompiler.CompileException(
-                        "MVP: record-update spread not supported");
-            }
             mv.visitInsn(DUP);
-            mv.visitLdcInsn(f.key());
-            emitExpr(f.value(), mv, locals);
+            switch (me) {
+                case Expr.MapEntry.Field f -> {
+                    mv.visitLdcInsn(f.key());
+                    emitExpr(f.value(), mv, locals);
+                }
+                case Expr.MapEntry.DynField df -> {
+                    emitExpr(df.keyExpr(), mv, locals);
+                    mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("asMapKey"), "asMapKey",
+                            "(Ljava/lang/Object;)Ljava/lang/String;", false);
+                    emitExpr(df.value(), mv, locals);
+                }
+                case Expr.MapEntry.Spread sp ->
+                        throw new IrijCompiler.CompileException(
+                                "MVP: record-update spread not supported");
+            }
             mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "put",
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
             mv.visitInsn(POP);
@@ -718,12 +727,21 @@ final class ExprEmitter implements Opcodes {
         mv.visitInsn(DUP);
         mv.visitMethodInsn(INVOKESPECIAL, "java/util/LinkedHashMap", "<init>", "()V", false);
         for (Expr.MapEntry me : ml.entries()) {
-            if (!(me instanceof Expr.MapEntry.Field f)) {
-                throw new IrijCompiler.CompileException("MVP: map spread not supported");
-            }
             mv.visitInsn(DUP);
-            mv.visitLdcInsn(f.key());
-            emitExpr(f.value(), mv, locals);
+            switch (me) {
+                case Expr.MapEntry.Field f -> {
+                    mv.visitLdcInsn(f.key());
+                    emitExpr(f.value(), mv, locals);
+                }
+                case Expr.MapEntry.DynField df -> {
+                    emitExpr(df.keyExpr(), mv, locals);
+                    mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("asMapKey"), "asMapKey",
+                            "(Ljava/lang/Object;)Ljava/lang/String;", false);
+                    emitExpr(df.value(), mv, locals);
+                }
+                case Expr.MapEntry.Spread sp ->
+                        throw new IrijCompiler.CompileException("MVP: map spread not supported");
+            }
             mv.visitMethodInsn(INVOKEINTERFACE, "java/util/Map", "put",
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
             mv.visitInsn(POP);

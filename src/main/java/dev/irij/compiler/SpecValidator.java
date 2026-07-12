@@ -460,9 +460,42 @@ public final class SpecValidator {
         throw fail("cannot validate " + typeName(value) + " as " + specName);
     }
 
+    /** Primitive spec names allowed as sum-spec variants: a bare value
+     *  of the matching Java type satisfies the sum without a tag. */
+    private static final java.util.Set<String> PRIMITIVE_VARIANTS = java.util.Set.of(
+            "Str", "Int", "Float", "Bool", "Keyword", "Rational", "Unit");
+
+    /** True when {@code name} may appear as a primitive variant in a
+     *  sum spec (used by the emitter to keep primitive names out of
+     *  the constructor/tag registry). */
+    public static boolean isPrimitiveVariant(String name) {
+        return PRIMITIVE_VARIANTS.contains(name);
+    }
+
+    private static boolean primitiveMatches(String name, Object value) {
+        return switch (name) {
+            case "Str" -> value instanceof String;
+            case "Int" -> value instanceof Long;
+            case "Float" -> value instanceof Double;
+            case "Bool" -> value instanceof Boolean;
+            case "Keyword" -> value instanceof Values.Keyword;
+            case "Rational" -> value instanceof Values.Rational;
+            case "Unit" -> value == Values.UNIT;
+            default -> false;
+        };
+    }
+
     private static Object validateSumShape(Object value, String specName,
                                             java.util.Map<String, Integer> variants) {
         if (!(value instanceof Values.Tagged t)) {
+            // Primitive variants: `spec Node / Raw / El / Str` accepts a
+            // bare string by type. Primitives carry no certification tag;
+            // the value passes through unchanged.
+            for (String v : variants.keySet()) {
+                if (PRIMITIVE_VARIANTS.contains(v) && primitiveMatches(v, value)) {
+                    return value;
+                }
+            }
             throw fail("expected " + specName + " variant, got " + typeName(value));
         }
         Integer arity = variants.get(t.tag());

@@ -197,6 +197,50 @@ final class LambdaEmitter implements Opcodes {
                 Set<String> bound2 = new HashSet<>(bound);
                 for (Stmt st : blk.stmts()) collectFreeVarsStmt(st, bound2, outer, out, seen);
             }
+            case Expr.MapLit ml -> {
+                for (Expr.MapEntry en : ml.entries()) {
+                    switch (en) {
+                        case Expr.MapEntry.Field f ->
+                                collectFreeVars(f.value(), bound, outer, out, seen);
+                        case Expr.MapEntry.DynField df -> {
+                            collectFreeVars(df.keyExpr(), bound, outer, out, seen);
+                            collectFreeVars(df.value(), bound, outer, out, seen);
+                        }
+                        case Expr.MapEntry.Spread sp ->
+                                collectFreeVars(new Expr.Var(sp.name(), null), bound, outer, out, seen);
+                    }
+                }
+            }
+            case Expr.RecordUpdate ru -> {
+                collectFreeVars(new Expr.Var(ru.base(), null), bound, outer, out, seen);
+                for (Expr.MapEntry en : ru.updates()) {
+                    if (en instanceof Expr.MapEntry.Field f) {
+                        collectFreeVars(f.value(), bound, outer, out, seen);
+                    }
+                }
+            }
+            case Expr.Pipe p -> {
+                collectFreeVars(p.left(), bound, outer, out, seen);
+                collectFreeVars(p.right(), bound, outer, out, seen);
+            }
+            case Expr.Compose c -> {
+                collectFreeVars(c.left(), bound, outer, out, seen);
+                collectFreeVars(c.right(), bound, outer, out, seen);
+            }
+            case Expr.SeqOp so -> {
+                if (so.arg() != null) collectFreeVars(so.arg(), bound, outer, out, seen);
+            }
+            case Expr.StringInterp si -> {
+                for (Expr.StringPart part : si.parts()) {
+                    if (part instanceof Expr.StringPart.Interpolation ip) {
+                        collectFreeVars(ip.expr(), bound, outer, out, seen);
+                    }
+                }
+            }
+            case Expr.Range r -> {
+                collectFreeVars(r.from(), bound, outer, out, seen);
+                collectFreeVars(r.to(), bound, outer, out, seen);
+            }
             default -> { /* literals, TypeRef, Keyword — no free vars */ }
         }
     }

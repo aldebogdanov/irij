@@ -71,3 +71,22 @@ The grammar accepts more than the back-ends implement. Examples:
 6. Add handling in `ClassEmitter.emit*` — or document why bytecode mode
    doesn't support it yet (and ensure it surfaces a clean error).
 7. Tests in both modes.
+
+## Curried lambda chains (PR4, 2026-07)
+
+`lambdaChain : lambdaParams ARROW (lambdaChain | exprSeq)` — so
+`(a -> b -> body)` parses as `(a -> (b -> body))` without explicit
+nesting. ANTLR's adaptive prediction disambiguates: after an ARROW it
+first tries another chain link (`pattern* ARROW …`) and falls back to
+`exprSeq` when no second ARROW follows. Both `lambdaExpr` and fn-decl
+`lambdaBody` share the rule; in a fn decl the outermost params stay fn
+params and the rest of the chain becomes a nested `Expr.Lambda`.
+
+## Dynamic map keys (PR4, 2026-07)
+
+`mapEntry` gained `LPAREN expr RPAREN EQUALS expr` — `{(k)= v}`
+evaluates the key at runtime (`Expr.MapEntry.DynField`); it must
+produce a Str (`RtCollections.asMapKey` throws otherwise). Works in
+map literals and `{...base (k)= v}` record updates. Dynamic keys are
+skipped by row-var inference over record specs (key unknowable at
+compile time).
