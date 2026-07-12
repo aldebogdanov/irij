@@ -444,9 +444,7 @@ public final class RtEffects {
         RtConcurrency.inheritEffectStack(p.effectStack());
         RtConcurrency.inheritSMStack(p.smStack());
         RtConcurrency.inheritEffectRow(p.effectRow());
-        if (p.namespace() != null) RuntimeSupport.NS.set(p.namespace());
-        if (p.sessionOut() != null) RuntimeSupport.SESSION_OUT.set(p.sessionOut());
-        return body.get();
+        return RuntimeSupport.callBoundSession(p.namespace(), p.sessionOut(), body);
     }
 
 

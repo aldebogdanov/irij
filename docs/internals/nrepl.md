@@ -67,7 +67,8 @@ Mechanism:
 
 - `NReplSession` owns `bytecodeNamespace: ConcurrentHashMap<String, Object>`.
 - Before each invoke, the session sets `RuntimeSupport.NS` (a
-  ThreadLocal) to that map; restores on finally.
+  ScopedValue since PR3) to that map for the duration of the eval
+  (structured binding — nothing to restore).
 - The emitter compiles with `CompileOptions.namespaceMode = true`.
   In that mode:
   - Top-level `Stmt.Bind` with a simple-name target emits an extra
