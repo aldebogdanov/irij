@@ -37,6 +37,26 @@ Each session owns:
 Bindings (`x := 5`, `fn foo ...`) made in one eval persist for
 subsequent evals in the same session — same as a Clojure REPL.
 
+### Seed resolution (project context)
+
+`NReplServer` is started with a `projectRoot` (the dir the editor
+launched `irij --nrepl-server` in). At session-construction time that
+root is resolved to seed roots via
+`DependencyResolver.resolveSeedRoots(projectRoot, out)` — the **same**
+entry point a file run uses (`BytecodeRunner`) and the REPL uses (from
+CWD). The roots are handed to `new BytecodeSession(prefix, seedRoots)`,
+which threads them into every `compileDeclsMulti` call, so the
+compile-time `ModuleInliner` can resolve `use <seed>` in interactive
+evals exactly as it does for `irij run`.
+
+Resolution is **best-effort**: no manifest, no deps, or a resolution
+failure (offline, missing tag) degrades to an empty seed list rather
+than aborting the session — a later eval that genuinely needs the seed
+then surfaces its own "module not found". Before this wiring
+(pre-v0.8), `projectRoot` was informational only and `use vrata` in
+`eval-buffer` failed even though the equivalent `irij run` succeeded.
+Regression: `NReplSessionTest.evalResolvesSeedFromProjectManifest`.
+
 ## `eval-bytecode` — stateful via namespace
 
 Each snippet compiles to a fresh class `irij.NReplEval$N` in the

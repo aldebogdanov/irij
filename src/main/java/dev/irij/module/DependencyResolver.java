@@ -37,6 +37,32 @@ public final class DependencyResolver {
     }
 
     /**
+     * Resolve a project's seeds to their local source roots, for the
+     * compile-time module inliner. Reads {@code <projectRoot>/irij.toml},
+     * resolves every seed (transitively), and returns the roots in
+     * declaration order.
+     *
+     * <p>Shared entry point for every "compile in a project context"
+     * caller — file runs, the REPL, and the nREPL session — so they all
+     * resolve {@code use <seed>} the same way. Returns an empty list when
+     * {@code projectRoot} is null, has no manifest, or declares no seeds.
+     *
+     * @throws IOException if a declared seed cannot be resolved (offline,
+     *         missing tag, bad path) — callers that prefer best-effort
+     *         degradation should catch and fall back to an empty list.
+     */
+    public static List<Path> resolveSeedRoots(Path projectRoot, java.io.PrintStream out)
+            throws IOException {
+        if (projectRoot == null) return List.of();
+        Path toml = projectRoot.resolve("irij.toml");
+        if (!Files.exists(toml)) return List.of();
+        var deps = ProjectFile.parseDeps(toml);
+        if (deps.isEmpty()) return List.of();
+        var resolver = new DependencyResolver(projectRoot, out);
+        return new ArrayList<>(resolver.resolveAll(deps).values());
+    }
+
+    /**
      * Resolve all seeds (including transitive) and return their source paths.
      *
      * @return map of seed name → resolved source directory path

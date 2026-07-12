@@ -1,7 +1,10 @@
 package dev.irij.nrepl;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.*;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -127,6 +130,42 @@ class NReplSessionTest {
         var s1 = new NReplSession();
         var s2 = new NReplSession();
         assertNotEquals(s1.id(), s2.id());
+    }
+
+    /** Regression: a session opened on a project whose irij.toml
+     *  declares a seed must resolve `use <seed>` in every eval — the
+     *  same way a file run does. Before the fix, projectRoot was
+     *  informational only and the seed root never reached the compile-
+     *  time inliner, so evaluating a buffer that imported a seed failed
+     *  with "module not found". Uses a path seed so the test is
+     *  offline. */
+    @Test void evalResolvesSeedFromProjectManifest(@TempDir Path project) throws Exception {
+        // Seed root: <project>/lib/greeter.irj (module `greeter`).
+        Files.createDirectories(project.resolve("lib"));
+        Files.writeString(project.resolve("lib/greeter.irj"),
+                "mod greeter\npub fn make-greeting :: Str Str\n  (n -> \"Hi, \" ++ n)\n");
+        // Manifest points the seed name at that path.
+        Files.writeString(project.resolve("irij.toml"), """
+                [project]
+                name = "host"
+                version = "0.1"
+
+                [seeds]
+                greeter = { path = "lib" }
+                """);
+
+        var session = new NReplSession(project);
+        var resp = eval(session, "use greeter :open\nmake-greeting \"World\"");
+        assertNull(resp.get("err"), () -> "unexpected error: " + resp.get("err"));
+        assertEquals("Hi, World", resp.get("value"));
+    }
+
+    /** A session with no project (null root) still works for seed-free
+     *  code — the resolver degrades to no seeds. */
+    @Test void evalWithoutProjectRootStillWorks() {
+        var session = new NReplSession(null);
+        var resp = eval(session, "1 + 2");
+        assertEquals("3", resp.get("value"));
     }
 
     @Test void evalMissingCode() {

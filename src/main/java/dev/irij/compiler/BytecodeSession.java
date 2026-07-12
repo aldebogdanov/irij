@@ -8,6 +8,7 @@ import dev.irij.parser.IrijParseDriver;
 
 import java.io.PrintStream;
 import java.lang.reflect.Method;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -49,12 +50,23 @@ public final class BytecodeSession {
     private final Loader loader = new Loader();
     private final String classPrefix;
 
+    /** Seed (dependency) roots for the compile-time module inliner, so
+     *  interactive evals can resolve `use <seed>` the same way a
+     *  file run does. Empty = no seeds (REPL/nREPL outside a project,
+     *  or the playground sandbox). */
+    private final List<Path> seedRoots;
+
     public BytecodeSession() {
         this("irij.Session");
     }
 
     public BytecodeSession(String classPrefix) {
+        this(classPrefix, List.of());
+    }
+
+    public BytecodeSession(String classPrefix, List<Path> seedRoots) {
         this.classPrefix = classPrefix;
+        this.seedRoots = List.copyOf(seedRoots);
     }
 
     /** The shared namespace map this session writes top-level binds
@@ -98,7 +110,7 @@ public final class BytecodeSession {
         String className = classPrefix + "$" + COUNTER.incrementAndGet();
         java.util.Map<String, byte[]> classes = IrijCompiler.compileDeclsMulti(
                 decls, className, null, opts,
-                java.util.List.of(),
+                seedRoots,
                 fileLabel != null ? fileLabel : (className + ".irj"));
         Class<?> cls = loader.defineAll(classes, className);
 

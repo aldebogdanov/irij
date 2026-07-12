@@ -44,12 +44,27 @@ public class IrijRepl {
     private final PrintWriter out;
 
     public IrijRepl() throws IOException {
-        this.session = new BytecodeSession("irij.Repl");
+        this.session = new BytecodeSession("irij.Repl", replSeedRoots());
         this.terminal = TerminalBuilder.builder()
                 .system(true)
                 .dumb(false)
                 .build();
         this.out = terminal.writer();
+    }
+
+    /** Resolve seeds from the working directory the REPL was launched
+     *  in, so `use <seed>` at the prompt resolves like a file run does.
+     *  Best-effort — a resolution failure (offline, missing seed)
+     *  degrades to no seeds rather than aborting REPL startup. */
+    private static List<Path> replSeedRoots() {
+        Path cwd = Path.of(System.getProperty("user.dir"));
+        try {
+            return dev.irij.module.DependencyResolver.resolveSeedRoots(cwd, System.out);
+        } catch (Exception e) {
+            System.err.println("REPL: seed resolution failed for "
+                    + cwd + ": " + e.getMessage());
+            return List.of();
+        }
     }
 
     public void run() {
@@ -118,7 +133,7 @@ public class IrijRepl {
                   :env             — show user-defined bindings
                   :help            — this message""");
         } else if (cmd.equals(":reset")) {
-            this.session = new BytecodeSession("irij.Repl");
+            this.session = new BytecodeSession("irij.Repl", replSeedRoots());
             out.println("Session reset.");
         } else if (cmd.startsWith(":load ")) {
             loadFile(cmd.substring(6).trim());

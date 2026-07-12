@@ -3,14 +3,11 @@ package dev.irij.cli;
 import dev.irij.compiler.CompileOptions;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.module.DependencyResolver;
-import dev.irij.module.ProjectFile;
 
 import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.reflect.Method;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -60,8 +57,7 @@ public final class BytecodeRunner {
      */
     public static void runFile(Path sourceFile, PrintStream captureOut) throws IOException {
         Path projectRoot = sourceFile.toAbsolutePath().getParent();
-        Map<String, Path> deps = resolveDeps(projectRoot);
-        List<Path> seedRoots = new ArrayList<>(deps.values());
+        List<Path> seedRoots = DependencyResolver.resolveSeedRoots(projectRoot, System.out);
 
         String className = "irij.CliRun$" + COUNTER.incrementAndGet();
         Map<String, byte[]> classes = IrijCompiler.compileFileMulti(sourceFile, className,
@@ -113,15 +109,6 @@ public final class BytecodeRunner {
         } finally {
             if (captureOut != null) System.setOut(prevOut);
         }
-    }
-
-    private static Map<String, Path> resolveDeps(Path projectRoot) throws IOException {
-        Path tomlFile = projectRoot.resolve("irij.toml");
-        if (!Files.exists(tomlFile)) return Map.of();
-        var deps = ProjectFile.parseDeps(tomlFile);
-        if (deps.isEmpty()) return Map.of();
-        var resolver = new DependencyResolver(projectRoot, System.out);
-        return resolver.resolveAll(deps);
     }
 
     private static final class BytesLoader extends ClassLoader {

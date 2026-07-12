@@ -32,13 +32,28 @@ public final class NReplSession {
         this.id = UUID.randomUUID().toString();
         this.backgroundOut = new BackgroundOutputStream();
         this.indirectOut = new IndirectOutputStream(backgroundOut);
-        this.session = new BytecodeSession("irij.NReplEval");
+        // Resolve the project's seeds up front so every eval in this
+        // session can `use <seed>` — the compile-time inliner needs the
+        // seed roots, exactly as a file run gets them from
+        // BytecodeRunner.resolveDeps. Without this, evaluating a buffer
+        // that imports a registry/git seed fails to resolve the module.
+        this.session = new BytecodeSession("irij.NReplEval", resolveSeedRoots(projectRoot));
         this.closed = false;
-        // projectRoot is currently informational only; module
-        // resolution happens via the compile-time inliner reading
-        // seeds from `~/.irij/seeds/`. Bytecode mode doesn't have
-        // a runtime "set source path" affordance.
-        // TODO: wire seed-root resolution into BytecodeSession.eval.
+    }
+
+    /** Resolve the project's seeds to local roots. Best-effort: no
+     *  manifest, no deps, or a resolution failure (e.g. offline)
+     *  degrades to an empty list rather than killing the session — the
+     *  eval will then surface its own "module not found" if it actually
+     *  needed a seed. */
+    private static List<java.nio.file.Path> resolveSeedRoots(java.nio.file.Path projectRoot) {
+        try {
+            return dev.irij.module.DependencyResolver.resolveSeedRoots(projectRoot, System.out);
+        } catch (Exception e) {
+            System.err.println("nREPL: seed resolution failed for "
+                    + projectRoot + ": " + e.getMessage());
+            return List.of();
+        }
     }
 
     public String id() {
