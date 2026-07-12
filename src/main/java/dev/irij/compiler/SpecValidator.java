@@ -516,15 +516,14 @@ public final class SpecValidator {
                 String required = app.args().isEmpty() ? null
                         : (app.args().get(0) instanceof SpecExpr.Name n
                                 ? n.name() : null);
-                if (value instanceof dev.irij.compiler.RuntimeSupport.CompiledHandler ch) {
+                if (value instanceof dev.irij.compiler.CompiledHandler ch) {
                     if (required != null && !required.equals(ch.effectName)) {
                         throw fail("expected Handler " + required
                                 + ", got Handler " + ch.effectName);
                     }
                     yield value;
                 }
-                if (value instanceof dev.irij.compiler.RuntimeSupport
-                        .CompiledComposedHandler cch) {
+                if (value instanceof dev.irij.compiler.CompiledComposedHandler cch) {
                     if (required != null) {
                         for (var h : cch.handlers) {
                             if (required.equals(h.effectName)) yield value;

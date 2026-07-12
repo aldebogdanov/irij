@@ -62,7 +62,7 @@ final class PatternEmitter implements Opcodes {
             emitPatternTest(arm.pattern(), scrut, mv, armLocals, nextArm);
             if (arm.guard() != null) {
                 ce.exprEm.emitExpr(arm.guard(), mv, armLocals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy", "(Ljava/lang/Object;)Z", false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy", "(Ljava/lang/Object;)Z", false);
                 mv.visitJumpInsn(IFEQ, nextArm);
             }
             ce.exprEm.emitExpr(arm.body(), mv, armLocals);
@@ -72,7 +72,7 @@ final class PatternEmitter implements Opcodes {
 
         mv.visitLabel(noMatch);
         mv.visitVarInsn(ALOAD, scrut);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "noMatch",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("noMatch"), "noMatch",
                 "(Ljava/lang/Object;)Ljava/lang/IllegalStateException;", false);
         mv.visitInsn(ATHROW);
 
@@ -98,19 +98,19 @@ final class PatternEmitter implements Opcodes {
             case Pattern.GroupedPat gp -> emitPatternTest(gp.inner(), scrutSlot, mv, locals, failL);
             case Pattern.UnitPat __ -> {
                 mv.visitVarInsn(ALOAD, scrutSlot);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "isUnit", "(Ljava/lang/Object;)Z", false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isUnit"), "isUnit", "(Ljava/lang/Object;)Z", false);
                 mv.visitJumpInsn(IFEQ, failL);
             }
             case Pattern.LitPat lp -> {
                 mv.visitVarInsn(ALOAD, scrutSlot);
                 ce.exprEm.emitExpr(lp.literal(), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "eq", ClassEmitter.CMPOP_DESC, false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("eq"), "eq", ClassEmitter.CMPOP_DESC, false);
                 mv.visitJumpInsn(IFEQ, failL);
             }
             case Pattern.KeywordPat kp -> {
                 mv.visitVarInsn(ALOAD, scrutSlot);
                 mv.visitLdcInsn(kp.name());
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "isKeyword",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isKeyword"), "isKeyword",
                         "(Ljava/lang/Object;Ljava/lang/String;)Z", false);
                 mv.visitJumpInsn(IFEQ, failL);
                 if (kp.arg() != null) {
@@ -132,13 +132,13 @@ final class PatternEmitter implements Opcodes {
                                              MethodVisitor mv, Locals locals, Label failL) {
         mv.visitVarInsn(ALOAD, scrutSlot);
         mv.visitLdcInsn(cp.name());
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "isTag",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isTag"), "isTag",
                 "(Ljava/lang/Object;Ljava/lang/String;)Z", false);
         mv.visitJumpInsn(IFEQ, failL);
 
         // Arity check
         mv.visitVarInsn(ALOAD, scrutSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "taggedArity", "(Ljava/lang/Object;)I", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("taggedArity"), "taggedArity", "(Ljava/lang/Object;)I", false);
         ce.exprEm.pushIconst(mv, cp.args().size());
         mv.visitJumpInsn(IF_ICMPNE, failL);
 
@@ -146,7 +146,7 @@ final class PatternEmitter implements Opcodes {
             int fieldSlot = locals.allocateAnon();
             mv.visitVarInsn(ALOAD, scrutSlot);
             ce.exprEm.pushIconst(mv, i);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "taggedField",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("taggedField"), "taggedField",
                     "(Ljava/lang/Object;I)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, fieldSlot);
             emitPatternTest(cp.args().get(i), fieldSlot, mv, locals, failL);
@@ -157,7 +157,7 @@ final class PatternEmitter implements Opcodes {
     void emitVectorPatternTest(Pattern.VectorPat vp, int scrutSlot,
                                         MethodVisitor mv, Locals locals, Label failL) {
         mv.visitVarInsn(ALOAD, scrutSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "isVector", "(Ljava/lang/Object;)Z", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isVector"), "isVector", "(Ljava/lang/Object;)Z", false);
         mv.visitJumpInsn(IFEQ, failL);
 
         int fixed = vp.elements().size();
@@ -165,7 +165,7 @@ final class PatternEmitter implements Opcodes {
 
         // Size check
         mv.visitVarInsn(ALOAD, scrutSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "vecSize", "(Ljava/lang/Object;)I", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("vecSize"), "vecSize", "(Ljava/lang/Object;)I", false);
         int sizeSlot = locals.allocateAnon();
         mv.visitInsn(DUP);
         mv.visitVarInsn(ISTORE, sizeSlot);
@@ -180,7 +180,7 @@ final class PatternEmitter implements Opcodes {
             int elSlot = locals.allocateAnon();
             mv.visitVarInsn(ALOAD, scrutSlot);
             ce.exprEm.pushIconst(mv, i);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "vecGet",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("vecGet"), "vecGet",
                     "(Ljava/lang/Object;I)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, elSlot);
             emitPatternTest(vp.elements().get(i), elSlot, mv, locals, failL);
@@ -191,7 +191,7 @@ final class PatternEmitter implements Opcodes {
             mv.visitVarInsn(ALOAD, scrutSlot);
             ce.exprEm.pushIconst(mv, fixed);
             mv.visitVarInsn(ILOAD, sizeSlot);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "vecSlice",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("vecSlice"), "vecSlice",
                     "(Ljava/lang/Object;II)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, restSlot);
         }
@@ -201,11 +201,11 @@ final class PatternEmitter implements Opcodes {
     void emitTuplePatternTest(Pattern.TuplePat tp, int scrutSlot,
                                        MethodVisitor mv, Locals locals, Label failL) {
         mv.visitVarInsn(ALOAD, scrutSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "isTuple", "(Ljava/lang/Object;)Z", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isTuple"), "isTuple", "(Ljava/lang/Object;)Z", false);
         mv.visitJumpInsn(IFEQ, failL);
 
         mv.visitVarInsn(ALOAD, scrutSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "tupleSize", "(Ljava/lang/Object;)I", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("tupleSize"), "tupleSize", "(Ljava/lang/Object;)I", false);
         ce.exprEm.pushIconst(mv, tp.elements().size());
         mv.visitJumpInsn(IF_ICMPNE, failL);
 
@@ -213,7 +213,7 @@ final class PatternEmitter implements Opcodes {
             int elSlot = locals.allocateAnon();
             mv.visitVarInsn(ALOAD, scrutSlot);
             ce.exprEm.pushIconst(mv, i);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "tupleGet",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("tupleGet"), "tupleGet",
                     "(Ljava/lang/Object;I)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, elSlot);
             emitPatternTest(tp.elements().get(i), elSlot, mv, locals, failL);
@@ -224,20 +224,20 @@ final class PatternEmitter implements Opcodes {
     void emitDestructurePatternTest(Pattern.DestructurePat dp, int scrutSlot,
                                              MethodVisitor mv, Locals locals, Label failL) {
         mv.visitVarInsn(ALOAD, scrutSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "isRecord", "(Ljava/lang/Object;)Z", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isRecord"), "isRecord", "(Ljava/lang/Object;)Z", false);
         mv.visitJumpInsn(IFEQ, failL);
 
         for (Pattern.DestructureField f : dp.fields()) {
             mv.visitVarInsn(ALOAD, scrutSlot);
             mv.visitLdcInsn(f.key());
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "recordHas",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("recordHas"), "recordHas",
                     "(Ljava/lang/Object;Ljava/lang/String;)Z", false);
             mv.visitJumpInsn(IFEQ, failL);
 
             int fieldSlot = locals.allocateAnon();
             mv.visitVarInsn(ALOAD, scrutSlot);
             mv.visitLdcInsn(f.key());
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "recordGet",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("recordGet"), "recordGet",
                     "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, fieldSlot);
             emitPatternTest(f.value(), fieldSlot, mv, locals, failL);

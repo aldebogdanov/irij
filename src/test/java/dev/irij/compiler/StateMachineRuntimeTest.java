@@ -1,9 +1,9 @@
 package dev.irij.compiler;
 
-import dev.irij.compiler.RuntimeSupport.CompiledHandler;
-import dev.irij.compiler.RuntimeSupport.IrijContinuation;
+import dev.irij.compiler.CompiledHandler;
+import dev.irij.compiler.IrijContinuation;
 import dev.irij.compiler.RuntimeSupport.IrijFn;
-import dev.irij.compiler.RuntimeSupport.PerformSignal;
+import dev.irij.compiler.PerformSignal;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -62,7 +62,7 @@ class StateMachineRuntimeTest {
             IrijFn resume = (IrijFn) args[1];
             return resume.apply(new Object[]{}); // tail-resume
         };
-        Object result = RuntimeSupport.runWithSM(
+        Object result = RtEffects.runWithSM(
                 logHandler(logClause), logThenReturn(postResume));
         assertEquals(42L, result);
         assertEquals(1, postResume.get(), "body must have continued after resume");
@@ -71,7 +71,7 @@ class StateMachineRuntimeTest {
     @Test void aborts_body_if_clause_does_not_resume() {
         AtomicInteger postResume = new AtomicInteger(0);
         IrijFn logClause = args -> "aborted";
-        Object result = RuntimeSupport.runWithSM(
+        Object result = RtEffects.runWithSM(
                 logHandler(logClause), logThenReturn(postResume));
         assertEquals("aborted", result);
         assertEquals(0, postResume.get(), "body must NOT have continued");
@@ -90,7 +90,7 @@ class StateMachineRuntimeTest {
             postClauseStmts.incrementAndGet(); // unreachable
             return "ignored";
         };
-        Object result = RuntimeSupport.runWithSM(
+        Object result = RtEffects.runWithSM(
                 logHandler(logClause), logThenReturn(new AtomicInteger()));
         assertEquals(42L, result);
         assertEquals(0, postClauseStmts.get(),
@@ -120,7 +120,7 @@ class StateMachineRuntimeTest {
             IrijFn resume = (IrijFn) args[1];
             return resume.apply(new Object[]{});
         };
-        Object result = RuntimeSupport.runWithSM(logHandler(logClause), body);
+        Object result = RtEffects.runWithSM(logHandler(logClause), body);
         assertEquals("final", result);
         assertEquals(java.util.List.of("a", "b", "c"), seen);
     }
@@ -132,7 +132,7 @@ class StateMachineRuntimeTest {
         };
         IrijContinuation body = new IrijContinuation(step, 0);
         PerformSignal raised = assertThrows(PerformSignal.class, () ->
-                RuntimeSupport.runWithSM(logHandler(args -> null), body));
+                RtEffects.runWithSM(logHandler(args -> null), body));
         assertEquals("Other", raised.effectName);
         assertEquals("boom",  raised.opName);
     }

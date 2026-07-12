@@ -518,7 +518,7 @@ final class ClassEmitter implements Opcodes {
                         fnEm.userFnWrapperName(fnName), APPLY_DESC, false);
                 cl.visitInvokeDynamicInsn("apply", "()" + IRIJ_FN_DESC, bsm,
                         samType, implHandle, samType);
-                cl.visitMethodInsn(INVOKESTATIC, RT, "nsPut",
+                cl.visitMethodInsn(INVOKESTATIC, RtOwners.of("nsPut"), "nsPut",
                         "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
                 cl.visitInsn(POP);
             }
@@ -642,7 +642,7 @@ final class ClassEmitter implements Opcodes {
                         if (options.namespaceMode()) {
                             mv.visitLdcInsn(sm.name());
                             mv.visitVarInsn(ALOAD, slot);
-                            mv.visitMethodInsn(INVOKESTATIC, RT, "nsPut",
+                            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nsPut"), "nsPut",
                                     "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
                             mv.visitInsn(POP);
                         }
@@ -691,9 +691,9 @@ final class ClassEmitter implements Opcodes {
     // ── Scope { fork ... } ─────────────────────────────────────────────
 
     static final String SCOPE_HANDLE =
-            "dev/irij/compiler/RuntimeSupport$CompiledScopeHandle";
+            "dev/irij/compiler/CompiledScopeHandle";
 
-    static final String COMP_HANDLER = "dev/irij/compiler/RuntimeSupport$CompiledHandler";
+    static final String COMP_HANDLER = "dev/irij/compiler/CompiledHandler";
     // ── 14c.3 state-machine lowering (step 2: pure + single-op bodies) ──
     //
     // Design: docs/phase-14c3-state-machine.md
@@ -710,10 +710,10 @@ final class ClassEmitter implements Opcodes {
     // Bodies with bindings in pre-op position fall back to threaded lowering
     // (no local-lifting yet). Multi-perform + branching arrive in step 3.
 
-    static final String CONT = "dev/irij/compiler/RuntimeSupport$IrijContinuation";
-    static final String CONT_DESC = "Ldev/irij/compiler/RuntimeSupport$IrijContinuation;";
-    static final String PERF_SIGNAL = "dev/irij/compiler/RuntimeSupport$PerformSignal";
-    static final String TAIL_RESUME = "dev/irij/compiler/RuntimeSupport$TailResume";
+    static final String CONT = "dev/irij/compiler/IrijContinuation";
+    static final String CONT_DESC = "Ldev/irij/compiler/IrijContinuation;";
+    static final String PERF_SIGNAL = "dev/irij/compiler/PerformSignal";
+    static final String TAIL_RESUME = "dev/irij/compiler/TailResume";
 
     int smDestCounter = 0;
 

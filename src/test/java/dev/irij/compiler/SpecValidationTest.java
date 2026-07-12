@@ -255,7 +255,7 @@ class SpecValidationTest {
     void handlerSpec_acceptsCompiledHandlerWithMatchingEffect() {
         var spec = new dev.irij.ast.SpecExpr.App("Handler",
                 java.util.List.of(new dev.irij.ast.SpecExpr.Name("Logger")));
-        var handler = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+        var handler = new dev.irij.compiler.CompiledHandler(
                 "quiet-log", "Logger", java.util.Map.of());
         assertSame(handler, SpecValidator.validate(handler, spec));
     }
@@ -264,7 +264,7 @@ class SpecValidationTest {
     void handlerSpec_rejectsHandlerForWrongEffect() {
         var spec = new dev.irij.ast.SpecExpr.App("Handler",
                 java.util.List.of(new dev.irij.ast.SpecExpr.Name("Logger")));
-        var greetHandler = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+        var greetHandler = new dev.irij.compiler.CompiledHandler(
                 "hi", "Greet", java.util.Map.of());
         var e = assertThrows(dev.irij.IrijRuntimeError.class,
                 () -> SpecValidator.validate(greetHandler, spec));
@@ -288,11 +288,11 @@ class SpecValidationTest {
     void handlerSpec_acceptsComposedHandlerCoveringEffect() {
         var spec = new dev.irij.ast.SpecExpr.App("Handler",
                 java.util.List.of(new dev.irij.ast.SpecExpr.Name("Logger")));
-        var loggerH = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+        var loggerH = new dev.irij.compiler.CompiledHandler(
                 "ql", "Logger", java.util.Map.of());
-        var greetH = new dev.irij.compiler.RuntimeSupport.CompiledHandler(
+        var greetH = new dev.irij.compiler.CompiledHandler(
                 "hi", "Greet", java.util.Map.of());
-        var composed = new dev.irij.compiler.RuntimeSupport.CompiledComposedHandler(
+        var composed = new dev.irij.compiler.CompiledComposedHandler(
                 java.util.List.of(greetH, loggerH));
         assertSame(composed, SpecValidator.validate(composed, spec));
     }

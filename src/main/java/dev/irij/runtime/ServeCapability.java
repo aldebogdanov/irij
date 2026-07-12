@@ -1,6 +1,7 @@
 package dev.irij.runtime;
 
 import dev.irij.IrijRuntimeError;
+import dev.irij.compiler.RtEffects;
 import dev.irij.compiler.RuntimeSupport;
 import dev.irij.runtime.IrijHttpServer.IrijExchange;
 import dev.irij.runtime.Values.IrijMap;
@@ -59,15 +60,15 @@ public final class ServeCapability {
             // Without this, a perform in the user's handler body (e.g.
             // sse-response) on a fresh request thread would see empty
             // EFFECT_ROW / SM_STACK and die with "no handler on stack".
-            final RuntimeSupport.EffectSnapshot effectSnap =
-                    RuntimeSupport.snapshotEffects();
+            final dev.irij.compiler.EffectSnapshot effectSnap =
+                    RtEffects.snapshotEffects();
 
             IrijHttpServer.serve((int) port, exchange -> {
                 {
                     if (httpServeStatic(exchange, scriptDir, isBundled)) return;
 
                     IrijMap req = buildRequestMap(exchange);
-                    Object resp = RuntimeSupport.runWithEffectSnapshot(
+                    Object resp = RtEffects.runWithEffectSnapshot(
                             effectSnap,
                             () -> RuntimeSupport.callAny(handler, new Object[]{req}));
 
