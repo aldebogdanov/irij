@@ -65,7 +65,7 @@ final class SmEmitter implements Opcodes {
         ce.exprEm.pushIconst(mv, nFields);
 
         // RuntimeSupport.runWithSM(Object, IrijFn, int) -> Object
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "runWithSM",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("runWithSM"), "runWithSM",
                 "(Ljava/lang/Object;L" + ClassEmitter.IRIJ_FN + ";I)Ljava/lang/Object;", false);
         mv.visitVarInsn(ASTORE, resultSlot);
 
@@ -79,7 +79,7 @@ final class SmEmitter implements Opcodes {
             Locals ofLocals = outer.childScope();
             int errorSlot = ofLocals.allocate("error");
             mv.visitVarInsn(ALOAD, teSlot);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "errorMessage",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("errorMessage"), "errorMessage",
                     "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
             mv.visitVarInsn(ASTORE, errorSlot);
             List<Stmt> of = w.onFailure();
@@ -427,7 +427,7 @@ final class SmEmitter implements Opcodes {
             Locals ofLocals = inner.childScope();
             int errorSlot = ofLocals.allocate("error");
             sm.visitVarInsn(ALOAD, teSlot);
-            sm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "errorMessage",
+            sm.visitMethodInsn(INVOKESTATIC, RtOwners.of("errorMessage"), "errorMessage",
                     "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
             sm.visitVarInsn(ASTORE, errorSlot);
             List<Stmt> of = w.onFailure();
@@ -468,11 +468,11 @@ final class SmEmitter implements Opcodes {
         }
         emitSMStep(innerShape, innerBody, captures, sm, inner);
         ce.exprEm.pushIconst(sm, innerNFields);
-        sm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "getOrAllocInnerCont",
+        sm.visitMethodInsn(INVOKESTATIC, RtOwners.of("getOrAllocInnerCont"), "getOrAllocInnerCont",
                 "(" + ClassEmitter.CONT_DESC + "IL" + ClassEmitter.IRIJ_FN + ";I)" + ClassEmitter.CONT_DESC, false);
 
         sm.visitVarInsn(ALOAD, vSlot);
-        sm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "runWithSM",
+        sm.visitMethodInsn(INVOKESTATIC, RtOwners.of("runWithSM"), "runWithSM",
                 "(Ljava/lang/Object;" + ClassEmitter.CONT_DESC + "Ljava/lang/Object;)Ljava/lang/Object;",
                 false);
     }
@@ -553,7 +553,7 @@ final class SmEmitter implements Opcodes {
                     }
                     case Term.Branch br -> {
                         ce.exprEm.emitExpr(br.cond(), sm, inner);
-                        sm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy",
+                        sm.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                                 "(Ljava/lang/Object;)Z", false);
                         sm.visitJumpInsn(IFEQ, body[br.elseId()]);
                         sm.visitJumpInsn(GOTO, body[br.thenId()]);
@@ -734,7 +734,7 @@ final class SmEmitter implements Opcodes {
                 samType, stepHandle, samType);
         // newCont(stepFn, totalNFields) → kClause
         ce.exprEm.pushIconst(w, totalNFields);
-        w.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "newCont",
+        w.visitMethodInsn(INVOKESTATIC, RtOwners.of("newCont"), "newCont",
                 "(L" + ClassEmitter.IRIJ_FN + ";I)" + ClassEmitter.CONT_DESC, false);
         w.visitVarInsn(ASTORE, wKSlot);
 
@@ -751,7 +751,7 @@ final class SmEmitter implements Opcodes {
 
         // RT.runWithSMNoHs(kClause)
         w.visitVarInsn(ALOAD, wKSlot);
-        w.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "runWithSMNoHs",
+        w.visitMethodInsn(INVOKESTATIC, RtOwners.of("runWithSMNoHs"), "runWithSMNoHs",
                 "(" + ClassEmitter.CONT_DESC + ")Ljava/lang/Object;", false);
         w.visitInsn(ARETURN);
         w.visitMaxs(0, 0); w.visitEnd();

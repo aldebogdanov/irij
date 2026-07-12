@@ -31,7 +31,7 @@ final class IntrinsicsEmitter implements Opcodes {
         if (eff == null) return;
         mv.visitLdcInsn(eff);
         mv.visitLdcInsn(name);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "checkPerformEffect",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("checkPerformEffect"), "checkPerformEffect",
                 "(Ljava/lang/String;Ljava/lang/String;)V", false);
     }
 
@@ -42,7 +42,7 @@ final class IntrinsicsEmitter implements Opcodes {
             case "print", "println" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, name, "(Ljava/lang/Object;)V", false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of(name), name, "(Ljava/lang/Object;)V", false);
                 // print/println return unit — push UNIT for expression-position use
                 mv.visitFieldInsn(GETSTATIC, ClassEmitter.VALUES, "UNIT", ClassEmitter.OBJ_DESC);
                 return true;
@@ -50,47 +50,47 @@ final class IntrinsicsEmitter implements Opcodes {
             case "to-str" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "toStr",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("toStr"), "toStr",
                         "(Ljava/lang/Object;)Ljava/lang/String;", false);
                 return true;
             }
             case "error" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "errorBuiltin",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("errorBuiltin"), "errorBuiltin",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "spawn" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "spawn",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("spawn"), "spawn",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "sleep" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "sleep",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("sleep"), "sleep",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "await" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "await",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("await"), "await",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "par" -> {
                 ce.exprEm.pushObjectArray(args, mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "par",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("par"), "par",
                         "([Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "race" -> {
                 ce.exprEm.pushObjectArray(args, mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "race",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("race"), "race",
                         "([Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -98,14 +98,14 @@ final class IntrinsicsEmitter implements Opcodes {
                 if (args.size() != 2) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
                 ce.exprEm.emitExpr(args.get(1), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "timeout",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("timeout"), "timeout",
                         "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "try" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "tryFn",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("tryFn"), "tryFn",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -117,7 +117,7 @@ final class IntrinsicsEmitter implements Opcodes {
             case "length" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "length",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("length"), "length",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -125,7 +125,7 @@ final class IntrinsicsEmitter implements Opcodes {
                 if (args.size() != 2) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
                 ce.exprEm.emitExpr(args.get(1), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "nth",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nth"), "nth",
                         "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -133,28 +133,28 @@ final class IntrinsicsEmitter implements Opcodes {
                 if (args.size() != 2) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
                 ce.exprEm.emitExpr(args.get(1), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "conj",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("conj"), "conj",
                         "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "empty?" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "isEmpty",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isEmpty"), "isEmpty",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "head" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "head",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("head"), "head",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
             case "tail" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "tail",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("tail"), "tail",
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -166,7 +166,7 @@ final class IntrinsicsEmitter implements Opcodes {
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
                 ce.exprEm.emitExpr(args.get(1), mv, locals);
                 ce.exprEm.emitExpr(args.get(2), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "fold",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("fold"), "fold",
                         "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -213,12 +213,12 @@ final class IntrinsicsEmitter implements Opcodes {
             case "get-env"             -> { return emitRT1(args, mv, locals, "getEnv"); }
             case "now-ms"              -> {
                 if (!isZeroArgCall(args)) return false;
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "nowMs", "()Ljava/lang/Object;", false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nowMs"), "nowMs", "()Ljava/lang/Object;", false);
                 return true;
             }
             case "env" -> {
                 ce.exprEm.pushObjectArray(args, mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "envBuiltin",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("envBuiltin"), "envBuiltin",
                         "([Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -249,7 +249,7 @@ final class IntrinsicsEmitter implements Opcodes {
             case "random-int"   -> { return emitRT1(args, mv, locals, "randomInt"); }
             case "random-float" -> {
                 if (!isZeroArgCall(args)) return false;
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "randomFloat",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("randomFloat"), "randomFloat",
                         "()Ljava/lang/Object;", false);
                 return true;
             }
@@ -273,14 +273,14 @@ final class IntrinsicsEmitter implements Opcodes {
             case "dbg" -> {
                 if (args.size() != 1) return false;
                 ce.exprEm.emitExpr(args.get(0), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "dbg",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("dbg"), "dbg",
                         "(Ljava/lang/Object;)V", false);
                 mv.visitFieldInsn(GETSTATIC, ClassEmitter.VALUES, "UNIT", ClassEmitter.OBJ_DESC);
                 return true;
             }
             case "read-line" -> {
                 if (!isZeroArgCall(args)) return false;
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "readLine",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("readLine"), "readLine",
                         "()Ljava/lang/Object;", false);
                 return true;
             }
@@ -335,7 +335,7 @@ final class IntrinsicsEmitter implements Opcodes {
                 ce.exprEm.pushIconst(mv, 1);
                 mv.visitVarInsn(ALOAD, aSlot);
                 mv.visitInsn(AASTORE);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "callAny",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("callAny"), "callAny",
                         "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
                 return true;
             }
@@ -384,7 +384,7 @@ final class IntrinsicsEmitter implements Opcodes {
     boolean emitRT1(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
         if (args.size() != 1) return false;
         ce.exprEm.emitExpr(args.get(0), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, method,
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of(method), method,
                 "(Ljava/lang/Object;)Ljava/lang/Object;", false);
         return true;
     }
@@ -395,7 +395,7 @@ final class IntrinsicsEmitter implements Opcodes {
         if (args.size() != 2) return false;
         ce.exprEm.emitExpr(args.get(0), mv, locals);
         ce.exprEm.emitExpr(args.get(1), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, method,
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of(method), method,
                 "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
         return true;
     }
@@ -407,7 +407,7 @@ final class IntrinsicsEmitter implements Opcodes {
         ce.exprEm.emitExpr(args.get(0), mv, locals);
         ce.exprEm.emitExpr(args.get(1), mv, locals);
         ce.exprEm.emitExpr(args.get(2), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, method,
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of(method), method,
                 "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
                 false);
         return true;

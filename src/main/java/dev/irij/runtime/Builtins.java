@@ -59,121 +59,39 @@ public final class Builtins {
         env.define("false", Boolean.FALSE);
 
         // ── I/O (requires Console effect) ──────────────────────────────
-        env.define("print", new BuiltinFn("print", 1, List.of("Console"), args -> {
-            out.print(Values.toIrijString(args.get(0)));
-            return Values.UNIT;
-        }));
+        env.define("print", new BuiltinFn("print", 1, List.of("Console"), args -> { dev.irij.compiler.RuntimeSupport.print(args.get(0)); return Values.UNIT; }));
 
-        env.define("println", new BuiltinFn("println", 1, List.of("Console"), args -> {
-            out.println(Values.toIrijString(args.get(0)));
-            return Values.UNIT;
-        }));
+        env.define("println", new BuiltinFn("println", 1, List.of("Console"), args -> { dev.irij.compiler.RuntimeSupport.println(args.get(0)); return Values.UNIT; }));
 
-        env.define("dbg", new BuiltinFn("dbg", 1, List.of("Console"), args -> {
-            var v = args.get(0);
-            out.println("[dbg] " + Values.typeName(v) + ": " + Values.toIrijString(v));
-            return v;
-        }));
+        env.define("dbg", new BuiltinFn("dbg", 1, List.of("Console"), args -> { dev.irij.compiler.RuntimeSupport.dbg(args.get(0)); return Values.UNIT; }));
 
-        env.define("read-line", new BuiltinFn("read-line", 0, List.of("Console"), args -> {
-            try {
-                var line = STDIN_READER.readLine();
-                return line != null ? line : Values.UNIT;
-            } catch (java.io.IOException e) {
-                throw new IrijRuntimeError("read-line: " + e.getMessage(), null);
-            }
-        }));
+        env.define("read-line", new BuiltinFn("read-line", 0, List.of("Console"), args -> dev.irij.compiler.RuntimeSupport.readLine()));
 
-        env.define("to-str", new BuiltinFn("to-str", 1, args -> {
-            return Values.toIrijString(args.get(0));
-        }));
+        env.define("to-str", new BuiltinFn("to-str", 1, args -> dev.irij.compiler.RuntimeSupport.toStr(args.get(0))));
 
         // ── Concurrency primitives ─────────────────────────────────────
-        env.define("sleep", new BuiltinFn("sleep", 1, List.of("Time"), args -> {
-            var ms = args.get(0);
-            long millis;
-            if (ms instanceof Long l)  millis = l;                      // sleep 1000  → 1 second
-            else if (ms instanceof Double d) millis = (long)(d * 1000); // sleep 1.5   → 1500 ms
-            else throw new IrijRuntimeError(
-                    "sleep expects Int (milliseconds) or Float (seconds), got " + Values.typeName(ms));
-            try { Thread.sleep(millis); }
-            catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IrijRuntimeError("interrupted");
-            }
-            return Values.UNIT;
-        }));
+        env.define("sleep", new BuiltinFn("sleep", 1, List.of("Time"), args -> dev.irij.compiler.RtConcurrency.sleep(args.get(0))));
 
         // ── Arithmetic ──────────────────────────────────────────────────
-        env.define("div", new BuiltinFn("div", 2, args -> {
-            long a = asLong(args.get(0), "div");
-            long b = asLong(args.get(1), "div");
-            if (b == 0) throw new IrijRuntimeError("Division by zero");
-            return a / b;
-        }));
+        env.define("div", new BuiltinFn("div", 2, args -> dev.irij.compiler.RtOps.div(args.get(0), args.get(1))));
 
-        env.define("mod", new BuiltinFn("mod", 2, args -> {
-            long a = asLong(args.get(0), "mod");
-            long b = asLong(args.get(1), "mod");
-            if (b == 0) throw new IrijRuntimeError("Division by zero");
-            return a % b;
-        }));
+        env.define("mod", new BuiltinFn("mod", 2, args -> dev.irij.compiler.RtOps.mod(args.get(0), args.get(1))));
 
-        env.define("abs", new BuiltinFn("abs", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof Long l) return Math.abs(l);
-            if (v instanceof Double d) return Math.abs(d);
-            throw new IrijRuntimeError("abs expects a number, got " + Values.typeName(v));
-        }));
+        env.define("abs", new BuiltinFn("abs", 1, args -> dev.irij.compiler.RtMath.abs(args.get(0))));
 
-        env.define("min", new BuiltinFn("min", 2, args -> {
-            return compare(args.get(0), args.get(1)) <= 0 ? args.get(0) : args.get(1);
-        }));
+        env.define("min", new BuiltinFn("min", 2, args -> dev.irij.compiler.RtOps.min(args.get(0), args.get(1))));
 
-        env.define("max", new BuiltinFn("max", 2, args -> {
-            return compare(args.get(0), args.get(1)) >= 0 ? args.get(0) : args.get(1);
-        }));
+        env.define("max", new BuiltinFn("max", 2, args -> dev.irij.compiler.RtOps.max(args.get(0), args.get(1))));
 
         env.define("pi", Math.PI);
         env.define("e", Math.E);
 
         // ── Collection ──────────────────────────────────────────────────
-        env.define("head", new BuiltinFn("head", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof IrijVector vec) {
-                if (vec.elements().isEmpty()) throw new IrijRuntimeError("head of empty vector");
-                return vec.elements().get(0);
-            }
-            if (v instanceof IrijRange r) {
-                if (r.size() == 0) throw new IrijRuntimeError("head of empty range");
-                return r.from();
-            }
-            throw new IrijRuntimeError("head expects a Vector or Range, got " + Values.typeName(v));
-        }));
+        env.define("head", new BuiltinFn("head", 1, args -> dev.irij.compiler.RtCollections.head(args.get(0))));
 
-        env.define("tail", new BuiltinFn("tail", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof IrijVector vec) {
-                if (vec.elements().isEmpty()) throw new IrijRuntimeError("tail of empty vector");
-                return new IrijVector(vec.elements().subList(1, vec.elements().size()));
-            }
-            if (v instanceof IrijRange r) {
-                if (r.size() == 0) return r;
-                return new IrijRange(r.from() + 1, r.to(), r.exclusive());
-            }
-            throw new IrijRuntimeError("tail expects a Vector or Range, got " + Values.typeName(v));
-        }));
+        env.define("tail", new BuiltinFn("tail", 1, args -> dev.irij.compiler.RtCollections.tail(args.get(0))));
 
-        env.define("length", new BuiltinFn("length", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof IrijVector vec) return (long) vec.elements().size();
-            if (v instanceof String s) return (long) s.length();
-            if (v instanceof IrijMap m) return (long) m.entries().size();
-            if (v instanceof IrijSet s) return (long) s.elements().size();
-            if (v instanceof IrijTuple t) return (long) t.elements().length;
-            if (v instanceof IrijRange r) return (long) r.size();
-            throw new IrijRuntimeError("length expects a collection, got " + Values.typeName(v));
-        }));
+        env.define("length", new BuiltinFn("length", 1, args -> dev.irij.compiler.RtCollections.length(args.get(0))));
 
         // `empty? x` — true if a collection is empty (or null).
         env.define("empty?", new BuiltinFn("empty?", 1, args -> {
@@ -189,127 +107,31 @@ public final class Builtins {
         }));
 
         // `conj v x` — append x to vector, returning a new vector.
-        env.define("conj", new BuiltinFn("conj", 2, args -> {
-            var v = args.get(0);
-            var x = args.get(1);
-            if (v instanceof IrijVector vec) {
-                var copy = new ArrayList<>(vec.elements());
-                copy.add(x);
-                return new IrijVector(copy);
-            }
-            throw new IrijRuntimeError("conj expects a Vector, got " + Values.typeName(v));
-        }));
+        env.define("conj", new BuiltinFn("conj", 2, args -> dev.irij.compiler.RtCollections.conj(args.get(0), args.get(1))));
 
-        env.define("reverse", new BuiltinFn("reverse", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof IrijVector vec) {
-                var rev = new ArrayList<>(vec.elements());
-                Collections.reverse(rev);
-                return new IrijVector(rev);
-            }
-            if (v instanceof String s) return new StringBuilder(s).reverse().toString();
-            throw new IrijRuntimeError("reverse expects a Vector or Str, got " + Values.typeName(v));
-        }));
+        env.define("reverse", new BuiltinFn("reverse", 1, args -> dev.irij.compiler.RtCollections.reverseVal(args.get(0))));
 
-        env.define("sort", new BuiltinFn("sort", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof IrijVector vec) {
-                var sorted = new ArrayList<>(vec.elements());
-                sorted.sort((a, b) -> compare(a, b));
-                return new IrijVector(sorted);
-            }
-            throw new IrijRuntimeError("sort expects a Vector, got " + Values.typeName(v));
-        }));
+        env.define("sort", new BuiltinFn("sort", 1, args -> dev.irij.compiler.RtCollections.sortVal(args.get(0))));
 
-        env.define("concat", new BuiltinFn("concat", 2, args -> {
-            return concatValues(args.get(0), args.get(1));
-        }));
+        env.define("concat", new BuiltinFn("concat", 2, args -> dev.irij.compiler.RtOps.concat(args.get(0), args.get(1))));
 
-        env.define("take", new BuiltinFn("take", 2, args -> {
-            long n = asLong(args.get(0), "take");
-            var v = args.get(1);
-            var list = toList(v);
-            return new IrijVector(list.subList(0, (int) Math.min(n, list.size())));
-        }));
+        env.define("take", new BuiltinFn("take", 2, args -> dev.irij.compiler.RtCollections.takeVal(args.get(0), args.get(1))));
 
-        env.define("drop", new BuiltinFn("drop", 2, args -> {
-            long n = asLong(args.get(0), "drop");
-            var v = args.get(1);
-            var list = toList(v);
-            return new IrijVector(list.subList((int) Math.min(n, list.size()), list.size()));
-        }));
+        env.define("drop", new BuiltinFn("drop", 2, args -> dev.irij.compiler.RtCollections.dropVal(args.get(0), args.get(1))));
 
-        env.define("to-vec", new BuiltinFn("to-vec", 1, args -> {
-            return new IrijVector(toList(args.get(0)));
-        }));
+        env.define("to-vec", new BuiltinFn("to-vec", 1, args -> dev.irij.compiler.RtCollections.toVec(args.get(0))));
 
-        env.define("contains?", new BuiltinFn("contains?", 2, args -> {
-            var coll = args.get(0);
-            var elem = args.get(1);
-            if (coll instanceof IrijVector vec) return vec.elements().contains(elem);
-            if (coll instanceof IrijSet set) return set.elements().contains(elem);
-            if (coll instanceof IrijMap map) return map.entries().containsKey(Values.toIrijString(elem));
-            throw new IrijRuntimeError("contains? expects a collection, got " + Values.typeName(coll));
-        }));
+        env.define("contains?", new BuiltinFn("contains?", 2, args -> dev.irij.compiler.RtCollections.containsP(args.get(0), args.get(1))));
 
-        env.define("keys", new BuiltinFn("keys", 1, args -> {
-            if (args.get(0) instanceof IrijMap map) {
-                return new IrijVector(new ArrayList<>(map.entries().keySet()));
-            }
-            throw new IrijRuntimeError("keys expects a Map");
-        }));
+        env.define("keys", new BuiltinFn("keys", 1, args -> dev.irij.compiler.RtCollections.keys(args.get(0))));
 
-        env.define("vals", new BuiltinFn("vals", 1, args -> {
-            if (args.get(0) instanceof IrijMap map) {
-                return new IrijVector(new ArrayList<>(map.entries().values()));
-            }
-            throw new IrijRuntimeError("vals expects a Map");
-        }));
+        env.define("vals", new BuiltinFn("vals", 1, args -> dev.irij.compiler.RtCollections.vals(args.get(0))));
 
-        env.define("get", new BuiltinFn("get", 2, args -> {
-            var key = args.get(0);
-            var coll = args.get(1);
-            if (coll instanceof IrijMap map) {
-                var v = map.entries().get(Values.toIrijString(key));
-                return v != null ? v : Values.UNIT;
-            }
-            if (coll instanceof IrijVector vec) {
-                long idx = asLong(key, "get");
-                if (idx < 0 || idx >= vec.elements().size()) return Values.UNIT;
-                return vec.elements().get((int) idx);
-            }
-            if (coll instanceof IrijTuple tup) {
-                long idx = asLong(key, "get");
-                if (idx < 0 || idx >= tup.elements().length) return Values.UNIT;
-                return tup.elements()[(int) idx];
-            }
-            throw new IrijRuntimeError("get expects a Map, Vector, or Tuple as second argument");
-        }));
+        env.define("get", new BuiltinFn("get", 2, args -> dev.irij.compiler.RtCollections.getOp(args.get(0), args.get(1))));
 
-        env.define("nth", new BuiltinFn("nth", 2, args -> {
-            long idx = asLong(args.get(0), "nth");
-            var coll = args.get(1);
-            if (coll instanceof IrijVector vec) {
-                if (idx < 0 || idx >= vec.elements().size())
-                    throw new IrijRuntimeError("nth: index " + idx + " out of bounds (size " + vec.elements().size() + ")");
-                return vec.elements().get((int) idx);
-            }
-            if (coll instanceof IrijTuple tup) {
-                if (idx < 0 || idx >= tup.elements().length)
-                    throw new IrijRuntimeError("nth: index " + idx + " out of bounds (size " + tup.elements().length + ")");
-                return tup.elements()[(int) idx];
-            }
-            throw new IrijRuntimeError("nth expects a Vector or Tuple, got " + Values.typeName(coll));
-        }));
+        env.define("nth", new BuiltinFn("nth", 2, args -> dev.irij.compiler.RtCollections.nth(args.get(0), args.get(1))));
 
-        env.define("last", new BuiltinFn("last", 1, args -> {
-            var v = args.get(0);
-            if (v instanceof IrijVector vec) {
-                if (vec.elements().isEmpty()) throw new IrijRuntimeError("last of empty vector");
-                return vec.elements().get(vec.elements().size() - 1);
-            }
-            throw new IrijRuntimeError("last expects a Vector, got " + Values.typeName(v));
-        }));
+        env.define("last", new BuiltinFn("last", 1, args -> dev.irij.compiler.RtCollections.last(args.get(0))));
 
 
         // ── Functional ──────────────────────────────────────────────────
@@ -322,270 +144,111 @@ public final class Builtins {
             throw new IrijRuntimeError("flip requires partial application support");
         }));
 
-        env.define("not", new BuiltinFn("not", 1, args -> {
-            return !Values.isTruthy(args.get(0));
-        }));
+        env.define("not", new BuiltinFn("not", 1, args -> dev.irij.compiler.RtOps.notOp(args.get(0))));
 
         // (`empty?` defined earlier with full collection coverage —
         //  Vector / Map / Set / Tuple / Range / String / null.)
 
         // ── Error handling ─────────────────────────────────────────────
-        env.define("error", new BuiltinFn("error", 1, args -> {
-            throw new IrijRuntimeError(Values.toIrijString(args.get(0)));
-        }));
+        env.define("error", new BuiltinFn("error", 1, args -> dev.irij.compiler.RuntimeSupport.errorBuiltin(args.get(0))));
 
         // ── Type introspection ─────────────────────────────────────────
-        env.define("type-of", new BuiltinFn("type-of", 1, args -> {
-            return Values.typeName(args.get(0));
-        }));
+        env.define("type-of", new BuiltinFn("type-of", 1, args -> dev.irij.compiler.RuntimeSupport.typeOf(args.get(0))));
 
         // ── Dynamic map operations ─────────────────────────────────────
-        env.define("assoc", new BuiltinFn("assoc", 3, args -> {
-            var m = args.get(0);
-            var key = Values.toIrijString(args.get(1));
-            var val = args.get(2);
-            if (m instanceof IrijMap map) {
-                var entries = new LinkedHashMap<>(map.entries());
-                entries.put(key, val);
-                return new IrijMap(entries);
-            }
-            throw new IrijRuntimeError("assoc expects a Map as first argument, got " + Values.typeName(m));
-        }));
+        env.define("assoc", new BuiltinFn("assoc", 3, args -> dev.irij.compiler.RtCollections.assoc(args.get(0), args.get(1), args.get(2))));
 
-        env.define("dissoc", new BuiltinFn("dissoc", 2, args -> {
-            var m = args.get(0);
-            var key = Values.toIrijString(args.get(1));
-            if (m instanceof IrijMap map) {
-                var entries = new LinkedHashMap<>(map.entries());
-                entries.remove(key);
-                return new IrijMap(entries);
-            }
-            throw new IrijRuntimeError("dissoc expects a Map as first argument, got " + Values.typeName(m));
-        }));
+        env.define("dissoc", new BuiltinFn("dissoc", 2, args -> dev.irij.compiler.RtCollections.dissoc(args.get(0), args.get(1))));
 
-        env.define("merge", new BuiltinFn("merge", 2, args -> {
-            var m1 = args.get(0);
-            var m2 = args.get(1);
-            if (m1 instanceof IrijMap map1 && m2 instanceof IrijMap map2) {
-                var entries = new LinkedHashMap<>(map1.entries());
-                entries.putAll(map2.entries());
-                return new IrijMap(entries);
-            }
-            throw new IrijRuntimeError("merge expects two Maps, got " + Values.typeName(m1) + " and " + Values.typeName(m2));
-        }));
+        env.define("merge", new BuiltinFn("merge", 2, args -> dev.irij.compiler.RtCollections.merge(args.get(0), args.get(1))));
 
         // ── String operations ──────────────────────────────────────────
-        env.define("split", new BuiltinFn("split", 2, args -> {
-            var str = asString(args.get(0), "split");
-            var sep = asString(args.get(1), "split");
-            var parts = sep.isEmpty()
-                ? str.chars().mapToObj(c -> String.valueOf((char) c)).toList()
-                : Arrays.asList(str.split(java.util.regex.Pattern.quote(sep), -1));
-            return new IrijVector(new ArrayList<>(parts));
-        }));
+        env.define("split", new BuiltinFn("split", 2, args -> dev.irij.compiler.RtStrings.split(args.get(0), args.get(1))));
 
-        env.define("join", new BuiltinFn("join", 2, args -> {
-            var sep = asString(args.get(0), "join");
-            var coll = args.get(1);
-            var list = toList(coll);
-            return list.stream().map(Values::toIrijString).collect(Collectors.joining(sep));
-        }));
+        env.define("join", new BuiltinFn("join", 2, args -> dev.irij.compiler.RtStrings.join(args.get(0), args.get(1))));
 
-        env.define("trim", new BuiltinFn("trim", 1, args -> {
-            return asString(args.get(0), "trim").strip();
-        }));
+        env.define("trim", new BuiltinFn("trim", 1, args -> dev.irij.compiler.RtStrings.trimStr(args.get(0))));
 
-        env.define("upper-case", new BuiltinFn("upper-case", 1, args -> {
-            return asString(args.get(0), "upper-case").toUpperCase();
-        }));
+        env.define("upper-case", new BuiltinFn("upper-case", 1, args -> dev.irij.compiler.RtStrings.upperCase(args.get(0))));
 
-        env.define("lower-case", new BuiltinFn("lower-case", 1, args -> {
-            return asString(args.get(0), "lower-case").toLowerCase();
-        }));
+        env.define("lower-case", new BuiltinFn("lower-case", 1, args -> dev.irij.compiler.RtStrings.lowerCase(args.get(0))));
 
-        env.define("starts-with?", new BuiltinFn("starts-with?", 2, args -> {
-            return asString(args.get(0), "starts-with?").startsWith(asString(args.get(1), "starts-with?"));
-        }));
+        env.define("starts-with?", new BuiltinFn("starts-with?", 2, args -> dev.irij.compiler.RtStrings.startsWithP(args.get(0), args.get(1))));
 
-        env.define("ends-with?", new BuiltinFn("ends-with?", 2, args -> {
-            return asString(args.get(0), "ends-with?").endsWith(asString(args.get(1), "ends-with?"));
-        }));
+        env.define("ends-with?", new BuiltinFn("ends-with?", 2, args -> dev.irij.compiler.RtStrings.endsWithP(args.get(0), args.get(1))));
 
-        env.define("replace", new BuiltinFn("replace", 3, args -> {
-            var str = asString(args.get(0), "replace");
-            var from = asString(args.get(1), "replace");
-            var to = asString(args.get(2), "replace");
-            return str.replace(from, to);
-        }));
+        env.define("replace", new BuiltinFn("replace", 3, args -> dev.irij.compiler.RtStrings.replace(args.get(0), args.get(1), args.get(2))));
 
-        env.define("url-encode", new BuiltinFn("url-encode", 1, args -> {
-            return java.net.URLEncoder.encode(asString(args.get(0), "url-encode"),
-                java.nio.charset.StandardCharsets.UTF_8);
-        }));
+        env.define("url-encode", new BuiltinFn("url-encode", 1, args -> dev.irij.compiler.RtStrings.urlEncode(args.get(0))));
 
-        env.define("url-decode", new BuiltinFn("url-decode", 1, args -> {
-            return java.net.URLDecoder.decode(asString(args.get(0), "url-decode"),
-                java.nio.charset.StandardCharsets.UTF_8);
-        }));
+        env.define("url-decode", new BuiltinFn("url-decode", 1, args -> dev.irij.compiler.RtStrings.urlDecode(args.get(0))));
 
-        env.define("substring", new BuiltinFn("substring", 3, args -> {
-            var str = asString(args.get(0), "substring");
-            int start = (int) asLong(args.get(1), "substring");
-            int end = (int) asLong(args.get(2), "substring");
-            if (start < 0 || end > str.length() || start > end)
-                throw new IrijRuntimeError("substring: index out of bounds (start=" + start + ", end=" + end + ", length=" + str.length() + ")");
-            return str.substring(start, end);
-        }));
+        env.define("substring", new BuiltinFn("substring", 3, args -> dev.irij.compiler.RtStrings.substring(args.get(0), args.get(1), args.get(2))));
 
-        env.define("char-at", new BuiltinFn("char-at", 2, args -> {
-            var str = asString(args.get(0), "char-at");
-            int idx = (int) asLong(args.get(1), "char-at");
-            if (idx < 0 || idx >= str.length())
-                throw new IrijRuntimeError("char-at: index " + idx + " out of bounds (length " + str.length() + ")");
-            return String.valueOf(str.charAt(idx));
-        }));
+        env.define("char-at", new BuiltinFn("char-at", 2, args -> dev.irij.compiler.RtStrings.charAt(args.get(0), args.get(1))));
 
-        env.define("index-of", new BuiltinFn("index-of", 2, args -> {
-            var str = asString(args.get(0), "index-of");
-            var sub = asString(args.get(1), "index-of");
-            return (long) str.indexOf(sub);
-        }));
+        env.define("index-of", new BuiltinFn("index-of", 2, args -> dev.irij.compiler.RtStrings.indexOf(args.get(0), args.get(1))));
 
         // ── Math operations ────────────────────────────────────────────
-        env.define("sqrt", new BuiltinFn("sqrt", 1, args -> {
-            return Math.sqrt(asDouble(args.get(0), "sqrt"));
-        }));
+        env.define("sqrt", new BuiltinFn("sqrt", 1, args -> dev.irij.compiler.RtMath.sqrt(args.get(0))));
 
-        env.define("floor", new BuiltinFn("floor", 1, args -> {
-            return (long) Math.floor(asDouble(args.get(0), "floor"));
-        }));
+        env.define("floor", new BuiltinFn("floor", 1, args -> dev.irij.compiler.RtMath.floor(args.get(0))));
 
-        env.define("ceil", new BuiltinFn("ceil", 1, args -> {
-            return (long) Math.ceil(asDouble(args.get(0), "ceil"));
-        }));
+        env.define("ceil", new BuiltinFn("ceil", 1, args -> dev.irij.compiler.RtMath.ceil(args.get(0))));
 
-        env.define("round", new BuiltinFn("round", 1, args -> {
-            return Math.round(asDouble(args.get(0), "round"));
-        }));
+        env.define("round", new BuiltinFn("round", 1, args -> dev.irij.compiler.RtMath.round(args.get(0))));
 
-        env.define("sin", new BuiltinFn("sin", 1, args -> {
-            return Math.sin(asDouble(args.get(0), "sin"));
-        }));
+        env.define("sin", new BuiltinFn("sin", 1, args -> dev.irij.compiler.RtMath.sin(args.get(0))));
 
-        env.define("cos", new BuiltinFn("cos", 1, args -> {
-            return Math.cos(asDouble(args.get(0), "cos"));
-        }));
+        env.define("cos", new BuiltinFn("cos", 1, args -> dev.irij.compiler.RtMath.cos(args.get(0))));
 
-        env.define("tan", new BuiltinFn("tan", 1, args -> {
-            return Math.tan(asDouble(args.get(0), "tan"));
-        }));
+        env.define("tan", new BuiltinFn("tan", 1, args -> dev.irij.compiler.RtMath.tan(args.get(0))));
 
-        env.define("log", new BuiltinFn("log", 1, args -> {
-            return Math.log(asDouble(args.get(0), "log"));
-        }));
+        env.define("log", new BuiltinFn("log", 1, args -> dev.irij.compiler.RtMath.log(args.get(0))));
 
-        env.define("exp", new BuiltinFn("exp", 1, args -> {
-            return Math.exp(asDouble(args.get(0), "exp"));
-        }));
+        env.define("exp", new BuiltinFn("exp", 1, args -> dev.irij.compiler.RtMath.exp(args.get(0))));
 
-        env.define("pow", new BuiltinFn("pow", 2, args -> {
-            return Math.pow(asDouble(args.get(0), "pow"), asDouble(args.get(1), "pow"));
-        }));
+        env.define("pow", new BuiltinFn("pow", 2, args -> dev.irij.compiler.RtMath.pow(args.get(0), args.get(1))));
 
-        env.define("random-int", new BuiltinFn("random-int", 1, List.of("Random"), args -> {
-            long bound = asLong(args.get(0), "random-int");
-            return ThreadLocalRandom.current().nextLong(bound);
-        }));
+        env.define("random-int", new BuiltinFn("random-int", 1, List.of("Random"), args -> dev.irij.compiler.RtMath.randomInt(args.get(0))));
 
-        env.define("random-float", new BuiltinFn("random-float", 0, List.of("Random"), args -> {
-            return ThreadLocalRandom.current().nextDouble();
-        }));
+        env.define("random-float", new BuiltinFn("random-float", 0, List.of("Random"), args -> dev.irij.compiler.RtMath.randomFloat()));
 
         // ── Crypto / auth primitives ───────────────────────────────────
         // Hashing is deterministic and pure; no effect gate. random-token
         // is non-deterministic and gated under Random.
 
-        env.define("sha256-hex", new BuiltinFn("sha256-hex", 1, args -> {
-            return dev.irij.compiler.RuntimeSupport.sha256Hex(args.get(0));
-        }));
+        env.define("sha256-hex", new BuiltinFn("sha256-hex", 1, args -> dev.irij.compiler.RtMath.sha256Hex(args.get(0))));
 
-        env.define("hmac-sha256-hex", new BuiltinFn("hmac-sha256-hex", 2, args -> {
-            return dev.irij.compiler.RuntimeSupport.hmacSha256Hex(args.get(0), args.get(1));
-        }));
+        env.define("hmac-sha256-hex", new BuiltinFn("hmac-sha256-hex", 2, args -> dev.irij.compiler.RtMath.hmacSha256Hex(args.get(0), args.get(1))));
 
-        env.define("random-token", new BuiltinFn("random-token", 1, List.of("Random"), args -> {
-            return dev.irij.compiler.RuntimeSupport.randomToken(args.get(0));
-        }));
+        env.define("random-token", new BuiltinFn("random-token", 1, List.of("Random"), args -> dev.irij.compiler.RtMath.randomToken(args.get(0))));
 
         // ── Conversion primitives ──────────────────────────────────────
-        env.define("parse-int", new BuiltinFn("parse-int", 1, args -> {
-            var str = asString(args.get(0), "parse-int");
-            try { return Long.parseLong(str.strip()); }
-            catch (NumberFormatException e) {
-                throw new IrijRuntimeError("parse-int: cannot parse '" + str + "' as Int");
-            }
-        }));
+        env.define("parse-int", new BuiltinFn("parse-int", 1, args -> dev.irij.compiler.RtMath.parseInt(args.get(0))));
 
-        env.define("parse-float", new BuiltinFn("parse-float", 1, args -> {
-            var str = asString(args.get(0), "parse-float");
-            try { return Double.parseDouble(str.strip()); }
-            catch (NumberFormatException e) {
-                throw new IrijRuntimeError("parse-float: cannot parse '" + str + "' as Float");
-            }
-        }));
+        env.define("parse-float", new BuiltinFn("parse-float", 1, args -> dev.irij.compiler.RtMath.parseFloat(args.get(0))));
 
-        env.define("char-code", new BuiltinFn("char-code", 1, args -> {
-            var str = asString(args.get(0), "char-code");
-            if (str.isEmpty()) throw new IrijRuntimeError("char-code: empty string");
-            return (long) str.codePointAt(0);
-        }));
+        env.define("char-code", new BuiltinFn("char-code", 1, args -> dev.irij.compiler.RtStrings.charCode(args.get(0))));
 
-        env.define("from-char-code", new BuiltinFn("from-char-code", 1, args -> {
-            int cp = (int) asLong(args.get(0), "from-char-code");
-            return String.valueOf(Character.toChars(cp));
-        }));
+        env.define("from-char-code", new BuiltinFn("from-char-code", 1, args -> dev.irij.compiler.RtStrings.fromCharCode(args.get(0))));
 
         // FileIO primitives (read-file / write-file / file-exists?) —
         // removed phase 3d. Reach via the FileIO effect (std.fs) +
         // FsCapability.
 
-        env.define("get-env", new BuiltinFn("get-env", 1, List.of("Env"), args -> {
-            var name = asString(args.get(0), "get-env");
-            var val = System.getenv(name);
-            return val != null ? val : Values.UNIT;
-        }));
+        env.define("get-env", new BuiltinFn("get-env", 1, List.of("Env"), args -> dev.irij.compiler.RtIo.getEnv(args.get(0))));
 
-        env.define("now-ms", new BuiltinFn("now-ms", 0, List.of("Time"), args -> {
-            return System.currentTimeMillis();
-        }));
+        env.define("now-ms", new BuiltinFn("now-ms", 0, List.of("Time"), args -> dev.irij.compiler.RtIo.nowMs()));
 
         // ── JSON (pure transforms) ──────────────────────────────────────
-        env.define("json-parse", new BuiltinFn("json-parse", 1, args -> {
-            var str = asString(args.get(0), "json-parse");
-            try {
-                return jsonToIrij(JsonParser.parseString(str));
-            } catch (JsonSyntaxException e) {
-                throw new IrijRuntimeError("json-parse: " + e.getMessage());
-            }
-        }));
+        env.define("json-parse", new BuiltinFn("json-parse", 1, args -> dev.irij.compiler.RtIo.jsonParse(args.get(0))));
 
-        env.define("json-encode", new BuiltinFn("json-encode", 1, args -> {
-            return irijToJson(args.get(0)).toString();
-        }));
+        env.define("json-encode", new BuiltinFn("json-encode", 1, args -> dev.irij.compiler.RtIo.jsonEncode(args.get(0))));
 
-        env.define("json-encode-pretty", new BuiltinFn("json-encode-pretty", 1, args -> {
-            var gson = new GsonBuilder().setPrettyPrinting().create();
-            return gson.toJson(irijToJson(args.get(0)));
-        }));
+        env.define("json-encode-pretty", new BuiltinFn("json-encode-pretty", 1, args -> dev.irij.compiler.RtIo.jsonEncodePretty(args.get(0))));
 
-        env.define("toml-parse", new BuiltinFn("toml-parse", 1, args -> {
-            var str = asString(args.get(0), "toml-parse");
-            try {
-                return tomlValueToIrij(new Toml().read(str).toMap());
-            } catch (IllegalStateException e) {
-                throw new IrijRuntimeError("toml-parse: " + e.getMessage());
-            }
-        }));
+        env.define("toml-parse", new BuiltinFn("toml-parse", 1, args -> dev.irij.compiler.RtIo.tomlParse(args.get(0))));
 
         // list-dir / delete-file / make-dir / append-file — removed
         // phase 3d. Reach via std.fs effect ops + FsCapability.

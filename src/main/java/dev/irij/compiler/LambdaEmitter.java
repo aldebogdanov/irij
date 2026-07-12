@@ -75,7 +75,7 @@ final class LambdaEmitter implements Opcodes {
             int restSlot = inner.allocate(restName);
             lm.visitVarInsn(ALOAD, argsSlot);
             ce.exprEm.pushIconst(lm, paramNames.size());
-            lm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "restVector",
+            lm.visitMethodInsn(INVOKESTATIC, RtOwners.of("restVector"), "restVector",
                     "([Ljava/lang/Object;I)Ljava/lang/Object;", false);
             lm.visitVarInsn(ASTORE, restSlot);
         }
@@ -88,7 +88,7 @@ final class LambdaEmitter implements Opcodes {
         Label clauseTryStart = null, clauseTryEnd = null, clauseHandler = null;
         if (clauseEffects != null) {
             ce.smEm.emitStringArrayConst(lm, clauseEffects);
-            lm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "enterFn", "([Ljava/lang/String;)V", false);
+            lm.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterFn"), "enterFn", "([Ljava/lang/String;)V", false);
             clauseTryStart = new Label();
             clauseTryEnd = new Label();
             clauseHandler = new Label();
@@ -97,13 +97,13 @@ final class LambdaEmitter implements Opcodes {
         ce.exprEm.emitExpr(lam.body(), lm, inner);
         if (clauseEffects != null) {
             // Normal exit: pop, then return the value left on stack.
-            lm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitFn", "()V", false);
+            lm.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitFn"), "exitFn", "()V", false);
         }
         lm.visitInsn(ARETURN);
         if (clauseEffects != null) {
             lm.visitLabel(clauseTryEnd);
             lm.visitLabel(clauseHandler);
-            lm.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitFn", "()V", false);
+            lm.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitFn"), "exitFn", "()V", false);
             lm.visitInsn(ATHROW);
             lm.visitTryCatchBlock(clauseTryStart, clauseTryEnd, clauseHandler, null);
         }
@@ -137,7 +137,7 @@ final class LambdaEmitter implements Opcodes {
         // to the impl, no currying.
         int curryArity = (restName != null) ? -1 : paramNames.size();
         ce.exprEm.pushIconst(mv, curryArity);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "curry",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("curry"), "curry",
                 "(" + ClassEmitter.IRIJ_FN_DESC + "I)" + ClassEmitter.IRIJ_FN_DESC, false);
     }
 

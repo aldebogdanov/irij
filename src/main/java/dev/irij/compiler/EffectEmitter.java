@@ -162,12 +162,12 @@ final class EffectEmitter implements Opcodes {
         // declare this effect (and we're not inside an ambient frame).
         mv.visitLdcInsn(effectName);
         mv.visitLdcInsn(opName);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "checkPerformEffect",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("checkPerformEffect"), "checkPerformEffect",
                 "(Ljava/lang/String;Ljava/lang/String;)V", false);
         mv.visitLdcInsn(effectName);
         mv.visitLdcInsn(opName);
         ce.exprEm.pushObjectArray(args, mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "perform",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("perform"), "perform",
                 "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false);
     }
 
@@ -200,7 +200,7 @@ final class EffectEmitter implements Opcodes {
             Decl.HandlerDecl hd = ce.handlers.get(hName);
             if (hd != null) {
                 mv.visitLdcInsn(hd.effectName());
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "enterWith",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterWith"), "enterWith",
                         "(Ljava/lang/String;)V", false);
                 pushedEffects.add(hd.effectName());
             }
@@ -227,13 +227,13 @@ final class EffectEmitter implements Opcodes {
         mv.visitLabel(withEnd);
         // Normal exit: pop each pushed frame, then GOTO afterWith.
         for (int i = 0; i < pushedEffects.size(); i++) {
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitWith", "()V", false);
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitWith"), "exitWith", "()V", false);
         }
         mv.visitJumpInsn(GOTO, afterWith);
         // Exception exit: pop, rethrow.
         mv.visitLabel(withHandler);
         for (int i = 0; i < pushedEffects.size(); i++) {
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitWith", "()V", false);
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitWith"), "exitWith", "()V", false);
         }
         mv.visitInsn(ATHROW);
         mv.visitTryCatchBlock(withStart, withEnd, withHandler, null);
@@ -275,7 +275,7 @@ final class EffectEmitter implements Opcodes {
         ce.exprEm.emitExpr(w.handler(), mv, outer);
         mv.visitInsn(DUP);
         mv.visitVarInsn(ASTORE, handlerSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "enterWithFromValue",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterWithFromValue"), "enterWithFromValue",
                 "(Ljava/lang/Object;)I", false);
         mv.visitVarInsn(ISTORE, countSlot);
 
@@ -315,14 +315,14 @@ final class EffectEmitter implements Opcodes {
             default -> 0;
         };
         ce.exprEm.pushIconst(mv, nFields);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "runWithSM",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("runWithSM"), "runWithSM",
                 "(Ljava/lang/Object;L" + ClassEmitter.IRIJ_FN + ";I)Ljava/lang/Object;", false);
         mv.visitVarInsn(ASTORE, resultSlot);
 
         mv.visitLabel(withEnd);
         // Normal exit: pop the runtime frames + push the result.
         mv.visitVarInsn(ILOAD, countSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitWithCount", "(I)V", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitWithCount"), "exitWithCount", "(I)V", false);
         mv.visitVarInsn(ALOAD, resultSlot);
         mv.visitJumpInsn(GOTO, after);
 
@@ -331,7 +331,7 @@ final class EffectEmitter implements Opcodes {
         int excSlot = outer.allocateAnon();
         mv.visitVarInsn(ASTORE, excSlot);
         mv.visitVarInsn(ILOAD, countSlot);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitWithCount", "(I)V", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitWithCount"), "exitWithCount", "(I)V", false);
         mv.visitVarInsn(ALOAD, excSlot);
         mv.visitInsn(ATHROW);
         mv.visitTryCatchBlock(withStart, withEnd, withCatch, null);

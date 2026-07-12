@@ -107,7 +107,7 @@ final class FnEmitter implements Opcodes {
         // is already on the stack; exitFn returns void, so the stack
         // shape stays { result } for the subsequent ARETURN.
         if (ce.currentFnPushesEffects) {
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitFn", "()V", false);
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitFn"), "exitFn", "()V", false);
         }
         mv.visitInsn(ARETURN);
     }
@@ -179,7 +179,7 @@ final class FnEmitter implements Opcodes {
             mv.visitInsn(AASTORE);
             mv.visitMethodInsn(INVOKEINTERFACE, ClassEmitter.IRIJ_FN, "apply",
                     "([Ljava/lang/Object;)Ljava/lang/Object;", true);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                     "(Ljava/lang/Object;)Z", false);
             Label ok = new Label();
             mv.visitJumpInsn(IFNE, ok);
@@ -221,7 +221,7 @@ final class FnEmitter implements Opcodes {
             }
             mv.visitMethodInsn(INVOKEINTERFACE, ClassEmitter.IRIJ_FN, "apply",
                     "([Ljava/lang/Object;)Ljava/lang/Object;", true);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                     "(Ljava/lang/Object;)Z", false);
             Label ok = new Label();
             mv.visitJumpInsn(IFNE, ok);
@@ -338,10 +338,10 @@ final class FnEmitter implements Opcodes {
         ce.currentFnPushesEffects = true;
         boolean ambient = ce.smEm.isAmbientRow(fn.effectRow());
         if (ambient) {
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "enterFnAmbient", "()V", false);
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterFnAmbient"), "enterFnAmbient", "()V", false);
         } else {
             ce.smEm.emitStringArrayConst(mv, fn.effectRow());
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "enterFn", "([Ljava/lang/String;)V", false);
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterFn"), "enterFn", "([Ljava/lang/String;)V", false);
         }
         Label efTryStart = new Label();
         Label efTryEnd = new Label();
@@ -382,7 +382,7 @@ final class FnEmitter implements Opcodes {
         mv.visitLabel(efTryEnd);
         // Catch-all: pop the effect-row frame, then re-throw.
         mv.visitLabel(efHandler);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "exitFn", "()V", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitFn"), "exitFn", "()V", false);
         mv.visitInsn(ATHROW);
         mv.visitTryCatchBlock(efTryStart, efTryEnd, efHandler, null);
 
@@ -461,7 +461,7 @@ final class FnEmitter implements Opcodes {
      *  supplies the fn's return value via {@link #emitImperativeTail}. */
     void emitTailIfStmt(Stmt.IfStmt ifs, MethodVisitor mv, Locals locals) {
         ce.exprEm.emitExpr(ifs.cond(), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                 "(Ljava/lang/Object;)Z", false);
         Label elseL = new Label();
         mv.visitJumpInsn(IFEQ, elseL);

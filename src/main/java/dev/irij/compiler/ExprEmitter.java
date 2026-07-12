@@ -54,7 +54,7 @@ final class ExprEmitter implements Opcodes {
         // 2. Tail-propagating shape: if/else — both branches are tail.
         if (e instanceof Expr.IfExpr ie) {
             emitExpr(ie.cond(), mv, locals);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                     "(Ljava/lang/Object;)Z", false);
             Label elseL = new Label();
             mv.visitJumpInsn(IFEQ, elseL);
@@ -97,7 +97,7 @@ final class ExprEmitter implements Opcodes {
      *  if appears in tail position inside a Block. */
     void emitImperativeIfAsExpr(Stmt.IfStmt ifs, MethodVisitor mv, Locals locals) {
         emitExpr(ifs.cond(), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                 "(Ljava/lang/Object;)Z", false);
         Label elseL = new Label();
         Label endL = new Label();
@@ -270,7 +270,7 @@ final class ExprEmitter implements Opcodes {
                 mv.visitJumpInsn(GOTO, okL);
                 mv.visitLabel(failL);
                 mv.visitVarInsn(ALOAD, scrut);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "noMatch",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("noMatch"), "noMatch",
                         "(Ljava/lang/Object;)Ljava/lang/IllegalStateException;", false);
                 mv.visitInsn(ATHROW);
                 mv.visitLabel(okL);
@@ -281,7 +281,7 @@ final class ExprEmitter implements Opcodes {
 
     void emitIfStmt(Stmt.IfStmt ifs, MethodVisitor mv, Locals locals) {
         emitExpr(ifs.cond(), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy", "(Ljava/lang/Object;)Z", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy", "(Ljava/lang/Object;)Z", false);
         Label elseL = new Label();
         Label endL = new Label();
         mv.visitJumpInsn(IFEQ, elseL);
@@ -348,7 +348,7 @@ final class ExprEmitter implements Opcodes {
             case Expr.DotAccess da -> emitDotAccess(da, mv, locals);
             case Expr.JavaRef jr -> {
                 mv.visitLdcInsn(jr.ref());
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "javaStaticRef",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("javaStaticRef"), "javaStaticRef",
                         "(Ljava/lang/String;)Ljava/lang/Object;", false);
             }
             case Expr.Compose c -> emitCompose(c, mv, locals);
@@ -357,7 +357,7 @@ final class ExprEmitter implements Opcodes {
                 emitExpr(r.from(), mv, locals);
                 emitExpr(r.to(), mv, locals);
                 mv.visitInsn(r.exclusive() ? ICONST_1 : ICONST_0);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "rangeOf",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("rangeOf"), "rangeOf",
                         "(Ljava/lang/Object;Ljava/lang/Object;Z)Ljava/lang/Object;",
                         false);
             }
@@ -427,39 +427,39 @@ final class ExprEmitter implements Opcodes {
                 return;
             }
             case "pi" -> {
-                mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "PI_BOXED", ClassEmitter.OBJ_DESC);
+                mv.visitFieldInsn(GETSTATIC, RtOwners.of("PI_BOXED"), "PI_BOXED", ClassEmitter.OBJ_DESC);
                 return;
             }
             case "e" -> {
-                mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "E_BOXED", ClassEmitter.OBJ_DESC);
+                mv.visitFieldInsn(GETSTATIC, RtOwners.of("E_BOXED"), "E_BOXED", ClassEmitter.OBJ_DESC);
                 return;
             }
             case "identity" -> {
-                mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "IDENTITY", ClassEmitter.IRIJ_FN_DESC);
+                mv.visitFieldInsn(GETSTATIC, RtOwners.of("IDENTITY"), "IDENTITY", ClassEmitter.IRIJ_FN_DESC);
                 return;
             }
             case "const" -> {
-                mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "CONST", ClassEmitter.IRIJ_FN_DESC);
+                mv.visitFieldInsn(GETSTATIC, RtOwners.of("CONST"), "CONST", ClassEmitter.IRIJ_FN_DESC);
                 return;
             }
             // Builtins passed as values (sort-by length #[…], etc.)
             // Each maps to a static IrijFn in RuntimeSupport.
-            case "length"   -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "LENGTH", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "head"     -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "HEAD", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "tail"     -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "TAIL", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "empty?"   -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "EMPTY_Q", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "to-str"   -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "TO_STR", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "not"      -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "NOT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "type-of"  -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "TYPE_OF", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "abs"      -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "ABS_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "sqrt"     -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "SQRT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "floor"    -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "FLOOR_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "ceil"     -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "CEIL_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "round"    -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "ROUND_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "reverse"  -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "REVERSE_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "sort"     -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "SORT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "println"  -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "PRINTLN_FN", ClassEmitter.IRIJ_FN_DESC); return; }
-            case "print"    -> { mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, "PRINT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "length"   -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("LENGTH"), "LENGTH", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "head"     -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("HEAD"), "HEAD", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "tail"     -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("TAIL"), "TAIL", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "empty?"   -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("EMPTY_Q"), "EMPTY_Q", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "to-str"   -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("TO_STR"), "TO_STR", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "not"      -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("NOT_FN"), "NOT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "type-of"  -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("TYPE_OF"), "TYPE_OF", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "abs"      -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("ABS_FN"), "ABS_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "sqrt"     -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("SQRT_FN"), "SQRT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "floor"    -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("FLOOR_FN"), "FLOOR_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "ceil"     -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("CEIL_FN"), "CEIL_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "round"    -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("ROUND_FN"), "ROUND_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "reverse"  -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("REVERSE_FN"), "REVERSE_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "sort"     -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("SORT_FN"), "SORT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "println"  -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("PRINTLN_FN"), "PRINTLN_FN", ClassEmitter.IRIJ_FN_DESC); return; }
+            case "print"    -> { mv.visitFieldInsn(GETSTATIC, RtOwners.of("PRINT_FN"), "PRINT_FN", ClassEmitter.IRIJ_FN_DESC); return; }
             default -> {}
         }
         Integer slot = locals.lookup(name);
@@ -490,7 +490,7 @@ final class ExprEmitter implements Opcodes {
         // successive evals see each other's top-level `:=` bindings.
         if (ce.options.namespaceMode()) {
             mv.visitLdcInsn(name);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "nsGet",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nsGet"), "nsGet",
                     "(Ljava/lang/String;)Ljava/lang/Object;", false);
             return;
         }
@@ -527,7 +527,7 @@ final class ExprEmitter implements Opcodes {
         // `@ to-str v`, etc.) without enumerating each one as a
         // static IrijFn here.
         mv.visitLdcInsn(name);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "builtinFn",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("builtinFn"), "builtinFn",
                 "(Ljava/lang/String;)" + ClassEmitter.IRIJ_FN_DESC, false);
     }
 
@@ -551,7 +551,7 @@ final class ExprEmitter implements Opcodes {
             default -> throw new IrijCompiler.CompileException(
                     "MVP: operator section not yet supported: (" + op + ")");
         };
-        mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, constName, ClassEmitter.IRIJ_FN_DESC);
+        mv.visitFieldInsn(GETSTATIC, RtOwners.of(constName), constName, ClassEmitter.IRIJ_FN_DESC);
     }
 
 
@@ -560,7 +560,7 @@ final class ExprEmitter implements Opcodes {
         // (Function composition for non-handler values isn't supported in MVP.)
         emitExpr(c.left(), mv, locals);
         emitExpr(c.right(), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "compose",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("compose"), "compose",
                 "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", false);
     }
 
@@ -584,7 +584,7 @@ final class ExprEmitter implements Opcodes {
         // Interop fallthrough: evaluate target, delegate to JavaInterop.
         emitExpr(da.target(), mv, locals);
         mv.visitLdcInsn(da.field());
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "javaInstanceRef",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("javaInstanceRef"), "javaInstanceRef",
                 "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
     }
 
@@ -593,26 +593,26 @@ final class ExprEmitter implements Opcodes {
         emitExpr(bop.left(), mv, locals);
         emitExpr(bop.right(), mv, locals);
         switch (bop.op()) {
-            case "+"  -> mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "add", ClassEmitter.BINOP_DESC, false);
-            case "-"  -> mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "sub", ClassEmitter.BINOP_DESC, false);
-            case "*"  -> mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "mul", ClassEmitter.BINOP_DESC, false);
-            case "/"  -> mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "div", ClassEmitter.BINOP_DESC, false);
-            case "%"  -> mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "mod", ClassEmitter.BINOP_DESC, false);
-            case "**" -> mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "pow", ClassEmitter.BINOP_DESC, false);
+            case "+"  -> mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("add"), "add", ClassEmitter.BINOP_DESC, false);
+            case "-"  -> mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("sub"), "sub", ClassEmitter.BINOP_DESC, false);
+            case "*"  -> mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("mul"), "mul", ClassEmitter.BINOP_DESC, false);
+            case "/"  -> mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("div"), "div", ClassEmitter.BINOP_DESC, false);
+            case "%"  -> mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("mod"), "mod", ClassEmitter.BINOP_DESC, false);
+            case "**" -> mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("pow"), "pow", ClassEmitter.BINOP_DESC, false);
             case "<"  -> cmpToBoxedBool(mv, "lt");
             case "<=" -> cmpToBoxedBool(mv, "le");
             case ">"  -> cmpToBoxedBool(mv, "gt");
             case ">=" -> cmpToBoxedBool(mv, "ge");
             case "==" -> cmpToBoxedBool(mv, "eq");
             case "!=", "/=" -> cmpToBoxedBool(mv, "neq");
-            case "++" -> mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "concat", ClassEmitter.BINOP_DESC, false);
+            case "++" -> mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("concat"), "concat", ClassEmitter.BINOP_DESC, false);
             case "&&" -> {
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "and", ClassEmitter.CMPOP_DESC, false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("and"), "and", ClassEmitter.CMPOP_DESC, false);
                 mv.visitMethodInsn(INVOKESTATIC, "java/lang/Boolean", "valueOf",
                         "(Z)Ljava/lang/Boolean;", false);
             }
             case "||" -> {
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "or", ClassEmitter.CMPOP_DESC, false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("or"), "or", ClassEmitter.CMPOP_DESC, false);
                 mv.visitMethodInsn(INVOKESTATIC, "java/lang/Boolean", "valueOf",
                         "(Z)Ljava/lang/Boolean;", false);
             }
@@ -688,7 +688,7 @@ final class ExprEmitter implements Opcodes {
     void emitRecordUpdate(Expr.RecordUpdate ru, MethodVisitor mv, Locals locals) {
         // Push the base value, call RT.recordUpdateBegin → LinkedHashMap.
         emitVarLoad(ru.base(), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "recordUpdateBegin",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("recordUpdateBegin"), "recordUpdateBegin",
                 "(Ljava/lang/Object;)Ljava/util/LinkedHashMap;", false);
         // For each Field entry, DUP map, push key/value, put, pop result.
         for (Expr.MapEntry me : ru.updates()) {
@@ -787,7 +787,7 @@ final class ExprEmitter implements Opcodes {
                 default -> null;
             };
             if (field != null) {
-                mv.visitFieldInsn(GETSTATIC, ClassEmitter.RT, field, ClassEmitter.IRIJ_FN_DESC);
+                mv.visitFieldInsn(GETSTATIC, RtOwners.of(field), field, ClassEmitter.IRIJ_FN_DESC);
                 return;
             }
             // HOF ops standalone aren't useful as bare values; throw.
@@ -808,7 +808,7 @@ final class ExprEmitter implements Opcodes {
                     case "/$" -> "seqScanPartial";
                     default -> throw new IllegalStateException();
                 };
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, method,
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of(method), method,
                         "(Ljava/lang/Object;)" + ClassEmitter.IRIJ_FN_DESC, false);
             }
             case "/+", "/*", "/#", "/&", "/|" -> {
@@ -822,7 +822,7 @@ final class ExprEmitter implements Opcodes {
                     case "/|" -> "seqAny";
                     default -> throw new IllegalStateException();
                 };
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, method,
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of(method), method,
                         "(Ljava/lang/Object;)Ljava/lang/Object;", false);
             }
             default -> throw new IrijCompiler.CompileException(
@@ -933,7 +933,7 @@ final class ExprEmitter implements Opcodes {
     void emitIrijFnCall(Expr fnExpr, List<Expr> args, MethodVisitor mv, Locals locals) {
         emitExpr(fnExpr, mv, locals);
         pushObjectArray(args, mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "callAny",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("callAny"), "callAny",
                 "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;", false);
     }
 
@@ -1022,11 +1022,11 @@ final class ExprEmitter implements Opcodes {
             String field = ce.recordCapField.get(capVar.name());
             mv.visitLdcInsn(da.field());
             mv.visitFieldInsn(GETSTATIC, ce.internalName, field, ClassEmitter.OBJ_DESC);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "getOp",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("getOp"), "getOp",
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;",
                     false);
             pushObjectArray(app.args(), mv, locals);
-            mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "callAny",
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("callAny"), "callAny",
                     "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;",
                     false);
             return;
@@ -1128,7 +1128,7 @@ final class ExprEmitter implements Opcodes {
             // so the target resolves on the right class, not the caller.
             Handle bootstrap = new Handle(
                     H_INVOKESTATIC,
-                    ClassEmitter.RT,
+                    RtOwners.of("redefBootstrap"),
                     "redefBootstrap",
                     "(Ljava/lang/invoke/MethodHandles$Lookup;"
                             + "Ljava/lang/String;"
@@ -1144,7 +1144,7 @@ final class ExprEmitter implements Opcodes {
 
     void emitIfExpr(Expr.IfExpr ie, MethodVisitor mv, Locals locals) {
         emitExpr(ie.cond(), mv, locals);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy", "(Ljava/lang/Object;)Z", false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy", "(Ljava/lang/Object;)Z", false);
         Label elseL = new Label();
         Label endL = new Label();
         mv.visitJumpInsn(IFEQ, elseL);
@@ -1167,11 +1167,11 @@ final class ExprEmitter implements Opcodes {
                 mv.visitMethodInsn(INVOKESTATIC, "java/lang/Long", "valueOf",
                         "(J)Ljava/lang/Long;", false);
                 emitExpr(uop.operand(), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "sub", ClassEmitter.BINOP_DESC, false);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("sub"), "sub", ClassEmitter.BINOP_DESC, false);
             }
             case "!" -> {
                 emitExpr(uop.operand(), mv, locals);
-                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "truthy",
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                         "(Ljava/lang/Object;)Z", false);
                 // flip: XOR with 1
                 mv.visitInsn(ICONST_1);
@@ -1185,7 +1185,7 @@ final class ExprEmitter implements Opcodes {
 
 
     void cmpToBoxedBool(MethodVisitor mv, String fn) {
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, fn, ClassEmitter.CMPOP_DESC, false);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of(fn), fn, ClassEmitter.CMPOP_DESC, false);
         mv.visitMethodInsn(INVOKESTATIC, "java/lang/Boolean", "valueOf",
                 "(Z)Ljava/lang/Boolean;", false);
     }

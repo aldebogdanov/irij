@@ -126,7 +126,7 @@ final class ProtoEmitter implements Opcodes {
         mv.visitCode();
         // tag := typeTag(arg0)
         mv.visitVarInsn(ALOAD, 0);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "typeTag",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("typeTag"), "typeTag",
                 "(Ljava/lang/Object;)Ljava/lang/String;", false);
         int tagSlot = arity;
         mv.visitVarInsn(ASTORE, tagSlot);
@@ -148,7 +148,7 @@ final class ProtoEmitter implements Opcodes {
         // no impl → throw
         mv.visitLdcInsn(method);
         mv.visitVarInsn(ALOAD, 0);
-        mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.RT, "noImpl",
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("noImpl"), "noImpl",
                 "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/IllegalStateException;", false);
         mv.visitInsn(ATHROW);
         mv.visitLabel(end);
