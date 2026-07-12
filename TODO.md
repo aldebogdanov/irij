@@ -679,7 +679,7 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
 
 ## Near-term (high priority)
 
-- [ ] **Primitives as sum-spec variants (proper union types)** — a
+- [x] **Primitives as sum-spec variants (proper union types)** — DONE (PR4, 2026-07; see docs/internals/specs.md; spec text update batched into the PR5 spec reconciliation). A
   `spec` sum must be able to mix named record/constructor variants
   with primitive specs:
   ```

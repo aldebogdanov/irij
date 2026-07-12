@@ -267,6 +267,26 @@ errors read `Spec failure on output of fn: …`.
 Pre/post contracts (`pre/post/in/out`) and user-declared
 product/sum specs are also enforced in bytecode mode.
 
+### Primitives as sum-spec variants (union types)
+
+A sum spec may mix named constructor variants with primitive spec
+names (`Str`, `Int`, `Float`, `Bool`, `Keyword`, `Rational`, `Unit`):
+
+```
+spec Node
+  Raw Str       ;; constructor variant
+  El Str        ;; constructor variant
+  Str           ;; primitive — a bare string is a valid Node
+```
+
+`SpecValidator.validateSumShape` first tries the Tagged path; a
+non-Tagged value then matches any listed primitive variant **by
+type**. Primitive values carry no certification tag and pass through
+unchanged. The emitter keeps primitive names out of `tagToSpec` so
+`Str` stays a spec name and never becomes a nullary constructor.
+Motivation: modeling `Node = element | raw | text` honestly (vrata's
+HTML children) instead of loosening to `#[_]`.
+
 **Pre/post emission** (`emitPreContractChecks`,
 `installPostSlots`, `emitPostChecks`):
 

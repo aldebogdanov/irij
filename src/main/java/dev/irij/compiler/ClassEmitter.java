@@ -376,7 +376,13 @@ final class ClassEmitter implements Opcodes {
                         LinkedHashMap<String, Integer> vmap = new LinkedHashMap<>();
                         for (Decl.Variant v : ss.variants()) {
                             vmap.put(v.name(), v.arity());
-                            tagToSpec.put(v.name(), sd.name());
+                            // Primitive variants (Str/Int/…) match by type,
+                            // not tag — keep them out of the constructor
+                            // registry so `Str` stays a spec name, never a
+                            // nullary constructor.
+                            if (!SpecValidator.isPrimitiveVariant(v.name())) {
+                                tagToSpec.put(v.name(), sd.name());
+                            }
                         }
                         sumVariants.put(sd.name(), vmap);
                     }
