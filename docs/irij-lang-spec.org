@@ -356,6 +356,13 @@
      Ok  a
      Err e
 
+   ;; union with primitive variants — a bare primitive value matches
+   ;; by type (no tag): a plain Str is a valid Node
+   spec Node
+     Raw Str
+     El  Str
+     Str
+
    ;; parametric spec
    spec Tree a
      Leaf a
@@ -1192,26 +1199,37 @@
 
   The standard library is organized by effect capabilities:
 
+  Implemented modules (v0.8):
+
   #+begin_example
-  std.core        ;; fundamental types, operators, protocols
-                  ;; includes: loop, identity, const, flip, compose
-  std.collection  ;; vectors, maps, sets, trees (persistent + transient)
-  std.text        ;; string operations, regex, unicode
-  std.math        ;; numeric, random, linear algebra
-  std.io          ;; file, stdio, path
-  std.net         ;; http client/server, tcp, udp
-  std.json        ;; parse/encode/streaming
-  std.time        ;; instant, duration, clock effect
-  std.async       ;; scope, fiber, channel, flow, stream
-  std.choreo      ;; located types, EPP, transport backends
-                  ;; includes: census (role-set membership query)
-  std.test        ;; assert-eq / assert-true / test / summarize
-  std.check       ;; contracts, refinement, SMT integration
-  std.ffi         ;; JVM interop utilities
-  std.log         ;; structured logging effect
-  std.db          ;; database effect + connection pooling
-  std.cli         ;; argument parsing, terminal effects
+  std.collection  ;; vector/map/set operations (+ std.list re-exports)
+  std.text        ;; string operations
+  std.math        ;; numeric helpers
+  std.func        ;; combinators (identity, const, compose, ...)
+  std.convert     ;; conversions between core value types
+  std.fs          ;; FileIO effect + default handler
+  std.http        ;; Http client effect
+  std.serve       ;; Serve effect — HTTP server, SSE, multipart
+  std.db          ;; Db effect (SQLite via JDBC)
+  std.session     ;; Session effect (server-side sessions)
+  std.auth        ;; password hashing / token helpers
+  std.env         ;; Env effect (environment variables)
+  std.time        ;; Time effect (clock + sleep)
+  std.random      ;; Random effect
+  std.log         ;; Log effect — leveled logging (default/silent handlers)
+  std.test        ;; assert-eq / assert-true / assert-throws / test / summarize
+  std.jvm         ;; JVM interop conveniences
+  std.datastar    ;; Datastar SSE frontend helpers
   #+end_example
+
+  Effect-backed modules pair a =pub effect= with a =pub handler
+  default-X= so production code runs against the default handler and
+  tests swap in mocks. JSON lives in core builtins (=json-parse= /
+  =json-encode=), not a module.
+
+  Planned (unimplemented): =std.async= (channels, flows, streams),
+  =std.choreo= (located types, EPP), =std.check= (refinement/SMT),
+  =std.cli= (argument parsing).
 
   Notable std.core functions:
 

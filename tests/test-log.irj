@@ -1,0 +1,36 @@
+;; ── std.log tests ──────────────────────────────────────────────────
+
+use std.test :open
+use std.log :open
+
+handler mem-log :: Log
+  state :! #[]
+  log-msg level msg =>
+    state <- conj state (level ++ ":" ++ msg)
+    resume ()
+
+captured := with mem-log
+  log-info "hello"
+  log-warn "careful"
+  log-error "boom"
+  mem-log.state
+
+r1 := test "levels route through log-msg" (-> assert-eq captured #["info:hello" "warn:careful" "error:boom"])
+
+silent := with silent-log
+  log-info "dropped"
+  :done
+
+r2 := test "silent-log drops output" (-> assert-eq silent :done)
+
+fn do-work :: Int Int ::: Log
+  n =>
+    log-info "working on ${n}"
+    n * 2
+
+dl-result := with default-log
+  do-work 5
+
+r3 := test "default-log prints and resumes" (-> assert-eq dl-result 10)
+
+summarize #[r1 r2 r3]

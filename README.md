@@ -60,7 +60,7 @@ irij test                     # 299 integration tests (tests/*.irj)
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)
-- **Bytecode compiler (experimental, 14a+14b+14c.2+14c.2b+14d)** &mdash; `irij compile file.irj -o out.jar` emits a runnable JVM jar (subset: literals, arith, `if`, `:=`, `fn`, `match`, pattern dispatch, collections, ADT constructors, first-class lambdas with captures, rest params, protocol dispatch, algebraic effects with one-shot `resume` and `on-failure`, modules via compile-time source inlining (`use std.X`), Java interop (`Class/member`, `obj.method` via shared `JavaInterop`), structured concurrency (`scope`/`scope.race`/`scope.supervised`, `spawn`/`par`/`race`/`timeout`/`await` on virtual threads, fibers inherit effect stack); see `docs/phase-14-bytecode.md`)
+- **Bytecode compiler** &mdash; the only execution model since v0.6.20: ASM-emitted JVM classfiles with state-machine effect lowering, self-TCO, invokedynamic hot-redef; `irij build` packages self-contained runnable JARs
 - **nREPL** &mdash; Emacs integration via `editors/emacs/irij-nrepl.el`
 
 ## Documentation

@@ -1,0 +1,57 @@
+mod std.log
+
+;; Log effect module — leveled logging as an algebraic effect.
+;;
+;; Logging goes through the Log effect, so the destination is a
+;; handler decision, not a global: default-log writes to stdout,
+;; silent-log drops everything, and a test can capture lines in
+;; handler state.
+;;
+;; Usage:
+;;   use std.log :open
+;;
+;;   fn work :: Int Int ::: Log
+;;     n =>
+;;       log-info "starting with ${n}"
+;;       if n < 0
+;;         log-warn "negative input"
+;;       n * 2
+;;
+;;   with default-log
+;;     work 21
+;;
+;;   ;; Capture in tests:
+;;   handler mem-log :: Log
+;;     state :! #[]
+;;     log-msg level msg =>
+;;       state <- conj state "${level}:${msg}"
+;;       resume ()
+;;
+;;   with mem-log
+;;     work -1
+
+pub effect Log
+  log-msg :: Str Str -> ()
+
+;; Stdout logger: one "[level] message" line per call.
+pub handler default-log :: Log ::: Console
+  log-msg level msg =>
+    println "[${level}] ${msg}"
+    resume ()
+
+;; Drops all log output (benchmarks, quiet runs).
+pub handler silent-log :: Log
+  log-msg level msg =>
+    resume ()
+
+pub fn log-debug :: Str () ::: Log
+  (msg -> log-msg "debug" msg)
+
+pub fn log-info :: Str () ::: Log
+  (msg -> log-msg "info" msg)
+
+pub fn log-warn :: Str () ::: Log
+  (msg -> log-msg "warn" msg)
+
+pub fn log-error :: Str () ::: Log
+  (msg -> log-msg "error" msg)
