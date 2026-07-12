@@ -4,6 +4,30 @@
 JVM class per program. Uses [ASM](https://asm.ow2.io/) for the
 low-level bytes.
 
+## Code structure (emitter modules)
+
+The emitter was one 5k-line class until the 2026-07 refactor; it is
+now a small orchestrator plus focused modules, all package-private in
+`dev.irij.compiler`. `ClassEmitter` owns **all shared state** (fn
+arities, effect rows, spec/proto/handler registries, per-fn scratch
+like `currentPostSlots`) and the multi-pass `emit()` driver; each
+module holds a back-reference `ce` and does one job:
+
+| Class | Job |
+|---|---|
+| `ClassEmitter` | passes, class/file management, `<clinit>`, top-level decls, shared state |
+| `FnEmitter` | named-fn methods, tail returns, spec checks, pre/post contracts, `f$irijfn` wrappers |
+| `ExprEmitter` | expression/statement emission: literals, binds, calls, pipes, collections, scopes |
+| `PatternEmitter` | `match` + pattern tests (constructor/vector/tuple/destructure) |
+| `LambdaEmitter` | lambda methods, free-variable capture analysis |
+| `IntrinsicsEmitter` | builtin fast paths (direct `RuntimeSupport` INVOKESTATICs), builtin effect checks |
+| `EffectEmitter` | `perform`, `with` entry, handler builders, handler-shape scans |
+| `SmClassifier` | with-body classification into `WithBodyShape` (Pure/SingleOp/Sequence/EffIR), A-normalization, tier-c gates |
+| `SmEmitter` | state-machine lowering emission: SM steps, nested `with`, EffIR blocks, tier-c clauses |
+| `ProtoEmitter` | `impl` methods + protocol dispatchers |
+| `SmIr` | shared SM IR records: `Segment`, `WithBodyShape`, `Term`, `BB`, … |
+| `Locals` | JVM local-slot table |
+
 ## Output shape
 
 For `irij.Program`:
