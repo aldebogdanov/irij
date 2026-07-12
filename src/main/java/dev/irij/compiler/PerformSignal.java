@@ -8,12 +8,9 @@ public final class PerformSignal extends RuntimeException {
 
     public PerformSignal() { super(null, null, false, false); }
 
-    public static final ThreadLocal<PerformSignal> POOL =
-            ThreadLocal.withInitial(PerformSignal::new);
-
     public static PerformSignal of(String effectName, String opName,
                                     Object[] args, IrijContinuation k) {
-        PerformSignal s = POOL.get();
+        PerformSignal s = new PerformSignal();
         s.effectName = effectName;
         s.opName = opName;
         s.args = args;

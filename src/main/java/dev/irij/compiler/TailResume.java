@@ -14,11 +14,8 @@ public final class TailResume extends RuntimeException {
 
     public TailResume() { super(null, null, false, false); }
 
-    public static final ThreadLocal<TailResume> POOL =
-            ThreadLocal.withInitial(TailResume::new);
-
     public static TailResume of(Object v, Object target) {
-        TailResume r = POOL.get();
+        TailResume r = new TailResume();
         r.value = v;
         r.target = target;
         return r;

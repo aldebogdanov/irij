@@ -94,17 +94,65 @@ public final class RuntimeSupport {
      *  evals in the session. Inherited by virtual-thread fibers /
      *  spawned tasks so cross-eval fn refs survive into background
      *  work. */
-    public static final ThreadLocal<java.util.Map<String, Object>> NS =
-            ThreadLocal.withInitial(java.util.HashMap::new);
+    public static final ScopedValue<java.util.Map<String, Object>> NS =
+            ScopedValue.newInstance();
 
-    /** Per-thread PrintStream override for sandboxed sessions. When
-     *  set (non-null), every {@link #sessionPrintln} / {@link
-     *  #sessionPrint} call routes there instead of {@code System.out}.
-     *  Inherited by spawned virtual threads so a Playground session's
-     *  spawn captures its stdout into the session buffer rather than
-     *  leaking to the server's process stdout. */
-    public static final ThreadLocal<java.io.PrintStream> SESSION_OUT =
-            new ThreadLocal<>();
+    /** Scoped PrintStream override for sandboxed sessions. When bound,
+     *  every {@code print} / {@code println} call routes there instead
+     *  of {@code System.out}. Bound lexically around each session eval
+     *  ({@link BytecodeSession}); spawned virtual threads re-bind from
+     *  their {@link ParentSnapshot} so a Playground session's spawn
+     *  captures its stdout into the session buffer rather than leaking
+     *  to the server's process stdout. ScopedValue (JEP 506, final in
+     *  JDK 25) replaces the previous ThreadLocals here and for
+     *  {@link #NS}: bindings are structurally scoped, so per-session
+     *  state cannot leak past the eval that installed it. */
+    public static final ScopedValue<java.io.PrintStream> SESSION_OUT =
+            ScopedValue.newInstance();
+
+    /** Current session PrintStream, or null when no session is bound. */
+    public static java.io.PrintStream sessionOut() {
+        return SESSION_OUT.isBound() ? SESSION_OUT.get() : null;
+    }
+
+    /** Fallback namespace for nsGet/nsPut outside any session binding
+     *  (normal `irij run` never emits ns calls; this keeps a stray
+     *  namespace-mode class loaded outside a session working). */
+    private static final java.util.Map<String, Object> GLOBAL_NS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** Current namespace map: the session-bound one, else the global
+     *  fallback. */
+    public static java.util.Map<String, Object> ns() {
+        return NS.isBound() ? NS.get() : GLOBAL_NS;
+    }
+
+    /** Bind session values (either may be null = leave unbound) around
+     *  {@code body}. Shared by session eval, fiber forks, and
+     *  effect-snapshot replay on request threads. */
+    public static void runBoundSession(java.util.Map<String, Object> ns,
+            java.io.PrintStream out, Runnable body) {
+        ScopedValue.Carrier c = carrier(ns, out);
+        if (c == null) body.run(); else c.run(body);
+    }
+
+    /** Value-returning variant of {@link #runBoundSession}. */
+    public static Object callBoundSession(java.util.Map<String, Object> ns,
+            java.io.PrintStream out, java.util.function.Supplier<Object> body) {
+        ScopedValue.Carrier c = carrier(ns, out);
+        return c == null ? body.get() : c.call(body::get);
+    }
+
+    private static ScopedValue.Carrier carrier(java.util.Map<String, Object> ns,
+            java.io.PrintStream out) {
+        ScopedValue.Carrier c = null;
+        if (ns != null) c = ScopedValue.where(NS, ns);
+        if (out != null) {
+            c = (c == null) ? ScopedValue.where(SESSION_OUT, out)
+                            : c.where(SESSION_OUT, out);
+        }
+        return c;
+    }
 
     // (Bytecode effect-row enforcement happens at compile time via
     //  EffectRowChecker.check(decls). No runtime stack needed —
@@ -118,7 +166,7 @@ public final class RuntimeSupport {
 
     /** Look up `name` in the current namespace. Throws if not bound. */
     public static Object nsGet(String name) {
-        var ns = NS.get();
+        var ns = ns();
         if (!ns.containsKey(name)) {
             throw new dev.irij.IrijRuntimeError(
                     "Unbound variable: " + name);
@@ -129,7 +177,7 @@ public final class RuntimeSupport {
     /** Store `name → value` in the current namespace. Returns the
      *  value so call sites can chain (`var := nsPut(...)`). */
     public static Object nsPut(String name, Object value) {
-        NS.get().put(name, value);
+        ns().put(name, value);
         return value;
     }
 
@@ -153,13 +201,13 @@ public final class RuntimeSupport {
     }
 
     public static void print(Object v) {
-        java.io.PrintStream out = SESSION_OUT.get();
+        java.io.PrintStream out = sessionOut();
         if (out == null) out = System.out;
         out.print(display(v));
     }
 
     public static void println(Object v) {
-        java.io.PrintStream out = SESSION_OUT.get();
+        java.io.PrintStream out = sessionOut();
         if (out == null) out = System.out;
         out.println(display(v));
     }

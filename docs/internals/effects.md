@@ -34,9 +34,13 @@ while (true) {
 }
 ```
 
-No threads, no queues. A perform = one throw (stack-trace-free,
-pooled). A resume = one TailResume throw (also pooled). Both unwind
-back to the loop, which iterates.
+No threads, no queues. A perform = one throw (a fresh stack-trace-free
+`PerformSignal`). A resume = one `TailResume` throw (same deal). Both
+unwind back to the loop, which iterates. The instances were pooled
+per-thread until PR3 (2026-07); benchmarking 1M performs showed the
+pool bought nothing (~80 ms either way — stackless exception allocation
+is TLAB-cheap and often scalar-replaced), so the pools were dropped
+along with their shared-mutable-instance hazards.
 
 Cost per perform: ~100ns at JIT steady-state. The throw is amortised
 by HotSpot's escape analysis when `PerformSignal` doesn't escape the
@@ -132,14 +136,14 @@ loop catching the right resume. Without it, the clause's own
 perform-resume would be confused with the outer body's
 perform-resume.
 
-**Pool-snapshot invariant (v0.7.0).** `PerformSignal` and `TailResume`
-are pooled per-thread for zero-allocation control flow. The pool slot
-is shared across nested dispatch loops, so each iteration of
-`dispatchLoopSMImpl` snapshots `sig.effectName`, `sig.opName`,
-`sig.args`, and `sig.continuation` into locals immediately after the
-catch — before invoking the clause. A tier-c clause that performs its
-own effect spawns an inner dispatch loop that reuses the same pool
-instance; without the snapshot, the inner perform would overwrite the
+**Signal-snapshot invariant (v0.7.0, kept post-pooling).** Each
+iteration of `dispatchLoopSMImpl` snapshots `sig.effectName`,
+`sig.opName`, `sig.args`, and `sig.continuation` into locals
+immediately after the catch — before invoking the clause. Signals are
+freshly allocated since PR3 (2026-07), but the snapshot discipline
+stays: a tier-c clause that performs its own effect spawns an inner
+dispatch loop, and reading fields off a signal reference that an inner
+loop may also observe would reintroduce the same aliasing class of
 outer iteration's `sig.continuation`, causing the outer trampoline to
 resume the wrong continuation (and trigger spurious "resume called
 twice" errors).

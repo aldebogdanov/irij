@@ -114,32 +114,33 @@ public final class BytecodeSession {
                 fileLabel != null ? fileLabel : (className + ".irj"));
         Class<?> cls = loader.defineAll(classes, className);
 
-        // Install the session's namespace + (optional) session
-        // PrintStream on this thread. SESSION_OUT routes println /
-        // print and is inherited by spawned virtual threads via
-        // ParentSnapshot — so a fork's stdout still hits the session
-        // buffer even after the synchronous eval returns. Restored
-        // in finally so we never leak per-session state.
-        var prevNS = RuntimeSupport.NS.get();
-        var prevSessionOut = RuntimeSupport.SESSION_OUT.get();
-        RuntimeSupport.NS.set(namespace);
-        if (captureOut != null) RuntimeSupport.SESSION_OUT.set(captureOut);
+        // Bind the session's namespace + (optional) session
+        // PrintStream around the eval. SESSION_OUT routes println /
+        // print; spawned virtual threads re-bind from ParentSnapshot —
+        // so a fork's stdout still hits the session buffer even after
+        // the synchronous eval returns. ScopedValue bindings end with
+        // the call, so per-session state cannot leak to later evals.
         PrintStream prevOut = System.out;
         if (captureOut != null) System.setOut(captureOut);
         try {
             Method main = cls.getMethod("main", String[].class);
-            main.invoke(null, (Object) new String[0]);
-        } catch (java.lang.reflect.InvocationTargetException ite) {
-            Throwable cause = ite.getCause();
-            if (cause instanceof RuntimeException re) throw re;
-            if (cause instanceof Error err) throw err;
-            throw new RuntimeException(cause);
-        } catch (NoSuchMethodException | IllegalAccessException e) {
+            RuntimeSupport.callBoundSession(namespace, captureOut, () -> {
+                try {
+                    main.invoke(null, (Object) new String[0]);
+                    return null;
+                } catch (java.lang.reflect.InvocationTargetException ite) {
+                    Throwable cause = ite.getCause();
+                    if (cause instanceof RuntimeException re) throw re;
+                    if (cause instanceof Error err) throw err;
+                    throw new RuntimeException(cause);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            });
+        } catch (NoSuchMethodException e) {
             throw new RuntimeException(e);
         } finally {
             if (captureOut != null) System.setOut(prevOut);
-            RuntimeSupport.SESSION_OUT.set(prevSessionOut);
-            RuntimeSupport.NS.set(prevNS);
         }
     }
 

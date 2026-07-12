@@ -34,8 +34,8 @@ public final class RtConcurrency {
                 new java.util.ArrayDeque<>(dev.irij.runtime.EffectSystem.STACK.get()),
                 new java.util.ArrayDeque<>(RuntimeSupport.SM_STACK.get()),
                 new java.util.ArrayDeque<>(RtEffects.EFFECT_ROW.get()),
-                RuntimeSupport.NS.get(),
-                RuntimeSupport.SESSION_OUT.get());
+                RuntimeSupport.NS.isBound() ? RuntimeSupport.NS.get() : null,
+                RuntimeSupport.sessionOut());
     }
 
 
@@ -69,13 +69,13 @@ public final class RtConcurrency {
             inheritEffectStack(parent.effectStack());
             inheritSMStack(parent.smStack());
             inheritEffectRow(parent.effectRow());
-            if (parent.namespace() != null) RuntimeSupport.NS.set(parent.namespace());
-            if (parent.sessionOut() != null) RuntimeSupport.SESSION_OUT.set(parent.sessionOut());
-            try {
-                future.complete(RuntimeSupport.callAny(thunk, new Object[0]));
-            } catch (Throwable ex) {
-                future.completeExceptionally(ex);
-            }
+            RuntimeSupport.runBoundSession(parent.namespace(), parent.sessionOut(), () -> {
+                try {
+                    future.complete(RuntimeSupport.callAny(thunk, new Object[0]));
+                } catch (Throwable ex) {
+                    future.completeExceptionally(ex);
+                }
+            });
         });
         return new Fiber(future, t);
     }
@@ -88,14 +88,14 @@ public final class RtConcurrency {
             inheritEffectStack(parent.effectStack());
             inheritSMStack(parent.smStack());
             inheritEffectRow(parent.effectRow());
-            if (parent.namespace() != null) RuntimeSupport.NS.set(parent.namespace());
-            if (parent.sessionOut() != null) RuntimeSupport.SESSION_OUT.set(parent.sessionOut());
-            try { RuntimeSupport.callAny(thunk, new Object[0]); }
-            catch (Throwable t) {
-                java.io.PrintStream err = parent.sessionOut() != null
-                        ? parent.sessionOut() : System.err;
-                err.println("[spawn] error: " + t.getMessage());
-            }
+            RuntimeSupport.runBoundSession(parent.namespace(), parent.sessionOut(), () -> {
+                try { RuntimeSupport.callAny(thunk, new Object[0]); }
+                catch (Throwable t) {
+                    java.io.PrintStream err = parent.sessionOut() != null
+                            ? parent.sessionOut() : System.err;
+                    err.println("[spawn] error: " + t.getMessage());
+                }
+            });
         });
     }
 
