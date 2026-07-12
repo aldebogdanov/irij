@@ -3,34 +3,30 @@ package dev.irij.cli;
 import dev.irij.ast.AstBuilder;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.IrijRuntimeError;
-import dev.irij.runtime.Values;
 import dev.irij.mcp.IrijMcpServer;
 import dev.irij.nrepl.NReplServer;
 import dev.irij.parser.IrijParseDriver;
 import dev.irij.repl.IrijRepl;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.PrintStream;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.stream.Collectors;
 
-// TODO: add "install" and "build" commands to this doc
 /**
- * Irij command-line entry point.
+ * Irij command-line entry point. Word subcommands dispatch to their
+ * own classes ({@link TestCommand}, {@link BuildCommand}, …); flags
+ * and bare file paths fall through to the file runner.
  *
  * Usage:
  *   irij                       — launch interactive REPL
  *   irij <file.irj>            — parse and run a source file
+ *   irij run <file.irj>        — same, explicit
  *   irij test [files|dirs...]  — run test files (auto-discovers test-*.irj)
+ *   irij build | compile | install | publish | version | lsp | help
  *   irij --parse-only <file>   — parse and report errors, no evaluation
  *   irij --ast <file>          — dump parsed AST (debug)
  *   irij --nrepl-server[=PORT] — start nREPL server (default port 7888)
- *   irij --version             — print version
+ *   irij --mcp-server          — start MCP server (stdio)
+ *   irij --version             — print engine version
  */
 public final class IrijCli {
 
@@ -54,47 +50,25 @@ public final class IrijCli {
             return;
         }
 
-        // ── test subcommand ──────────────────────────────────────────────
-        if (args[0].equals("test")) {
-            List<Path> testFiles = resolveTestFiles(args);
-            runTests(testFiles);
-            return;
-        }
-
-        // ── install subcommand ──────────────────────────────────────────
-        if (args[0].equals("install") || args[0].equals("seed")) {
-            runInstall();
-            return;
-        }
-
-        // ── publish subcommand ─────────────────────────────────────────
-        if (args[0].equals("publish") || args[0].equals("sow")) {
-            runPublish();
-            return;
-        }
-
-        // ── version subcommand (commit-count version of the CWD project) ──
-        if (args[0].equals("version")) {
-            runVersion(java.util.Arrays.copyOfRange(args, 1, args.length));
-            return;
-        }
-
-        // ── build subcommand ────────────────────────────────────────────
-        if (args[0].equals("build")) {
-            BuildCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
-            return;
-        }
-
-        // ── compile subcommand (experimental bytecode compiler) ─────────
-        if (args[0].equals("compile")) {
-            CompileCommand.run(java.util.Arrays.copyOfRange(args, 1, args.length));
-            return;
-        }
-
-        // ── lsp subcommand (language server over stdio) ─────────────────
-        if (args[0].equals("lsp")) {
-            dev.irij.lsp.IrijLspServer.run();
-            return;
+        String[] rest = java.util.Arrays.copyOfRange(args, 1, args.length);
+        switch (args[0]) {
+            case "test"             -> { TestCommand.run(args); return; }
+            case "install", "seed"  -> { InstallCommand.run(); return; }
+            case "publish", "sow"   -> { PublishCommand.run(); return; }
+            case "version"          -> { VersionCommand.run(rest); return; }
+            case "build"            -> { BuildCommand.run(rest); return; }
+            case "compile"          -> { CompileCommand.run(rest); return; }
+            case "lsp"              -> { dev.irij.lsp.IrijLspServer.run(); return; }
+            case "repl"             -> { launchRepl(); return; }
+            case "help"             -> { printHelp(); return; }
+            case "run"              -> {
+                if (rest.length == 0) {
+                    System.err.println("Usage: irij run <file.irj>");
+                    System.exit(1);
+                }
+                args = rest;
+            }
+            default -> { /* flags / file path — handled below */ }
         }
 
         // Walk flags
@@ -130,7 +104,7 @@ public final class IrijCli {
                         }
                     } else if (arg.startsWith("-")) {
                         System.err.println("Unknown flag: " + arg);
-                        System.err.println("Run 'irij --help' for usage.");
+                        System.err.println("Run 'irij help' for usage.");
                         System.exit(1);
                     } else {
                         filePath = arg;
@@ -169,6 +143,7 @@ public final class IrijCli {
             result = IrijParseDriver.parseFile(path);
         } catch (IOException e) {
             System.err.println("Cannot read file: " + path + ": " + e.getMessage());
+            System.err.println("Run 'irij help' for usage.");
             System.exit(1);
             return;
         }
@@ -218,435 +193,6 @@ public final class IrijCli {
         }
     }
 
-    // ── Test runner ────────────────────────────────────────────────────
-
-    /**
-     * Resolve test file paths from CLI args.
-     * If no args after "test", default to ./tests/ directory.
-     */
-    private static List<Path> resolveTestFiles(String[] args) {
-        if (args.length == 1) {
-            // irij test — default to ./tests/
-            Path testsDir = Path.of("tests").toAbsolutePath();
-            return discoverTestFiles(testsDir);
-        }
-
-        List<Path> files = new ArrayList<>();
-        for (int i = 1; i < args.length; i++) {
-            Path p = Path.of(args[i]).toAbsolutePath();
-            if (Files.isDirectory(p)) {
-                files.addAll(discoverTestFiles(p));
-            } else {
-                files.add(p);
-            }
-        }
-        return files;
-    }
-
-    /**
-     * Discover test-*.irj files in a directory, sorted by name.
-     */
-    private static List<Path> discoverTestFiles(Path dir) {
-        if (!Files.isDirectory(dir)) {
-            System.err.println("Test directory not found: " + dir);
-            System.exit(1);
-            return List.of();
-        }
-        try (var stream = Files.list(dir)) {
-            return stream
-                    .filter(p -> p.getFileName().toString().matches("test-.*\\.irj"))
-                    .sorted()
-                    .collect(Collectors.toList());
-        } catch (IOException e) {
-            System.err.println("Cannot list directory: " + dir + ": " + e.getMessage());
-            System.exit(1);
-            return List.of();
-        }
-    }
-
-    /**
-     * Run test files, print per-file and grand-total summaries, and exit.
-     */
-    private static void runTests(List<Path> files) {
-        if (files.isEmpty()) {
-            System.err.println("No test files found.");
-            System.exit(1);
-            return;
-        }
-
-        int grandPass = 0;
-        int grandFail = 0;
-        int crashCount = 0;
-        List<String> failedFiles = new ArrayList<>();
-
-        System.out.println("Running " + files.size() + " test file(s)...");
-        System.out.println();
-
-        for (Path file : files) {
-            String fileName = file.getFileName().toString();
-            try {
-                // Parse
-                var result = IrijParseDriver.parseFile(file);
-                if (result.hasErrors()) {
-                    System.out.println("✗ " + fileName + " (PARSE ERROR)");
-                    for (var err : result.errors()) {
-                        System.out.println("    " + file + ":" + err);
-                    }
-                    crashCount++;
-                    failedFiles.add(fileName);
-                    continue;
-                }
-
-                // v0.6.13: bytecode-only execution.
-                var baos = new ByteArrayOutputStream();
-                var ps = new PrintStream(baos, true, StandardCharsets.UTF_8);
-                BytecodeRunner.runFile(file, ps);
-
-                // Count [ok] and [FAIL] lines
-                String output = baos.toString(StandardCharsets.UTF_8);
-                int okCount = 0;
-                int failCount = 0;
-                for (String line : output.split("\n")) {
-                    String trimmed = line.trim();
-                    if (trimmed.startsWith("[ok]")) okCount++;
-                    else if (trimmed.startsWith("[FAIL]")) failCount++;
-                }
-
-                int total = okCount + failCount;
-                grandPass += okCount;
-                grandFail += failCount;
-
-                if (failCount == 0) {
-                    System.out.println("\u2713 " + fileName + " (" + okCount + "/" + total + ")");
-                } else {
-                    System.out.println("\u2717 " + fileName + " (" + okCount + "/" + total + ", " + failCount + " FAILED)");
-                    // Print captured [FAIL] lines for context
-                    for (String line : output.split("\n")) {
-                        if (line.trim().startsWith("[FAIL]")) {
-                            System.out.println("    " + line.trim());
-                        }
-                    }
-                    failedFiles.add(fileName);
-                }
-
-            } catch (IrijRuntimeError e) {
-                System.out.println("\u2717 " + fileName + " (CRASH: " + e.getMessage() + ")");
-                crashCount++;
-                failedFiles.add(fileName);
-            } catch (IOException e) {
-                System.out.println("\u2717 " + fileName + " (IO ERROR: " + e.getMessage() + ")");
-                crashCount++;
-                failedFiles.add(fileName);
-            }
-        }
-
-        // Grand total
-        int grandTotal = grandPass + grandFail;
-        System.out.println();
-        System.out.println("─────────────────────────────────────");
-        if (grandFail == 0 && crashCount == 0) {
-            System.out.println("All passed: " + grandPass + "/" + grandTotal + " tests in " + files.size() + " file(s)");
-        } else {
-            System.out.println("Total: " + grandPass + "/" + grandTotal + " tests passed"
-                    + (crashCount > 0 ? ", " + crashCount + " file(s) crashed" : ""));
-            System.out.println("Failed: " + String.join(", ", failedFiles));
-        }
-
-        System.exit((grandFail == 0 && crashCount == 0) ? 0 : 1);
-    }
-
-    // ── Install ──────────────────────────────────────────────────────────
-
-    private static void runInstall() {
-        var projectRoot = Path.of(System.getProperty("user.dir"));
-        var tomlFile = projectRoot.resolve("irij.toml");
-
-        if (!Files.exists(tomlFile)) {
-            System.out.println("No irij.toml found in " + projectRoot);
-            return;
-        }
-
-        try {
-            var deps = dev.irij.module.ProjectFile.parseDeps(tomlFile);
-            if (deps.isEmpty()) {
-                System.out.println("irij.toml has no seeds to install.");
-                return;
-            }
-
-            System.out.println("Installing " + deps.size() + " seed"
-                + (deps.size() == 1 ? "" : "s") + " ...");
-            var resolver = new dev.irij.module.DependencyResolver(projectRoot, System.out);
-            var resolved = resolver.resolveAll(deps);
-
-            System.out.println();
-            for (var entry : resolved.entrySet()) {
-                System.out.println("  " + entry.getKey() + " → " + entry.getValue());
-            }
-            System.out.println("\nDone.");
-        } catch (dev.irij.module.ProjectFile.ParseError e) {
-            System.err.println("Error in irij.toml: " + e.getMessage());
-            System.exit(1);
-        } catch (IOException e) {
-            System.err.println("Error installing seeds: " + e.getMessage());
-            System.exit(1);
-        }
-    }
-
-    // ── Publish ─────────────────────────────────────────────────────────
-
-    /** Resolve the registry Bearer token: $IRIJ_TOKEN first, then
-     *  ~/.config/irij/token (first non-blank line). Null if neither. */
-    private static String resolvePublishToken() {
-        var env = System.getenv("IRIJ_TOKEN");
-        if (env != null && !env.isBlank()) return env.trim();
-        try {
-            var tokenFile = Path.of(System.getProperty("user.home"),
-                    ".config", "irij", "token");
-            if (Files.exists(tokenFile)) {
-                for (var line : Files.readAllLines(tokenFile)) {
-                    if (!line.isBlank()) return line.trim();
-                }
-            }
-        } catch (Exception ignored) { /* fall through to null */ }
-        return null;
-    }
-
-    /**
-     * {@code irij version [--base|--count|--full]} — print the
-     * commit-count version of the project in the current directory.
-     * Default (and {@code --full}) prints {@code MAJOR.MINOR.<count>} on
-     * main, or {@code MAJOR.MINOR.<count>-<branch>} on a dev branch.
-     * {@code --base} prints the 2-part base from irij.toml; {@code --count}
-     * prints just the commit count.
-     */
-    private static void runVersion(String[] args) {
-        var projectRoot = Path.of(System.getProperty("user.dir"));
-        var tomlFile = projectRoot.resolve("irij.toml");
-        if (!Files.exists(tomlFile)) {
-            System.err.println("No irij.toml in " + projectRoot + " — `irij version` "
-                + "reports the version of an Irij project.");
-            System.exit(1);
-            return;
-        }
-        String mode = args.length > 0 ? args[0] : "--full";
-        try {
-            var meta = dev.irij.module.ProjectFile.parseFile(tomlFile).meta();
-            String base = meta == null ? "" : meta.version();
-            switch (mode) {
-                case "--count" -> System.out.println(
-                        dev.irij.module.ProjectVersion.commitCount(projectRoot).orElse(0));
-                case "--base" -> {
-                    dev.irij.module.ProjectVersion.requireMajorMinorBase(base);
-                    System.out.println(base.trim());
-                }
-                case "--full", "" -> System.out.println(
-                        dev.irij.module.ProjectVersion.buildVersion(projectRoot, base));
-                default -> {
-                    System.err.println("Unknown flag: " + mode
-                        + " (expected --full, --base, or --count)");
-                    System.exit(1);
-                }
-            }
-        } catch (IllegalArgumentException e) {
-            System.err.println("Error: " + e.getMessage());
-            System.exit(1);
-        } catch (Exception e) {
-            System.err.println("Error reading irij.toml: " + e.getMessage());
-            System.exit(1);
-        }
-    }
-
-    private static void runPublish() {
-        var projectRoot = Path.of(System.getProperty("user.dir"));
-        var tomlFile = projectRoot.resolve("irij.toml");
-
-        if (!Files.exists(tomlFile)) {
-            System.err.println("No irij.toml found. Cannot publish without project metadata.");
-            System.exit(1);
-            return;
-        }
-
-        try {
-            var result = dev.irij.module.ProjectFile.parseFile(tomlFile);
-            var meta = result.meta();
-
-            // Validate required fields
-            if (meta == null || meta.name().isBlank() || meta.version().isBlank()
-                    || meta.author().isBlank() || meta.description().isBlank()) {
-                System.err.println("Error: irij.toml [project] must have name, version, author, and description.");
-                System.exit(1);
-                return;
-            }
-
-            // Optional link fields must be real web URLs — a typo'd link on
-            // the registry seed page is worse than none.
-            for (var link : new String[][] {
-                    {"website", meta.website()}, {"repo", meta.repo()}, {"docs", meta.docs()}}) {
-                if (!link[1].isBlank()
-                        && !link[1].startsWith("https://") && !link[1].startsWith("http://")) {
-                    System.err.println("Error: irij.toml [project] " + link[0]
-                        + " must be an http(s):// URL (got '" + link[1] + "').");
-                    System.exit(1);
-                    return;
-                }
-            }
-
-            // Commit-count versioning: the [project] version is a 2-part
-            // MAJOR.MINOR base; the published version is base + "." + the
-            // git commit count. Reject a hand-picked patch (decision: a
-            // manual patch must never collide with the commit-count one).
-            try {
-                dev.irij.module.ProjectVersion.requireMajorMinorBase(meta.version());
-            } catch (IllegalArgumentException e) {
-                System.err.println("Error: " + e.getMessage());
-                System.exit(1);
-                return;
-            }
-            // Releases come from main only, from a clean tree (the branch
-            // guard lives here, not in the version string).
-            var curBranch = dev.irij.module.ProjectVersion.branch(projectRoot).orElse("");
-            if (!dev.irij.module.ProjectVersion.isReleaseBranch(curBranch)) {
-                System.err.println("Error: `irij publish` must run on the main branch "
-                    + "(on '" + (curBranch.isBlank() ? "<detached/unknown>" : curBranch) + "').");
-                System.err.println("  Commit-count releases come from main only; a feature "
-                    + "branch would mint a different patch.");
-                System.exit(1);
-                return;
-            }
-            if (!dev.irij.module.ProjectVersion.isClean(projectRoot)) {
-                System.err.println("Error: working tree is not clean — commit or stash first.");
-                System.err.println("  The published version is derived from the commit count, so "
-                    + "uncommitted work would be mis-stamped.");
-                System.exit(1);
-                return;
-            }
-            // The full MAJOR.MINOR.<count> version used for the rest of publish.
-            final String publishVersion =
-                    dev.irij.module.ProjectVersion.releaseVersion(projectRoot, meta.version());
-
-            // Reject path deps
-            for (var dep : result.deps()) {
-                if (dep.source() instanceof dev.irij.module.ProjectFile.DepSource.PathDep) {
-                    System.err.println("Error: cannot publish with path seed '" + dep.name()
-                        + "'. Convert to registry or git seed first.");
-                    System.exit(1);
-                    return;
-                }
-            }
-
-            // Collect .irj files + README + irij.toml
-            var filesToBundle = new ArrayList<Path>();
-            filesToBundle.add(tomlFile);
-            try (var stream = Files.walk(projectRoot, 5)) {
-                stream.filter(p -> Files.isRegularFile(p)
-                        && !p.startsWith(projectRoot.resolve(".git"))
-                        && !p.startsWith(projectRoot.resolve("build"))
-                        && !p.startsWith(projectRoot.resolve(".irij"))
-                        && (p.toString().endsWith(".irj")
-                            || p.getFileName().toString().equalsIgnoreCase("README.md")
-                            || p.getFileName().toString().equalsIgnoreCase("README")))
-                    .forEach(filesToBundle::add);
-            }
-
-            // Build tarball
-            var tarball = Files.createTempFile("irij-publish-", ".tar.gz");
-            try {
-                var tarArgs = new ArrayList<String>();
-                tarArgs.add("tar");
-                tarArgs.add("czf");
-                tarArgs.add(tarball.toString());
-                tarArgs.add("-C");
-                tarArgs.add(projectRoot.toString());
-                for (var f : filesToBundle) {
-                    tarArgs.add(projectRoot.relativize(f).toString());
-                }
-                var pb = new ProcessBuilder(tarArgs)
-                    .redirectErrorStream(true);
-                var proc = pb.start();
-                try (var is = proc.getInputStream()) { is.readAllBytes(); }
-                if (proc.waitFor() != 0) {
-                    System.err.println("Error creating tarball.");
-                    System.exit(1);
-                    return;
-                }
-
-                // Upload to registry
-                var registryUrl = System.getenv().getOrDefault("IRIJ_REGISTRY", "https://irij.online");
-                var url = registryUrl + "/api/seeds/publish";
-
-                System.out.println("Publishing " + meta.name() + " " + publishVersion + " ...");
-
-                // Multipart upload: metadata JSON + tarball
-                var boundary = "----IrijPublish" + System.currentTimeMillis();
-                var metaJson = "{\"name\":" + jsonStr(meta.name())
-                    + ",\"version\":" + jsonStr(publishVersion)
-                    + ",\"description\":" + jsonStr(meta.description())
-                    + ",\"author\":" + jsonStr(meta.author())
-                    + ",\"license\":" + jsonStr(meta.license())
-                    + ",\"website\":" + jsonStr(meta.website())
-                    + ",\"repo\":" + jsonStr(meta.repo())
-                    + ",\"docs\":" + jsonStr(meta.docs()) + "}";
-
-                var bodyBaos = new ByteArrayOutputStream();
-                bodyBaos.write(("--" + boundary + "\r\n").getBytes());
-                bodyBaos.write("Content-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n".getBytes());
-                bodyBaos.write(metaJson.getBytes());
-                bodyBaos.write(("\r\n--" + boundary + "\r\n").getBytes());
-                bodyBaos.write(("Content-Disposition: form-data; name=\"tarball\"; filename=\""
-                    + meta.name() + "-" + publishVersion + ".tar.gz\"\r\n"
-                    + "Content-Type: application/gzip\r\n\r\n").getBytes());
-                bodyBaos.write(Files.readAllBytes(tarball));
-                bodyBaos.write(("\r\n--" + boundary + "--\r\n").getBytes());
-
-                // Bearer token for the multi-tenant registry. Sources, in
-                // priority order: $IRIJ_TOKEN, then ~/.config/irij/token.
-                // Create one at <registry>/dashboard → "Create token".
-                var token = resolvePublishToken();
-                if (token == null || token.isBlank()) {
-                    System.err.println("No registry token found. Publishing requires one.");
-                    System.err.println("  1. Create a token at " + registryUrl + "/dashboard");
-                    System.err.println("  2. Provide it via either:");
-                    System.err.println("       export IRIJ_TOKEN=<token>");
-                    System.err.println("       echo <token> > ~/.config/irij/token");
-                    System.exit(1);
-                    return;
-                }
-
-                var client = java.net.http.HttpClient.newHttpClient();
-                var request = java.net.http.HttpRequest.newBuilder()
-                    .uri(java.net.URI.create(url))
-                    .header("Content-Type", "multipart/form-data; boundary=" + boundary)
-                    .header("Authorization", "Bearer " + token.trim())
-                    .POST(java.net.http.HttpRequest.BodyPublishers.ofByteArray(bodyBaos.toByteArray()))
-                    .build();
-
-                var response = client.send(request,
-                    java.net.http.HttpResponse.BodyHandlers.ofString());
-
-                if (response.statusCode() == 200 || response.statusCode() == 201) {
-                    System.out.println("Published " + meta.name() + " " + publishVersion + " ✓");
-                } else {
-                    System.err.println("Publish failed (HTTP " + response.statusCode() + "): " + response.body());
-                    System.exit(1);
-                }
-            } finally {
-                Files.deleteIfExists(tarball);
-            }
-        } catch (dev.irij.module.ProjectFile.ParseError e) {
-            System.err.println("Error in irij.toml: " + e.getMessage());
-            System.exit(1);
-        } catch (Exception e) {
-            System.err.println("Error publishing: " + e.getMessage());
-            System.exit(1);
-        }
-    }
-
-    private static String jsonStr(String s) {
-        if (s == null) return "\"\"";
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
-    }
-
-
     // ── Help ─────────────────────────────────────────────────────────────
 
     private static void printHelp() {
@@ -654,8 +200,8 @@ public final class IrijCli {
             Irij ℑ  programming language
 
             Usage:
-              irij                       start interactive REPL
-              irij <file.irj>            run a source file
+              irij                       start interactive REPL (alias: irij repl)
+              irij <file.irj>            run a source file (alias: irij run <file.irj>)
               irij build                 package app into self-contained JAR (bytecode-sm, default since v0.6.x)
               irij build <file.irj>      build with explicit entry point
               irij build -o out.jar      build with custom output path
@@ -677,7 +223,7 @@ public final class IrijCli {
               irij --mcp-server          start MCP server (stdio, for Claude Code)
               irij --nrepl-server        start nREPL server (port 7888)
               irij --nrepl-server=PORT   start nREPL server on PORT
-              irij --version             print version
-              irij --help                this message""");
+              irij --version             print engine version
+              irij help                  this message (also --help)""");
     }
 }

@@ -1,6 +1,7 @@
 # Bytecode compiler
 
-`dev.irij.compiler.ClassEmitter` + `RuntimeSupport`. Emits a single
+`dev.irij.compiler.ClassEmitter` (+ emitter modules) and the
+`RuntimeSupport`/`Rt*` runtime classes. Emits a single
 JVM class per program. Uses [ASM](https://asm.ow2.io/) for the
 low-level bytes.
 
@@ -27,6 +28,17 @@ module holds a back-reference `ce` and does one job:
 | `ProtoEmitter` | `impl` methods + protocol dispatchers |
 | `SmIr` | shared SM IR records: `Segment`, `WithBodyShape`, `Term`, `BB`, … |
 | `Locals` | JVM local-slot table |
+
+The runtime side got the same treatment: `RuntimeSupport` (IrijFn,
+callAny, nREPL namespace state, hot-redef bootstrap, builtin registry)
+plus domain classes `RtOps`, `RtMath`, `RtStrings`, `RtCollections`,
+`RtEffects`, `RtConcurrency`, `RtInterop`, `RtIo`, and public
+top-level runtime types (`IrijContinuation`, `PerformSignal`,
+`TailResume`, `CompiledHandler`, `CompiledScopeHandle`, …) that
+emitted bytecode references by descriptor. Emit sites resolve each
+runtime symbol's owning class through `RtOwners.of(name)` — a
+reflection-built map with fail-fast ambiguity detection — so the
+runtime classes themselves are the single source of truth.
 
 ## Output shape
 
@@ -95,7 +107,7 @@ A module-free program still emits exactly one class — the map has a
 single entry and behaviour is identical to before.
 
 Everything is `static`. No instance state. No subclasses except for
-internal helpers (`IrijContinuation` lives in `RuntimeSupport`, not in
+internal helpers (`IrijContinuation` is a public top-level class in `dev.irij.compiler`, not in
 the user's class) and the per-source-file fn classes above.
 
 ## Value model

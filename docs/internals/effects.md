@@ -93,7 +93,7 @@ For each shape, the emitter:
 
 1. Allocates a static `smstep$N` method holding the state machine.
 2. Builds an `IrijFn` wrapper via `LambdaMetafactory`.
-3. Calls `RuntimeSupport.runWithSM(handler, step, nFields)` at the
+3. Calls `RtEffects.runWithSM(handler, step, nFields)` at the
    `with` site.
 
 ## Nested `with` (native dual-SM)
@@ -103,7 +103,7 @@ detects `Stmt.With(inner, ...)` as a *segment terminator*. At that
 segment, the emitter:
 
 1. Allocates or fetches `kInner` from `kOuter.fields[innerSlot]` via
-   `RuntimeSupport.getOrAllocInnerCont`.
+   `RtEffects.getOrAllocInnerCont`.
 2. Calls `runWithSM(innerHandler, kInner, vSlot)` — a re-entrant
    overload that threads the outer-handled resume value into `kInner`
    on re-entry.

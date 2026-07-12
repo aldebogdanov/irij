@@ -5,7 +5,13 @@ hosting: Java-side builtins are reachable from the bytecode emitter
 via `RuntimeSupport` static methods; `.irj` files get inlined +
 compiled. Single execution model since v0.6.20 (R5d).
 
-## Java side — `RuntimeSupport` static methods + `Builtins` registry
+## Java side — `RuntimeSupport`/`Rt*` statics + `Builtins` registry
+
+One implementation per builtin since the 2026-07 refactor: the
+statics on `RtOps`/`RtMath`/`RtStrings`/`RtCollections`/`RtIo`/…
+are the single source of truth (they are what call-position
+intrinsics INVOKESTATIC), and the `Builtins` registry's
+value-position `BuiltinFn` entries delegate to them.
 
 Registered as `BuiltinFn` objects in the global environment:
 

@@ -47,7 +47,7 @@ Modifiers:
 - `scope.supervised` — let children fail independently; main body
   result is what scope returns.
 
-Implementation: `RuntimeSupport.CompiledScopeHandle`. `fork(thunk)`
+Implementation: `CompiledScopeHandle (top-level in dev.irij.compiler)`. `fork(thunk)`
 spawns a vthread tracked in the handle's fiber list; block-exit
 invokes `joinByModifier(modifier, fibers)`.
 
@@ -58,10 +58,10 @@ at fork time. Two thread-local stacks need to be propagated:
 
 | Stack | Purpose |
 |---|---|
-| `RuntimeSupport.SM_STACK` | State-machine handler frames (the only effect dispatch path since v0.6.13) |
+| `RuntimeSupport.SM_STACK` (dispatch machinery itself lives in `RtEffects`) | State-machine handler frames (the only effect dispatch path since v0.6.13) |
 | `EffectSystem.STACK` | Legacy handler-context stack; still walked as a fallback by `fireOp` for fibers spawned outside any SM `with` |
 
-`RuntimeSupport.snapParent()` snapshots both stacks (via
+`RtConcurrency.snapParent()` snapshots both stacks (via
 `ParentSnapshot` record). Spawn / forkOne / par / race / timeout /
 scope-fork all use it. The fiber installs both with
 `inheritEffectStack(...)` and `inheritSMStack(...)` at the top of its
@@ -82,9 +82,9 @@ effect: X.op (no handler on stack)".
 The public snapshot API for capabilities:
 
 ```java
-RuntimeSupport.EffectSnapshot snap = RuntimeSupport.snapshotEffects();
+EffectSnapshot snap = RtEffects.snapshotEffects();
 // later, on the worker thread:
-Object result = RuntimeSupport.runWithEffectSnapshot(snap,
+Object result = RtEffects.runWithEffectSnapshot(snap,
         () -> RuntimeSupport.callAny(userHandler, new Object[]{arg}));
 ```
 
