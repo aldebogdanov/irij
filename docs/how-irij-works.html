@@ -240,7 +240,8 @@ evaluate to <code>Str</code>.</p>
 <p>Self-recursive calls in tail position compile to <code>GOTO</code> back to
 the function entry with parameter slots rebound in place — O(1) stack, no
 trampoline. <code>emitTailExpr</code> walks tail positions (if-branches, last
-block expression, match arm bodies); everything else falls through to
+block expression, match arm bodies, the last expression of a
+<code>do</code>); everything else falls through to
 <code>emitExpr + ARETURN</code>. New argument values are all evaluated on the
 JVM stack <em>before</em> any slot is overwritten, so
 <code>sum-to (acc + n) (n - 1)</code> can't read a half-updated frame.
@@ -255,8 +256,10 @@ each <code>with</code> body into a <strong>resumable state machine</strong>;
 there are no threads or queues in the dispatch path.</p>
 
 <h3>Classification</h3>
-<p><code>SmClassifier</code> A-normalizes the body (every op call becomes
-<code>x := op args</code> or a bare op statement), then classifies it into a
+<p><code>SmClassifier</code> A-normalizes the body — every op call, including
+one embedded inside a pipe, map literal, string interpolation, range,
+record update, or <code>do</code>, is lifted in source order to
+<code>x := op args</code> or a bare op statement — then classifies it into a
 <code>WithBodyShape</code>:</p>
 <table>
 <tr><th>Shape</th><th>Meaning</th></tr>
@@ -302,7 +305,12 @@ there are no threads or queues in the dispatch path.</p>
 <p>The continuation object (<code>IrijContinuation</code>) holds
 <code>state</code> (which segment runs next) and <code>fields</code> (lifted
 locals). Handler mutable state (<code>state :! 0</code>, <code>&lt;-</code>)
-lives in per-handler static fields, readable from outside via dot-access.
+is a <strong>named global cell</strong>: one static field per handler
+<em>declaration</em>, initialized once at the declaration and never reset by
+<code>with</code> — successive or cross-thread <code>with h</code> blocks
+share it, and <code>h.state</code> (a plain field read) stays valid after the
+<code>with</code> returns, which is how test handlers hand results back.
+Mutating one handler's state from parallel fibers is a knowing data race.
 Handlers compose with <code>&gt;&gt;</code>
 (<code>CompiledComposedHandler</code>); nested <code>with</code> persists the
 inner continuation in the outer's fields. A clause body that performs its own

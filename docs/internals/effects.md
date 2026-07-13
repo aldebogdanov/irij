@@ -46,6 +46,28 @@ Cost per perform: ~100ns at JIT steady-state. The throw is amortised
 by HotSpot's escape analysis when `PerformSignal` doesn't escape the
 catching frame.
 
+## Handler state: one global cell per declaration
+
+`state :! init` compiles to a **static field** on the program class
+(`handler$<name>$state$<var>`, see `ClassEmitter` pass 1 +
+`EffectEmitter.emitHandlerStateInit`). Lifetime and scope, pinned in
+spec §3.2 and verified by probes:
+
+- **Init once** — when `main` reaches the handler *declaration*, not
+  at `with` entry. Entering `with h` never resets state; sequential
+  `with h` blocks accumulate.
+- **Global across threads** — fibers and the parent read/write the
+  same static. `ParentSnapshot` copies handler *stacks*, never state
+  cells (they were never thread-local to begin with).
+- **`h.state` dot-access** is a plain GETSTATIC — valid anywhere,
+  including after the `with` returns. That read-after-`with` idiom is
+  how test handlers hand results back (std.log tests, the SM coverage
+  matrix) and is the reason per-`with` fresh state was rejected.
+- **Races are real**: `state <- conj state s` is a non-atomic
+  read-modify-write. Concurrent `with h` over one handler can lose
+  updates. Confine a stateful handler to one thread, or accept the
+  race knowingly.
+
 ## Classification coverage (PR7, 2026-07)
 
 `containsOpCallExpr` detects op calls in every expression position:
