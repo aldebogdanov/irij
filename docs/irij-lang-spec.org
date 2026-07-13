@@ -523,6 +523,20 @@
    with mock-console
      greet "world"      ;; greet's print/read-line go to in-memory list
 
+   *Handler-state semantics (decided v0.8):* a =state :!= binding is a
+   *named global cell* owned by the handler declaration — one cell per
+   program, not per =with= entry, not per thread. It initializes once,
+   when execution reaches the declaration, and is *never reset* by
+   entering =with=; successive (or concurrently running) =with h=
+   blocks in any thread read and write the same cell, and
+   =h.state= reads its current value from anywhere, including after a
+   =with= returns (the idiom used to extract results from a test
+   handler). Concurrent mutation is a plain data race — =<-= is a
+   non-atomic read-modify-write — so a handler whose state is mutated
+   from parallel fibers must be confined to one thread or treated as
+   intentionally racy. A fresh-state-per-=with= design was considered
+   and rejected: it would break read-after-=with= extraction.
+
    ;; composing handlers: stack multiple effect implementations
    with (mock-console >> file-to-memory >> http-to-cache)
      sync-data ()        ;; all three effects handled, fully pure

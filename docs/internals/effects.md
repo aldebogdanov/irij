@@ -46,6 +46,49 @@ Cost per perform: ~100ns at JIT steady-state. The throw is amortised
 by HotSpot's escape analysis when `PerformSignal` doesn't escape the
 catching frame.
 
+## Handler state: one global cell per declaration
+
+`state :! init` compiles to a **static field** on the program class
+(`handler$<name>$state$<var>`, see `ClassEmitter` pass 1 +
+`EffectEmitter.emitHandlerStateInit`). Lifetime and scope, pinned in
+spec §3.2 and verified by probes:
+
+- **Init once** — when `main` reaches the handler *declaration*, not
+  at `with` entry. Entering `with h` never resets state; sequential
+  `with h` blocks accumulate.
+- **Global across threads** — fibers and the parent read/write the
+  same static. `ParentSnapshot` copies handler *stacks*, never state
+  cells (they were never thread-local to begin with).
+- **`h.state` dot-access** is a plain GETSTATIC — valid anywhere,
+  including after the `with` returns. That read-after-`with` idiom is
+  how test handlers hand results back (std.log tests, the SM coverage
+  matrix) and is the reason per-`with` fresh state was rejected.
+- **Races are real**: `state <- conj state s` is a non-atomic
+  read-modify-write. Concurrent `with h` over one handler can lose
+  updates. Confine a stateful handler to one thread, or accept the
+  race knowingly.
+
+## Classification coverage (PR7, 2026-07)
+
+`containsOpCallExpr` detects op calls in every expression position:
+App, BinaryOp, UnaryOp, IfExpr, Block, Lambda (conservative), the
+collection literals, DotAccess, MatchExpr, **and** — since PR7 —
+Pipe, Compose, SeqOp, DoExpr, Range, StringInterp, MapLit (including
+dynamic keys), and RecordUpdate. The A-normalizer has matching
+rebuild cases for each, so an op embedded in any of those positions
+is lifted to a fresh bind in source order and the body classifies
+into a native SM shape instead of riding the SM_STACK runtime
+fallback. `SmLoweringCoverageTest` pins the observable behavior
+(values + handler-state order) across a shapes × positions matrix;
+it passed identically before and after the flip, proving the
+fallback and native paths agree.
+
+`exprPerformsForeignEffect` (tier-c gating for handler clauses) was
+deliberately **not** extended — widening it would reroute clause
+bodies with foreign ops in embedded positions from the threaded
+fallback to tier-c compilation, which needs its own shape-coverage
+work first.
+
 ## State-machine details
 
 `emitWithSM` classifies the body into one of these shapes:
@@ -212,3 +255,4 @@ Spawned fibers inherit `SM_STACK` (SM handler frames), `EFFECT_ROW`
 per-thread session PrintStream (`SESSION_OUT`) via `ParentSnapshot`
 — see `concurrency.md`. `fireOp` from a fiber walks `SM_STACK` and
 dispatches synchronously.
+

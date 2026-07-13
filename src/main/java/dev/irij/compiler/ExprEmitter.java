@@ -51,6 +51,17 @@ final class ExprEmitter implements Opcodes {
             return;
         }
 
+        // 2a. Tail-propagating shape: `do e1 ... en` — the last
+        // expression is in tail position (self-calls there become GOTO).
+        if (e instanceof Expr.DoExpr de && !de.exprs().isEmpty()) {
+            for (int i = 0; i < de.exprs().size() - 1; i++) {
+                emitExpr(de.exprs().get(i), mv, locals);
+                mv.visitInsn(POP);
+            }
+            emitTailExpr(de.exprs().get(de.exprs().size() - 1), mv, locals);
+            return;
+        }
+
         // 2. Tail-propagating shape: if/else — both branches are tail.
         if (e instanceof Expr.IfExpr ie) {
             emitExpr(ie.cond(), mv, locals);
@@ -345,6 +356,19 @@ final class ExprEmitter implements Opcodes {
             case Expr.MatchExpr me -> ce.patEm.emitMatchExpr(me, mv, locals);
             case Expr.Lambda lam -> ce.lamEm.emitLambda(lam, mv, locals);
             case Expr.Block blk -> emitBlock(blk, mv, locals);
+            case Expr.DoExpr de -> {
+                // `do e1 e2 ... en` — evaluate in order, keep only the
+                // last value (spec §1.3.2: sequence effects).
+                if (de.exprs().isEmpty()) {
+                    mv.visitFieldInsn(GETSTATIC, ClassEmitter.VALUES, "UNIT", ClassEmitter.OBJ_DESC);
+                } else {
+                    for (int i = 0; i < de.exprs().size() - 1; i++) {
+                        emitExpr(de.exprs().get(i), mv, locals);
+                        mv.visitInsn(POP);
+                    }
+                    emitExpr(de.exprs().get(de.exprs().size() - 1), mv, locals);
+                }
+            }
             case Expr.DotAccess da -> emitDotAccess(da, mv, locals);
             case Expr.JavaRef jr -> {
                 mv.visitLdcInsn(jr.ref());

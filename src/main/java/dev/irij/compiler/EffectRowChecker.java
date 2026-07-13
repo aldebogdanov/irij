@@ -464,6 +464,7 @@ public final class EffectRowChecker {
             case Expr.Lambda lam -> walkExpr(lam.body(), avail, ctx);
             case Expr.VectorLit vl -> { for (Expr x : vl.elements()) walkExpr(x, avail, ctx); }
             case Expr.SetLit sl -> { for (Expr x : sl.elements()) walkExpr(x, avail, ctx); }
+            case Expr.DoExpr de -> { for (Expr x : de.exprs()) walkExpr(x, avail, ctx); }
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) walkExpr(x, avail, ctx); }
             case Expr.MapLit ml -> {
                 for (var me : ml.entries()) {
@@ -854,6 +855,7 @@ public final class EffectRowChecker {
             }
             case Expr.VectorLit vl -> { for (Expr x : vl.elements()) collectInto(x, out); }
             case Expr.SetLit sl -> { for (Expr x : sl.elements()) collectInto(x, out); }
+            case Expr.DoExpr de -> { for (Expr x : de.exprs()) collectInto(x, out); }
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) collectInto(x, out); }
             case Expr.MapLit ml -> {
                 for (var me : ml.entries()) {

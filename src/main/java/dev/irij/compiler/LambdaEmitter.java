@@ -241,6 +241,9 @@ final class LambdaEmitter implements Opcodes {
                 collectFreeVars(r.from(), bound, outer, out, seen);
                 collectFreeVars(r.to(), bound, outer, out, seen);
             }
+            case Expr.DoExpr de -> {
+                for (Expr x : de.exprs()) collectFreeVars(x, bound, outer, out, seen);
+            }
             default -> { /* literals, TypeRef, Keyword — no free vars */ }
         }
     }
