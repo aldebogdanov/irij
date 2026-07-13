@@ -46,6 +46,27 @@ Cost per perform: ~100ns at JIT steady-state. The throw is amortised
 by HotSpot's escape analysis when `PerformSignal` doesn't escape the
 catching frame.
 
+## Classification coverage (PR7, 2026-07)
+
+`containsOpCallExpr` detects op calls in every expression position:
+App, BinaryOp, UnaryOp, IfExpr, Block, Lambda (conservative), the
+collection literals, DotAccess, MatchExpr, **and** — since PR7 —
+Pipe, Compose, SeqOp, DoExpr, Range, StringInterp, MapLit (including
+dynamic keys), and RecordUpdate. The A-normalizer has matching
+rebuild cases for each, so an op embedded in any of those positions
+is lifted to a fresh bind in source order and the body classifies
+into a native SM shape instead of riding the SM_STACK runtime
+fallback. `SmLoweringCoverageTest` pins the observable behavior
+(values + handler-state order) across a shapes × positions matrix;
+it passed identically before and after the flip, proving the
+fallback and native paths agree.
+
+`exprPerformsForeignEffect` (tier-c gating for handler clauses) was
+deliberately **not** extended — widening it would reroute clause
+bodies with foreign ops in embedded positions from the threaded
+fallback to tier-c compilation, which needs its own shape-coverage
+work first.
+
 ## State-machine details
 
 `emitWithSM` classifies the body into one of these shapes:
@@ -212,3 +233,4 @@ Spawned fibers inherit `SM_STACK` (SM handler frames), `EFFECT_ROW`
 per-thread session PrintStream (`SESSION_OUT`) via `ParentSnapshot`
 — see `concurrency.md`. `fireOp` from a fiber walks `SM_STACK` and
 dispatches synchronously.
+

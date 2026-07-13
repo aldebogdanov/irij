@@ -343,6 +343,20 @@ final class SmClassifier implements Opcodes {
             return new Expr.App(app.fn(), args, app.loc());
         }
 
+        /** Normalize one map entry (map literal or record update),
+         *  lifting ops from values and dynamic keys in source order. */
+        Expr.MapEntry normalizeMapEntry(Expr.MapEntry en, List<Stmt> out) {
+            return switch (en) {
+                case Expr.MapEntry.Field f ->
+                        new Expr.MapEntry.Field(f.key(), normalizeExpr(f.value(), out));
+                case Expr.MapEntry.DynField df ->
+                        new Expr.MapEntry.DynField(
+                                normalizeExpr(df.keyExpr(), out),
+                                normalizeExpr(df.value(), out));
+                case Expr.MapEntry.Spread sp -> sp;
+            };
+        }
+
         /** Normalize an expression in a non-top-level position. Any op call
          *  encountered is lifted to a fresh Simple-Bind in {@code out}. */
         Expr normalizeExpr(Expr e, List<Stmt> out) {
@@ -388,6 +402,45 @@ final class SmClassifier implements Opcodes {
                     List<Expr> xs = new ArrayList<>();
                     for (Expr x : sl.elements()) xs.add(normalizeExpr(x, out));
                     yield new Expr.SetLit(xs, sl.loc());
+                }
+                case Expr.Compose c -> new Expr.Compose(
+                        normalizeExpr(c.left(), out),
+                        normalizeExpr(c.right(), out), c.forward(), c.loc());
+                case Expr.SeqOp so -> new Expr.SeqOp(so.op(),
+                        normalizeExpr(so.arg(), out), so.loc());
+                case Expr.Range r -> new Expr.Range(
+                        normalizeExpr(r.from(), out),
+                        normalizeExpr(r.to(), out), r.exclusive(), r.loc());
+                case Expr.DoExpr de -> {
+                    List<Expr> xs = new ArrayList<>();
+                    for (Expr x : de.exprs()) xs.add(normalizeExpr(x, out));
+                    yield new Expr.DoExpr(xs, de.loc());
+                }
+                case Expr.StringInterp si -> {
+                    List<Expr.StringPart> parts = new ArrayList<>();
+                    for (Expr.StringPart part : si.parts()) {
+                        if (part instanceof Expr.StringPart.Interpolation ip) {
+                            parts.add(new Expr.StringPart.Interpolation(
+                                    normalizeExpr(ip.expr(), out)));
+                        } else {
+                            parts.add(part);
+                        }
+                    }
+                    yield new Expr.StringInterp(parts, si.loc());
+                }
+                case Expr.MapLit ml -> {
+                    List<Expr.MapEntry> entries = new ArrayList<>();
+                    for (Expr.MapEntry en : ml.entries()) {
+                        entries.add(normalizeMapEntry(en, out));
+                    }
+                    yield new Expr.MapLit(entries, ml.loc());
+                }
+                case Expr.RecordUpdate ru -> {
+                    List<Expr.MapEntry> updates = new ArrayList<>();
+                    for (Expr.MapEntry en : ru.updates()) {
+                        updates.add(normalizeMapEntry(en, out));
+                    }
+                    yield new Expr.RecordUpdate(ru.base(), updates, ru.loc());
                 }
                 // IfExpr / MatchExpr / Lambda / Block: can't easily A-normalize
                 // inline — leave untouched; EffIRBuilder will reject if ops
@@ -728,6 +781,54 @@ final class SmClassifier implements Opcodes {
                 for (Expr.MatchArm arm : me.arms()) {
                     if (containsOpCallExpr(arm.guard())) yield true;
                     if (containsOpCallExpr(arm.body())) yield true;
+                }
+                yield false;
+            }
+            // PR7: positions that previously fell through to the
+            // SM_STACK fallback — now detected so bodies classify into
+            // native SM shapes (SmLoweringCoverageTest pins behavior).
+            case Expr.Pipe p -> containsOpCallExpr(p.left()) || containsOpCallExpr(p.right());
+            case Expr.Compose c -> containsOpCallExpr(c.left()) || containsOpCallExpr(c.right());
+            case Expr.SeqOp so -> so.arg() != null && containsOpCallExpr(so.arg());
+            case Expr.DoExpr de -> {
+                for (Expr x : de.exprs()) if (containsOpCallExpr(x)) yield true;
+                yield false;
+            }
+            case Expr.Range r -> containsOpCallExpr(r.from()) || containsOpCallExpr(r.to());
+            case Expr.StringInterp si -> {
+                for (Expr.StringPart part : si.parts()) {
+                    if (part instanceof Expr.StringPart.Interpolation ip
+                            && containsOpCallExpr(ip.expr())) yield true;
+                }
+                yield false;
+            }
+            case Expr.MapLit ml -> {
+                for (Expr.MapEntry en : ml.entries()) {
+                    switch (en) {
+                        case Expr.MapEntry.Field f -> {
+                            if (containsOpCallExpr(f.value())) yield true;
+                        }
+                        case Expr.MapEntry.DynField df -> {
+                            if (containsOpCallExpr(df.keyExpr())
+                                    || containsOpCallExpr(df.value())) yield true;
+                        }
+                        case Expr.MapEntry.Spread sp -> { /* var ref, no op */ }
+                    }
+                }
+                yield false;
+            }
+            case Expr.RecordUpdate ru -> {
+                for (Expr.MapEntry en : ru.updates()) {
+                    switch (en) {
+                        case Expr.MapEntry.Field f -> {
+                            if (containsOpCallExpr(f.value())) yield true;
+                        }
+                        case Expr.MapEntry.DynField df -> {
+                            if (containsOpCallExpr(df.keyExpr())
+                                    || containsOpCallExpr(df.value())) yield true;
+                        }
+                        case Expr.MapEntry.Spread sp -> { /* var ref, no op */ }
+                    }
                 }
                 yield false;
             }
