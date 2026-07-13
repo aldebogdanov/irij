@@ -311,6 +311,7 @@ final class ClassEmitter implements Opcodes {
             case Expr.Block n -> n.loc();
             case Expr.DotAccess n -> n.loc();
             case Expr.VectorLit n -> n.loc();
+            case Expr.DoExpr n -> n.loc();
             case Expr.SetLit n -> n.loc();
             case Expr.TupleLit n -> n.loc();
             case Expr.MapLit n -> n.loc();

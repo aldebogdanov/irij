@@ -133,6 +133,7 @@ elimination at hot sites.
 | `emitApp` | Function calls. Decides between built-in, effect op, constructor, local lambda value, lifted slot, or user-fn `invokestatic`. |
 | `emitBuiltinApp` | Hardcoded knowledge of built-in fns (`+`, `++`, `println`, `spawn`, `length`, `head`, `tail`, `nth`, `conj`, `empty?`, ...). |
 | `emitLambda` | Lambda literal → private static method + LambdaMetafactory indy at call site. |
+| `DoExpr` (in `emitExpr`/`emitTailExpr`) | `do e1 … en` — emit each, POP all but last; last is tail-position (self-calls become GOTO). |
 | `emitMatchExpr` | Pattern match → if-chain + bind on success. |
 | `emitWith` | `Stmt.With` — runs `smCanHandle` + `classifyWithBody`, then `emitWithSM`. Unsupported shapes are compile-time errors. |
 | `emitWithSM` | The (sole) effect lowering. See `effects.md`. |
