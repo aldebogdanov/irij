@@ -34,13 +34,60 @@ while (true) {
 }
 ```
 
-No threads, no queues. A perform = one throw (stack-trace-free,
-pooled). A resume = one TailResume throw (also pooled). Both unwind
-back to the loop, which iterates.
+No threads, no queues. A perform = one throw (a fresh stack-trace-free
+`PerformSignal`). A resume = one `TailResume` throw (same deal). Both
+unwind back to the loop, which iterates. The instances were pooled
+per-thread until PR3 (2026-07); benchmarking 1M performs showed the
+pool bought nothing (~80 ms either way — stackless exception allocation
+is TLAB-cheap and often scalar-replaced), so the pools were dropped
+along with their shared-mutable-instance hazards.
 
 Cost per perform: ~100ns at JIT steady-state. The throw is amortised
 by HotSpot's escape analysis when `PerformSignal` doesn't escape the
 catching frame.
+
+## Handler state: one global cell per declaration
+
+`state :! init` compiles to a **static field** on the program class
+(`handler$<name>$state$<var>`, see `ClassEmitter` pass 1 +
+`EffectEmitter.emitHandlerStateInit`). Lifetime and scope, pinned in
+spec §3.2 and verified by probes:
+
+- **Init once** — when `main` reaches the handler *declaration*, not
+  at `with` entry. Entering `with h` never resets state; sequential
+  `with h` blocks accumulate.
+- **Global across threads** — fibers and the parent read/write the
+  same static. `ParentSnapshot` copies handler *stacks*, never state
+  cells (they were never thread-local to begin with).
+- **`h.state` dot-access** is a plain GETSTATIC — valid anywhere,
+  including after the `with` returns. That read-after-`with` idiom is
+  how test handlers hand results back (std.log tests, the SM coverage
+  matrix) and is the reason per-`with` fresh state was rejected.
+- **Races are real**: `state <- conj state s` is a non-atomic
+  read-modify-write. Concurrent `with h` over one handler can lose
+  updates. Confine a stateful handler to one thread, or accept the
+  race knowingly.
+
+## Classification coverage (PR7, 2026-07)
+
+`containsOpCallExpr` detects op calls in every expression position:
+App, BinaryOp, UnaryOp, IfExpr, Block, Lambda (conservative), the
+collection literals, DotAccess, MatchExpr, **and** — since PR7 —
+Pipe, Compose, SeqOp, DoExpr, Range, StringInterp, MapLit (including
+dynamic keys), and RecordUpdate. The A-normalizer has matching
+rebuild cases for each, so an op embedded in any of those positions
+is lifted to a fresh bind in source order and the body classifies
+into a native SM shape instead of riding the SM_STACK runtime
+fallback. `SmLoweringCoverageTest` pins the observable behavior
+(values + handler-state order) across a shapes × positions matrix;
+it passed identically before and after the flip, proving the
+fallback and native paths agree.
+
+`exprPerformsForeignEffect` (tier-c gating for handler clauses) was
+deliberately **not** extended — widening it would reroute clause
+bodies with foreign ops in embedded positions from the threaded
+fallback to tier-c compilation, which needs its own shape-coverage
+work first.
 
 ## State-machine details
 
@@ -93,7 +140,7 @@ For each shape, the emitter:
 
 1. Allocates a static `smstep$N` method holding the state machine.
 2. Builds an `IrijFn` wrapper via `LambdaMetafactory`.
-3. Calls `RuntimeSupport.runWithSM(handler, step, nFields)` at the
+3. Calls `RtEffects.runWithSM(handler, step, nFields)` at the
    `with` site.
 
 ## Nested `with` (native dual-SM)
@@ -103,7 +150,7 @@ detects `Stmt.With(inner, ...)` as a *segment terminator*. At that
 segment, the emitter:
 
 1. Allocates or fetches `kInner` from `kOuter.fields[innerSlot]` via
-   `RuntimeSupport.getOrAllocInnerCont`.
+   `RtEffects.getOrAllocInnerCont`.
 2. Calls `runWithSM(innerHandler, kInner, vSlot)` — a re-entrant
    overload that threads the outer-handled resume value into `kInner`
    on re-entry.
@@ -132,14 +179,14 @@ loop catching the right resume. Without it, the clause's own
 perform-resume would be confused with the outer body's
 perform-resume.
 
-**Pool-snapshot invariant (v0.7.0).** `PerformSignal` and `TailResume`
-are pooled per-thread for zero-allocation control flow. The pool slot
-is shared across nested dispatch loops, so each iteration of
-`dispatchLoopSMImpl` snapshots `sig.effectName`, `sig.opName`,
-`sig.args`, and `sig.continuation` into locals immediately after the
-catch — before invoking the clause. A tier-c clause that performs its
-own effect spawns an inner dispatch loop that reuses the same pool
-instance; without the snapshot, the inner perform would overwrite the
+**Signal-snapshot invariant (v0.7.0, kept post-pooling).** Each
+iteration of `dispatchLoopSMImpl` snapshots `sig.effectName`,
+`sig.opName`, `sig.args`, and `sig.continuation` into locals
+immediately after the catch — before invoking the clause. Signals are
+freshly allocated since PR3 (2026-07), but the snapshot discipline
+stays: a tier-c clause that performs its own effect spawns an inner
+dispatch loop, and reading fields off a signal reference that an inner
+loop may also observe would reintroduce the same aliasing class of
 outer iteration's `sig.continuation`, causing the outer trampoline to
 resume the wrong continuation (and trigger spurious "resume called
 twice" errors).
@@ -208,3 +255,4 @@ Spawned fibers inherit `SM_STACK` (SM handler frames), `EFFECT_ROW`
 per-thread session PrintStream (`SESSION_OUT`) via `ParentSnapshot`
 — see `concurrency.md`. `fireOp` from a fiber walks `SM_STACK` and
 dispatches synchronously.
+

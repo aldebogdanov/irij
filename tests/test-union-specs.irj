@@ -1,0 +1,31 @@
+;; ── Union types: primitives as sum-spec variants ──────────────────
+;; A sum spec may mix named constructor variants with primitive specs
+;; (Str/Int/Float/Bool/Keyword/Rational/Unit). A bare primitive value
+;; matches by type instead of by tag.
+
+use std.test :open
+
+spec Node
+  Raw Str
+  El Str
+  Str
+
+fn same :: Node Node
+  (n -> n)
+
+r1 := test "bare string is a Node" (-> assert-eq (same "text") "text")
+r2 := test "tagged variant still works" (-> assert-eq (to-str (same (Raw "<b>"))) "Raw \"<b>\"")
+r3 := test "validate! accepts primitive variant" (-> assert-eq (validate! "Node" "text") "text")
+r4 := test "validate! rejects unlisted primitive" (-> assert-throws (-> validate! "Node" 42))
+
+spec MaybeInt
+  Nothing
+  Int
+
+r5 := test "int matches Int variant" (-> assert-eq (same-mi 7) 7)
+r6 := test "nullary variant still works" (-> assert-eq (to-str (same-mi Nothing)) "Nothing")
+
+fn same-mi :: MaybeInt MaybeInt
+  (v -> v)
+
+summarize #[r1 r2 r3 r4 r5 r6]

@@ -6,6 +6,10 @@ code structure, and the trade-offs that shaped each subsystem.
 Audience: contributors, the curious, and future-me trying to remember
 why something is the way it is.
 
+For a single-page curated overview (rendered HTML, suitable for the
+website), see [../how-irij-works.html](../how-irij-works.html) — it
+links back here for depth.
+
 ## Reading order
 
 1. [Pipeline](pipeline.md) — source → AST → bytecode

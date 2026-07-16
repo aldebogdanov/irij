@@ -1,0 +1,21 @@
+;; ── do expression: sequencing with a value ─────────────────────────
+
+use std.test :open
+
+r1 := test "do value is last expr" (-> assert-eq (do (1) (2) (3)) 3)
+
+order :! #[]
+fn note :: Str ()
+  s =>
+    order <- conj order s
+
+seq-result := do (note "a") (note "b") (42)
+r2 := test "do runs left to right" (-> assert-eq order #["a" "b"])
+r3 := test "do in bind position" (-> assert-eq seq-result 42)
+
+fn down :: Int Int
+  (n -> if (n == 0) 0 else (do (n) (down (n - 1))))
+
+r4 := test "do tail keeps TCO" (-> assert-eq (down 200000) 0)
+
+summarize #[r1 r2 r3 r4]

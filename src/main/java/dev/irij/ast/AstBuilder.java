@@ -418,9 +418,14 @@ public class AstBuilder {
     }
 
     private Decl.FnBody.LambdaBody visitLambdaBodyAsFnBody(LambdaBodyContext ctx) {
-        var params = visitLambdaParams(ctx.lambdaParams());
+        var chain = ctx.lambdaChain();
+        var params = visitLambdaParams(chain.lambdaParams());
         String restParam = extractRestParam(params);
-        var body = visitExprSeq(ctx.exprSeq());
+        // Curried fn body: outer params belong to the fn; the rest of
+        // the chain becomes a nested Lambda expression.
+        Expr body = chain.lambdaChain() != null
+                ? visitLambdaChain(chain.lambdaChain())
+                : visitExprSeq(chain.exprSeq());
         return new Decl.FnBody.LambdaBody(params, restParam, body);
     }
 
@@ -1114,9 +1119,16 @@ public class AstBuilder {
     }
 
     private Expr visitLambdaExpr(LambdaExprContext ctx) {
+        return visitLambdaChain(ctx.lambdaChain());
+    }
+
+    /** {@code (a -> b -> body)} nests right: Lambda(a, Lambda(b, body)). */
+    private Expr visitLambdaChain(LambdaChainContext ctx) {
         var params = visitLambdaParams(ctx.lambdaParams());
         String restParam = extractRestParam(params);
-        var body = visitExprSeq(ctx.exprSeq());
+        Expr body = ctx.lambdaChain() != null
+                ? visitLambdaChain(ctx.lambdaChain())
+                : visitExprSeq(ctx.exprSeq());
         return new Expr.Lambda(params, restParam, body, loc(ctx));
     }
 
@@ -1196,11 +1208,15 @@ public class AstBuilder {
             } else if (entry.STRING() != null) {
                 var raw = entry.STRING().getText();
                 var key = unescapeString(raw.substring(1, raw.length() - 1));
-                entries.add(new Expr.MapEntry.Field(key, visitExpr(entry.expr())));
+                entries.add(new Expr.MapEntry.Field(key, visitExpr(entry.expr(0))));
             } else if (entry.ATTR_IDENT() != null) {
-                entries.add(new Expr.MapEntry.Field(entry.ATTR_IDENT().getText(), visitExpr(entry.expr())));
+                entries.add(new Expr.MapEntry.Field(entry.ATTR_IDENT().getText(), visitExpr(entry.expr(0))));
+            } else if (entry.LPAREN() != null) {
+                // {(expr)= val} — dynamic key, evaluated at runtime
+                entries.add(new Expr.MapEntry.DynField(
+                        visitExpr(entry.expr(0)), visitExpr(entry.expr(1))));
             } else {
-                entries.add(new Expr.MapEntry.Field(entry.IDENT().getText(), visitExpr(entry.expr())));
+                entries.add(new Expr.MapEntry.Field(entry.IDENT().getText(), visitExpr(entry.expr(0))));
             }
         }
         if (hasSpreadFirst) {
