@@ -148,6 +148,23 @@ class RowVarSubstitutionTest {
     }
 
     @Test
+    void topLevelFnAfterStdUseStillBanned() {
+        // Regression: inlining interleaves module decls at the use
+        // site, so a root fn AFTER `use std.*` used to inherit the
+        // std module label from the ModDecl scan and slip through the
+        // std-only Any allowance. Origin now comes from the inliner's
+        // fnFile map.
+        var e = expectFail("""
+                use std.list :open
+
+                fn pretend :: _ _ _ ::: Any
+                  (f x -> f x)
+                """);
+        assertTrue(e.getMessage().contains("Any"),
+                () -> "expected Any-removal error, got: " + e.getMessage());
+    }
+
+    @Test
     void nestedVecBindingAccepted() {
         // Binding through a container spec counts: #[(Fn):eff].
         assertDoesNotThrow(() -> IrijCompiler.compileSource("""

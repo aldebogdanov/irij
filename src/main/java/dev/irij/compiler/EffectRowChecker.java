@@ -131,7 +131,34 @@ public final class EffectRowChecker {
     private java.util.Map<String, String> varCap = new java.util.HashMap<>();
 
     public static void check(List<Decl> decls) {
-        new EffectRowChecker().run(decls);
+        check(decls, java.util.Map.of());
+    }
+
+    /** @param fnFile fn-name → origin source file from the inliner
+     *  ({@code std/list.irj} for stdlib fns, the root file for the
+     *  program's own). Authoritative for std-only allowances — the
+     *  ModDecl scan below mislabels root fns that FOLLOW a use-inlined
+     *  module, since inlining interleaves module decls at the use
+     *  site. Empty map = fall back to the scan (LSP/tests). */
+    public static void check(List<Decl> decls, Map<String, String> fnFile) {
+        var c = new EffectRowChecker();
+        c.fnFileOrigin = fnFile != null ? fnFile : java.util.Map.of();
+        c.run(decls);
+    }
+
+    private Map<String, String> fnFileOrigin = java.util.Map.of();
+
+    private boolean isStdOrigin(String fnName) {
+        String f = fnFileOrigin.get(fnName);
+        if (f != null) return f.startsWith("std/");
+        String mod = fnModule.get(fnName);
+        return mod != null && mod.startsWith("std.");
+    }
+
+    private String originOf(String fnName) {
+        String f = fnFileOrigin.get(fnName);
+        if (f != null) return f;
+        return fnModule.get(fnName);
     }
 
     private void run(List<Decl> decls) {
@@ -190,14 +217,14 @@ public final class EffectRowChecker {
             List<String> row = e.getValue();
             if (row == null) continue;
             if (!row.contains("Any")) continue;
-            String mod = fnModule.get(e.getKey());
-            if (mod == null || !mod.startsWith("std.")) {
+            if (!isStdOrigin(e.getKey())) {
+                String origin = originOf(e.getKey());
                 throw new IrijCompiler.CompileException(
                         "`::: Any` is no longer allowed in user code "
                                 + "(use a parametric row variable like "
-                                + "`:eff` / `::: eff` instead). "
-                                + "Fn: '" + e.getKey() + "'"
-                                + (mod != null ? " in module '" + mod + "'" : ""));
+                                + "`:eff` instead, bound in the fn's `::` "
+                                + "spec). Fn: '" + e.getKey() + "'"
+                                + (origin != null ? " (" + origin + ")" : ""));
             }
         }
         // Phase 6: row variables in a fn's effect row must be BOUND —
@@ -212,11 +239,11 @@ public final class EffectRowChecker {
                 if (!isRowVar(eff)) continue;
                 List<SpecExpr> specs = fnSpecs.get(e.getKey());
                 if (specs == null || !specsMentionRowVar(specs, eff)) {
-                    String mod = fnModule.get(e.getKey());
+                    String origin = originOf(e.getKey());
                     throw new IrijCompiler.CompileException(
                             "Unbound row variable '" + eff + "' in effect row"
                                     + " of fn '" + e.getKey() + "'"
-                                    + (mod != null ? " in module '" + mod + "'" : "")
+                                    + (origin != null ? " (" + origin + ")" : "")
                                     + ". Bind it in the fn's `::` spec (e.g. "
                                     + "`(Fn):" + eff + "` or `#[(Fn):" + eff + "]`)"
                                     + " or drop it — a free row variable "
