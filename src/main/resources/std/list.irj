@@ -58,9 +58,8 @@ pub fn count :: _ _
   (v -> length v)
 
 ;; `sum` calls `fold` with `(+)`. `(+)` is a built-in numeric op with
-;; no effects; the fold passes through (Any). Sum itself doesn't
-;; introduce effects so callers don't need to declare anything.
-;; (`fold` is `::: Any` so it's polymorphic — caller's row is empty
-;; here, so the callback runs in empty too. (+) needs nothing.)
+;; no effects; fold's `:eff` row variable binds to the empty row at
+;; this call site, so sum itself stays pure and callers declare
+;; nothing.
 pub fn sum :: _ _
   (v -> fold (+) 0 v)

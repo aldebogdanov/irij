@@ -63,7 +63,8 @@ Available-set semantics inside a fn body:
 | Declared row | Body's available set |
 |---|---|
 | `null` (unannotated) | empty (pure) |
-| Contains `Any` | ambient (everything OK; polymorphism marker) |
+| Contains a row variable (lowercase-first token, e.g. `eff`) | ambient (everything OK; precision lives at call sites) |
+| Contains `Any` (stdlib-only — rejected in user code) | ambient |
 | Otherwise | exactly the listed effects |
 
 `with X body` extends the available set with X's effect for the
@@ -88,52 +89,74 @@ effect-row checker checks:
   required effects of callee ⊆ available effects of caller
 
 If a fn declares `::: Console`, every caller must itself have
-Console in its effect row (or be top-level ambient, or be declared
-`::: Any` and inherit). Otherwise the call is rejected with:
+Console in its effect row (or be top-level ambient, or carry a row
+variable and inherit). Otherwise the call is rejected with:
 
 ```
 Effect 'Console' not declared: 'call to f' requires ::: Console
   in enclosing function's effect row
 ```
 
-Implemented in `Interpreter.checkCalleeRow(calleeRow, calleeName,
-loc)`, invoked from each apply path (Lambda / MatchFn /
-ImperativeFn) before the row is pushed.
+Checked statically by `EffectRowChecker` (callee row ⊆ available
+set at every call site), with a runtime backstop: the emitter calls
+`RtEffects.enterFn(declaredRow)` on fn entry and
+`RtEffects.checkPerformEffect` at every perform site, which peeks
+the top frame of the thread's `EFFECT_ROW` stack.
 
 Without subsumption, `:::` would only constrain inside the callee —
 a caller could call `::: Console` fns without declaring Console
 itself, defeating the row contract.
 
-## Effect-row polymorphism via `Any`
+## Effect-row polymorphism: row variables (`Any` is stdlib-only)
 
-Higher-order fns whose callback may need effects unknown at
-definition site declare `::: Any` in their row:
+Higher-order fns whose callback may need effects unknown at the
+definition site use **parametric row variables**: any lowercase-first
+token in a row position is a row variable, conventionally `eff`.
 
 ```
-pub fn fold :: _ _ _ _ ::: Any
-  (f acc v ->
-    if (empty? v) acc
-    else (fold f (f acc (head v)) (tail v)))
+pub fn fold :: (Fn):eff _ _ _ ::: eff
+pub fn map  :: (Fn):eff _ _ ::: eff
+pub fn router :: #[(Route):eff] Fn ::: eff     ;; binds through Vec elements
 ```
 
-When such a fn is *called*, the effect-row pushed onto
-`AVAILABLE_EFFECTS` is the UNION of declared effects (minus `Any`)
-and the caller's available set. So `fold (_ x -> println x) () v`
-called from a fn declared `::: Console` lets the callback's
-`println` see Console — even though `fold` itself doesn't mention
-Console.
+Two halves of the mechanism:
 
-Implemented in `Interpreter.effectiveRow(declared)`:
+**Static** (`EffectRowChecker`). Inside a fn whose row contains a
+row variable, the body's available set is AMBIENT (`available()`;
+`isRowVar` = lowercase first char) — precision is *not* checked
+inside. Instead, at each call site of such a fn the checker binds
+the variable to the actual argument's row (`hasRowVar` path;
+`collectNestedRowVarBindings` walks `(Fn):eff` through Vec/Set/
+Tuple/Map/record specs) and requires the bound row of the *caller*.
+So `fold (x acc -> println x) 0 v` demands `Console` at the fold
+call site.
 
-- declared contains `Any` AND caller was AMBIENT → push AMBIENT.
-- declared contains `Any` AND caller has a finite row → push UNION.
-- declared doesn't contain `Any` → push declared verbatim (old
-  behaviour).
+**Runtime** (`RtEffects`). The emitter compiles row-var fns with
+`enterFnAmbient()` — the body pushes an ambient frame and inherits
+the caller's effects. The runtime check inside such fns is
+permissive by design; enforcement precision is the static half.
 
-This is what lets `std.list.fold` (Irij-ported) replace the old
-Java BuiltinFn fold. The BuiltinFn was effect-transparent by
-construction (no row push); `::: Any` gives Irij-side fns the same
-transparency explicitly.
+A **free row variable** — `::: eff` with no `(Fn):eff` parameter to
+bind it — is legal and is the idiom for effect-transparent dispatch
+of *stored* lambdas whose rows are statically unknowable (callback
+registries, e.g. a reactive library's watcher dispatch). Statically
+nothing binds, so the call site is unconstrained; the stored
+lambda's performs are then governed by the ambient frame of
+whatever row the triggering call chain declared.
+
+**`::: Any` is banned in user code** (Phase 5 of
+`EffectRowChecker.check`): a row containing `Any` in any module not
+under `std.` fails compilation with
+
+```
+`::: Any` is no longer allowed in user code (use a parametric row
+variable like `:eff` / `::: eff` instead)
+```
+
+The checker exempts `std.*` modules as transitional headroom, but
+current stdlib source has fully migrated to row variables — no
+`Any` rows remain. Migration for user code is mechanical:
+`::: Any` → `::: eff`.
 
 ## At what time
 

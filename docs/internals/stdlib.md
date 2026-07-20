@@ -68,13 +68,17 @@ Real Irij code, parsed + compiled like user code:
 A Java BuiltinFn is **effect-transparent** by construction — the
 callback's effects are invisible at registration time, the callback
 runs in whatever effect row the caller has. Irij-side higher-order
-fns gain the same transparency by declaring `::: Any` in their
-effect row (see `specs.md`).
+fns gain the same transparency with **parametric row variables**
+(`(Fn):eff … ::: eff`; see `specs.md`). `::: Any` is rejected in
+user code and no longer appears in stdlib source either — the
+Phase-5 checker exemption for `std.*` remains only as transitional
+headroom.
 
-`std.list.fold` is declared `::: Any`, so `fold (_ x -> println x)
-() v` works under `::: Console` — the callback inherits the
-caller's effect row. The Java BuiltinFn fold was removed; the
-Irij-ported version is now the single source of truth.
+`std.list.fold` is declared `:: (Fn):eff _ _ _ ::: eff`, so
+`fold (acc x -> println x) () v` type-checks exactly when the call
+site's row has Console — the callback's row binds `eff` there. The
+Java BuiltinFn fold was removed; the Irij-ported version is the
+single source of truth.
 
 Callers do `use std.list :open` (already imported by std.collection
 and std.func; explicit elsewhere).
