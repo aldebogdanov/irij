@@ -7,8 +7,8 @@ primitives are inspired by Missionary (Clojure) and Trio (Python).
 
 | Operator | Shape | Semantics |
 |---|---|---|
-| `spawn` | `spawn thunk → Fiber` | Fire-and-forget vthread. |
-| `await` | `await fiber → result` | Block until done. |
+| `spawn` | `spawn thunk → Fiber` | Start a fiber. Awaitable; safe to discard (failures print to session out either way — awaiting one also rethrows). |
+| `await` | `await fiber → result` | Block until done. Accepts only `Fiber` values (from `spawn`, `par`/`race` internals, or `scope` forks). |
 | `sleep` | `sleep ms → ()` | Block this thread for ms. |
 | `par` | `par combiner t1 t2 ... → combiner r1 r2 ...` | Run all in parallel, combine results. |
 | `race` | `race t1 t2 ... → result of first to finish` | Others interrupted. |

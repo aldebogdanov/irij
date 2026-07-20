@@ -68,4 +68,23 @@ scope s
 
 r10 := test "scope waits for fibers" (-> assert-true waited)
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10]
+;; ── bare spawn + await compose ─────────────────────────
+
+fn spawn-then-await :: Int ::: Time
+  =>
+  f := spawn (-> sleep 10; 40 + 2)
+  await f
+
+r11 := test "spawn returns an awaitable Fiber" (-> assert-eq 42 (spawn-then-await ()))
+
+fn spawn-failure-rethrows :: Bool ::: Time
+  =>
+  f := spawn (-> sleep 5; error "fiber boom")
+  r := try (-> await f)
+  match r
+    (Err msg) => contains-substr? msg "boom"
+    _ => false
+
+r12 := test "awaited spawn failure rethrows" (-> assert-true (spawn-failure-rethrows ()))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12]

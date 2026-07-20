@@ -81,22 +81,22 @@ public final class RtConcurrency {
     }
 
 
-    /** `spawn thunk` — fire-and-forget vthread, returns the Thread. */
+    /** `spawn thunk` — start a fiber; returns an awaitable {@link Fiber}
+     *  (composes with `await`, matching concurrency.md). Fire-and-forget
+     *  callers may discard the handle: failures still print to the
+     *  session out. An awaited failure is ALSO rethrown by `await` —
+     *  the print is a liveness aid, not the error channel. */
     public static Object spawn(Object thunk) {
         var parent = snapParent();
-        return Thread.startVirtualThread(() -> {
-            inheritEffectStack(parent.effectStack());
-            inheritSMStack(parent.smStack());
-            inheritEffectRow(parent.effectRow());
-            RuntimeSupport.runBoundSession(parent.namespace(), parent.sessionOut(), () -> {
-                try { RuntimeSupport.callAny(thunk, new Object[0]); }
-                catch (Throwable t) {
-                    java.io.PrintStream err = parent.sessionOut() != null
-                            ? parent.sessionOut() : System.err;
-                    err.println("[spawn] error: " + t.getMessage());
-                }
-            });
+        Fiber f = forkOne(thunk, parent);
+        f.result.whenComplete((v, ex) -> {
+            if (ex != null) {
+                java.io.PrintStream err = parent.sessionOut() != null
+                        ? parent.sessionOut() : System.err;
+                err.println("[spawn] error: " + ex.getMessage());
+            }
         });
+        return f;
     }
 
 
