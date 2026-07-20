@@ -136,13 +136,26 @@ call site.
 the caller's effects. The runtime check inside such fns is
 permissive by design; enforcement precision is the static half.
 
-A **free row variable** — `::: eff` with no `(Fn):eff` parameter to
-bind it — is legal and is the idiom for effect-transparent dispatch
-of *stored* lambdas whose rows are statically unknowable (callback
-registries, e.g. a reactive library's watcher dispatch). Statically
-nothing binds, so the call site is unconstrained; the stored
-lambda's performs are then governed by the ambient frame of
-whatever row the triggering call chain declared.
+**Row variables must be bound** (Phase 6 of `EffectRowChecker.check`):
+every row variable in a fn's `:::` row must appear as a `:var`
+suffix somewhere in that fn's `::` spec — directly (`(Fn):eff`) or
+through a container (`#[(Fn):eff]`, tuple/record/set fields, arrow
+outputs). A *free* row variable (`::: eff` with nothing to bind it)
+is rejected:
+
+```
+Unbound row variable 'eff' in effect row of fn '<name>': bind it in
+the fn's `::` spec (e.g. `(Fn):eff` or `#[(Fn):eff]`) or drop it —
+a free row variable disables effect checking like `::: Any` did.
+```
+
+Dispatch of *stored* lambdas whose rows are statically unknowable
+(callback registries) therefore lives in fns that take the callbacks
+as (possibly container-wrapped) parameters; fns higher up the chain
+carry concrete rows. When such a fn is called with an opaque value
+(e.g. a Vec fetched from state), the binding is vacuous — the call
+site is unconstrained statically and the stored lambdas run under
+the row-var fn's ambient frame at runtime.
 
 **`::: Any` is banned in user code** (Phase 5 of
 `EffectRowChecker.check`): a row containing `Any` in any module not

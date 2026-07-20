@@ -200,6 +200,30 @@ public final class EffectRowChecker {
                                 + (mod != null ? " in module '" + mod + "'" : ""));
             }
         }
+        // Phase 6: row variables in a fn's effect row must be BOUND —
+        // each must appear (as a `:var` suffix) somewhere in the fn's
+        // `::` spec, so call sites have something to substitute from.
+        // A free row variable is `::: Any` by another name (ambient
+        // body, zero call-site precision), so it gets the same fate.
+        for (var e : fnRows.entrySet()) {
+            List<String> row = e.getValue();
+            if (row == null) continue;
+            for (String eff : row) {
+                if (!isRowVar(eff)) continue;
+                List<SpecExpr> specs = fnSpecs.get(e.getKey());
+                if (specs == null || !specsMentionRowVar(specs, eff)) {
+                    String mod = fnModule.get(e.getKey());
+                    throw new IrijCompiler.CompileException(
+                            "Unbound row variable '" + eff + "' in effect row"
+                                    + " of fn '" + e.getKey() + "'"
+                                    + (mod != null ? " in module '" + mod + "'" : "")
+                                    + ". Bind it in the fn's `::` spec (e.g. "
+                                    + "`(Fn):" + eff + "` or `#[(Fn):" + eff + "]`)"
+                                    + " or drop it — a free row variable "
+                                    + "disables effect checking like `::: Any` did.");
+                }
+            }
+        }
         for (Decl d : decls) {
             if (d instanceof Decl.ModDecl) continue;
             Object inner = (d instanceof Decl.PubDecl pd) ? pd.inner() : d;
@@ -209,6 +233,33 @@ public final class EffectRowChecker {
                 checkHandler(hd);
             }
         }
+    }
+
+    private static boolean specsMentionRowVar(List<SpecExpr> specs, String var) {
+        for (SpecExpr s : specs) {
+            if (s != null && specMentionsRowVar(s, var)) return true;
+        }
+        return false;
+    }
+
+    private static boolean specMentionsRowVar(SpecExpr s, String var) {
+        return switch (s) {
+            case SpecExpr.App a -> var.equals(a.rowVar())
+                    || specsMentionRowVar(a.args(), var);
+            case SpecExpr.Arrow a -> var.equals(a.rowVar())
+                    || specsMentionRowVar(a.inputs(), var)
+                    || (a.output() != null && specMentionsRowVar(a.output(), var));
+            case SpecExpr.VecSpec v -> specMentionsRowVar(v.elemSpec(), var);
+            case SpecExpr.SetSpec ss -> specMentionsRowVar(ss.elemSpec(), var);
+            case SpecExpr.TupleSpec t -> specsMentionRowVar(t.elemSpecs(), var);
+            case SpecExpr.RecordSpec r -> {
+                for (SpecExpr f : r.fields().values()) {
+                    if (specMentionsRowVar(f, var)) yield true;
+                }
+                yield false;
+            }
+            default -> false;
+        };
     }
 
     /** fn-name → originating module qualified name. Used for the

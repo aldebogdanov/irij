@@ -125,6 +125,38 @@ class RowVarSubstitutionTest {
     }
 
     @Test
+    void freeRowVarRejected() {
+        // Phase 6: a row variable that appears in ::: but nowhere in
+        // the fn's :: spec has nothing to bind against — rejected.
+        var e = expectFail("""
+                fn sneaky :: _ _ ::: eff
+                  (x -> x)
+                """);
+        assertTrue(e.getMessage().contains("Unbound row variable"),
+                () -> "expected unbound-row-var error, got: " + e.getMessage());
+    }
+
+    @Test
+    void rowVarWithoutAnySpecRejected() {
+        // Row var on a spec-less fn: nothing can ever bind it.
+        var e = expectFail("""
+                fn sneaky ::: eff
+                  (x -> x)
+                """);
+        assertTrue(e.getMessage().contains("Unbound row variable"),
+                () -> "expected unbound-row-var error, got: " + e.getMessage());
+    }
+
+    @Test
+    void nestedVecBindingAccepted() {
+        // Binding through a container spec counts: #[(Fn):eff].
+        assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+                fn run-all :: #[(Fn):eff] _ _ ::: eff
+                  (fns x -> x)
+                """, "irij.Program"));
+    }
+
+    @Test
     void pureCallbackBindsRowVarToEmptySet() {
         // Callback performs no effects. Row-var binds to {}.
         // Callee's effective row = {} ∪ {} = empty. Caller passes
