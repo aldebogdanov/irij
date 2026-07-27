@@ -1,0 +1,123 @@
+mod std.term
+
+;; Raw-mode terminal effect — the substrate for full-screen (TUI) apps.
+;;
+;; Console is line-oriented: it echoes, it waits for Enter, it knows
+;; nothing about the size of the window or which key was pressed. Term
+;; is cell-oriented: raw mode, decoded key events, resize notifications,
+;; and writes buffered into whole frames.
+;;
+;; Usage:
+;;   use std.term :open
+;;
+;;   fn loop-once ::: Term
+;;     =>
+;;     ev := term-read 16                   ;; ms; -1 blocks, 0 polls
+;;     if (get "kind" ev == "key")
+;;       term-write (csi "H" ++ get "key" ev)      ;; home, then the key name
+;;       term-flush ()
+;;
+;;   with default-term
+;;     term-enter {alt-screen= true}
+;;     loop-once ()
+;;     term-leave ()
+;;
+;;   ;; Mock in tests — same surface, no tty:
+;;   handler mock-term :: Term
+;;     term-enter opts => resume ()
+;;     term-leave ()   => resume ()
+;;     term-size ()    => resume {cols= 80 rows= 24}
+;;     term-read ms    => resume {kind= "key" key= "q" ch= "q" mods= #[]}
+;;     term-write s    => resume ()
+;;     term-flush ()   => resume ()
+;;
+;; Events are maps discriminated by `kind`:
+;;
+;;   {kind= "key"    key= "enter" ch= ""  mods= #["ctrl"]}
+;;   {kind= "resize" cols= 120 rows= 40}
+;;   {kind= "mouse"  btn= "left" press= true col= 11 row= 2 mods= #[]}
+;;   {kind= "app"    …}          ;; whatever term-post was handed
+;;   {kind= "none"}              ;; timeout expired, nothing happened
+;;   {kind= "eof"}               ;; stdin closed — exit the app
+;;
+;; One fiber owns the screen. `term-write` / `term-flush` share a
+;; single frame buffer, so drawing from several fibers at once
+;; interleaves garbage; background work sends `term-post` instead and
+;; lets the drawing fiber decide what to redraw. `term-post` is the one
+;; op safe to call from anywhere — a posted event is picked up within
+;; ~50 ms even if the reader is mid-wait.
+;;
+;; `key` is a name for special keys ("enter" "tab" "escape" "up" "f5"
+;; "pageup" "backspace" …) or the character itself for printable ones;
+;; `ch` carries the character and is empty for special keys. `mods`
+;; holds "ctrl" / "alt" / "shift" in that order — shift is implicit in
+;; the character for printable keys, so it only shows up on the special
+;; ones. Mouse col/row are 0-based, matching buffer coordinates.
+
+pub effect Term
+  term-enter     :: Map ()      ;; {alt-screen= cursor= mouse=} — raw mode on
+  term-leave     :: ()          ;; restore the terminal; always pair with enter
+  term-size      :: Map         ;; {cols= rows=}
+  term-read      :: Int Map     ;; timeout-ms → event
+  term-post      :: Map ()      ;; inject an event from another fiber
+  term-write     :: Str ()      ;; append to the frame buffer
+  term-flush     :: ()          ;; ship the buffer in one write
+  term-str-width :: Str Int     ;; display width in cells (CJK = 2, combining = 0)
+
+;; Capability binding. `term-jline` resolves only inside Term-handler
+;; clauses (lint-enforced by EffectRowChecker).
+cap term-jline :: Term = "dev.irij.runtime.TermCapability"
+
+pub handler default-term :: Term ::: JVM
+  term-enter opts =>
+    term-jline.enter opts
+    resume ()
+  term-leave () =>
+    term-jline.leave ()
+    resume ()
+  term-size () => resume (term-jline.size ())
+  term-read timeout-ms => resume (term-jline.read timeout-ms)
+  term-post ev =>
+    term-jline.postEvent ev
+    resume ()
+  term-write s =>
+    term-jline.write s
+    resume ()
+  term-flush () =>
+    term-jline.flush ()
+    resume ()
+  term-str-width s => resume (term-jline.strWidth s)
+
+;; ── Escape-sequence helpers ─────────────────────────────────────────
+
+;; ESC + s. `"\e"` is the escape byte itself; this is just the pairing
+;; that reads better at a call site.
+pub fn esc :: Str Str
+  => s
+  "\e" ++ s
+
+;; Control Sequence Introducer — `ESC [`. `csi "2J"` clears the screen,
+;; `csi "6;12H"` parks the cursor at row 6, column 12.
+pub fn csi :: Str Str
+  => s
+  esc ("[" ++ s)
+
+;; ── Convenience wrappers ────────────────────────────────────────────
+
+;; Raw mode for the duration of `thunk`, restored on the way out —
+;; including when the thunk errors, which is the case that otherwise
+;; leaves the user staring at a dead shell. Re-raises after restoring.
+pub fn with-term :: Map (Fn):eff _ ::: Term eff
+  => opts thunk
+  term-enter opts
+  result := try thunk
+  term-leave ()
+  match result
+    Ok v => v
+    Err msg => error msg
+
+;; Blocking read — no timeout. The natural shape for an app whose only
+;; clock is the user.
+pub fn term-wait :: Map ::: Term
+  =>
+  term-read (-1)
