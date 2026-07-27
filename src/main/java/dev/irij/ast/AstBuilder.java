@@ -1046,7 +1046,7 @@ public class AstBuilder {
         String content = raw.substring(1, raw.length() - 1);
 
         // Check for interpolation
-        if (!content.contains("${")) {
+        if (indexOfInterp(content, 0) < 0) {
             return new Expr.StrLit(unescapeString(content), loc);
         }
 
@@ -1054,7 +1054,7 @@ public class AstBuilder {
         var parts = new ArrayList<Expr.StringPart>();
         int i = 0;
         while (i < content.length()) {
-            int interpStart = content.indexOf("${", i);
+            int interpStart = indexOfInterp(content, i);
             if (interpStart < 0) {
                 // Rest is literal
                 parts.add(new Expr.StringPart.Literal(unescapeString(content.substring(i))));
@@ -1463,13 +1463,58 @@ public class AstBuilder {
         return Double.parseDouble(text.replaceAll("_", ""));
     }
 
+    /**
+     * Index of the next <em>unescaped</em> {@code ${}, or -1. The
+     * lexer accepts {@code \$} as an escape, but the interpolation
+     * splitter used to look for a bare {@code ${} — so {@code "\${x}"}
+     * interpolated anyway and left the backslash in the output. An odd
+     * number of preceding backslashes means the {@code $} is escaped.
+     */
+    private static int indexOfInterp(String s, int from) {
+        for (int i = s.indexOf("${", from); i >= 0; i = s.indexOf("${", i + 2)) {
+            int backslashes = 0;
+            for (int j = i - 1; j >= 0 && s.charAt(j) == '\\'; j--) backslashes++;
+            if (backslashes % 2 == 0) return i;
+        }
+        return -1;
+    }
+
+    /**
+     * Single pass, left to right. Chained {@code replace} calls were
+     * wrong for a literal backslash followed by an escape letter:
+     * {@code "\\n"} unescapes {@code \\} to one backslash, but only
+     * after the {@code \n} rule has already consumed the second
+     * backslash and turned it into a newline. Scanning consumes each
+     * escape exactly once, so the backslash rule can't be re-entered.
+     *
+     * <p>{@code \e} is ESC (0x1B). Terminal apps need it in nearly
+     * every string they write, and {@code from-char-code 27 ++ …} at
+     * each site is unreadable.
+     */
     private String unescapeString(String s) {
-        return s.replace("\\n", "\n")
-                .replace("\\r", "\r")
-                .replace("\\t", "\t")
-                .replace("\\\"", "\"")
-                .replace("\\\\", "\\")
-                .replace("\\$", "$");
+        if (s.indexOf('\\') < 0) return s;
+        var sb = new StringBuilder(s.length());
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c != '\\' || i + 1 >= s.length()) {
+                sb.append(c);
+                continue;
+            }
+            char next = s.charAt(++i);
+            switch (next) {
+                case 'n'  -> sb.append('\n');
+                case 'r'  -> sb.append('\r');
+                case 't'  -> sb.append('\t');
+                case 'e'  -> sb.append('\033');
+                case '"'  -> sb.append('"');
+                case '\\' -> sb.append('\\');
+                case '$'  -> sb.append('$');
+                // Not an escape the lexer recognises — the backslash
+                // stood for itself.
+                default   -> sb.append('\\').append(next);
+            }
+        }
+        return sb.toString();
     }
 
     /** Determine if the operator between two sub-expressions is forward or backward. */

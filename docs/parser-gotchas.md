@@ -70,7 +70,12 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 
 ## Strings
 
-- **`${}` always interpolates** at runtime — no escape. Split if you need a literal: `"$" ++ "{}"`.
+- **Escapes are `\n \r \t \e \" \\ \$`** and nothing else. An unrecognised
+  one (`\q`, `ሴ`) is left alone — backslash and letter both survive.
+  `\e` is ESC (0x1B), for ANSI; `char-code "\e"` is 27.
+- **`\${}` suppresses interpolation** (fixed 0.8.x — it used to interpolate
+  anyway and leave the backslash behind). A bare `${}` still always
+  interpolates.
 
 ## Contracts & types
 

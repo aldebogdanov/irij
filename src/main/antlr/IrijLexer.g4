@@ -164,7 +164,7 @@ INT_LIT     : [0-9] ([0-9_]* [0-9])? ;
 // ── String Literals ──────────────────────────────────────────────────
 STRING      : '"' (STR_ESCAPE | STR_INTERP | ~["\\\r\n])* '"' ;
 
-fragment STR_ESCAPE : '\\' [nrt"\\$] ;
+fragment STR_ESCAPE : '\\' [nrte"\\$] ;   // \e = ESC (0x1B), for ANSI
 fragment STR_INTERP : '${' ~[}]* '}' ;    // interpolation ${expr}
 
 // ── Whitespace & Comments ────────────────────────────────────────────
