@@ -1,0 +1,161 @@
+use std.test :open
+use std.term :open
+
+;; The Term effect can't exercise its default handler here — that one
+;; needs a tty, and the test runner may not have one. What IS testable
+;; without a terminal is the whole point of routing terminal I/O
+;; through an effect: a mock handler swaps in and the app-level code
+;; runs unchanged. (Escape-sequence decoding is covered Java-side in
+;; TermDecoderTest.)
+;;
+;; NB: `out` is a reserved word, so the capture slot is `buf`.
+
+;; ── Mock handler: nothing to read, everything written captured ────
+
+handler mock-term :: Term
+  buf :! ""
+  term-enter opts =>
+    buf <- buf ++ "[enter]"
+    resume ()
+  term-leave () =>
+    buf <- buf ++ "[leave]"
+    resume ()
+  term-size () => resume {cols= 80 rows= 24}
+  term-read ms => resume {kind= "none"}
+  term-post ev => resume ()
+  term-write s =>
+    buf <- buf ++ s
+    resume ()
+  term-flush () => resume ()
+  term-str-width s => resume (length s)
+
+;; ── Mock handler: reads back the frame the app drew ───────────────
+;; Handler state isn't visible from outside, so this one hands the
+;; captured buffer back through `term-read` as an app event. That makes
+;; "what exactly did the app write to the screen" an assertable value.
+
+handler echo-term :: Term
+  buf :! ""
+  term-enter opts => resume ()
+  term-leave () => resume ()
+  term-size () => resume {cols= 80 rows= 24}
+  term-read ms => resume {kind= "app" drawn= buf}
+  term-post ev => resume ()
+  term-write s =>
+    buf <- buf ++ s
+    resume ()
+  term-flush () => resume ()
+  term-str-width s => resume (length s)
+
+;; ── Mock handler: hands back a scripted key sequence, then EOF ────
+
+handler script-term :: Term
+  keys :! #["a" "up" "enter"]
+  term-enter opts => resume ()
+  term-leave () => resume ()
+  term-size () => resume {cols= 40 rows= 10}
+  term-read ms =>
+    if (empty? keys)
+      resume {kind= "eof"}
+    else
+      k := head keys
+      keys <- tail keys
+      resume {kind= "key" key= k ch= k mods= #[]}
+  term-post ev => resume ()
+  term-write s => resume ()
+  term-flush () => resume ()
+  term-str-width s => resume (length s)
+
+;; ── App-level code: knows Term, knows nothing about ttys ─────────
+
+fn draw-header ::: Term
+  => title
+  term-write (csi "H" ++ title)
+  term-flush ()
+
+fn read-until-eof ::: Term
+  => acc
+  ev := term-read 10
+  if (get "kind" ev == "eof")
+    acc
+  else
+    read-until-eof (conj acc (get "key" ev))
+
+;; ── Escape helpers ────────────────────────────────────────────────
+
+r1 := test "esc prefixes the ESC byte" (-> assert-eq (from-char-code 27 ++ "X") (esc "X"))
+r2 := test "csi is ESC + [" (-> assert-eq (from-char-code 27 ++ "[2J") (csi "2J"))
+
+;; ── Mock dispatch ─────────────────────────────────────────────────
+
+fn run-size
+  =>
+  with mock-term
+    get "cols" (term-size ())
+
+r3 := test "size through a mock" (-> assert-eq 80 (run-size ()))
+
+;; A TUI asserted on without a screen: the frame the app drew is just
+;; a string, and this is the exact byte sequence it put on the wire.
+fn run-draw
+  =>
+  with echo-term
+    draw-header "hi"
+    get "drawn" (term-read 0)
+
+r4 := test "the drawn frame is exactly what was written" (-> assert-eq (csi "H" ++ "hi") (run-draw ()))
+
+fn run-width
+  =>
+  with mock-term
+    term-str-width "abc"
+
+r5 := test "str-width through a mock" (-> assert-eq 3 (run-width ()))
+
+;; ── Scripted input drives the app loop ────────────────────────────
+
+fn run-keys
+  =>
+  with script-term
+    read-until-eof #[]
+
+r6 := test "scripted keys drive the app" (-> assert-eq #["a" "up" "enter"] (run-keys ()))
+
+;; ── Timeout shape ─────────────────────────────────────────────────
+
+fn run-idle
+  =>
+  with mock-term
+    get "kind" (term-read 0)
+
+r7 := test "no input yields a none event" (-> assert-eq "none" (run-idle ()))
+
+;; ── term-post round-trip ──────────────────────────────────────────
+
+fn run-post
+  =>
+  with mock-term
+    term-post {kind= "app" tag= "tick"}
+    "ok"
+
+r8 := test "post is accepted" (-> assert-eq "ok" (run-post ()))
+
+;; ── with-term restores even when the body errors ──────────────────
+;; The reason with-term exists: an error unwinding past term-leave
+;; leaves the user's shell in raw mode.
+
+fn run-boom
+  =>
+  with mock-term
+    with-term {} (-> error "boom")
+
+r9 := test "with-term re-raises the body's error" (-> assert-throws (-> run-boom ()))
+
+fn run-ok
+  =>
+  with mock-term
+    with-term {} (-> 42)
+
+r10 := test "with-term returns the body's value" (-> assert-eq 42 (run-ok ()))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10]
