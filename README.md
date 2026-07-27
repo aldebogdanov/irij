@@ -39,6 +39,7 @@ irij examples/collections.irj # vectors, maps, pipelines
 irij examples/effects.irj     # algebraic effects deep dive
 irij examples/walkthrough.irj # full language tour (all phases)
 irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
+irij examples/terminal.irj    # raw-mode terminal (Term effect) — needs a tty
 ```
 
 ## Tests
@@ -57,6 +58,7 @@ irij test                     # 299 integration tests (tests/*.irj)
 - **Law verification** &mdash; QuickCheck-style property testing: `law name = forall x. P x`
 - **Protocols** &mdash; type-dispatched methods: `proto`, `impl`
 - **Structured concurrency** &mdash; `scope`, `fork`, `par`, `race`, `timeout`
+- **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)

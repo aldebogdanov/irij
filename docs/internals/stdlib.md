@@ -57,6 +57,7 @@ Real Irij code, parsed + compiled like user code:
 | `std.db` | `Db` effect + SQLite handler |
 | `std.serve` | Web server framework (routes, middleware, request/response) |
 | `std.session` | nREPL session effects |
+| `std.term` | `Term` effect — raw-mode terminal I/O for TUI apps; `default-term` handler + `esc`/`csi`/`with-term` helpers |
 | `std.datastar` | Datastar SSE protocol |
 | `std.json` | JSON parser + serialiser |
 | `std.convert` | Type coercions (`to-int`, `to-float`, `to-bool`) |

@@ -516,6 +516,14 @@ Effect-based I/O operations, mockable via handlers in tests.
   - `Env`: `env-var` (wraps `env` builtin, tagged `::: Env`)
   - All fully mockable: `handler fixed-clock :: Time`, `handler fixed-random :: Random`, `handler mock-env :: Env`
   - 8 integration tests (`tests/test-time-random-env.irj`)
+- [x] **Terminal I/O** — `std.term` module with `Term` effect (TUI substrate)
+  - Ops: `term-enter`, `term-leave`, `term-size`, `term-read`, `term-post`, `term-write`, `term-flush`, `term-str-width`
+  - `default-term` handler → `TermCapability` (JLine: raw mode, non-blocking reader, wcwidth); alt-screen / cursor / mouse toggles are plain ANSI
+  - `TermDecoder` — escape-sequence grammar (arrows, editing + function keys, xterm modifiers, SGR mouse, alt-prefix) behind a `Source` interface, so it decodes with no tty
+  - Helpers: `esc` / `csi` (Irij strings have no `\e`), `with-term` (restores on error), `term-wait`
+  - Crash safety: JVM shutdown hook restores the terminal; no-tty is a clear error, not a silent dumb-terminal downgrade
+  - Fully mockable: `handler mock-term :: Term` — scripted keys in, drawn frame out
+  - 23 Java tests (`TermDecoderTest`) + 10 integration tests (`tests/test-term.irj`), `examples/terminal.irj`
 - [ ] **TOML** — config file support (deferred)
 - [ ] **TOON** — token-efficient format for AI contexts (deferred)
 - [ ] **HTTP server** — `::: Serve` effect (deferred)

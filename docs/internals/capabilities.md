@@ -70,6 +70,32 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   6-op Session effect; raw-session-* names + their emit fast-paths
   delisted. `raw-nrepl-eval-sandboxed` kept as a plain builtin —
   it's the CLI entry path with no handler scope.
+- **3f — Term (shipped)**: `TermCapability` + the new `std.term`
+  module, for full-screen terminal apps. Unlike 3a–3e this one
+  isn't a migration — there was no `raw-term-*` surface to delist.
+  `Console` only ever offered line I/O (`println` / `read-line`),
+  which is the wrong shape for a TUI: no raw mode, no key events,
+  no size, no resize. JLine (already a dependency, for the REPL)
+  supplies the terminal handle, raw-mode attributes, the
+  non-blocking reader and `wcwidth`; escape-sequence decoding lives
+  in `TermDecoder`, deliberately outside the cap so the grammar is
+  unit-testable against a canned char stream with no tty
+  (`TermDecoderTest`, 23 cases). The payoff of routing terminal I/O
+  through an effect at all is `handler mock-term` — scripted keys
+  in, drawn frame out, so a TUI is assertable in `tests/` with no
+  screen (`tests/test-term.irj`).
+  - **Restoring on crash.** A terminal left in raw mode with the alt
+    screen up makes the user's shell unusable, and an Irij error
+    unwinding past `term-leave` would do exactly that. Two guards: a
+    JVM shutdown hook in the cap (covers uncaught errors and Ctrl-C)
+    and `with-term`, which wraps the body in `try` and restores
+    before re-raising.
+  - **No tty is an error, not a downgrade.** `TerminalBuilder` is
+    built with `dumb(false)`: left on, JLine logs a warning and
+    hands back a handle whose raw mode and size are fiction. A pty
+    that reports 0×0 (CI harnesses, `script`) falls back to
+    `$COLUMNS`/`$LINES`, then 80×24 — a layout engine handed a zero
+    divides by it.
 
 ## Syntax
 

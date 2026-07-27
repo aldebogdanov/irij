@@ -1,0 +1,98 @@
+;; Raw-mode terminal — the Term effect.
+;;
+;; Console is line-oriented: it echoes what you type and hands it over
+;; only once you press Enter. Term is cell-oriented — every keypress
+;; arrives as it happens, the screen is addressable, and the app owns
+;; the whole window.
+;;
+;; NEEDS A TTY. Run it directly:
+;;
+;;   irij run examples/terminal.irj
+;;
+;; Piping stdin or capturing stdout gets a clear error instead of a
+;; program drawing into nowhere. Press q to quit.
+
+use std.term :open
+
+;; ── Screen ──────────────────────────────────────────────────────────
+
+fn clear ::: Term
+  =>
+  term-write (csi "2J")
+
+;; Cursor to row/col — 1-based, the terminal's own convention.
+fn move-to ::: Term
+  => row col
+  term-write (csi (to-str row ++ ";" ++ to-str col ++ "H"))
+
+fn draw-at ::: Term
+  => row col s
+  move-to row col
+  term-write s
+
+;; ── Frame ───────────────────────────────────────────────────────────
+
+fn draw-frame ::: Term
+  => last-key count
+  sz := term-size ()
+  clear ()
+  draw-at 2 3 ("Irij terminal demo — " ++ to-str (get "cols" sz) ++ "x" ++ to-str (get "rows" sz))
+  draw-at 4 3 ("last key: " ++ last-key)
+  draw-at 5 3 ("keys seen: " ++ to-str count)
+  draw-at 7 3 "press q to quit"
+  term-flush ()
+
+;; ── Loop ────────────────────────────────────────────────────────────
+
+;; Renders the key that was pressed, then waits for the next one.
+;; Tail-recursive, so this runs indefinitely in constant stack.
+fn loop ::: Term
+  => last-key count
+  draw-frame last-key count
+  ev := term-wait ()
+  kind := get "kind" ev
+  if (kind == "eof")
+    count
+  else
+    step ev kind last-key count
+
+fn step ::: Term
+  => ev kind last-key count
+  if (kind == "resize")
+    ;; The window changed under us — redraw at the new size.
+    loop last-key count
+  else
+    handle-key ev kind last-key count
+
+fn handle-key ::: Term
+  => ev kind last-key count
+  if (kind /= "key")
+    loop last-key count
+  else
+    key := describe ev
+    if (get "key" ev == "q")
+      count + 1
+    else
+      loop key (count + 1)
+
+;; "ctrl+c", "up", "a" — the shape a keymap would dispatch on.
+fn describe :: Map Str
+  => ev
+  mods := get "mods" ev
+  if (empty? mods)
+    get "key" ev
+  else
+    (join "+" mods) ++ "+" ++ get "key" ev
+
+;; ── Entry ───────────────────────────────────────────────────────────
+
+;; with-term pairs enter/leave around the body — including when the
+;; body errors, which is the case that would otherwise leave the shell
+;; in raw mode with no echo.
+fn main-flow ::: Term Console
+  =>
+  total := with-term {alt-screen= true} (-> loop "(none)" 0)
+  println ("bye — " ++ to-str total ++ " keys")
+
+with default-term
+  main-flow ()

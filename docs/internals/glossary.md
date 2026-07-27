@@ -40,6 +40,8 @@ Terms used throughout the internals docs.
 | **Spec** | Runtime predicate validating a value's shape. Malli-inspired. |
 | **SpecContractFn** | Wrapper applied to fn values at definition time when specs are declared. Validates args on entry, return on exit. |
 | **Tagged** | `Values.Tagged(constructorName, args)` — discriminated-union representation for `Maybe.Some v`, etc. |
+| **Term** | Effect for raw-mode, cell-oriented terminal I/O (`std.term`) — the substrate for TUI apps. Distinct from `Console`, which is line-oriented. Backed by `TermCapability` (JLine). |
+| **TermDecoder** | Escape-sequence grammar: chars in, one event map out (`{kind= "key"/"mouse"/"none"/"eof"}`). Reads through a `Source` interface so it's testable with no terminal. |
 | **TailResume** | SM-mode resume mechanism. Synthesised `resumeFn` throws `TailResume(value, target)`; the trampoline catches it (target-matching) and iterates. |
 | **Tier (a)** | Clauses that don't perform — most stdlib handlers. |
 | **Tier (b)** | Bodies that perform tier-a effects only. |
