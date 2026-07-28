@@ -139,4 +139,101 @@ class UserSpecTest {
             println (show 42)
             """, "cannot validate Int as Point");
     }
+
+    // ── Product fields: types and closedness ────────────────────────────
+    //
+    // The declared field specs used to be parsed and then dropped at
+    // registration, so a product checked field *presence* only: a
+    // `Str` satisfied `x :: Int`, and any value carrying a superset of
+    // the names passed. Both are now checked.
+
+    private static final String POINT = """
+            spec Point
+              x :: Int
+              y :: Int
+
+            fn show :: Point Str
+              (p -> "ok")
+
+            """;
+
+    @Test
+    void productFieldTypeIsChecked() {
+        expectFailure(POINT + "println (show {x= \"nope\" y= 2})",
+                "Point field 'x': expected Int, got Str");
+    }
+
+    @Test
+    void productIsClosedToExtraFields() {
+        // Not a superset — a record carrying the right names plus more
+        // is a different shape, and letting it pass means the spec
+        // doesn't actually pin down what it names.
+        expectFailure(POINT + "println (show {x= 1 y= 2 z= 3})",
+                "Point has no field 'z'");
+    }
+
+    @Test
+    void exactProductPasses() throws Exception {
+        assertEquals("ok", run(POINT + "println (show {x= 1 y= 2})"));
+    }
+
+    @Test
+    void missingFieldStillReported() {
+        expectFailure(POINT + "println (show {x= 1})", "Point requires field 'y'");
+    }
+
+    /**
+     * The constructor is the one place a product value is built, and
+     * validation downstream fast-paths on a matching specName — so an
+     * unchecked constructor would be a hole straight through every
+     * later check.
+     */
+    @Test
+    void constructorCertifiesItsFields() {
+        expectFailure(POINT + "v := Point \"nope\" 2\nprintln (show v)",
+                "Point field 'x': expected Int, got Str");
+    }
+
+    /** Field specs are full SpecExprs, not just primitive names. */
+    @Test
+    void collectionFieldValidatesElements() {
+        expectFailure("""
+            spec Bag
+              items :: #[Int]
+
+            fn show :: Bag Str
+              (b -> "ok")
+
+            println (show {items= #[1 "two"]})
+            """, "Bag field 'items': expected Int, got Str");
+    }
+
+    @Test
+    void nestedProductFieldRecurses() {
+        expectFailure("""
+            spec Inner
+              n :: Int
+            spec Outer
+              inner :: Inner
+
+            fn show :: Outer Str
+              (o -> "ok")
+
+            println (show {inner= {n= "nope"}})
+            """, "Outer field 'inner': Inner field 'n': expected Int, got Str");
+    }
+
+    /** A wildcard field is declared-but-unconstrained, as everywhere else. */
+    @Test
+    void wildcardFieldAcceptsAnything() throws Exception {
+        assertEquals("ok", run("""
+            spec Box
+              v :: _
+
+            fn show :: Box Str
+              (b -> "ok")
+
+            println (show {v= "anything"})
+            """));
+    }
 }

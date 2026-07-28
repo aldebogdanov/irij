@@ -52,16 +52,33 @@ public final class SpecValidator {
     // this registry when the name isn't a primitive.
 
     public sealed interface Descriptor {
-        record Product(List<String> fields) implements Descriptor {}
+        /** @param fields     declared field names, in declaration order
+         *  @param fieldSpecs {@link #encode}d spec per field, parallel
+         *                    to {@code fields}. An empty string means
+         *                    the field's spec was a wildcard or a type
+         *                    variable — present but unconstrained. */
+        record Product(List<String> fields, List<String> fieldSpecs) implements Descriptor {}
         record Sum(java.util.LinkedHashMap<String, Integer> variants) implements Descriptor {}
     }
 
     private static final ConcurrentHashMap<String, Descriptor> REGISTRY = new ConcurrentHashMap<>();
 
     /** Emitter-side: register a product spec (record-shaped). The
-     *  fields array carries field names in declaration order. */
+     *  fields array carries field names in declaration order; the
+     *  parallel specs array carries each field's {@link #encode}d
+     *  spec, or {@code ""} where the declaration left it open. */
+    public static void registerProduct(String name, String[] fields, String[] fieldSpecs) {
+        var specs = new java.util.ArrayList<String>(fields.length);
+        for (int i = 0; i < fields.length; i++) {
+            specs.add(i < fieldSpecs.length && fieldSpecs[i] != null ? fieldSpecs[i] : "");
+        }
+        REGISTRY.put(name, new Descriptor.Product(List.of(fields), List.copyOf(specs)));
+    }
+
+    /** Names-only registration — every field unconstrained. Kept for
+     *  callers that have no spec information to hand (tests, tooling). */
     public static void registerProduct(String name, String[] fields) {
-        REGISTRY.put(name, new Descriptor.Product(List.of(fields)));
+        registerProduct(name, fields, new String[fields.length]);
     }
 
     /** Emitter-side: register a sum spec. The flat array alternates
@@ -431,33 +448,71 @@ public final class SpecValidator {
         Descriptor d = REGISTRY.get(name);
         if (d == null) return value;
         return switch (d) {
-            case Descriptor.Product p -> validateProductShape(value, name, p.fields());
+            case Descriptor.Product p -> validateProductShape(value, name, p);
             case Descriptor.Sum s -> validateSumShape(value, name, s.variants());
         };
     }
 
+    /**
+     * Constructor-side certification. Called on every product value
+     * the emitter builds, and deliberately bypasses the specName
+     * fast-path in {@link #validateUserDeclared} — that fast-path is
+     * sound only because this ran first.
+     */
+    public static Object certifyProduct(Object value, String specName) {
+        Descriptor d = REGISTRY.get(specName);
+        if (d instanceof Descriptor.Product p
+                && value instanceof Values.Tagged t
+                && t.namedFields() != null) {
+            checkProductFields(t.namedFields(), specName, p);
+        }
+        return value;
+    }
+
+    /**
+     * A product is <b>closed</b>: exactly the declared fields, each
+     * satisfying its declared spec. An extra field is a mismatch, not
+     * a superset that happens to fit — otherwise any record carrying
+     * the right names would pass as any other, and the spec would
+     * name a shape it doesn't actually pin down.
+     */
     private static Object validateProductShape(Object value, String specName,
-                                                List<String> requiredFields) {
+                                                Descriptor.Product p) {
         if (value instanceof Values.Tagged t && t.namedFields() != null) {
-            for (var field : requiredFields) {
-                if (!t.namedFields().containsKey(field)) {
-                    throw fail(specName + " requires field '" + field + "'");
-                }
-            }
+            checkProductFields(t.namedFields(), specName, p);
             return new Values.Tagged(t.tag(), t.fields(), t.namedFields(), specName);
         }
         if (value instanceof Values.IrijMap m) {
-            for (var field : requiredFields) {
-                if (!m.entries().containsKey(field)) {
-                    throw fail(specName + " requires field '" + field + "'");
-                }
-            }
+            checkProductFields(m.entries(), specName, p);
             var named = new java.util.LinkedHashMap<>(m.entries());
-            List<Object> fields = new java.util.ArrayList<>(requiredFields.size());
-            for (var field : requiredFields) fields.add(named.get(field));
+            List<Object> fields = new java.util.ArrayList<>(p.fields().size());
+            for (var field : p.fields()) fields.add(named.get(field));
             return new Values.Tagged(specName, fields, named, specName);
         }
         throw fail("cannot validate " + typeName(value) + " as " + specName);
+    }
+
+    private static void checkProductFields(java.util.Map<String, Object> actual,
+                                            String specName, Descriptor.Product p) {
+        for (int i = 0; i < p.fields().size(); i++) {
+            String field = p.fields().get(i);
+            if (!actual.containsKey(field)) {
+                throw fail(specName + " requires field '" + field + "'");
+            }
+            String encoded = p.fieldSpecs().get(i);
+            if (encoded.isEmpty()) continue;
+            try {
+                validate(actual.get(field), decode(encoded));
+            } catch (IrijRuntimeError e) {
+                throw fail(specName + " field '" + field + "': " + e.getMessage());
+            }
+        }
+        for (var key : actual.keySet()) {
+            if (!p.fields().contains(key)) {
+                throw fail(specName + " has no field '" + key + "' (declares: "
+                        + String.join(", ", p.fields()) + ")");
+            }
+        }
     }
 
     /** Primitive spec names allowed as sum-spec variants: a bare value
