@@ -45,6 +45,10 @@ final class ClassEmitter implements Opcodes {
      *  to emit caller-side subsumption checks at INVOKESTATIC sites. */
     final Map<String, List<String>> fnEffectRow = new HashMap<>();
     final Map<String, List<String>> productFields = new HashMap<>();
+    /** Spec name → per-field encoded specs, parallel to
+     *  {@link #productFields}. Registered alongside the names so
+     *  field values are validated, not just counted. */
+    final Map<String, List<String>> productFieldSpecs = new HashMap<>();
     /** Top-level `:=` bindings get hoisted to static fields on the
      *  emitted class so user-fn methods can read them (interpreter
      *  semantics: globalEnv lookup). Maps Irij name → JVM field name.
@@ -375,8 +379,16 @@ final class ClassEmitter implements Opcodes {
                 switch (sd.body()) {
                     case Decl.SpecBody.ProductSpec ps -> {
                         List<String> names = new ArrayList<>();
-                        for (Decl.SpecField f : ps.fields()) names.add(f.name());
+                        List<String> fieldSpecs = new ArrayList<>();
+                        for (Decl.SpecField f : ps.fields()) {
+                            names.add(f.name());
+                            // "" where the field is unconstrained: no
+                            // annotation, a wildcard, or a type var.
+                            fieldSpecs.add(f.spec() == null || FnEmitter.skipSpec(f.spec())
+                                    ? "" : SpecValidator.encode(f.spec()));
+                        }
                         productFields.put(sd.name(), names);
+                        productFieldSpecs.put(sd.name(), fieldSpecs);
                         tagToSpec.put(sd.name(), sd.name());
                     }
                     case Decl.SpecBody.SumSpec ss -> {
@@ -542,18 +554,10 @@ final class ClassEmitter implements Opcodes {
         }
         for (var e : productFields.entrySet()) {
             cl.visitLdcInsn(e.getKey());
-            // String[] fields
-            exprEm.pushIconst(cl, e.getValue().size());
-            cl.visitTypeInsn(ANEWARRAY, "java/lang/String");
-            int i = 0;
-            for (String f : e.getValue()) {
-                cl.visitInsn(DUP);
-                exprEm.pushIconst(cl, i++);
-                cl.visitLdcInsn(f);
-                cl.visitInsn(AASTORE);
-            }
+            pushStringArray(cl, e.getValue());
+            pushStringArray(cl, productFieldSpecs.getOrDefault(e.getKey(), List.of()));
             cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerProduct",
-                    "(Ljava/lang/String;[Ljava/lang/String;)V", false);
+                    "(Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
         }
         for (var e : sumVariants.entrySet()) {
             cl.visitLdcInsn(e.getKey());
@@ -733,6 +737,19 @@ final class ClassEmitter implements Opcodes {
     static final String TAIL_RESUME = "dev/irij/compiler/TailResume";
 
     int smDestCounter = 0;
+
+    /** Push a {@code String[]} of the given values onto the stack. */
+    private void pushStringArray(MethodVisitor mv, List<String> values) {
+        exprEm.pushIconst(mv, values.size());
+        mv.visitTypeInsn(ANEWARRAY, "java/lang/String");
+        int i = 0;
+        for (String v : values) {
+            mv.visitInsn(DUP);
+            exprEm.pushIconst(mv, i++);
+            mv.visitLdcInsn(v);
+            mv.visitInsn(AASTORE);
+        }
+    }
 
     /** Lazily declare a static field for a top-level binding. Field
      *  name is mangled to avoid collisions; type is Object. */

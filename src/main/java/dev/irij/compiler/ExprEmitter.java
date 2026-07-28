@@ -929,6 +929,14 @@ final class ExprEmitter implements Opcodes {
                 mv.visitLdcInsn(specName);
                 mv.visitMethodInsn(INVOKESPECIAL, ClassEmitter.VALUES + "$Tagged", "<init>",
                         "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;Ljava/lang/String;)V", false);
+                // Certify here, at the one place a product value can be
+                // built. Validation downstream fast-paths on a matching
+                // specName, so without this a constructor call is a hole
+                // straight through every later check: `R "str" 2` would
+                // satisfy `x :: Int` forever after.
+                mv.visitLdcInsn(specName);
+                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "certifyProduct",
+                        "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
             } else {
                 mv.visitMethodInsn(INVOKESPECIAL, ClassEmitter.VALUES + "$Tagged", "<init>",
                         "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;)V", false);

@@ -347,24 +347,45 @@ keep passing across releases.
 
 Populated by a generated `<clinit>` on every emitted class. For
 each `Decl.SpecDecl` the emitter records the variant arities (sum)
-or field names (product) and emits `clinit` calls:
+or the field names *and their encoded specs* (product) and emits
+`clinit` calls:
 
 ```
-SpecValidator.registerProduct("Point", new String[]{"x","y"});
+SpecValidator.registerProduct("Point",
+        new String[]{"x","y"},
+        new String[]{"Int","Int"});
 SpecValidator.registerSum("Shape",
         new Object[]{"Circle", 1, "Rect", 2});
 ```
+
+The per-field specs are `SpecValidator.encode` strings — the same
+encoding fn annotations use — so a field spec may be anything a fn
+annotation may be (`#[Int]`, `Map[Str,Int]`, a nested product, an
+arrow). An empty string marks a field the declaration left open (a
+wildcard or a type variable). Until this was wired, the field specs
+were parsed into `Decl.SpecField` and then dropped, so a product
+validated field *presence* only.
 
 `SpecValidator.validateNamed` falls through unknown names into
 `validateUserDeclared`, which:
 
 1. Fast-paths Tagged values whose `specName` already matches (set
    by `emitConstructorApp` — the bytecode emitter passes the
-   parent spec name through to `Values.Tagged`).
+   parent spec name through to `Values.Tagged`). That fast-path is
+   sound only because `emitConstructorApp` also emits a
+   `SpecValidator.certifyProduct` call: the constructor is the one
+   place a product value is built, so validating there means a
+   certified value is genuinely valid. Skip it and `Point "str" 2`
+   satisfies `x :: Int` at every boundary forever after.
 2. Otherwise dispatches by descriptor:
    - **Product**: requires `Tagged` with all required named fields,
      or `IrijMap` with those keys (auto-certifies into Tagged).
-     Re-certifies the result with the matching `specName`.
+     Each present field is validated against its declared spec, and
+     the shape is **closed** — an undeclared field is a mismatch,
+     not a superset that happens to fit. Without closedness a spec
+     doesn't pin down the shape it names: any record carrying the
+     right field names would pass as any other. Re-certifies the
+     result with the matching `specName`.
    - **Sum**: requires `Tagged` whose tag is a known variant of the
      spec, and whose positional-field count matches the declared
      arity. Re-certifies the result.
