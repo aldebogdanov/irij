@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -32,6 +33,8 @@ final class ModuleInliner {
      *  bytecode build can inline `use vrata.html`. The list is
      *  searched in declaration order; first match wins. */
     private final List<Path> extraRoots;
+    /** root → the seed name that root provides, resolved lazily. */
+    private final java.util.Map<Path, String> seedNames = new HashMap<>();
     private final Set<String> loaded = new HashSet<>();
     private final Set<String> loading = new HashSet<>();
     private final Set<String> aliases = new HashSet<>();
@@ -41,6 +44,43 @@ final class ModuleInliner {
     ModuleInliner(Path sourceRoot, List<Path> extraRoots) {
         this.sourceRoot = sourceRoot;
         this.extraRoots = extraRoots == null ? List.of() : extraRoots;
+    }
+
+    /**
+     * Which seed a resolved root provides.
+     *
+     * <p>The root's own {@code irij.toml} is authoritative — every
+     * published seed and every path dep is a project and has one. The
+     * directory-name fallbacks cover a bare directory used as a root:
+     * a path dep is {@code …/uzor}, and a registry seed is
+     * {@code …/uzor/0.1.12}, so the name is either the last segment or
+     * the one above it.
+     */
+    private String seedNameOf(Path root) {
+        return seedNames.computeIfAbsent(root, r -> {
+            Path toml = r.resolve("irij.toml");
+            if (Files.exists(toml)) {
+                try {
+                    var meta = dev.irij.module.ProjectFile.parseFile(toml).meta();
+                    if (meta != null && meta.name() != null && !meta.name().isBlank()) {
+                        return meta.name();
+                    }
+                } catch (Exception ignored) {
+                    // Fall through to the directory-name guesses.
+                }
+            }
+            Path self = r.getFileName();
+            return self == null ? "" : self.toString();
+        });
+    }
+
+    /** True when {@code root} provides the seed {@code name}, allowing
+     *  for the {@code <name>/<version>} layout of an installed seed. */
+    private boolean rootProvides(Path root, String name) {
+        if (name.equals(seedNameOf(root))) return true;
+        Path parent = root.getParent();
+        return parent != null && parent.getFileName() != null
+                && name.equals(parent.getFileName().toString());
     }
 
     /** Short-name aliases registered via `use` (e.g. "json" for "std.json"). */
@@ -187,7 +227,14 @@ final class ModuleInliner {
                             "Error reading module file '" + p + "': " + e.getMessage());
                 }
             }
-            if (stripped != null) {
+            // Only strip the seed prefix against the root that
+            // actually provides that seed. `<root>/core.irj` matches
+            // for ANY qualified name ending in `.core`, so without
+            // this check `use uzor.core` could resolve to butterfly's
+            // core.irj — whichever root happened to come first. The
+            // failure is silent: the module loads, and every name the
+            // caller wanted is simply missing.
+            if (stripped != null && rootProvides(root, parts[0])) {
                 Path q = root.resolve(stripped);
                 if (Files.exists(q)) {
                     try {
