@@ -45,6 +45,28 @@ fn div :: Map Vec Map
 result := math.div 10 3   ;; bare `div` is the local user fn
 ```
 
+
+## Seed module lookup
+
+A seed's modules live **flat** in its root: `uzor.core` is
+`<uzorRoot>/core.irj`, not `<uzorRoot>/uzor/core.irj`. So
+`ModuleInliner` tries two shapes under each extra root — the full
+dotted path, then the path with the leading seed name stripped.
+
+The stripped shape is only tried against **the root that provides that
+seed**. `<root>/core.irj` matches any qualified name ending in
+`.core`, so trying it against every root made resolution depend on the
+order the roots came in: with uzor and butterfly both present,
+`use uzor.core` could load butterfly's `core.irj`. Nothing errored —
+the module loaded, and every name the caller wanted was simply
+missing.
+
+A root's seed is identified by its own `irij.toml` `[project] name`,
+which every published seed and every path dep has. Two directory-name
+fallbacks cover a bare directory used as a root: the last segment (a
+path dep, `…/uzor`) or the one above it (an installed seed,
+`…/uzor/0.1.12`).
+
 ## Resolution
 
 `ModuleInliner` runs after parsing, before back-end dispatch:
