@@ -102,4 +102,58 @@ class LambdaCaptureTest {
                   println m.v
                 """));
     }
+
+    /**
+     * A parameter shadows a same-named top-level binding, even from
+     * inside a lambda. The collector used to skip any name that
+     * existed as a top-level field, so the lambda read the global
+     * instead of capturing the parameter — silently, with a plausible
+     * wrong value rather than an error.
+     *
+     * <p>Modules inline into one namespace, so this fired whenever a
+     * program's top-level binding shared a name with a parameter
+     * inside any library fn it called. Found via uzor: a test file
+     * binding {@code st := plain} made {@code std}-style helpers in
+     * uzor.style render every span with the wrong style.
+     */
+    @Test void parameterShadowsSameNamedTopLevelBinding() throws Exception {
+        assertEquals("PP", run("""
+                fn capture :: _ Str
+                  => st
+                  fold (acc x -> acc ++ st) "" #["a" "b"]
+
+                st := "GLOBAL"
+                println (capture "P")
+                """));
+    }
+
+    /** The same shadowing, one call deeper and through a filter. */
+    @Test void nestedFnParameterShadowsTopLevelBinding() throws Exception {
+        assertEquals("#[2]", run("""
+                fn keep-matching :: Int Vec Vec
+                  => cp xs
+                  /? (x -> x == cp) xs
+
+                cp := 99
+                println (keep-matching 2 #[1 2 3])
+                """));
+    }
+
+    /**
+     * The behaviour the top-level-field check exists to protect: a
+     * lambda defined at top level must read the static field, so a
+     * write made after the lambda was built is visible to it.
+     */
+    @Test void topLevelLambdaStillSeesLaterWrites() throws Exception {
+        assertEquals("42", run("""
+                counter :! 0
+
+                fn call-it :: Fn _
+                  => f
+                  f ()
+
+                counter <- 41
+                println (call-it (-> counter + 1))
+                """));
+    }
 }

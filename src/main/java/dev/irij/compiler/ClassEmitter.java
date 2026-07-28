@@ -50,6 +50,12 @@ final class ClassEmitter implements Opcodes {
      *  semantics: globalEnv lookup). Maps Irij name → JVM field name.
      *  Populated lazily on first emitTopLevel BindingDecl write. */
     final Map<String, String> topLevelFields = new HashMap<>();
+
+    /** The {@code main} method's Locals — where top-level bindings get
+     *  their dual local slot. Identity-compared during lambda capture
+     *  to distinguish "this name is a top-level binding" from "this
+     *  name is a parameter that happens to share its spelling". */
+    Locals topLevelLocals = null;
     /** Sum-spec variants, kept in declaration order for deterministic
      *  emission. Each entry maps {@code variantName → arity}. */
     final Map<String, LinkedHashMap<String, Integer>> sumVariants = new LinkedHashMap<>();
@@ -467,6 +473,10 @@ final class ClassEmitter implements Opcodes {
         mv.visitCode();
         Locals locals = new Locals();
         locals.reserveArgsArray();
+        // Remembered so lambda capture can tell a top-level binding's
+        // dual local slot from a genuine local of some other scope —
+        // see LambdaEmitter.collectFreeVars.
+        topLevelLocals = locals;
         for (Decl d : decls) {
             if (asFnDecl(d) != null) continue;
             emitTopLevel(d, mv, locals);

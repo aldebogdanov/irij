@@ -153,7 +153,18 @@ final class LambdaEmitter implements Opcodes {
                 // capture them by value — reads and writes inside a
                 // lambda must hit the static field directly so updates
                 // are visible across threads / scope boundaries.
-                if (ce.topLevelFields.containsKey(n)) break;
+                //
+                // "Top-level binding" has to mean the slot in main's
+                // Locals, not merely a name that also exists as a
+                // top-level field. A parameter or let-binding of an
+                // enclosing scope shadows a same-named global, so it
+                // must still be captured: skipping it made the lambda
+                // read the caller's global instead of the argument its
+                // fn was given. Modules are inlined into one namespace,
+                // so this fired whenever a program's top-level binding
+                // happened to share a name with a parameter inside any
+                // library fn it called — silently, with a wrong value.
+                if (ce.topLevelFields.containsKey(n) && outer == ce.topLevelLocals) break;
                 if (!bound.contains(n) && outer.lookup(n) != null && !seen.contains(n)) {
                     seen.add(n);
                     out.add(n);
