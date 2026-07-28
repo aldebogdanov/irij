@@ -160,6 +160,32 @@ Each level is one fast path. The lifted-locals map is the only one
 that's per-emit-context (set by `emitSMSequence` / `emitSMEffIR`
 before they invoke recursive emits).
 
+### Lambda capture vs top-level bindings
+
+`LambdaEmitter.collectFreeVars` decides what a lambda closes over.
+Two rules meet here, and the order matters:
+
+- A **top-level binding** (`x := …` / `x :! …` at file scope) lives in
+  a static field and is *not* captured. Reads and writes inside a
+  lambda hit `GETSTATIC` / `PUTSTATIC`, so a write made after the
+  lambda was built — including one from another thread — is visible.
+- A **parameter or local** shadows a same-named top-level binding and
+  *is* captured, exactly as it shadows one outside a lambda
+  (`emitVarLoad` checks the local slot first).
+
+Distinguishing them can't be done by name alone. A top-level binding
+also gets a dual local slot in `main`, so the test is slot identity:
+the name is treated as top-level only when the enclosing scope's
+`Locals` **is** `ClassEmitter.topLevelLocals`. Testing only
+`topLevelFields.containsKey(name)` skipped capture for any parameter
+whose name happened to collide with some global, and the lambda then
+read that global instead. Because modules inline into one namespace,
+a program's top-level binding could break a library fn's internals
+this way — silently, with a plausible wrong value rather than an
+error. Regression tests: `LambdaCaptureTest.parameterShadowsSameNamedTopLevelBinding`
+and `topLevelLambdaStillSeesLaterWrites` (the two rules, pinned
+against each other).
+
 ## Function calls
 
 `emitApp(App app)` tree:
