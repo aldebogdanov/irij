@@ -73,8 +73,8 @@ public sealed interface Decl extends Node {
                        List<HandlerClause> clauses, List<Stmt> stateBindings,
                        SourceLoc loc) implements Decl {}
 
-    /** Role declaration: role $NAME. */
-    record RoleDecl(String name, SourceLoc loc) implements Decl {}
+    /** Party declaration: party $NAME. */
+    record PartyDecl(String name, SourceLoc loc) implements Decl {}
 
     /** Protocol declaration: proto Name a  methods/laws. */
     record ProtoDecl(String name, List<String> typeParams,

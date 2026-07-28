@@ -22,7 +22,7 @@ no special-cased layout rules in `.g4`.
 
 - **Reserved words are minimal but real.** `in`, `out`, `blame` come
   from contract clauses; `match`, `with`, `fn`, `if`, `else`, `mod`,
-  `use`, `pub`, `effect`, `handler`, `cap`, `role`, `proto`, `impl`,
+  `use`, `pub`, `effect`, `handler`, `cap`, `party`, `proto`, `impl`,
   `spec` are language structure. If you try to use one as an
   identifier, the parser will complain in surprising places — it
   often manifests as "expecting `->`" rather than "reserved word."

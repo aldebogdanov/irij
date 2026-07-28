@@ -46,7 +46,7 @@
      mirroring how both humans and LLMs read sequentially.
    - *Keywords are short words, not digraphs.* A small set of reserved
      words (=fn=, =do=, =if=, =else=, =match=, =spec=, =newtype=,
-     =mod=, =use=, =pub=, =with=, =scope=, =effect=, =role=, =cap=,
+     =mod=, =use=, =pub=, =with=, =scope=, =effect=, =party=, =cap=,
      =handler=, =impl=, =proto=, =pre=, =post=, =contract=,
      =select=, =enclave=, =par-each=, =on-failure=) are
      2–10 characters each —
@@ -103,7 +103,7 @@
     HttpResponse
     UserRecord
 
-    ;; role/location names: $-prefixed UPPER-CASE (choreography)
+    ;; party/location names: $-prefixed UPPER-CASE (choreography)
     $ALICE
     $BOB
     $DB-PRIMARY
@@ -342,10 +342,10 @@
    spec User
      name :: Str
      age  :: Int
-     role :: Role
+     tier :: Tier
 
    ;; construction: positional args in field-declaration order
-   u := User "Jo" 30 :admin     ;; → User {name= Jo age= 30 role= :admin}
+   u := User "Jo" 30 :gold      ;; → User {name= Jo age= 30 tier= :gold}
 
    ;; field access via dot
    u.name   ;; → "Jo"
@@ -785,7 +785,7 @@
 
 ** 5.3 Endpoint Projection (EPP)
 
-   The compiler projects a single choreography into per-role programs.
+   The compiler projects a single choreography into per-party programs.
 
    #+begin_example
    ;; The buy-protocol above compiles to:
@@ -829,18 +829,18 @@
 
    *The solution:* Make the participant set a type parameter. =forall
    $WORKERS= means "this choreography works for any set of participants
-   playing the $WORKER role." At runtime, =census $WORKERS= returns the
+   playing the $WORKER party." At runtime, =census $WORKERS= returns the
    current member set (a =std.choreo= function). The compiler projects
    this into: $COORD gets a loop of sends/receives; each $WORKER gets
    a "receive, compute, send back" program. The projection is
-   *per-role-template*, instantiated at deployment time for each actual
+   *per-party-template*, instantiated at deployment time for each actual
    participant.
 
    *=par-each=* is the choreographic parallel iteration keyword. It
-   iterates over a role set and runs the body once per participant,
+   iterates over a party set and runs the body once per participant,
    in parallel. Syntax: =results := par-each w <- $ROLE_SET body=.
    The last expression of each iteration is collected into a vector
-   bound on the coordinating role. Inside the body, =w= refers to the
+   bound on the coordinating party. Inside the body, =w= refers to the
    current participant.
 
    #+begin_example
@@ -1586,10 +1586,10 @@
   use std.net
   use std.core {loop}
 
-  ;; ── Roles ─────────────────────────────────────────────
-  role $CLIENT
-  role $PRIMARY
-  role $REPLICA
+  ;; ── Parties ───────────────────────────────────────────
+  party $CLIENT
+  party $PRIMARY
+  party $REPLICA
 
   ;; ── Data ──────────────────────────────────────────────
   spec Command

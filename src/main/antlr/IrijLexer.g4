@@ -19,7 +19,7 @@ PUB         : 'pub' ;
 WITH        : 'with' ;
 SCOPE       : 'scope' ;
 EFFECT      : 'effect' ;
-ROLE        : 'role' ;
+PARTY       : 'party' ;
 CAP         : 'cap' ;
 HANDLER     : 'handler' ;
 IMPL        : 'impl' ;
@@ -54,7 +54,7 @@ COMPOSE_BACK: '<<' ;       // compose backward
 // ── Choreography ─────────────────────────────────────────────────────
 SEND        : '~>' ;       // choreographic send
 RECV        : '<~' ;       // choreographic receive (sugar)
-BROADCAST   : '~*>' ;      // broadcast to multiple roles
+BROADCAST   : '~*>' ;      // broadcast to multiple parties
 CH_SELECT   : '~/' ;       // select/inform branch
 
 // ── Comparison ───────────────────────────────────────────────────────
@@ -121,8 +121,8 @@ UNDERSCORE  : '_' ;        // wildcard pattern
 // ── Keyword Atoms (Clojure-style) ────────────────────────────────────
 KEYWORD     : ':' [a-z] [a-z0-9_-]* ;   // :ok  :error  :pending
 
-// ── Role Names ───────────────────────────────────────────────────────
-ROLE_NAME   : '$' [A-Z] [A-Z0-9_-]* ;   // $BUYER  $DB-PRIMARY
+// ── Party Names ───────────────────────────────────────────────────────
+PARTY_NAME  : '$' [A-Z] [A-Z0-9_-]* ;   // $BUYER  $DB-PRIMARY
 
 // ── Java Interop Reference (Clojure-style) ───────────────────────────
 // Class/member, java.pkg.Class/member, Class/new. Must precede UPPER_NAME/

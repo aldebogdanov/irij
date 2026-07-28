@@ -73,9 +73,9 @@ public final class Builtins {
         env.define("sleep", new BuiltinFn("sleep", 1, List.of("Time"), args -> dev.irij.compiler.RtConcurrency.sleep(args.get(0))));
 
         // ── Arithmetic ──────────────────────────────────────────────────
-        env.define("div", new BuiltinFn("div", 2, args -> dev.irij.compiler.RtOps.div(args.get(0), args.get(1))));
+        env.define("quo", new BuiltinFn("quo", 2, args -> dev.irij.compiler.RtOps.div(args.get(0), args.get(1))));
 
-        env.define("mod", new BuiltinFn("mod", 2, args -> dev.irij.compiler.RtOps.mod(args.get(0), args.get(1))));
+        env.define("rem", new BuiltinFn("rem", 2, args -> dev.irij.compiler.RtOps.mod(args.get(0), args.get(1))));
 
         env.define("abs", new BuiltinFn("abs", 1, args -> dev.irij.compiler.RtMath.abs(args.get(0))));
 

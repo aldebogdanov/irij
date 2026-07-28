@@ -15,8 +15,12 @@ value-position `BuiltinFn` entries delegate to them.
 
 Registered as `BuiltinFn` objects in the global environment:
 
-- Arithmetic + comparison primitives (`add`, `sub`, `mul`, `div`,
-  `mod`, `<`, `<=`, `>`, `>=`, `==`, `!=`, `++`, `&&`, `||`, `!`)
+- Arithmetic + comparison primitives (`add`, `sub`, `mul`, `quo`,
+  `rem`, `<`, `<=`, `>`, `>=`, `==`, `!=`, `++`, `&&`, `||`, `!`)
+  — `quo`/`rem` are integer division and remainder. Not `div`/`mod`:
+  `mod` is the module-decl keyword, so the old `mod` builtin could
+  never be written down. The Java statics behind them keep the names
+  `RtOps.div` / `RtOps.mod`, since those also back `/` and `%`.
 - IO (`print`, `println`, `dbg`, `read-line`)
 - Conversion (`to-str`, `to-vec`)
 - Collection raw ops (`length`, `head`, `tail`, `nth`, `last`,

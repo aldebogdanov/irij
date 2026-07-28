@@ -310,7 +310,7 @@ final class ClassEmitter implements Opcodes {
             case Expr.RationalLit n -> n.loc();
             case Expr.Var n -> n.loc();
             case Expr.TypeRef n -> n.loc();
-            case Expr.RoleRef n -> n.loc();
+            case Expr.PartyRef n -> n.loc();
             case Expr.JavaRef n -> n.loc();
             case Expr.BinaryOp n -> n.loc();
             case Expr.UnaryOp n -> n.loc();
