@@ -243,8 +243,8 @@ final class IntrinsicsEmitter implements Opcodes {
             case "pow"   -> { return emitRT2(args, mv, locals, "pow"); }
             case "min"   -> { return emitRT2(args, mv, locals, "min"); }
             case "max"   -> { return emitRT2(args, mv, locals, "max"); }
-            case "div"   -> { return emitRT2(args, mv, locals, "divInt"); }
-            case "mod"   -> { return emitRT2(args, mv, locals, "modInt"); }
+            case "quo"   -> { return emitRT2(args, mv, locals, "divInt"); }
+            case "rem"   -> { return emitRT2(args, mv, locals, "modInt"); }
             // ── R3: random ───────────────────────────────────────────
             case "random-int"   -> { return emitRT1(args, mv, locals, "randomInt"); }
             case "random-float" -> {

@@ -81,7 +81,7 @@
 (defconst irij-keywords
   '("fn" "do" "if" "else" "match" "spec" "newtype"
     "mod" "use" "pub" "with" "scope" "effect"
-    "role" "cap" "handler" "impl" "proto"
+    "party" "cap" "handler" "impl" "proto"
     "pre" "post" "contract" "select"
     "enclave" "par-each" "on-failure"
     "in" "out")

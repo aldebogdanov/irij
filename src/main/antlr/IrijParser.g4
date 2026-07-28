@@ -22,7 +22,7 @@ topLevelDecl
     | capDecl
     | protoDecl
     | implDecl
-    | roleDecl
+    | partyDecl
     | matchStmt
     | ifStmt
     | withExpr
@@ -56,7 +56,7 @@ nameList
 nameListItem
     : IDENT | UPPER_NAME
     | FN | DO | IF | ELSE | MATCH | SPEC | NEWTYPE | MOD | USE | PUB
-    | WITH | SCOPE | EFFECT | ROLE | CAP | HANDLER | IMPL | PROTO
+    | WITH | SCOPE | EFFECT | PARTY | CAP | HANDLER | IMPL | PROTO
     | PRE | POST | CONTRACT | SELECT | ENCLAVE
     | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF
     ;
@@ -65,8 +65,8 @@ pubDecl
     : PUB (fnDecl | specDecl | effectDecl | handlerDecl | useDecl | binding)
     ;
 
-roleDecl
-    : ROLE ROLE_NAME
+partyDecl
+    : PARTY PARTY_NAME
     ;
 
 // ── fn ───────────────────────────────────────────────────────────────
@@ -279,7 +279,7 @@ specAtom
     | TUPLE_OPEN specExpr specExpr* RPAREN    // #(a b)
     | LBRACE refinementBody RBRACE            // {x :: Int | x >= 0}
     | LBRACE recordSpecBody RBRACE            // {field :: T; field :: T}
-    | specAtom MAP_AT ROLE_NAME               // located: T @$ROLE
+    | specAtom MAP_AT PARTY_NAME               // located: T @$PARTY
     ;
 
 refinementBody
@@ -439,7 +439,7 @@ appExpr
 
 // Postfix: dot access, located-at
 postfixExpr
-    : atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT))* (MAP_AT ROLE_NAME)?
+    : atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT))* (MAP_AT PARTY_NAME)?
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -451,7 +451,7 @@ atomExpr
     | JAVA_REF                                // Java interop: Class/member
     | IDENT
     | UPPER_NAME
-    | ROLE_NAME
+    | PARTY_NAME
     | KEYWORD
     | UNDERSCORE
     | ifExpr
@@ -473,7 +473,7 @@ atomExpr
 // ── Match expression (block-level, usable in expression context) ────
 
 matchExpr
-    : MATCH expr (MAP_AT ROLE_NAME)?
+    : MATCH expr (MAP_AT PARTY_NAME)?
       NEWLINE INDENT matchArms NEWLINE* DEDENT
     ;
 
@@ -573,7 +573,7 @@ ifStmt
 // ── match (as statement, block-level) ────────────────────────────────
 
 matchStmt
-    : MATCH expr (MAP_AT ROLE_NAME)?
+    : MATCH expr (MAP_AT PARTY_NAME)?
       NEWLINE INDENT matchArms NEWLINE* DEDENT
     ;
 
@@ -616,7 +616,7 @@ enclaveExpr
 // ── par-each ─────────────────────────────────────────────────────────
 
 parEachExpr
-    : PAR_EACH IDENT ASSIGN ROLE_NAME
+    : PAR_EACH IDENT ASSIGN PARTY_NAME
       NEWLINE INDENT stmtList NEWLINE* DEDENT
     ;
 

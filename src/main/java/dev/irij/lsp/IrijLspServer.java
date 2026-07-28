@@ -201,7 +201,7 @@ public final class IrijLspServer implements LanguageServer,
         for (String kw : List.of(
                 "fn", "pub", "if", "else", "match", "with", "scope",
                 "do", "spec", "effect", "handler", "cap", "mod", "use",
-                "newtype", "proto", "impl")) {
+                "newtype", "proto", "impl", "party")) {
             CompletionItem it = new CompletionItem(kw);
             it.setKind(CompletionItemKind.Keyword);
             items.add(it);
@@ -216,7 +216,7 @@ public final class IrijLspServer implements LanguageServer,
                 case HANDLER, CAP -> CompletionItemKind.Module;
                 case SPEC, NEWTYPE -> CompletionItemKind.Struct;
                 case PROTO -> CompletionItemKind.Interface;
-                case ROLE -> CompletionItemKind.Constant;
+                case PARTY -> CompletionItemKind.Constant;
             });
             it.setDetail(s.signature());
             items.add(it);

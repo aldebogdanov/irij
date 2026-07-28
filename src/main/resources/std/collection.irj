@@ -43,7 +43,7 @@ pub fn frequencies :: Vec Map
 pub fn partition :: Int _ Vec
   => n vec
   total := length vec
-  chunks := div (total + n - 1) n
+  chunks := quo (total + n - 1) n
   to-vec ~ (0 ..< chunks) |> @ (i -> take n (drop (i * n) vec))
 
 pub fn group-by :: Fn Vec Map

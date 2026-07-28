@@ -85,4 +85,40 @@ class PrimitivesTest {
         // call sites). Documented gap.
         // assertEquals("5050", run(src.toString()));
     }
+
+    /**
+     * `quo` / `rem` are integer division and remainder. They were
+     * `div` / `mod` until 0.8.x, and `mod` was unreachable: the name
+     * belongs to the module-decl keyword, so `mod 7 3` never parsed
+     * and the builtin registered under it could not be called.
+     */
+    @Test void quoAndRemAreReachable() throws Exception {
+        assertEquals("2", run("println (quo 7 3)"));
+        assertEquals("1", run("println (rem 7 3)"));
+    }
+
+    @Test void quoAndRemTruncateTowardZero() throws Exception {
+        // Same semantics as the `/` and `%` operators they share an
+        // implementation with.
+        assertEquals("-3", run("println (quo (-7) 2)"));
+        assertEquals("-1", run("println (rem (-7) 2)"));
+    }
+
+    /** `role` stopped being a keyword when choreography's became `party`. */
+    @Test void roleIsAnOrdinaryIdentifier() throws Exception {
+        assertEquals("admin", run("""
+                u := {name= "jo" role= "admin"}
+                println u.role
+                """));
+    }
+
+    @Test void roleWorksAsBindingAndFnName() throws Exception {
+        assertEquals("admin", run("""
+                fn role-of :: Map Str
+                  => m
+                  m.role
+                role := {role= "admin"}
+                println (role-of role)
+                """));
+    }
 }

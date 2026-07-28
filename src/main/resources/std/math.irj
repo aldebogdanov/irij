@@ -16,14 +16,15 @@ pub pow := pow
 pub abs := abs
 pub min := min
 pub max := max
-pub div := div    ;; integer division (re-exports the math builtin;
-                  ;; gives a qualified path like `math.div` when a
-                  ;; user-level fn or seed shadows `div` at the
-                  ;; top level — e.g. vrata.html's element builder).
-;; NB: `mod` is a reserved word (the module-decl keyword), so it
-;; can't be re-exported as an identifier. Reach the modulo
-;; primitive via `(a % b)` (the `%` operator) or the JVM interop
-;; `(java.lang.Math/floorMod a b)`.
+;; Integer division and remainder. Named `quo`/`rem` rather than
+;; `div`/`mod`: `mod` is the module-decl keyword, so the old `mod`
+;; builtin could never be written down — `mod 7 3` didn't parse, and
+;; the only ways to a remainder were the `%` operator or JVM interop.
+;; Re-exported here so a qualified `math.quo` still resolves when a
+;; user-level fn or seed shadows the name at the top level (e.g.
+;; vrata.html's element builder shadows `div`).
+pub quo := quo
+pub rem := rem
 pub pi := pi
 pub e := e
 pub random-int := random-int
@@ -57,7 +58,7 @@ pub fn gcd :: Int Int Int
   if (b == 0) (abs a) else (gcd b (a % b))
 
 pub fn lcm :: Int Int Int
-  (a b -> div (abs (a * b)) (gcd a b))
+  (a b -> quo (abs (a * b)) (gcd a b))
 
 pub fn sum-of :: Vec _
   (vec -> /+ vec)

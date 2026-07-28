@@ -48,19 +48,30 @@ class QualifiedUseTest {
     }
 
     @Test
-    void qualifiedDivReExportFromStdMath() throws Exception {
-        // `std.math` re-exports `div`. Qualified access works even
-        // if the global `div` is shadowed by a local fn.
+    void qualifiedQuoReExportFromStdMath() throws Exception {
+        // `std.math` re-exports `quo`. Qualified access works even
+        // if the global `quo` is shadowed by a local fn.
         assertEquals("3", run("""
                 use std.math :as math
-                println (math.div 10 3)
+                println (math.quo 10 3)
                 """));
     }
 
-    // Edge case skipped: defining a user fn `div` after `use std.math`
-    // (qualified, with pub div := div re-export) interacts with the
+    @Test
+    void qualifiedRemReExportFromStdMath() throws Exception {
+        // `rem` only became reachable when the builtin stopped being
+        // called `mod` — that name belongs to the module keyword, so
+        // `mod 10 3` never parsed.
+        assertEquals("1", run("""
+                use std.math :as math
+                println (math.rem 10 3)
+                """));
+    }
+
+    // Edge case skipped: defining a user fn `quo` after `use std.math`
+    // (qualified, with pub quo := quo re-export) interacts with the
     // emitter's name-resolution + static-field hoisting in ways that
-    // need a follow-up commit. The qualified `math.div` access works
+    // need a follow-up commit. The qualified `math.quo` access works
     // — what doesn't is the assertion "local user fn shadows the
     // module's top-level re-export". Tracked as tech debt.
 

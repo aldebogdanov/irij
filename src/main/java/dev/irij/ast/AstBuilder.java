@@ -51,7 +51,7 @@ public class AstBuilder {
         if (ctx.capDecl() != null) return visitCapDecl(ctx.capDecl());
         if (ctx.protoDecl() != null) return visitProtoDecl(ctx.protoDecl());
         if (ctx.implDecl() != null) return visitImplDecl(ctx.implDecl());
-        if (ctx.roleDecl() != null) return visitRoleDecl(ctx.roleDecl());
+        if (ctx.partyDecl() != null) return visitPartyDecl(ctx.partyDecl());
         if (ctx.matchStmt() != null) return new Decl.MatchDecl(visitMatchStmt(ctx.matchStmt()), loc);
         if (ctx.ifStmt() != null) return new Decl.IfDecl(visitIfStmt(ctx.ifStmt()), loc);
         if (ctx.withExpr() != null) return new Decl.WithDecl(visitWithExpr(ctx.withExpr()), loc);
@@ -577,8 +577,8 @@ public class AstBuilder {
 
     // ── role / proto / impl ─────────────────────────────────────────────
 
-    private Decl visitRoleDecl(RoleDeclContext ctx) {
-        return new Decl.RoleDecl(ctx.ROLE_NAME().getText(), loc(ctx));
+    private Decl visitPartyDecl(PartyDeclContext ctx) {
+        return new Decl.PartyDecl(ctx.PARTY_NAME().getText(), loc(ctx));
     }
 
     private Decl visitProtoDecl(ProtoDeclContext ctx) {
@@ -960,7 +960,7 @@ public class AstBuilder {
     private Expr visitPostfixExpr(PostfixExprContext ctx) {
         Expr result = visitAtomExpr(ctx.atomExpr());
         // Dot access chain: walk children after atomExpr
-        // Grammar: atomExpr (DOT (IDENT | UPPER_NAME))* (MAP_AT ROLE_NAME)?
+        // Grammar: atomExpr (DOT (IDENT | UPPER_NAME))* (MAP_AT PARTY_NAME)?
         boolean afterDot = false;
         for (var child : ctx.children) {
             if (child instanceof TerminalNode tn) {
@@ -971,7 +971,7 @@ public class AstBuilder {
                     result = new Expr.DotAccess(result, tn.getText(), loc(ctx));
                     afterDot = false;
                 }
-                // MAP_AT ROLE_NAME — ignore at runtime
+                // MAP_AT PARTY_NAME — ignore at runtime
             }
         }
         return result;
@@ -986,7 +986,7 @@ public class AstBuilder {
         if (ctx.JAVA_REF() != null) return new Expr.JavaRef(ctx.JAVA_REF().getText(), loc(ctx));
         if (ctx.IDENT() != null) return new Expr.Var(ctx.IDENT().getText(), loc(ctx));
         if (ctx.UPPER_NAME() != null) return new Expr.TypeRef(ctx.UPPER_NAME().getText(), loc(ctx));
-        if (ctx.ROLE_NAME() != null) return new Expr.RoleRef(ctx.ROLE_NAME().getText(), loc(ctx));
+        if (ctx.PARTY_NAME() != null) return new Expr.PartyRef(ctx.PARTY_NAME().getText(), loc(ctx));
         if (ctx.KEYWORD() != null) return visitKeyword(ctx.KEYWORD(), loc(ctx));
         if (ctx.UNDERSCORE() != null) return new Expr.Wildcard(loc(ctx));
         if (ctx.ifExpr() != null) return visitIfExpr(ctx.ifExpr());

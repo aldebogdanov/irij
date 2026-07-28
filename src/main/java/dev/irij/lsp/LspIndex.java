@@ -25,7 +25,7 @@ import java.util.List;
  */
 final class LspIndex {
 
-    enum Kind { FN, EFFECT, HANDLER, CAP, SPEC, NEWTYPE, PROTO, ROLE }
+    enum Kind { FN, EFFECT, HANDLER, CAP, SPEC, NEWTYPE, PROTO, PARTY }
 
     /** Per-document symbol. {@code docComment} carries any contiguous
      *  {@code ;;} comment block found immediately above the decl in
@@ -116,8 +116,8 @@ final class LspIndex {
                     pd.name(), Kind.PROTO, pd.loc(),
                     "proto " + pd.name()
                             + (pd.typeParams().isEmpty() ? "" : " " + String.join(" ", pd.typeParams()))));
-            case Decl.RoleDecl rd -> out.add(new Symbol(
-                    rd.name(), Kind.ROLE, rd.loc(),
+            case Decl.PartyDecl rd -> out.add(new Symbol(
+                    rd.name(), Kind.PARTY, rd.loc(),
                     "role " + rd.name()));
             default -> { /* not a name-surfaceable decl */ }
         }

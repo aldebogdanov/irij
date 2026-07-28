@@ -4,7 +4,15 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 
 ## Lexer
 
-- **Keywords cannot be variable names:** `role`, `mod`, `in`, `out`, `contract`, `forall`, `handler`, `if`, `else`, `match`, `with`, `scope`, `fn`, `use`, `pub`, `do`.
+- **Keywords cannot be variable names**, in *any* identifier position — binding,
+  map field, dot access, fn name, parameter: `party`, `mod`, `in`, `out`, `pre`,
+  `post`, `cap`, `select`, `contract`, `for`, `proof`, `handler`, `if`, `else`,
+  `match`, `with`, `scope`, `fn`, `use`, `pub`, `do`, `spec`, `effect`, `impl`,
+  `proto`, `newtype`, `enclave`, `par-each`, `on-failure`.
+  (`role` was one until 0.8.x — the choreography keyword is `party` now, so
+  `user.role` and `{role= …}` work.)
+- **Integer division and remainder are `quo` and `rem`**, not `div`/`mod`.
+  `mod` is the module keyword, so a `mod` builtin could never be written down.
 - **INDENT/DEDENT:** DEDENT is emitted BEFORE a NEWLINE in the token stream. All `INDENT ... DEDENT` grammar rules require `NEWLINE*` before `DEDENT`.
 - **`_foo` doesn't work:** `_` is the `UNDERSCORE` token, so `_foo` lexes as two tokens. Use `raw-foo` for internal-looking names.
 - **`!` suffix on IDENT** conflicts with the `NOT` token — avoid `foo!` as a name.

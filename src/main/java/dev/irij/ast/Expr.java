@@ -26,8 +26,8 @@ public sealed interface Expr extends Node {
     /** Type name used as expression (PascalCase — ADT constructor). */
     record TypeRef(String name, SourceLoc loc) implements Expr {}
 
-    /** Role name reference ($BUYER etc). */
-    record RoleRef(String name, SourceLoc loc) implements Expr {}
+    /** Party name reference ($BUYER etc). */
+    record PartyRef(String name, SourceLoc loc) implements Expr {}
 
     /** Java interop reference: Class/member (e.g. System/getenv, java.time.Instant/now, Class/new). */
     record JavaRef(String ref, SourceLoc loc) implements Expr {}
@@ -129,6 +129,6 @@ public sealed interface Expr extends Node {
 
     // ── Choreography (parsed, stubbed at runtime) ───────────────────────
 
-    /** Choreographic send/recv: expr ~> $ROLE, expr <~ $ROLE, etc. */
+    /** Choreographic send/recv: expr ~> $PARTY, expr <~ $PARTY, etc. */
     record ChoreoExpr(String op, Expr left, Expr right, SourceLoc loc) implements Expr {}
 }
