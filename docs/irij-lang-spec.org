@@ -375,6 +375,39 @@
    person := {name= "Jo" age= 30}
    #+end_example
 
+   *Product specs are closed.* A value satisfies a product spec when it
+   carries exactly the declared fields — no more, no fewer — and each
+   field's value satisfies that field's spec. A record with an extra
+   field is a different shape, not the declared one carrying more;
+   admitting it would mean the spec doesn't pin down what it names,
+   since any record with the right field names would then satisfy every
+   product spec sharing them.
+
+   #+begin_example
+   spec Account
+     name :: Str
+     age  :: Int
+
+   fn greet :: Account Str
+     (a -> "hi " ++ a.name)
+
+   greet {name= "Jo" age= 30}              ;; ⇒ "hi Jo"
+   greet {name= "Jo" age= "thirty"}        ;; error: Account field 'age': expected Int, got Str
+   greet {name= "Jo" age= 30 extra= 1}     ;; error: Account has no field 'extra' (declares: name, age)
+   greet {name= "Jo"}                      ;; error: Account requires field 'age'
+
+   ;; construction is checked too, so a bad value is rejected where it
+   ;; is built rather than somewhere later
+   Account "Jo" "thirty"                   ;; error: Account field 'age': expected Int, got Str
+   #+end_example
+
+   A field spec may be anything a function annotation may be — =#[Int]=,
+   a nested product, an arrow — and nested failures report the path
+   that reached them. A field declared =_= is present-but-unconstrained.
+
+   Anonymous records (=person= above) are structural and carry no such
+   obligation; closedness is a property of the *named* spec.
+
 ** 2.3 Pattern Matching & Destructuring
 
    #+begin_example
