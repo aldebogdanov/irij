@@ -614,6 +614,12 @@ final class ExprEmitter implements Opcodes {
 
 
     void emitBinaryOp(Expr.BinaryOp bop, MethodVisitor mv, Locals locals) {
+        // Short-circuit before either operand is emitted — see
+        // emitShortCircuit.
+        if (bop.op().equals("&&") || bop.op().equals("||")) {
+            emitShortCircuit(bop, mv, locals);
+            return;
+        }
         emitExpr(bop.left(), mv, locals);
         emitExpr(bop.right(), mv, locals);
         switch (bop.op()) {
@@ -1209,6 +1215,57 @@ final class ExprEmitter implements Opcodes {
         mv.visitLabel(endL);
     }
 
+
+    /**
+     * {@code &&} and {@code ||}, lowered to a branch so the right
+     * operand is evaluated only when it decides the answer.
+     *
+     * <p>Both used to be emitted like any other binary op — evaluate
+     * left, evaluate right, call {@code RtOps.and}. That made the
+     * guard idiom a trap:
+     *
+     * <pre>
+     *   (key-event? ev) &amp;&amp; (empty? (get "mods" ev))
+     * </pre>
+     *
+     * The guard could not protect the field access, because the field
+     * access had already run. Every language with these operators
+     * short-circuits, and code is written on that assumption.
+     *
+     * <p>The result stays a Boolean rather than becoming the operand
+     * (as in JS or Lua): that is what {@code RtOps.and}/{@code or}
+     * returned, and changing it would quietly alter the meaning of
+     * existing programs. So {@code a && b} is
+     * {@code if truthy(a) then truthy(b) else false}, and
+     * {@code a || b} is {@code if truthy(a) then true else truthy(b)}.
+     *
+     * <p>{@code RtOps.and}/{@code or} stay for the operator-section
+     * path ({@code (&&)} as a value): a function can't be lazy in its
+     * already-evaluated arguments.
+     */
+    private void emitShortCircuit(Expr.BinaryOp bop, MethodVisitor mv, Locals locals) {
+        boolean isAnd = bop.op().equals("&&");
+        Label shortL = new Label();
+        Label endL = new Label();
+
+        emitExpr(bop.left(), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
+                "(Ljava/lang/Object;)Z", false);
+        // && jumps out when the left is false; || when it is true.
+        mv.visitJumpInsn(isAnd ? IFEQ : IFNE, shortL);
+
+        emitExpr(bop.right(), mv, locals);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
+                "(Ljava/lang/Object;)Z", false);
+        mv.visitMethodInsn(INVOKESTATIC, "java/lang/Boolean", "valueOf",
+                "(Z)Ljava/lang/Boolean;", false);
+        mv.visitJumpInsn(GOTO, endL);
+
+        mv.visitLabel(shortL);
+        mv.visitFieldInsn(GETSTATIC, "java/lang/Boolean",
+                isAnd ? "FALSE" : "TRUE", "Ljava/lang/Boolean;");
+        mv.visitLabel(endL);
+    }
 
     void emitUnaryOp(Expr.UnaryOp uop, MethodVisitor mv, Locals locals) {
         switch (uop.op()) {

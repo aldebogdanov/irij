@@ -160,6 +160,21 @@ Each level is one fast path. The lifted-locals map is the only one
 that's per-emit-context (set by `emitSMSequence` / `emitSMEffIR`
 before they invoke recursive emits).
 
+### `&&` / `||` are branches, not calls
+
+`emitBinaryOp` intercepts both before either operand is emitted and
+lowers them the way `emitIfExpr` lowers a conditional: evaluate the
+left, `truthy`, jump out if it already decides the answer, otherwise
+evaluate the right. Emitting them like any other binary op — both
+operands, then `RtOps.and` — made the guard idiom a trap, since the
+guarded expression had already run by the time the guard was consulted.
+
+The result stays a `Boolean` rather than becoming the operand (JS/Lua
+style): that is what `RtOps.and`/`or` returned, and changing it would
+quietly alter existing programs. `RtOps.and`/`or` remain for the
+operator-section path (`(&&)` as a value), which cannot be lazy in
+arguments it has already been handed.
+
 ### Lambda capture vs top-level bindings
 
 `LambdaEmitter.collectFreeVars` decides what a lambda closes over.
