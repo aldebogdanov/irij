@@ -149,8 +149,12 @@
     **               ;; power
     == /=            ;; equal, not-equal
     < > <= >=        ;; comparison
-    && || !          ;; boolean
+    && || !          ;; boolean (&& and || short-circuit)
     ++               ;; concatenation (strings, lists, etc.)
+    ;; =&&= and =||= evaluate their right operand only when it decides
+    ;; the answer, so a guard protects what follows it:
+    ;;   (contains? m "k") && (valid? (get "k" m))
+    ;; Both yield a Bool, not the operand.
 
     ;; ── Collection / Array ──────────────────────────────────
     #[  ]            ;; vector literal         #[1 2 3]

@@ -121,4 +121,64 @@ class PrimitivesTest {
                 println (role-of role)
                 """));
     }
+
+    // ── Short-circuit && / || ───────────────────────────────────────
+    //
+    // Both used to evaluate their right operand unconditionally, which
+    // made the guard idiom a trap: `(has? x) && (use x)` ran `use`
+    // whether or not the guard held. Found from uzor, where
+    // `(key-event? ev) && (empty? (get "mods" ev))` crashed on every
+    // event that carried no "mods" field.
+
+    @Test void andDoesNotEvaluateRightWhenLeftIsFalse() throws Exception {
+        // `get` on a missing key yields Unit, and `empty?` rejects it —
+        // so this only prints if the right operand was skipped.
+        assertEquals("false", run("println (false && (empty? (get \"nope\" {})))"));
+    }
+
+    @Test void orDoesNotEvaluateRightWhenLeftIsTrue() throws Exception {
+        assertEquals("true", run("println (true || (empty? (get \"nope\" {})))"));
+    }
+
+    @Test void shortCircuitStillEvaluatesTheDecidingOperand() throws Exception {
+        assertEquals("false", run("println (true && (1 == 2))"));
+        assertEquals("true", run("println (false || (1 == 1))"));
+    }
+
+    /** The result is a Boolean, not the operand — as it always was. */
+    @Test void resultStaysBoolean() throws Exception {
+        assertEquals("true", run("println (1 && 2)"));
+        assertEquals("true", run("println (0 || \"\")"));
+        assertEquals("false", run("println (() || false)"));
+    }
+
+    /** Chains fold left, so a later operand is protected by every
+     *  earlier one. */
+    @Test void chainsShortCircuitThroughout() throws Exception {
+        assertEquals("false", run(
+                "println (false && (empty? (get \"a\" {})) && (empty? (get \"b\" {})))"));
+    }
+
+    /** A skipped operand does not perform its effects either. */
+    @Test void skippedOperandPerformsNothing() throws Exception {
+        assertEquals("ticks: 0", run("""
+                effect Counter
+                  tick :: Int
+
+                handler counting :: Counter
+                  n :! 0
+                  tick () =>
+                    n <- n + 1
+                    resume n
+
+                fn probe ::: Counter
+                  =>
+                  a := false && ((tick ()) > 0)
+                  b := true || ((tick ()) > 0)
+                  "ticks: " ++ to-str ((tick ()) - 1)
+
+                with counting
+                  println (probe ())
+                """));
+    }
 }
