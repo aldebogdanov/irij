@@ -7,6 +7,7 @@ import java.io.PrintStream;
 import java.lang.reflect.Method;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
  * Verifies the Phase R3 builtin ports — each {@link RuntimeSupport}
@@ -123,6 +124,32 @@ class PortedBuiltinsTest {
     @Test void toVecFromSet() throws Exception {
         // to-vec on a vector is identity-ish; on set it gives ordered elements
         assertEquals("#[1 2 3]", run("println (to-vec #[1 2 3])"));
+    }
+
+    @Test void toSetDedupes() throws Exception {
+        // Sets have no order, so assert on membership and size rather than
+        // the printed form.
+        assertEquals("3\ntrue\nfalse", run(
+                "s := to-set #[1 2 3 2 1]\n"
+              + "println (length s)\n"
+              + "println (contains? s 2)\n"
+              + "println (contains? s 9)"));
+    }
+
+    @Test void toSetEqualsLiteral() throws Exception {
+        assertEquals("true", run("println (to-set #[1 2 3] == #{1 2 3})"));
+    }
+
+    @Test void toTupleKeepsOrder() throws Exception {
+        assertEquals("#(1 2 3)\ntrue", run(
+                "t := to-tuple #[1 2 3]\n"
+              + "println t\n"
+              + "println (t == #(1 2 3))"));
+    }
+
+    @Test void toSetAndTupleRejectNonCollections() throws Exception {
+        assertThrows(Exception.class, () -> run("println (to-set 42)"));
+        assertThrows(Exception.class, () -> run("println (to-tuple 42)"));
     }
 
     // ── Misc ────────────────────────────────────────────────────────────

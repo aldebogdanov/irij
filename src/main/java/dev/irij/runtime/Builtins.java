@@ -120,6 +120,8 @@ public final class Builtins {
         env.define("drop", new BuiltinFn("drop", 2, args -> dev.irij.compiler.RtCollections.dropVal(args.get(0), args.get(1))));
 
         env.define("to-vec", new BuiltinFn("to-vec", 1, args -> dev.irij.compiler.RtCollections.toVec(args.get(0))));
+        env.define("to-set", new BuiltinFn("to-set", 1, args -> dev.irij.compiler.RtCollections.toSet(args.get(0))));
+        env.define("to-tuple", new BuiltinFn("to-tuple", 1, args -> dev.irij.compiler.RtCollections.toTuple(args.get(0))));
 
         env.define("contains?", new BuiltinFn("contains?", 2, args -> dev.irij.compiler.RtCollections.containsP(args.get(0), args.get(1))));
 

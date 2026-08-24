@@ -22,7 +22,12 @@ Registered as `BuiltinFn` objects in the global environment:
   never be written down. The Java statics behind them keep the names
   `RtOps.div` / `RtOps.mod`, since those also back `/` and `%`.
 - IO (`print`, `println`, `dbg`, `read-line`)
-- Conversion (`to-str`, `to-vec`)
+- Conversion (`to-str`, `to-vec`, `to-set`, `to-tuple`) —
+  `to-set`/`to-tuple` are the dynamic-arity counterparts of the
+  `#{}` and `#(...)` literals. `conj` is Vector-only, so without
+  them a Set or Tuple whose size is only known at runtime could
+  not be built at all. `to-set` collapses duplicates and keeps no
+  order; `to-tuple` keeps order.
 - Collection raw ops (`length`, `head`, `tail`, `nth`, `last`,
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)
@@ -102,6 +107,9 @@ into `ClassEmitter.emitBuiltinApp`:
 | `head` | `INVOKESTATIC RT.head` |
 | `tail` | `INVOKESTATIC RT.tail` |
 | `fold` | `INVOKESTATIC RT.fold` (effect-transparent — callback runs in caller's row) |
+| `to-vec` | `INVOKESTATIC RT.toVec` |
+| `to-set` | `INVOKESTATIC RT.toSet` |
+| `to-tuple` | `INVOKESTATIC RT.toTuple` |
 
 The general direction: stdlib is real Irij; Java provides the bare-
 metal building blocks. Higher-order builtins like `fold`, `map`,
