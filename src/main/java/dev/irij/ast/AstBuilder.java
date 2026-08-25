@@ -29,10 +29,20 @@ public class AstBuilder {
     public List<Decl> build(CompilationUnitContext ctx) {
         var decls = new ArrayList<Decl>();
         for (var tld : ctx.topLevelDecl()) {
-            decls.add(visitTopLevelDecl(tld));
+            Decl d = visitTopLevelDecl(tld);
+            // A `model` lowers to one function per clause plus the
+            // record binding that names them; the functions are
+            // parked here while that declaration is being built.
+            decls.addAll(hoisted);
+            hoisted.clear();
+            decls.add(d);
         }
         return decls;
     }
+
+    /** Declarations a desugaring produced that must precede the one
+     *  being built. Drained after every top-level declaration. */
+    private final List<Decl> hoisted = new ArrayList<>();
 
     // ═══════════════════════════════════════════════════════════════════
     // Top-Level Declarations
@@ -48,6 +58,7 @@ public class AstBuilder {
         if (ctx.newtypeDecl() != null) return visitNewtypeDecl(ctx.newtypeDecl());
         if (ctx.effectDecl() != null) return visitEffectDecl(ctx.effectDecl());
         if (ctx.handlerDecl() != null) return visitHandlerDecl(ctx.handlerDecl());
+        if (ctx.modelDecl() != null) return visitModelDecl(ctx.modelDecl());
         if (ctx.capDecl() != null) return visitCapDecl(ctx.capDecl());
         if (ctx.protoDecl() != null) return visitProtoDecl(ctx.protoDecl());
         if (ctx.implDecl() != null) return visitImplDecl(ctx.implDecl());
@@ -575,6 +586,172 @@ public class AstBuilder {
         return new Decl.HandlerDecl(name, effectName, requiredEffects, clauses, stateBindings, loc(ctx));
     }
 
+    // ── model ───────────────────────────────────────────────────────────
+    //
+    // A `model` declaration is the std.quint model record, written the
+    // way the rest of the language writes declarations. It desugars
+    // here, so nothing downstream of the parser knows it exists — no
+    // emitter case, no effect-checker case, no hot-redef case, and no
+    // second representation of the same thing to drift apart.
+    //
+    //   model bank :: "spec/bank.qnt" :pure {main= "bankTest"}
+    //     start                  => {balances= {alice= 0}}
+    //     deposit  st who amount => {...st balances= (credit st who amount)}
+    //
+    // becomes
+    //
+    //   bank := {spec-file= "spec/bank.qnt" mode= :pure main= "bankTest"
+    //            start=   {balances= {alice= 0}}
+    //            actions= {deposit= (st $picks -> who := get "who" $picks
+    //                                             amount := get "amount" $picks
+    //                                             {...st …})}}
+    //
+    // The picks record is bound to `$picks`, a name the lexer cannot
+    // produce, so a spec free to call a pick anything cannot collide
+    // with it.
+
+    private static final String PICKS = "$picks";
+
+    private Decl visitModelDecl(ModelDeclContext ctx) {
+        SourceLoc loc = loc(ctx);
+        String name = ctx.fnName().IDENT().getText();
+        String raw = ctx.STRING().getText();
+        String specFile = unescapeString(raw.substring(1, raw.length() - 1));
+        String mode = ctx.KEYWORD().getText().substring(1);
+        if (!mode.equals("pure") && !mode.equals("live")) {
+            throw new IllegalStateException(
+                    "model " + name + ": mode must be :pure or :live, got :" + mode
+                    + " (at " + loc + ")");
+        }
+        boolean live = mode.equals("live");
+        // A live model performs whatever the system under test
+        // performs. The row is declared once, in the header, and every
+        // clause is lowered to a function that carries it: a lambda
+        // declares nothing, and an effect performed from one is
+        // refused at the perform.
+        List<String> row = ctx.effectAnnotation() != null
+                ? collectEffectRowEntries(ctx.effectAnnotation()) : null;
+
+        var fields = new ArrayList<Expr.MapEntry>();
+        fields.add(new Expr.MapEntry.Field("spec-file", new Expr.StrLit(specFile, loc)));
+        fields.add(new Expr.MapEntry.Field("mode", new Expr.KeywordLit(mode, loc)));
+        // The options map is spliced in as written, so `main`,
+        // `action-path`, `ignore` and friends need no separate grammar.
+        if (ctx.mapLiteral() != null) {
+            Expr opts = visitMapLiteral(ctx.mapLiteral());
+            if (opts instanceof Expr.MapLit ml) fields.addAll(ml.entries());
+        }
+
+        var actions = new ArrayList<Expr.MapEntry>();
+        if (ctx.modelBody() != null) {
+            for (var c : ctx.modelBody().modelClause()) {
+                String clause = c.IDENT().getText();
+                var params = new ArrayList<Pattern>();
+                for (var p : c.pattern()) params.add(visitPattern(p));
+                Expr body = visitArmBody(c.armBody());
+                if (clause.equals("start")) {
+                    if (!params.isEmpty()) {
+                        throw new IllegalStateException("model " + name
+                                + ": `start` is the initial state, not a function, so it"
+                                + " takes no parameters (at " + loc + ")");
+                    }
+                    fields.add(new Expr.MapEntry.Field("start", body));
+                } else if (isLifecycle(clause, live)) {
+                    fields.add(new Expr.MapEntry.Field(clause,
+                            clauseFn(name, clause, List.of(), body, true, row, loc)));
+                } else {
+                    List<Pattern> picks = params;
+                    if (!live) {
+                        if (params.isEmpty()) {
+                            throw new IllegalStateException("model " + name
+                                    + ": the pure action `" + clause + "` takes the state as"
+                                    + " its first parameter and returns the next one (at "
+                                    + loc + ")");
+                        }
+                        picks = params.subList(1, params.size());
+                    }
+                    Pattern state = live ? null : params.get(0);
+                    actions.add(new Expr.MapEntry.Field(clause,
+                            actionFn(name, clause, state, picks, body, row, loc)));
+                }
+            }
+        }
+        fields.add(new Expr.MapEntry.Field("actions", new Expr.MapLit(actions, loc)));
+
+        Stmt bind = new Stmt.Bind(new Stmt.BindTarget.Simple(name),
+                new Expr.MapLit(fields, loc), loc);
+        Decl decl = new Decl.BindingDecl(bind, loc);
+        return ctx.PUB() != null ? new Decl.PubDecl(decl, loc) : decl;
+    }
+
+    /** The clauses that are the model's lifecycle rather than an action
+     *  of the spec. A pure model starts from a value; a live one starts
+     *  something running and reads it back. */
+    private boolean isLifecycle(String clause, boolean live) {
+        return live
+                ? clause.equals("init") || clause.equals("state") || clause.equals("halt")
+                : clause.equals("start");
+    }
+
+    /** One action, as the function std.quint calls: `(state picks -> …)`
+     *  for a pure model and `(picks -> …)` for a live one, with each
+     *  declared pick bound by name inside. */
+    private Expr actionFn(String model, String clause, Pattern state, List<Pattern> picks,
+                          Expr body, List<String> row, SourceLoc loc) {
+        var stmts = new ArrayList<Stmt>();
+        for (Pattern p : picks) {
+            if (p instanceof Pattern.WildcardPat) continue;
+            if (!(p instanceof Pattern.VarPat v)) {
+                throw new IllegalStateException("model " + model + ", action `" + clause
+                        + "`: a parameter names one of the spec's nondet picks, so it has"
+                        + " to be a plain name (at " + loc + ")");
+            }
+            stmts.add(new Stmt.Bind(new Stmt.BindTarget.Simple(v.name()),
+                    new Expr.App(new Expr.Var("get", loc),
+                            List.of(new Expr.StrLit(v.name(), loc), new Expr.Var(PICKS, loc)), loc),
+                    loc));
+        }
+        var params = new ArrayList<Pattern>();
+        if (state != null) params.add(state);
+        params.add(new Pattern.VarPat(PICKS, loc));
+        return clauseFn(model, clause, params, body, false, row, stmts, loc);
+    }
+
+    private Expr clauseFn(String model, String clause, List<Pattern> params, Expr body,
+                          boolean lifecycle, List<String> row, SourceLoc loc) {
+        return clauseFn(model, clause, params, body, lifecycle, row, new ArrayList<>(), loc);
+    }
+
+    /**
+     * Hoist one clause out as a top-level function and hand back a
+     * reference to it. Functions, not lambdas, because only a function
+     * can declare an effect row, and a live model's clauses are exactly
+     * the code that performs.
+     *
+     * <p>The name is unwritable — `bank$deposit` — so a model cannot
+     * collide with anything the file already defines, or with another
+     * model's clause of the same name.
+     */
+    private Expr clauseFn(String model, String clause, List<Pattern> params, Expr body,
+                          boolean lifecycle, List<String> row, List<Stmt> prelude,
+                          SourceLoc loc) {
+        var ps = new ArrayList<>(params);
+        // init / state / halt are called with unit; the parameter is
+        // there to be ignored.
+        if (lifecycle) ps.add(new Pattern.WildcardPat(loc));
+        Expr fnBody = body;
+        if (!prelude.isEmpty()) {
+            var stmts = new ArrayList<>(prelude);
+            stmts.add(new Stmt.ExprStmt(body, loc));
+            fnBody = new Expr.Block(stmts, loc);
+        }
+        String name = model + "$" + clause;
+        hoisted.add(new Decl.FnDecl(name, false, row, null,
+                new Decl.FnBody.LambdaBody(ps, null, fnBody),
+                List.of(), List.of(), List.of(), List.of(), loc));
+        return new Expr.Var(name, loc);
+    }
+
     // ── role / proto / impl ─────────────────────────────────────────────
 
     private Decl visitPartyDecl(PartyDeclContext ctx) {
@@ -960,14 +1137,15 @@ public class AstBuilder {
     private Expr visitPostfixExpr(PostfixExprContext ctx) {
         Expr result = visitAtomExpr(ctx.atomExpr());
         // Dot access chain: walk children after atomExpr
-        // Grammar: atomExpr (DOT (IDENT | UPPER_NAME))* (MAP_AT PARTY_NAME)?
+        // Grammar: atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT | MODEL))* (MAP_AT PARTY_NAME)?
         boolean afterDot = false;
         for (var child : ctx.children) {
             if (child instanceof TerminalNode tn) {
                 int type = tn.getSymbol().getType();
                 if (type == IrijParser.DOT) {
                     afterDot = true;
-                } else if (afterDot && (type == IrijParser.IDENT || type == IrijParser.UPPER_NAME || type == IrijParser.CAMEL_IDENT)) {
+                } else if (afterDot && (type == IrijParser.IDENT || type == IrijParser.UPPER_NAME
+                        || type == IrijParser.CAMEL_IDENT || type == IrijParser.MODEL)) {
                     result = new Expr.DotAccess(result, tn.getText(), loc(ctx));
                     afterDot = false;
                 }
@@ -1215,6 +1393,10 @@ public class AstBuilder {
                 // {(expr)= val} — dynamic key, evaluated at runtime
                 entries.add(new Expr.MapEntry.DynField(
                         visitExpr(entry.expr(0)), visitExpr(entry.expr(1))));
+            } else if (entry.MODEL() != null) {
+                // `model` is a soft keyword: a declaration head, and an
+                // ordinary field name everywhere else.
+                entries.add(new Expr.MapEntry.Field(entry.MODEL().getText(), visitExpr(entry.expr(0))));
             } else {
                 entries.add(new Expr.MapEntry.Field(entry.IDENT().getText(), visitExpr(entry.expr(0))));
             }

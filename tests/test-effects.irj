@@ -163,4 +163,40 @@ fn multi-ops-test
 
 r10 := test "multiple effect ops" (-> assert-eq #["test-input" "done"] (multi-ops-test ()))
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10]
+
+;; ── `op ()` on a one-parameter op ──────────────────────
+;;
+;; `op ()` is written both for a zero-parameter op and for a
+;; one-parameter op taking unit. Which one it is comes from the
+;; clause's arity, not from the literal: stripping the unit either
+;; way handed a one-parameter clause the resume function as its
+;; argument, left `resume` unbound, and died as "SM clause aborted
+;; from synchronous-perform context".
+
+effect Store
+  s-read :: _ Str
+  s-touch :: _ ()
+
+handler mem-store :: Store
+  s-read u => resume ("read " ++ (to-str u))
+  s-touch _ => resume ()
+
+;; The perform is in a different fn from the `with`, which is the
+;; case that broke: the arg list has to be right where it is emitted.
+fn store-read :: _ Str ::: Store
+  => u
+  s-read ()
+
+fn store-read-var :: _ Str ::: Store
+  => u
+  s-read u
+
+fn run-store
+  =>
+  with mem-store
+    #[(store-read ()) (store-read-var ())]
+
+r11 := test "a literal unit reaches a one-parameter op" (-> assert-eq "read ()" (nth 0 (run-store ())))
+r12 := test "and matches what a unit-valued variable does" (-> assert-eq (nth 0 (run-store ())) (nth 1 (run-store ())))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12]

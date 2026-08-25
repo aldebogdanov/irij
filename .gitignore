@@ -31,3 +31,9 @@ bench/.cache/
 # Clojure editor caches
 .clj-kondo/
 .lsp/
+
+# Quint model-based testing: the drop zone for traces that diverged.
+# Written on every failure; promoting one into a committed regression
+# test is a `mv` a person performs.
+**/failures/
+_apalache-out/

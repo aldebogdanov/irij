@@ -434,6 +434,23 @@ public final class RtCollections {
     }
 
 
+    /** `to-set coll` — the collection's elements as a Set. Duplicates
+     *  collapse; order is not preserved, since a Set has none. This is
+     *  the only way to build a Set of dynamic arity: `conj` is
+     *  Vector-only and `#{}` is a literal. */
+    public static Object toSet(Object v) {
+        return new dev.irij.runtime.Values.IrijSet(
+                new java.util.LinkedHashSet<>(asListAny(v)));
+    }
+
+
+    /** `to-tuple coll` — the collection's elements as a Tuple, in order.
+     *  The dynamic-arity counterpart of the `#(...)` literal. */
+    public static Object toTuple(Object v) {
+        return new dev.irij.runtime.Values.IrijTuple(asListAny(v).toArray());
+    }
+
+
     /** Construct an IrijRange. Args are Long-typed; `exclusive`
      *  controls whether the upper bound is included (`0 ..< 10` is
      *  exclusive, `0 .. 10` is inclusive). Used by the bytecode

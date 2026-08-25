@@ -1,0 +1,111 @@
+use std.test :open
+use std.fs :open
+use std.collection :open
+use std.quint.itf :as itf
+
+;; ITF decoding, against traces recorded from Quint 0.32.0 into
+;; tests/quint/. Recordings, not hand-written fixtures: every claim
+;; here is one the tool actually produced.
+
+fn value-of :: Str _
+  (json -> itf.decode-value (json-parse json))
+
+;; ── Value encodings ─────────────────────────────────────────────
+
+r1 := test "#bigint decodes to Int" (-> assert-eq 39 (value-of "{\"#bigint\": \"39\"}"))
+r2 := test "#set decodes to Set" (-> assert-eq #{1 2 3} (value-of "{\"#set\": [{\"#bigint\": \"1\"},{\"#bigint\": \"2\"},{\"#bigint\": \"3\"}]}"))
+r3 := test "#tup decodes to Tuple" (-> assert-eq #(7 "seven") (value-of "{\"#tup\": [{\"#bigint\": \"7\"}, \"seven\"]}"))
+r4 := test "#map decodes to Map with string keys" (-> assert-eq {alice= 3} (value-of "{\"#map\": [[\"alice\", {\"#bigint\": \"3\"}]]}"))
+r5 := test "an Int-keyed #map stringifies its keys" (-> assert-eq 9 (get "1" (value-of "{\"#map\": [[{\"#bigint\": \"1\"}, {\"#bigint\": \"9\"}]]}")))
+r6 := test "a record decodes to a Map" (-> assert-eq {x= 1 y= "why"} (value-of "{\"x\": {\"#bigint\": \"1\"}, \"y\": \"why\"}"))
+r7 := test "a bare array decodes to a Vec" (-> assert-eq #["x" "y"] (value-of "[\"x\", \"y\"]"))
+r8 := test "a variant keeps its tag and value" (-> assert-eq {tag= "Busy" value= 2} (value-of "{\"tag\": \"Busy\", \"value\": {\"#bigint\": \"2\"}}"))
+r9 := test "an unknown # tag is an error" (-> assert-throws (-> value-of "{\"#unserializable\": \"x\"}"))
+r10 := test "a #map whose keys collide is an error" (-> assert-throws (-> value-of "{\"#map\": [[{\"#bigint\": \"1\"}, 1], [\"1\", 2]]}"))
+r11 := test "an integer too big for Irij is an error, not a truncation" (-> assert-throws (-> value-of "{\"#bigint\": \"99999999999999999999\"}"))
+
+;; The bignumber.js leak: with --backend=rust, |n| >= 10^15 arrives as
+;; {s, e, c} internals instead of #bigint.
+big-json := "{\"s\": {\"#bigint\": \"1\"}, \"e\": {\"#bigint\": \"15\"}, \"c\": [{\"#bigint\": \"90\"}, {\"#bigint\": \"7199254740993\"}]}"
+r12 := test "a bignumber reassembles to the integer it encodes" (-> assert-eq 9007199254740993 (value-of big-json))
+neg-json := "{\"s\": {\"#bigint\": \"-1\"}, \"e\": {\"#bigint\": \"15\"}, \"c\": [{\"#bigint\": \"90\"}, {\"#bigint\": \"7199254740993\"}]}"
+r13 := test "a negative bignumber keeps its sign" (-> assert-eq (0 - 9007199254740993) (value-of neg-json))
+r14 := test "a record with s, e and c fields is not a bignumber" (-> assert-eq {s= 1 e= 2 c= 3} (value-of "{\"s\": {\"#bigint\": \"1\"}, \"e\": {\"#bigint\": \"2\"}, \"c\": {\"#bigint\": \"3\"}}"))
+
+;; ── Names ───────────────────────────────────────────────────────
+
+r15 := test "a variable keeps only its last path segment" (-> assert-eq "balances" (itf.short-name "bankTest::bank::balances"))
+r16 := test "an unprefixed variable is unchanged" (-> assert-eq "count" (itf.short-name "count"))
+
+;; Quint is camelCase, Irij identifiers are kebab-case, and that is a
+;; grammar difference rather than a preference: `lastError` cannot be
+;; written as an Irij field name at all.
+r40 := test "camelCase becomes kebab-case" (-> assert-eq "last-error" (itf.kebab "lastError"))
+r41 := test "runs of capitals separate" (-> assert-eq "a-big-int" (itf.kebab "aBigInt"))
+r42 := test "an already-kebab name is unchanged" (-> assert-eq "balances" (itf.kebab "balances"))
+r43 := test "snake_case becomes kebab-case too" (-> assert-eq "last-error" (itf.kebab "last_error"))
+r44 := test "a leading capital does not lead with a hyphen" (-> assert-eq "account" (itf.kebab "Account"))
+
+;; ── Traces ──────────────────────────────────────────────────────
+
+;; Fixtures are recordings: every trace under tests/quint/ came out of
+;; Quint 0.32.0, not out of a text editor.
+
+bank := itf.parse-trace {} (with default-fs do (fs-read "tests/quint/bank_run_0.itf.json"))
+shapes-json := with default-fs do (fs-read "tests/quint/shapes_0.itf.json")
+collide-json := with default-fs do (fs-read "tests/quint/collide_0.itf.json")
+tracked-json := with default-fs do (fs-read "tests/quint/tracked_run_0.itf.json")
+
+s0 := nth 0 bank.states
+s1 := nth 1 bank.states
+
+r17 := test "the source file survives decoding" (-> assert-eq "bank.qnt" bank.source)
+r18 := test "vars come from the states, not the vars array" (-> assert-eq #["balances" "last-error"] bank.vars)
+r19 := test "state 0 is the init action" (-> assert-eq "init" s0.action)
+r20 := test "state 0 has no picks" (-> assert-eq {} s0.picks)
+r21 := test "a state carries its index" (-> assert-eq 1 s1.index)
+r22 := test "picks unwrap out of Some" (-> assert-eq "alice" (get "who" s1.picks))
+r23 := test "mbt:: variables stay out of the compared state" (-> assert-eq #["balances" "last-error"] (sort (keys s1.state)))
+
+;; shapes.qnt exercises every encoding in a single state.
+shapes := (nth 0 (itf.parse-trace {} shapes-json).states).state
+
+r24 := test "a Set variable decodes to a Set" (-> assert-eq #{1 2 3} (get "a-set" shapes))
+r25 := test "a Tuple variable decodes to a Tuple" (-> assert-eq #(7 "seven") (get "a-tup" shapes))
+r26 := test "a nested Int-keyed map decodes" (-> assert-eq #{"a"} (get "1" (get "nested" shapes)))
+r27 := test "the 10^15 trap decodes in a real trace" (-> assert-eq 9007199254740993 (get "a-big-int" shapes))
+r28 := test "a List variable decodes to a Vec" (-> assert-eq #["x" "y"] (get "a-list" shapes))
+r29 := test "a variant variable keeps its tag" (-> assert-eq "Busy" (get "tag" (get "a-status" shapes)))
+
+;; collide.qnt imports one module twice, so two variables both end in ::n.
+r30 := test "two variables that read alike are an error" (-> assert-throws (-> itf.parse-trace {} collide-json))
+
+;; tracked.qnt records its own action, which is the only way a
+;; `quint test` or `quint verify` trace can drive anything.
+paths := {action-path= #["last-action"] nondet-path= #["last-pick"]}
+tracked-trace := itf.parse-trace paths tracked-json
+ts1 := nth 1 tracked-trace.states
+
+r31 := test "action-path reads the action out of ordinary state" (-> assert-true (contains? #["deposit" "withdraw" "overdraft"] ts1.action))
+r32 := test "nondet-path reads the picks out of ordinary state" (-> assert-true (contains? (keys ts1.picks) "who"))
+r33 := test "a path's own variable leaves the compared state" (-> assert-eq #["balances" "last-error"] (sort (keys ts1.state)))
+
+;; A `quint test` trace carries no mbt:: variables at all — which is
+;; the whole reason action-path exists.
+scripted-json := with default-fs do (fs-read "tests/quint/tracked_test_depositThenOverdraftTest_0.itf.json")
+
+r34 := test "a quint test trace has no action of its own" (-> assert-eq () (nth 1 (itf.parse-trace {} scripted-json).states).action)
+r35 := test "action-path recovers it" (-> assert-eq "deposit" (nth 1 (itf.parse-trace paths scripted-json).states).action)
+r36 := test "and nondet-path recovers the picks" (-> assert-eq 50 (get "amount" (nth 1 (itf.parse-trace paths scripted-json).states).picks))
+
+;; An Apalache counterexample is the same format in a different
+;; dialect: #meta carries varTypes and no source, and there are no
+;; mbt:: variables here either.
+verify-json := with default-fs do (fs-read "tests/quint/tracked_verify_underFifty.itf.json")
+counterexample := itf.parse-trace paths verify-json
+
+r37 := test "a counterexample decodes with no source" (-> assert-eq () counterexample.source)
+r38 := test "a counterexample decodes its state" (-> assert-eq #["balances" "last-error"] counterexample.vars)
+r39 := test "a counterexample's action comes from action-path" (-> assert-eq "deposit" (nth 1 counterexample.states).action)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r38 r39 r40 r41 r42 r43 r44]

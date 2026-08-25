@@ -19,6 +19,7 @@ topLevelDecl
     | newtypeDecl
     | effectDecl
     | handlerDecl
+    | modelDecl
     | capDecl
     | protoDecl
     | implDecl
@@ -58,7 +59,7 @@ nameListItem
     | FN | DO | IF | ELSE | MATCH | SPEC | NEWTYPE | MOD | USE | PUB
     | WITH | SCOPE | EFFECT | PARTY | CAP | HANDLER | IMPL | PROTO
     | PRE | POST | CONTRACT | SELECT | ENCLAVE
-    | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF
+    | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF | MODEL
     ;
 
 pubDecl
@@ -195,6 +196,46 @@ handlerBody
 handlerClause
     : IDENT pattern* FAT_ARROW armBody       // effect op impl
     | binding                                // handler-local state
+    ;
+
+// ── model ────────────────────────────────────────────────────────────
+//
+// `model <name> :: "<spec.qnt>" :pure|:live {opts}?`
+//
+// Binds a Quint specification to the Irij code that implements it. The
+// clauses read like handler clauses because they do the same job: one
+// per action the spec can take, named for it, with the `nondet` picks
+// bound by name in the parameter list.
+//
+//   model bank :: "spec/bank.qnt" :pure {main= "bankTest"}
+//     start                  => {balances= {alice= 0} last-error= ""}
+//     deposit  st who amount => {...st balances= (credit st who amount)}
+//
+// A `:pure` action takes the state first and returns the next one; a
+// `:live` action takes only picks and its return value is ignored.
+// A live model that performs effects declares the row once in the
+// header — `model bank :: "spec/bank.qnt" :live ::: Bank` — and every
+// clause is lowered to a function carrying it.
+// `start` (pure) and `init` / `state` / `halt` (live) are the lifecycle
+// clauses; every other name is an action.
+//
+// This desugars to the `std.quint` model record — see AstBuilder — so
+// nothing downstream of the parser knows the declaration exists.
+//
+// `model` is a soft keyword: it is still usable as a map field and as
+// a dot-access field, which is where a name this ordinary actually
+// turns up (`{model= "opus"}`, `cfg.model`).
+
+modelDecl
+    : PUB? MODEL fnName SPEC_ANN STRING KEYWORD mapLiteral? effectAnnotation? (NEWLINE INDENT modelBody NEWLINE* DEDENT)?
+    ;
+
+modelBody
+    : modelClause (NEWLINE modelClause)*
+    ;
+
+modelClause
+    : IDENT pattern* FAT_ARROW armBody
     ;
 
 // ── cap ──────────────────────────────────────────────────────────────
@@ -439,7 +480,7 @@ appExpr
 
 // Postfix: dot access, located-at
 postfixExpr
-    : atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT))* (MAP_AT PARTY_NAME)?
+    : atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT | MODEL))* (MAP_AT PARTY_NAME)?
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -548,6 +589,7 @@ mapEntryList
 mapEntry
     : SPREAD IDENT                            // {...record} spread
     | IDENT EQUALS expr                       // name= "jo"
+    | MODEL EQUALS expr                       // model= "opus" — soft keyword
     | ATTR_IDENT EQUALS expr                  // data-on:click= "..."
     | STRING EQUALS expr                      // "content-type"= "text/html"
     | LPAREN expr RPAREN EQUALS expr          // {(expr)= val} dynamic key

@@ -22,7 +22,12 @@ Registered as `BuiltinFn` objects in the global environment:
   never be written down. The Java statics behind them keep the names
   `RtOps.div` / `RtOps.mod`, since those also back `/` and `%`.
 - IO (`print`, `println`, `dbg`, `read-line`)
-- Conversion (`to-str`, `to-vec`)
+- Conversion (`to-str`, `to-vec`, `to-set`, `to-tuple`) —
+  `to-set`/`to-tuple` are the dynamic-arity counterparts of the
+  `#{}` and `#(...)` literals. `conj` is Vector-only, so without
+  them a Set or Tuple whose size is only known at runtime could
+  not be built at all. `to-set` collapses duplicates and keeps no
+  order; `to-tuple` keeps order.
 - Collection raw ops (`length`, `head`, `tail`, `nth`, `last`,
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)
@@ -32,6 +37,11 @@ Registered as `BuiltinFn` objects in the global environment:
   `try`)
 - Crypto + auth (`sha256-hex`, `hmac-sha256-hex`, `random-token`)
 - Effect / handler internals (`raw-*` calls for HTTP, DB, SSE, session)
+
+The capability providers in `dev.irij.runtime` are the other half of
+the boundary: `FsCapability`, `JdbcCapability`, `HttpClientCapability`,
+`ServeCapability`, `SessionCapability`, `TermCapability` and
+`QuintCapability` (the only one that starts a process).
 
 Why some live in Java:
 
@@ -67,6 +77,8 @@ Real Irij code, parsed + compiled like user code:
 | `std.convert` | Type coercions (`to-int`, `to-float`, `to-bool`) |
 | `std.test` | Test runner (`test`, `assert-eq`, `assert-throws`, ...) |
 | `std.jvm` | `JVM` effect + `unsafe-jvm` handler |
+| `std.quint` | `Quint` effect + model-based testing against a Quint spec — see [quint.md](quint.md) |
+| `std.quint.itf` | ITF trace decoding, pure |
 
 ## The boundary
 
@@ -102,6 +114,9 @@ into `ClassEmitter.emitBuiltinApp`:
 | `head` | `INVOKESTATIC RT.head` |
 | `tail` | `INVOKESTATIC RT.tail` |
 | `fold` | `INVOKESTATIC RT.fold` (effect-transparent — callback runs in caller's row) |
+| `to-vec` | `INVOKESTATIC RT.toVec` |
+| `to-set` | `INVOKESTATIC RT.toSet` |
+| `to-tuple` | `INVOKESTATIC RT.toTuple` |
 
 The general direction: stdlib is real Irij; Java provides the bare-
 metal building blocks. Higher-order builtins like `fold`, `map`,

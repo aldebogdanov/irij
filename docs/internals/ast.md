@@ -115,3 +115,16 @@ Most AST decisions assume runtime checking:
 3. Wire `AstBuilder.visitX(...)` to construct it.
 4. Add a `case X(...) ->` in every `switch` over the sealed root —
    the compiler will tell you which ones are missing.
+
+## Forms with no node of their own
+
+Not every syntax form earns an AST node. The `model` declaration
+(`docs/internals/quint.md`) is lowered by `AstBuilder` into a
+`Decl.FnDecl` per clause plus a `Decl.BindingDecl` naming them, because
+it *is* the std.quint model record written differently — giving it a
+node would mean maintaining a second representation of the same thing
+and a case for it in the emitter, the effect checker and hot-redef.
+
+The test for whether a form deserves a node: does anything downstream
+of the parser need to tell it apart from what it desugars to? For
+`model`, nothing does.

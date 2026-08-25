@@ -196,6 +196,8 @@ final class IntrinsicsEmitter implements Opcodes {
             case "contains?"    -> { return emitRT2(args, mv, locals, "containsP"); }
             case "last"         -> { return emitRT1(args, mv, locals, "last"); }
             case "to-vec"       -> { return emitRT1(args, mv, locals, "toVec"); }
+            case "to-set"       -> { return emitRT1(args, mv, locals, "toSet"); }
+            case "to-tuple"     -> { return emitRT1(args, mv, locals, "toTuple"); }
             case "not"          -> { return emitRT1(args, mv, locals, "notOp"); }
             case "type-of"      -> { return emitRT1(args, mv, locals, "typeOf"); }
             case "validate"     -> { return emitRT2(args, mv, locals, "validate"); }

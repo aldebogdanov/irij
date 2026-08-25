@@ -50,6 +50,9 @@
      =handler=, =impl=, =proto=, =pre=, =post=, =contract=,
      =select=, =enclave=, =par-each=, =on-failure=) are
      2–10 characters each —
+     plus =model= (§6.4a), which is *soft*: it heads a declaration and
+     is still an ordinary name as a map field and in dot access, since
+     a word that common has to stay usable —
      typically one BPE token. These are distinct from operators:
      operators act on values, keywords introduce structural forms.
      Keeping keywords as readable words costs negligible tokens
@@ -1014,6 +1017,62 @@
    Property-based testing belongs in a future =std.quickcheck= library
    (no special syntax, regular Irij). See =docs/internals/effects.md=
    for the broader R5c removal note.
+
+   What took its place is §6.4a: the sampling is done by a tool that
+   also proves, and the properties live in a specification that can be
+   reviewed on its own rather than in scattered =law= declarations.
+
+** 6.4a Level 3 — Model-Based Testing (=model=, v0.8.8)
+
+   A =model= declaration binds a formal specification written in
+   [[https://quint-lang.org/][Quint]] to the Irij code that implements
+   it. Quint generates traces from the spec — sequences of state,
+   action, state — and =std.quint= replays them against the code,
+   failing at the first step where the two disagree. Apalache proves
+   invariants outright.
+
+   #+begin_example
+   model bank :: "spec/bank.qnt" :pure {main= "bankTest"}
+     start                  => {balances= {alice= 0 bob= 0} last-error= ""}
+     deposit  st who amount => {...st balances= (credit st.balances who amount)}
+     withdraw st who amount => {...st balances= (credit st.balances who (0 - amount))}
+     overdraft st _ _       => {...st last-error= "insufficient funds"}
+
+   r1 := test "bank conforms to its spec" (-> qcheck bank {traces= 50})
+   #+end_example
+
+   The clauses read like handler clauses because they do the same job:
+   one per action the spec can take, named for it, with that action's
+   =nondet= picks bound by name in the parameter list. Names cross from
+   Quint's camelCase into Irij's kebab-case, since =lastError= is not a
+   legal Irij identifier.
+
+   Two modes, because Irij has two kinds of system:
+
+   - =:pure= — replay is a fold. =start= is the initial state, each
+     action is =(state picks -> state)=, and no trace can leak into the
+     next.
+   - =:live= — something is running. =init= starts or resets it, each
+     action is =(picks -> ignored)=, =state= reads the world back, and
+     =halt= stops it. A live model declares the effects it performs in
+     the header: =model bank :: "spec/bank.qnt" :live ::: Bank=.
+
+   Generating traces needs the =quint= binary; replaying a committed
+   trace needs nothing. That split is the handler boundary — =with
+   default-quint= runs the tool, and =qreplay= against a saved
+   =.itf.json= runs in CI with no Node installed. A trace that found a
+   bug once is therefore a deterministic regression test.
+
+   Divergence is a value, not an exception: =check= returns a result
+   record naming the step, the action, the picks, both sides of the
+   disagreement and a pasteable command that reproduces it. A *broken
+   model* — an action nothing handles — raises instead, because that is
+   a mistake in the test rather than news about the code.
+
+   =model= is a soft keyword: a declaration head, and still an ordinary
+   name as a map field and in dot access.
+
+   Implementation: =docs/internals/quint.md=.
 
 ** 6.5 Level 4 — Refinement Types
 

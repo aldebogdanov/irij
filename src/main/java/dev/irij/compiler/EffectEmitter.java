@@ -155,8 +155,16 @@ final class EffectEmitter implements Opcodes {
 
 
     void emitPerform(String opName, List<Expr> args, MethodVisitor mv, Locals locals) {
-        // `() -> ()` effects are called `op ()` — strip single unit arg.
-        if (args.size() == 1 && args.get(0) instanceof Expr.UnitLit) args = List.of();
+        // `op ()` is written for two different things: performing a
+        // zero-parameter op, and performing a one-parameter op with
+        // unit. Which one it is comes from the op's arity, not from
+        // the literal — stripping unconditionally hands a
+        // one-parameter clause the resume function as its argument
+        // and leaves `resume` unbound, so the clause never resumes
+        // and the perform dies as "SM clause aborted".
+        if (args.size() == 1 && args.get(0) instanceof Expr.UnitLit && opArity(opName) == 0) {
+            args = List.of();
+        }
         String effectName = ce.effectOps.get(opName);
         // Runtime effect-row check: throws if the enclosing fn doesn't
         // declare this effect (and we're not inside an ambient frame).
@@ -169,6 +177,42 @@ final class EffectEmitter implements Opcodes {
         ce.exprEm.pushObjectArray(args, mv, locals);
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("perform"), "perform",
                 "(Ljava/lang/String;Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/Object;", false);
+    }
+
+
+    /**
+     * Declared parameter count of an effect op, read off any handler
+     * clause implementing it. The parser keeps no signature for an
+     * {@code effect} declaration's ops — {@link Decl.EffectOp} is a
+     * name and nothing else — so the handlers are the only place the
+     * arity is written down. Every handler for one effect has to
+     * agree on it, so the first clause found settles the question.
+     *
+     * <p>Counted the way {@link #emitHandlerBuilder} builds the
+     * clause: unit patterns are dropped, so {@code beep () =>} is a
+     * zero-argument clause and {@code quint-version _ =>} is a
+     * one-argument one.
+     *
+     * <p>Returns -1 when no handler for the op is in this compilation
+     * unit, which after module inlining means none was written at
+     * all. That keeps the old unconditional-strip behaviour for a
+     * case that could not have worked either way.
+     */
+    private int opArity(String opName) {
+        for (Decl.HandlerDecl h : ce.handlers.values()) {
+            for (Decl.HandlerClause c : h.clauses()) {
+                if (!c.opName().equals(opName)) continue;
+                // Count what the clause is actually compiled to take:
+                // unit patterns are dropped there, so `beep () =>` is a
+                // zero-argument clause however it reads.
+                int n = 0;
+                for (Pattern p : c.params()) {
+                    if (!(p instanceof Pattern.UnitPat)) n++;
+                }
+                return n;
+            }
+        }
+        return -1;
     }
 
 

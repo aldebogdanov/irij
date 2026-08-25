@@ -685,6 +685,76 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
 
 ---
 
+## Phase 15 — Quint model-based testing
+
+Checks Irij code against a formal specification written in
+[Quint](https://quint-lang.org/). Replaces the `law` / `verify-laws`
+property testing removed in v0.6.12 (spec §6.4): sampling is not
+proof, but the tool that samples here also proves, and the spec it
+samples from is a separate artefact that can be reviewed on its own.
+Full design and the recorded Quint behaviour it rests on:
+`docs/internals/quint.md`.
+
+- [x] **`to-set` / `to-tuple` builtins** — `conj` is Vector-only and
+      `#{}` / `#(...)` are literals, so a Set or Tuple of runtime-known
+      size could not be built at all. Needed by the decoder, general
+      gap regardless. 5 tests in `PortedBuiltinsTest`, 7 in
+      `tests/test-collection.irj`.
+- [x] **`QuintCapability`** — the only place in Irij that starts a
+      process. `run` / `test` / `verify` / `version`, both pipes
+      drained concurrently, scratch directory deleted before return.
+      Returns a raw record and diagnoses nothing; that is std.quint's
+      job, where the message can change without recompiling the
+      runtime.
+- [x] **`std.quint.itf`** — pure ITF decoder. `#set` / `#tup` land on
+      native Irij values; a Quint `Map` becomes an Irij `Map` through
+      `to-str` (which is what makes an `Int -> a` map compare equal to
+      one the code built with `assoc`); names are normalized from
+      camelCase to kebab-case, because `lastError` is not a legal Irij
+      identifier; the bignumber.js leak for integers >= 10^15 is
+      reassembled; an integer past 2^63 raises rather than truncating.
+      44 tests in `tests/test-quint-itf.irj`, against traces recorded
+      from Quint 0.32.0 into `tests/quint/`.
+- [x] **`std.quint`** — `effect Quint` + `cap quint-cli` +
+      `default-quint`, models in two shapes (`:pure`, a fold; `:live`,
+      a running system), replay, coverage, divergence reports with a
+      pasteable reproduce line, and `check` / `check-run` / `verify` /
+      `replay-file` with `q`-prefixed asserting siblings. Generation
+      being an effect is what lets a mock handler exercise the whole
+      path with no binary installed. 28 tests in `tests/test-quint.irj`.
+- [x] **`examples/quint.irj`** — end to end against
+      `tests/quint/bank.qnt`, including the off-by-one no hand-written
+      test would think to make.
+- [x] **`model` declaration** — `model bank :: "spec/bank.qnt" :pure
+      {main= "bankTest"}` with handler-shaped clauses: one per action,
+      named for it, with that action's `nondet` picks bound **by name**
+      in the parameter list. A live model declares the row it performs
+      in the header (`::: Bank`). It desugars in `AstBuilder` to a
+      `Decl.FnDecl` per clause plus the record binding — no
+      `Decl.ModelDecl`, so no emitter, effect-checker or hot-redef case
+      and no second representation to drift. Functions rather than
+      lambdas because only a function can declare an effect row.
+      `model` is Irij's **first soft keyword**: a declaration head, and
+      still an ordinary name as a map field, in dot access and in a
+      `use` list — `{model= "opus"}` and `cfg.model` keep working. 9
+      tests in `ModelDeclTest`, 9 more in `tests/test-quint.irj`; spec
+      §6.4a and §1.1.
+- [x] **Failure artefacts** — `save-failure` writes the diverging trace
+      to `<dir>/failures/<spec>-seed<n>-trace<i>.itf.json`. The name is
+      deterministic, so re-running a failing seed rewrites one file;
+      the drop zone is not the archive, so promoting a trace into a
+      committed `qreplay` stays a decision a person makes. Kept out of
+      `qcheck` so `check` stays data-in-data-out and does not drag
+      `FileIO` into every model's row. 4 tests in `tests/test-quint.irj`.
+- [x] **`irij quint doctor`** — is the binary reachable, is it the
+      tested version, exits non-zero when traces cannot be generated
+      here. No `irij check` subcommand: a model is ordinary Irij code,
+      so running one is `irij run` or `irij test`, and a `check` that
+      discovered models by itself would need a registry the desugaring
+      deliberately does not build.
+
+---
+
 ## Near-term (high priority)
 
 - [x] **Primitives as sum-spec variants (proper union types)** — DONE (PR4, 2026-07; see docs/internals/specs.md; spec text update batched into the PR5 spec reconciliation). A
@@ -748,6 +818,29 @@ Source of truth: `docs/phase-14-bytecode.md`. Lives on branch `bytecode-mvp`.
 
 ## Known Issues / Bugs
 
+- [x] **`op ()` on a one-parameter effect op never resumed** — Fixed
+      (2026-08). `op ()` is written for two different things:
+      performing a zero-parameter op, and performing a one-parameter op
+      with unit. `EffectEmitter.emitPerform` stripped the unit argument
+      for both, so a one-parameter clause was invoked with the resume
+      function bound to its parameter and `resume` left unbound — the
+      clause never resumed and the perform died as "SM clause aborted
+      from synchronous-perform context", naming neither the op nor the
+      cause. Every effect whose ops take unit was affected, and the
+      failure looked like a state-machine limitation rather than an
+      arity bug. The parser keeps no signature for an `effect`
+      declaration's ops (`Decl.EffectOp` is a name and nothing else),
+      so the arity is now read off a handler clause, counted the way
+      `emitHandlerBuilder` builds one: unit patterns are dropped there,
+      so `beep () =>` is zero-argument and `s-read u =>` is
+      one-argument. 2 tests in `tests/test-effects.irj`.
+- [ ] **A module's private fn can be shadowed by an importer's
+      top-level binding** — modules inline into one namespace, so a
+      user binding named after a std module's private helper captures
+      it and calls through it fail with "Not callable: ()". Found when
+      a test file's `tracked := …` broke `std.quint.itf`'s own private
+      `tracked` (since renamed). `pub` names are alias-rewritten during
+      inlining; private ones are not, and should be.
 - [x] **irij.online wedged after any SSE client-disconnect (prod hang, needed `systemctl restart`)** — Fixed. Root cause: `com.sun.net.httpserver`'s single selector dispatcher thread **wedges on JDK 25** when a client disconnects from an SSE/streaming response, then accepts no new connection server-wide. Latent for ages; surfaced when the server's JDK was bumped 21→25 (servers `7fe01c0`). Reproduced under JDK 25 + Caddy (JDK 26 tolerates it; 26 isn't in nixpkgs). Hit both the Playground stream and the patch-once `/api/seeds`. Fix: replaced `com.sun.net.httpserver` with `IrijHttpServer` — a virtual-thread-per-connection `ServerSocket` server (one vthread per connection, blocking I/O, `Connection: close`), so a dead peer only ends its own thread. `IrijExchange` mirrors the `HttpExchange` surface; helpers ported near-verbatim. Regression test `IrijHttpServerTest`. NOT the same as the earlier empty-seed-page (v0.8.7) or "headers already sent" (v0.8.6) bugs — those were separate.
 
 

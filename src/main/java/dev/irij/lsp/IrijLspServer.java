@@ -200,7 +200,7 @@ public final class IrijLspServer implements LanguageServer,
         // Keywords first
         for (String kw : List.of(
                 "fn", "pub", "if", "else", "match", "with", "scope",
-                "do", "spec", "effect", "handler", "cap", "mod", "use",
+                "do", "spec", "effect", "handler", "model", "cap", "mod", "use",
                 "newtype", "proto", "impl", "party")) {
             CompletionItem it = new CompletionItem(kw);
             it.setKind(CompletionItemKind.Keyword);
