@@ -59,6 +59,7 @@ public final class IrijCli {
             case "build"            -> { BuildCommand.run(rest); return; }
             case "compile"          -> { CompileCommand.run(rest); return; }
             case "lsp"              -> { dev.irij.lsp.IrijLspServer.run(); return; }
+            case "quint"            -> { QuintCommand.run(rest); return; }
             case "repl"             -> { launchRepl(); return; }
             case "help"             -> { printHelp(); return; }
             case "run"              -> {
@@ -216,6 +217,7 @@ public final class IrijCli {
               irij test <file.irj>       run a specific test file
               irij test <dir/>           run all test-*.irj in directory
               irij test f1.irj f2.irj    run multiple test files
+              irij quint doctor          check the quint binary model-based testing needs
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
               irij --no-spec-lint <file> disable spec lint warnings (on by default)

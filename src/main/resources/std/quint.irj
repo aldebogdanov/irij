@@ -406,6 +406,50 @@ fn counterexample :: Map _ Map Map
 pub fn replay-file :: Map Str Map ::: FileIO
   (driver path -> replay-json driver (fs-read path))
 
+;; ── Keeping the trace that found it ────────────────────────────
+;;
+;; A generated trace lives in a scratch directory quint deletes, so a
+;; failure carries its JSON rather than a path. Writing it out is what
+;; turns a random failure into a regression test: the file replays in
+;; milliseconds, in CI, on a machine with no Node.
+;;
+;;   path := save-failure bank result "tests/quint"
+;;   ;; tests/quint/failures/bank-seed42-trace0.itf.json
+;;
+;; The name is deterministic — spec, seed and trace index — so
+;; re-running a failing seed rewrites one file and nothing piles up.
+;; `failures/` is the drop zone, not the archive: moving a trace up
+;; into `tests/quint/` and naming it in a `qreplay` is a decision a
+;; person makes, so a failing run never dirties the repository and a
+;; committed trace is always one somebody chose to keep.
+
+pub fn save-failure :: Map Map Str Str ::: FileIO
+  => driver result dir
+  f := get "failure" result
+  if (f == ())
+    ""
+  else
+    drop-zone := dir ++ "/failures"
+    fs-mkdir drop-zone
+    path := drop-zone ++ "/" ++ (failure-name driver result f)
+    fs-write path f.trace-json
+    path
+
+fn failure-name :: Map Map Map Str
+  => driver result f
+  seed := get "seed" result
+  which := if ((get "trace" f) == ()) "0" else (to-str f.trace)
+  stamp := if (seed == ()) "none" else (to-str seed)
+  (spec-name driver) ++ "-seed" ++ stamp ++ "-trace" ++ which ++ ".itf.json"
+
+fn spec-name :: Map Str
+  => driver
+  file := get "spec-file" driver
+  if (file == ())
+    "model"
+  else
+    replace (last (split file "/")) ".qnt" ""
+
 ;; ── Reporting ──────────────────────────────────────────────────
 
 pub fn report :: Map Str

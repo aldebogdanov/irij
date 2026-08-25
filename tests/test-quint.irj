@@ -254,4 +254,45 @@ holding := with empty-quint do (verify-holding ())
 r27 := test "an invariant that holds passes" (-> assert-true holding.ok?)
 r28 := test "and says so" (-> assert-true holding.invariant.holds?)
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r38]
+
+;; ── Keeping the trace that found it ────────────────────────────
+;;
+;; The failing trace travels in the result rather than as a path,
+;; because the scratch directory quint wrote it to is gone. Writing
+;; it out is what turns a random failure into a regression test.
+
+handler recording-fs :: FileIO
+  wrote :! {}
+  fs-read path => resume (get path wrote)
+  fs-write path content =>
+    wrote <- assoc wrote path content
+    resume ()
+  fs-append path content => resume ()
+  fs-exists? path => resume (contains? wrote path)
+  fs-list-dir path => resume (to-vec (keys wrote))
+  fs-delete path => resume ()
+  fs-mkdir path => resume ()
+
+fn save-it :: _ Str ::: FileIO
+  (_ -> save-failure broken checked-broken "tests/quint")
+
+fn save-passing :: _ Str ::: FileIO
+  (_ -> save-failure good checked-good "tests/quint")
+
+;; The handler's state lives with the `with` block, so reading back
+;; what was written happens inside the same one.
+fn save-and-read :: _ Str ::: FileIO
+  =>
+  path := save-failure broken checked-broken "tests/quint"
+  fs-read path
+
+saved-path := with recording-fs do (save-it ())
+saved-nothing := with recording-fs do (save-passing ())
+written := with recording-fs do (save-and-read ())
+
+r39 := test "a failure is written where it can be promoted from" (-> assert-eq "tests/quint/failures/bank-seed1-trace0.itf.json" saved-path)
+r40 := test "the name is deterministic, so nothing piles up" (-> assert-true (contains-substr? saved-path "seed1-trace0"))
+r41 := test "a passing run writes nothing" (-> assert-eq "" saved-nothing)
+r42 := test "what was written is the trace itself" (-> assert-true (contains-substr? written "bank.qnt"))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r38 r39 r40 r41 r42]

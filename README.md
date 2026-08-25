@@ -47,7 +47,7 @@ irij examples/quint.irj       # model-based testing against a Quint spec — nee
 
 ```sh
 ./gradlew test                # 513 Java unit tests
-irij test                     # 423 integration tests (tests/*.irj)
+irij test                     # 427 integration tests (tests/*.irj)
 ```
 
 ## Language Features

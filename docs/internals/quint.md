@@ -305,6 +305,41 @@ pass, and it points at the spec.
 An invariant that holds writes no trace at all, so zero traces is the
 pass there, unlike `check` where it is an error.
 
+## From a random failure to a committed test
+
+`check` and `replay-file` are the two ends of one workflow, and the
+file between them is the whole point of generating traces at random: a
+trace that found a bug once has to be able to find it again on a
+machine with no Node.
+
+```
+qcheck            divergence ── save-failure ──> tests/quint/failures/
+                                                       │  mv, by a person
+                                                       v
+qreplay           tests/quint/bank-seed42-trace0.itf.json
+```
+
+Two properties make that a workflow rather than a pile of files:
+
+- **The name is deterministic** — spec, seed and trace index — so
+  re-running a failing seed rewrites one file and nothing accumulates.
+- **The drop zone is not the archive.** `failures/` is written on every
+  divergence and belongs in `.gitignore`; promoting a trace up into
+  `tests/quint/` and naming it in a `qreplay` is a decision a person
+  makes. A failing run never dirties the repository, and a committed
+  trace is always one somebody chose to keep.
+
+`save-failure` is separate from `qcheck` rather than folded into it, so
+`check` stays a function of data returning data and does not drag
+`FileIO` into every model's effect row.
+
+## `irij quint doctor`
+
+Says whether the binary is reachable and whether it is the version the
+ITF decoding was verified against, and exits non-zero when traces
+cannot be generated here. There is no `irij check`: a model is ordinary
+Irij code, so running one is `irij run` or `irij test`.
+
 ## Running quint
 
 `QuintCapability` is the only place in Irij that starts a process.

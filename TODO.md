@@ -739,15 +739,19 @@ Full design and the recorded Quint behaviour it rests on:
       `use` list — `{model= "opus"}` and `cfg.model` keep working. 9
       tests in `ModelDeclTest`, 9 more in `tests/test-quint.irj`; spec
       §6.4a and §1.1.
-- [ ] **`irij check` CLI** — run models outside a test file, cache
-      generated traces, promote a failing trace into a committed
-      regression test. Plus `irij quint doctor` for the PATH/version
-      check.
-- [ ] **Failure artefacts** — write the diverging trace to
-      `tests/quint/failures/<spec>-seed<n>-trace<i>.itf.json` so a
-      random failure can be promoted by hand into a deterministic
-      regression test. The result already carries the JSON; nothing
-      writes it out yet.
+- [x] **Failure artefacts** — `save-failure` writes the diverging trace
+      to `<dir>/failures/<spec>-seed<n>-trace<i>.itf.json`. The name is
+      deterministic, so re-running a failing seed rewrites one file;
+      the drop zone is not the archive, so promoting a trace into a
+      committed `qreplay` stays a decision a person makes. Kept out of
+      `qcheck` so `check` stays data-in-data-out and does not drag
+      `FileIO` into every model's row. 4 tests in `tests/test-quint.irj`.
+- [x] **`irij quint doctor`** — is the binary reachable, is it the
+      tested version, exits non-zero when traces cannot be generated
+      here. No `irij check` subcommand: a model is ordinary Irij code,
+      so running one is `irij run` or `irij test`, and a `check` that
+      discovered models by itself would need a registry the desugaring
+      deliberately does not build.
 
 ---
 
