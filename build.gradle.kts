@@ -10,7 +10,7 @@ group = "dev.irij"
 // base by hand for a MAJOR/MINOR release; the patch is the commit count,
 // so every commit advances it and nobody hand-picks a patch. CI checks
 // out with fetch-depth: 0 (a shallow clone would count as 1).
-val baseVersion = "0.8"
+val baseVersion = "0.9"
 fun gitCommitCount(): String =
     try {
         val p = ProcessBuilder("git", "rev-list", "--count", "HEAD")

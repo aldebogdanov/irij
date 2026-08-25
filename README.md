@@ -98,7 +98,7 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.8.6 &mdash; SSE "patch once" responses + `irij publish` Bearer auth.
+0.9 &mdash; model-based testing against a Quint specification (the `model` declaration, `std.quint`).
 
 **SSE dispatcher fix.** A handler that promotes its exchange to
 Server-Sent Events (`ds-sse`) and then *returns* — the Datastar
