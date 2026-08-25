@@ -35,6 +35,18 @@ jobs:
       - name: Build shadow JAR
         run: ./gradlew shadowJar
 
+      # The .irj suites test the language as a user meets it — stdlib,
+      # effect handlers, specs, the bytecode end to end — and until now
+      # they ran only on someone's laptop. They need the shadow JAR, so
+      # they go after it rather than beside `./gradlew test`.
+      #
+      # They need nothing else: every suite that would otherwise touch
+      # the network, a database, a terminal or an external binary
+      # supplies its own handler instead. Keep it that way — a suite
+      # that needs a service is a suite that stops running here.
+      - name: Run integration tests
+        run: java -jar build/libs/irij.jar test
+
       - name: Upload JAR artifact
         uses: actions/upload-artifact@v4
         with:
