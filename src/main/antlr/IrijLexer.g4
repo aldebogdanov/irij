@@ -22,6 +22,7 @@ EFFECT      : 'effect' ;
 PARTY       : 'party' ;
 CAP         : 'cap' ;
 HANDLER     : 'handler' ;
+MODEL       : 'model' ;
 IMPL        : 'impl' ;
 PROTO       : 'proto' ;
 PRE         : 'pre' ;

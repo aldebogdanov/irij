@@ -725,12 +725,20 @@ Full design and the recorded Quint behaviour it rests on:
 - [x] **`examples/quint.irj`** — end to end against
       `tests/quint/bank.qnt`, including the off-by-one no hand-written
       test would think to make.
-- [ ] **`model` declaration** — the record form works but is written
-      one line at a time: a multi-line map literal does not parse, and
-      `spec` is reserved so the field is `spec-file`. A block-structured
-      `model name :: "spec/bank.qnt" :pure` decl with handler-shaped
-      clauses removes both, and lets `irij check` discover models
-      without running the file.
+- [x] **`model` declaration** — `model bank :: "spec/bank.qnt" :pure
+      {main= "bankTest"}` with handler-shaped clauses: one per action,
+      named for it, with that action's `nondet` picks bound **by name**
+      in the parameter list. A live model declares the row it performs
+      in the header (`::: Bank`). It desugars in `AstBuilder` to a
+      `Decl.FnDecl` per clause plus the record binding — no
+      `Decl.ModelDecl`, so no emitter, effect-checker or hot-redef case
+      and no second representation to drift. Functions rather than
+      lambdas because only a function can declare an effect row.
+      `model` is Irij's **first soft keyword**: a declaration head, and
+      still an ordinary name as a map field, in dot access and in a
+      `use` list — `{model= "opus"}` and `cfg.model` keep working. 9
+      tests in `ModelDeclTest`, 9 more in `tests/test-quint.irj`; spec
+      §6.4a and §1.1.
 - [ ] **`irij check` CLI** — run models outside a test file, cache
       generated traces, promote a failing trace into a committed
       regression test. Plus `irij quint doctor` for the PATH/version

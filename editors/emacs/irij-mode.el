@@ -81,7 +81,7 @@
 (defconst irij-keywords
   '("fn" "do" "if" "else" "match" "spec" "newtype"
     "mod" "use" "pub" "with" "scope" "effect"
-    "party" "cap" "handler" "impl" "proto"
+    "party" "cap" "handler" "model" "impl" "proto"
     "pre" "post" "contract" "select"
     "enclave" "par-each" "on-failure"
     "in" "out")
@@ -278,7 +278,7 @@ return the column of the rightmost such opener. Otherwise nil."
     "\\|\\bspec\\b.*$"
     "\\|\\bnewtype\\b.*$"
     ;; match / if / else / with / do end of line
-    "\\|\\b\\(?:match\\|if\\|else\\|with\\|do\\|scope\\|handler\\|effect\\|impl\\|proto\\)\\b.*$"
+    "\\|\\b\\(?:match\\|if\\|else\\|with\\|do\\|scope\\|handler\\|model\\|effect\\|impl\\|proto\\)\\b.*$"
     ;; Arrow at end of line:  =>  or  ->
     "\\|=>[ \t]*$"
     "\\|:::.*$"

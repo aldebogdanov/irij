@@ -46,8 +46,8 @@ irij examples/quint.irj       # model-based testing against a Quint spec — nee
 ## Tests
 
 ```sh
-./gradlew test                # 504 Java unit tests
-irij test                     # 413 integration tests (tests/*.irj)
+./gradlew test                # 513 Java unit tests
+irij test                     # 423 integration tests (tests/*.irj)
 ```
 
 ## Language Features
@@ -56,7 +56,7 @@ irij test                     # 413 integration tests (tests/*.irj)
 - **Mandatory effect tracking** &mdash; `fn name ::: Console` declares effects; unannotated = pure
 - **Algebraic effects & handlers** &mdash; `effect`, `handler`, `with`, `resume`, `on-failure`
 - **Contracts** &mdash; `pre`, `post` (function-level), `in`, `out` (module-boundary with blame)
-- **Model-based testing** &mdash; `std.quint` checks code against a [Quint](https://quint-lang.org/) specification: Quint generates traces, Irij replays them and fails at the first diverging step. Apalache proves invariants; a committed trace replays in CI with no Quint installed. (Replaces the `law` property testing removed in v0.6.12 — sampling is not proof, and the tool that samples also proves.)
+- **Model-based testing** &mdash; `model bank :: "spec/bank.qnt" :pure` binds a [Quint](https://quint-lang.org/) specification to the code implementing it, one clause per action with the spec's `nondet` picks bound by name. Quint generates traces, Irij replays them and fails at the first diverging step; Apalache proves invariants; a committed trace replays in CI with no Quint installed. (Replaces the `law` property testing removed in v0.6.12 — sampling is not proof, and the tool that samples also proves.)
 - **Protocols** &mdash; type-dispatched methods: `proto`, `impl`
 - **Structured concurrency** &mdash; `scope`, `fork`, `par`, `race`, `timeout`
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen

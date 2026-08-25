@@ -19,31 +19,33 @@ use std.fs :open
 ;; A pure state machine, so the model is a fold: each action takes the
 ;; state and the picks Quint made, and returns the next state.
 
-fn deposit :: Map Map Map
-  => st p
-  balance := get p.who st.balances
-  {...st balances= (assoc st.balances p.who (balance + p.amount)) last-error= ""}
+fn deposit :: Map Str Int Map
+  => st who amount
+  balance := get who st.balances
+  {...st balances= (assoc st.balances who (balance + amount)) last-error= ""}
 
-fn withdraw :: Map Map Map
-  => st p
-  balance := get p.who st.balances
-  {...st balances= (assoc st.balances p.who (balance - p.amount)) last-error= ""}
+fn withdraw :: Map Str Int Map
+  => st who amount
+  balance := get who st.balances
+  {...st balances= (assoc st.balances who (balance - amount)) last-error= ""}
 
-fn overdraft :: Map Map Map
-  (st p -> {...st last-error= "insufficient funds"})
+fn overdraft :: Map Map
+  (st -> {...st last-error= "insufficient funds"})
 
 ;; ── The model ──────────────────────────────────────────────────
 ;;
-;; `spec-file` rather than `spec`, because `spec` is a reserved word.
-;; Picks arrive as one record, so `p.who` is the name the spec gave
-;; it — normalized to Irij's convention: the spec's `lastError` is
-;; `last-error` here.
+;; One clause per action the spec can take, named for it, with that
+;; action's `nondet` picks bound by name in the parameter list. A
+;; `:pure` action takes the state first and returns the next one.
+;;
+;; The names are the spec's own, in Irij's convention: the spec's
+;; `lastError` is `last-error` here.
 
-bank := {spec-file= "tests/quint/bank.qnt" \
-         main= "bankTest" \
-         mode= :pure \
-         start= {balances= {alice= 0 bob= 0} last-error= ""} \
-         actions= {deposit= deposit withdraw= withdraw overdraft= overdraft}}
+model bank :: "tests/quint/bank.qnt" :pure {main= "bankTest"}
+  start                  => {balances= {alice= 0 bob= 0} last-error= ""}
+  deposit  st who amount => deposit st who amount
+  withdraw st who amount => withdraw st who amount
+  overdraft st _ _       => overdraft st
 
 ;; ── Generating and replaying ───────────────────────────────────
 
@@ -60,12 +62,16 @@ print (report result)
 ;; spec finds it, names the step, and prints the command that
 ;; reproduces it.
 
-fn deposit-off-by-one :: Map Map Map
-  => st p
-  balance := get p.who st.balances
-  {...st balances= (assoc st.balances p.who (balance + p.amount + 1)) last-error= ""}
+model broken :: "tests/quint/bank.qnt" :pure {main= "bankTest"}
+  start                  => {balances= {alice= 0 bob= 0} last-error= ""}
+  deposit  st who amount => off-by-one st who amount
+  withdraw st who amount => withdraw st who amount
+  overdraft st _ _       => overdraft st
 
-broken := {...bank actions= {deposit= deposit-off-by-one withdraw= withdraw overdraft= overdraft}}
+fn off-by-one :: Map Str Int Map
+  => st who amount
+  balance := get who st.balances
+  {...st balances= (assoc st.balances who (balance + amount + 1)) last-error= ""}
 
 println ""
 bad := with default-quint

@@ -160,6 +160,51 @@ live-result := with in-memory-bank
 r19 := test "a live model replays against a running system" (-> assert-true live-result.ok?)
 r20 := test "and every state of it was compared" (-> assert-eq 9 live-result.steps)
 
+
+;; ── The `model` declaration ────────────────────────────────────
+;;
+;; The same model, written as a declaration instead of a record. It
+;; desugars to exactly the record above, with two differences that
+;; are the point of it: the picks are bound by name in the parameter
+;; list, and the whole thing is a block rather than one long line.
+
+fn credit :: Map Str Int Map
+  (balances who amount -> assoc balances who ((get who balances) + amount))
+
+model declared :: "tests/quint/bank.qnt" :pure {main= "bankTest"}
+  start                  => {balances= {alice= 0 bob= 0} last-error= ""}
+  deposit  st who amount => {...st balances= (credit st.balances who amount) last-error= ""}
+  withdraw st who amount => {...st balances= (credit st.balances who (0 - amount)) last-error= ""}
+  overdraft st _ _       => {...st last-error= "insufficient funds"}
+
+declared-result := with default-fs do (replay-file declared bank-trace)
+
+r30 := test "a declared model replays" (-> assert-true declared-result.ok?)
+r31 := test "it desugars to the same spec-file" (-> assert-eq "tests/quint/bank.qnt" declared.spec-file)
+r32 := test "the mode becomes a field" (-> assert-eq :pure declared.mode)
+r33 := test "the options map is spliced in" (-> assert-eq "bankTest" declared.main)
+r34 := test "every non-lifecycle clause is an action" (-> assert-eq #["deposit" "overdraft" "withdraw"] (sort (keys declared.actions)))
+r35 := test "start is a value, not a function" (-> assert-eq {alice= 0 bob= 0} declared.start.balances)
+r36 := test "and it agrees with the record form step for step" (-> assert-eq ok-result.steps declared-result.steps)
+
+;; A live model declares the row it performs once, in the header.
+model live-declared :: "tests/quint/bank.qnt" :live ::: Bank
+  init                => bank-reset ()
+  state               => bank-read ()
+  deposit  who amount => bank-deposit who amount
+  withdraw who amount => bank-withdraw who amount
+  overdraft _ _       => bank-fail ()
+
+fn replay-live-declared :: _ _ ::: FileIO Bank
+  (_ -> replay-file live-declared bank-trace)
+
+live-declared-result := with in-memory-bank
+  with default-fs
+    replay-live-declared ()
+
+r37 := test "a declared live model drives a running system" (-> assert-true live-declared-result.ok?)
+r38 := test "its lifecycle clauses become callable" (-> assert-eq 9 live-declared-result.steps)
+
 ;; ── Generation, without the binary ─────────────────────────────
 ;;
 ;; `check` reaches the CLI through the Quint effect, so a handler
@@ -209,4 +254,4 @@ holding := with empty-quint do (verify-holding ())
 r27 := test "an invariant that holds passes" (-> assert-true holding.ok?)
 r28 := test "and says so" (-> assert-true holding.invariant.holds?)
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29]
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r38]

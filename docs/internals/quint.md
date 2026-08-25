@@ -145,8 +145,54 @@ dispatched, and the fix is in the spec: name the combination.
 
 ## Models
 
-A model is a record. It comes in two shapes because Irij has two kinds
-of system.
+A model binds a Quint specification to the code implementing it. It
+comes in two shapes because Irij has two kinds of system, and it can be
+written two ways: as a declaration, or as the record that declaration
+desugars to.
+
+### The `model` declaration
+
+```
+model bank :: "spec/bank.qnt" :pure {main= "bankTest"}
+  start                  => {balances= {alice= 0 bob= 0} last-error= ""}
+  deposit  st who amount => {...st balances= (credit st.balances who amount)}
+  withdraw st who amount => {...st balances= (credit st.balances who (0 - amount))}
+  overdraft st _ _       => {...st last-error= "insufficient funds"}
+```
+
+The clauses read like handler clauses because they do the same job:
+one per action the spec can take, named for it, with that action's
+`nondet` picks bound **by name** in the parameter list. `who` and
+`amount` are the spec's own names, normalized to Irij's convention.
+A pick the trace does not carry arrives as unit.
+
+`start` (pure) and `init` / `state` / `halt` (live) are the lifecycle
+clauses; every other name is an action. The optional map after the
+mode is spliced into the record as written, so `main`, `ignore`,
+`action-path` and the rest need no grammar of their own.
+
+A live model declares the effects it performs once, in the header:
+
+```
+model bank :: "spec/bank.qnt" :live ::: Bank
+  init                => bank-reset ()
+  state               => bank-read ()
+  deposit  who amount => bank-deposit who amount
+```
+
+That row lands on every clause, which is why the clauses are lowered
+to functions rather than lambdas — a lambda declares no row, and an
+effect performed from one is refused at the perform. See
+[parser.md](parser.md) for the desugaring.
+
+`model` is a soft keyword: still a map field and a dot-access field,
+which is where a name this ordinary turns up.
+
+### The record
+
+The declaration produces this, and it can also be written directly —
+useful when a model is assembled or modified programmatically, as the
+tests do with `{...sloppy ignore= #{"last-error"}}`.
 
 **Pure** — replay is a fold. `start` is the initial state and each
 action is `(state picks -> state)`. Nothing is set up or torn down and

@@ -90,3 +90,58 @@ produce a Str (`RtCollections.asMapKey` throws otherwise). Works in
 map literals and `{...base (k)= v}` record updates. Dynamic keys are
 skipped by row-var inference over record specs (key unknowable at
 compile time).
+
+## The `model` declaration desugars in the builder (2026-08)
+
+```
+modelDecl : PUB? MODEL fnName SPEC_ANN STRING KEYWORD mapLiteral?
+            effectAnnotation? (NEWLINE INDENT modelBody NEWLINE* DEDENT)?
+modelClause : IDENT pattern* FAT_ARROW armBody
+```
+
+`AstBuilder.visitModelDecl` lowers it to declarations that already
+exist — a `Decl.FnDecl` per clause plus a `Decl.BindingDecl` naming
+them — so there is **no `Decl.ModelDecl`**, no emitter case, no
+effect-checker case, no hot-redef case, and no second representation
+of the model to drift from the first. The declaration is exactly the
+`std.quint` record it produces.
+
+```
+model bank :: "spec/bank.qnt" :pure {main= "bankTest"}
+  start                  => {balances= {alice= 0}}
+  deposit  st who amount => {...st balances= (credit st who amount)}
+```
+
+becomes
+
+```
+fn bank$deposit
+  => st $picks
+  who := get "who" $picks
+  amount := get "amount" $picks
+  {...st balances= (credit st who amount)}
+
+bank := {spec-file= "spec/bank.qnt" mode= :pure main= "bankTest"
+         start= {balances= {alice= 0}} actions= {deposit= bank$deposit}}
+```
+
+Three things are load-bearing:
+
+- **Functions, not lambdas.** Only a function can declare an effect
+  row, and a live model's clauses are exactly the code that performs.
+  `model … :live ::: Bank` puts the row on every hoisted function; a
+  lambda would be refused at the perform for having declared nothing.
+- **Unwritable names.** `$picks` and `bank$deposit` cannot come out of
+  the lexer, so a spec free to name a pick anything cannot collide
+  with the binding the desugaring introduces, and two models may both
+  have a `deposit` clause.
+- **Hoisting.** `build()` drains `AstBuilder.hoisted` before each
+  top-level declaration it appends, since the functions must precede
+  the binding that references them.
+
+`MODEL` is a **soft keyword** — the first one. It is a declaration head
+and still an ordinary name in `mapEntry` (`{model= "opus"}`),
+in dot access (`cfg.model`) and in a `use` list. Those are the
+positions where a word this ordinary actually turns up. It is still
+reserved elsewhere, like every other keyword; the general fix is the
+soft-keyword work TODO.md tracks under the `party`/`quo` rename.
