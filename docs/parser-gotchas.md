@@ -66,6 +66,22 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 - **String keys in map literals:** `{"content-type"= val}` is now supported (as of 0.2.7). Dot access with string keys (`m."content-type"`) is NOT — use `get m "content-type"` or destructuring.
 - **Map literals inside `if` branches:** parser sometimes confused by `{k= v}` in a branch. Wrap: `(if cond ({a= 1}) else ({b= 2}))`.
 - **`bindTarget` accepts only `IDENT` or `{field= name}`** patterns — vector destructuring in `:=` needs `match`.
+- **A map literal cannot span lines by indentation.** A continuation line starts an INDENT and the parse fails on the second field. Backslash-continue instead:
+  ```
+  driver := {spec-file= "spec/bank.qnt" \
+             mode= :pure \
+             start= {n= 0}}
+  ```
+  Parenthesising it does *not* help — `({a= 1\n b= 2})` fails the same way.
+- **Field names are kebab-case identifiers.** `{lastError= 1}` does not parse and neither does `m.lastError`, because `lastError` is not a legal Irij identifier. String keys work at runtime (`assoc m "lastError" v`), so data from JSON or an external tool arrives fine — it just cannot be *written* as a field. Anything crossing that boundary is better normalized (`std.quint.itf.kebab`).
+- **Reserved words cannot be field names.** `{spec= …}`, `{out= …}` and `{in= …}` all fail; the read is confusing because the error points at the *following* field. `select` and `out` bite hardest in ordinary code (`fn select`, `raw.out`). `nameListItem` in the grammar has the full list.
+
+## Blocks and `if`
+
+- **Inline `if` always needs `else`.** `(if c a b)` does not parse; write `(if c a else b)`. The block form needs it too. The error surfaces at the *next* declaration, not at the `if`.
+- **A branch cannot introduce a binding.** `if c ... else` with `x := …` inside the else block fails; compute the value before the `if` and choose between the two results.
+- **Multi-line call arguments must line up on a multiple of two.** Continuation lines under a call (`fold f\n     acc\n     v`) are an indentation error at 5 or 7 spaces. Bind the intermediates instead.
+- **A record spread wants a bare name.** `{...r.failure k= v}` does not parse; bind `f := r.failure` first.
 
 ## Pipelines & seq-ops
 
