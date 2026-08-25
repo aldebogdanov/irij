@@ -40,13 +40,14 @@ irij examples/effects.irj     # algebraic effects deep dive
 irij examples/walkthrough.irj # full language tour (all phases)
 irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
 irij examples/terminal.irj    # raw-mode terminal (Term effect) — needs a tty
+irij examples/quint.irj       # model-based testing against a Quint spec — needs `quint`
 ```
 
 ## Tests
 
 ```sh
-./gradlew test                # 770 Java unit tests (incl. 54 bytecode-compiler tests)
-irij test                     # 299 integration tests (tests/*.irj)
+./gradlew test                # 504 Java unit tests
+irij test                     # 413 integration tests (tests/*.irj)
 ```
 
 ## Language Features
@@ -55,7 +56,7 @@ irij test                     # 299 integration tests (tests/*.irj)
 - **Mandatory effect tracking** &mdash; `fn name ::: Console` declares effects; unannotated = pure
 - **Algebraic effects & handlers** &mdash; `effect`, `handler`, `with`, `resume`, `on-failure`
 - **Contracts** &mdash; `pre`, `post` (function-level), `in`, `out` (module-boundary with blame)
-- **Law verification** &mdash; QuickCheck-style property testing: `law name = forall x. P x`
+- **Model-based testing** &mdash; `std.quint` checks code against a [Quint](https://quint-lang.org/) specification: Quint generates traces, Irij replays them and fails at the first diverging step. Apalache proves invariants; a committed trace replays in CI with no Quint installed. (Replaces the `law` property testing removed in v0.6.12 — sampling is not proof, and the tool that samples also proves.)
 - **Protocols** &mdash; type-dispatched methods: `proto`, `impl`
 - **Structured concurrency** &mdash; `scope`, `fork`, `par`, `race`, `timeout`
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
@@ -73,6 +74,7 @@ All docs live in `docs/`:
 - `phase-*.md` &mdash; implementation notes per phase
 - `architecture.md` &mdash; file map and code structure
 - `parser-gotchas.md` &mdash; known parser edge cases
+- `internals/` &mdash; how each subsystem works, including `internals/quint.md`
 
 ## Project Structure
 

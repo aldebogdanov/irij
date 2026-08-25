@@ -27,9 +27,10 @@ links back here for depth.
 13. [JVM capability](jvm-capability.md) — `::: JVM`, why Java is impure
 14. [Capabilities](capabilities.md) — `cap` decls, bridging effects to host code
 15. [Stdlib](stdlib.md) — what lives in Irij vs Java, the boundary
-16. [nREPL](nrepl.md) — protocol, sessions, bytecode-session eval
-17. [LSP](lsp.md) — `irij lsp`, capabilities, editor integration
-18. [Glossary](glossary.md) — terms used throughout
+16. [Quint](quint.md) — model-based testing against a formal spec
+17. [nREPL](nrepl.md) — protocol, sessions, bytecode-session eval
+18. [LSP](lsp.md) — `irij lsp`, capabilities, editor integration
+19. [Glossary](glossary.md) — terms used throughout
 
 Note: the tree-walking `Interpreter` class was removed in v0.6.20
 (R5d). The threaded handler protocol (14c.2) had already been

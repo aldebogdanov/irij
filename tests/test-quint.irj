@@ -1,0 +1,212 @@
+use std.test :open
+use std.fs :open
+use std.quint :open
+
+;; Model-based testing, replayed against the traces recorded from
+;; Quint 0.32.0 into tests/quint/. Nothing here starts a process:
+;; generation is an effect, so a mock handler stands in for the
+;; binary and every one of these runs in CI with no Node installed.
+
+;; ── A pure model of tests/quint/bank.qnt ───────────────────────
+
+fn deposit-step :: Map Map Map
+  (st p -> {...st balances= (assoc st.balances p.who ((get p.who st.balances) + p.amount)) last-error= ""})
+
+fn withdraw-step :: Map Map Map
+  (st p -> {...st balances= (assoc st.balances p.who ((get p.who st.balances) - p.amount)) last-error= ""})
+
+fn overdraft-step :: Map Map Map
+  (st p -> {...st last-error= "insufficient funds"})
+
+;; The same deposit, off by one. This is the bug a spec is for.
+fn deposit-off-by-one :: Map Map Map
+  (st p -> {...st balances= (assoc st.balances p.who ((get p.who st.balances) + p.amount + 1)) last-error= ""})
+
+bank-actions := {deposit= deposit-step withdraw= withdraw-step overdraft= overdraft-step}
+broken-actions := {deposit= deposit-off-by-one withdraw= withdraw-step overdraft= overdraft-step}
+bank-start := {balances= {alice= 0 bob= 0} last-error= ""}
+
+good := {spec-file= "tests/quint/bank.qnt" mode= :pure start= bank-start actions= bank-actions}
+broken := {spec-file= "tests/quint/bank.qnt" mode= :pure start= bank-start actions= broken-actions}
+
+bank-trace := "tests/quint/bank_run_0.itf.json"
+
+ok-result := with default-fs do (replay-file good bank-trace)
+bad-result := with default-fs do (replay-file broken bank-trace)
+
+r1 := test "a model that agrees with the spec passes" (-> assert-true ok-result.ok?)
+r2 := test "every state in the trace is replayed" (-> assert-eq 9 ok-result.steps)
+r3 := test "a model that disagrees fails" (-> assert-false bad-result.ok?)
+r4 := test "the failure names the diverging step" (-> assert-eq 6 bad-result.failure.step)
+r5 := test "and the action that caused it" (-> assert-eq "deposit" bad-result.failure.action)
+r6 := test "and the picks it was given" (-> assert-eq "alice" (get "who" bad-result.failure.picks))
+r7 := test "and both sides of the disagreement" (-> assert-eq {alice= 12 bob= 0} (get "balances" bad-result.failure.actual))
+r8 := test "only the diverging variable is reported" (-> assert-eq #["balances"] (keys bad-result.failure.expected))
+r9 := test "replay stops at the first divergence" (-> assert-eq 7 bad-result.steps)
+
+;; ── Coverage ───────────────────────────────────────────────────
+
+r10 := test "an action the trace exercised is counted" (-> assert-eq 3 (get "deposit" ok-result.coverage.used))
+r11 := test "step 0 is not counted as an action" (-> assert-eq () (get "init" ok-result.coverage.used))
+r12 := test "an action no trace reached is named" (-> assert-eq #["withdraw"] ok-result.coverage.unused)
+
+;; ── ignore ─────────────────────────────────────────────────────
+
+;; A model that never sets last-error diverges on it at the first
+;; overdraft — unless the model says that variable is the spec's
+;; business and not the code's.
+sloppy-actions := {deposit= deposit-step withdraw= withdraw-step overdraft= (st p -> st)}
+sloppy := {spec-file= "tests/quint/bank.qnt" mode= :pure start= bank-start actions= sloppy-actions}
+sloppy-ignoring := {...sloppy ignore= #{"last-error"}}
+
+sloppy-result := with default-fs do (replay-file sloppy bank-trace)
+ignoring-result := with default-fs do (replay-file sloppy-ignoring bank-trace)
+
+r13 := test "an unmodelled variable diverges" (-> assert-false sloppy-result.ok?)
+r14 := test "ignore takes it out of the comparison" (-> assert-true ignoring-result.ok?)
+
+;; ── An action with no handler ──────────────────────────────────
+
+;; A broken model raises; a model that merely disagrees returns data.
+;; The two are different kinds of news and are reported differently.
+no-deposit := {spec-file= "tests/quint/bank.qnt" mode= :pure start= bank-start actions= {withdraw= withdraw-step}}
+
+fn replay-without-deposit :: _ _ ::: FileIO
+  (_ -> replay-file no-deposit bank-trace)
+
+r15 := test "an action nothing handles is an error, not a diff" (-> assert-throws (-> with default-fs do (replay-without-deposit ())))
+
+;; ── An anonymous action ────────────────────────────────────────
+;;
+;; `mbt::actionTaken` is the first *named* action a branch executed,
+;; so a branch built from bare assignments records "". There is
+;; nothing to dispatch on, and the fix belongs in the spec: name the
+;; combination. tests/quint/anonymous.qnt has one of each.
+
+anon := {spec-file= "tests/quint/anonymous.qnt" mode= :pure start= {n= 0 touched= false} actions= {idle= (st p -> st)}}
+
+fn replay-anonymous :: _ _ ::: FileIO
+  (_ -> replay-file anon "tests/quint/anonymous_0.itf.json")
+
+r29 := test "an anonymous action is an error the spec has to fix" (-> assert-throws (-> with default-fs do (replay-anonymous ())))
+
+;; ── The report ─────────────────────────────────────────────────
+
+failure-text := report bad-result
+
+r16 := test "the report names the step" (-> assert-true (contains-substr? failure-text "step     6"))
+r17 := test "the report shows both states" (-> assert-true (contains-substr? failure-text "expected"))
+r18 := test "a passing result reports nothing alarming" (-> assert-false (contains-substr? (report ok-result) "diverged"))
+
+;; ── A live model ───────────────────────────────────────────────
+;;
+;; The system under test is running: its state lives in a handler
+;; installed around the whole replay, not in a value threaded through
+;; it. Each of the model's functions declares the row it performs.
+
+effect Bank
+  bank-reset :: _ ()
+  bank-deposit :: Str Int ()
+  bank-withdraw :: Str Int ()
+  bank-fail :: _ ()
+  bank-read :: _ Map
+
+handler in-memory-bank :: Bank
+  balances :! {}
+  last-error :! ""
+  bank-reset _ =>
+    balances <- {alice= 0 bob= 0}
+    last-error <- ""
+    resume ()
+  bank-deposit who amount =>
+    balances <- assoc balances who ((get who balances) + amount)
+    last-error <- ""
+    resume ()
+  bank-withdraw who amount =>
+    balances <- assoc balances who ((get who balances) - amount)
+    last-error <- ""
+    resume ()
+  bank-fail _ =>
+    last-error <- "insufficient funds"
+    resume ()
+  bank-read _ =>
+    resume {balances= balances last-error= last-error}
+
+fn start-bank :: _ () ::: Bank
+  (_ -> bank-reset ())
+
+fn read-bank :: _ Map ::: Bank
+  (_ -> bank-read ())
+
+fn do-deposit :: Map () ::: Bank
+  (p -> bank-deposit p.who p.amount)
+
+fn do-withdraw :: Map () ::: Bank
+  (p -> bank-withdraw p.who p.amount)
+
+fn do-overdraft :: Map () ::: Bank
+  (p -> bank-fail ())
+
+live := {spec-file= "tests/quint/bank.qnt" mode= :live init= start-bank state= read-bank \
+         actions= {deposit= do-deposit withdraw= do-withdraw overdraft= do-overdraft}}
+
+fn replay-live :: _ _ ::: FileIO Bank
+  (_ -> replay-file live bank-trace)
+
+live-result := with in-memory-bank
+  with default-fs
+    replay-live ()
+
+r19 := test "a live model replays against a running system" (-> assert-true live-result.ok?)
+r20 := test "and every state of it was compared" (-> assert-eq 9 live-result.steps)
+
+;; ── Generation, without the binary ─────────────────────────────
+;;
+;; `check` reaches the CLI through the Quint effect, so a handler
+;; that hands back a recorded trace exercises the whole generate-and-
+;; replay path with nothing installed. This is the same seam that
+;; lets a committed trace replay in CI.
+
+recorded := with default-fs do (fs-read bank-trace)
+
+handler canned-quint :: Quint
+  quint-version _ => resume "0.32.0"
+  quint-run opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "run"] dir= "." seed= 1 traces= #[{name= "run_0.itf.json" json= recorded}]}
+  quint-test opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "test"] dir= "." traces= #[{name= "test_0.itf.json" json= recorded}]}
+  quint-verify opts => resume {exit= 1 stdout= "" stderr= "" cmd= #["quint" "verify"] dir= "." traces= #[]}
+
+fn checked :: Map Map ::: Quint
+  (driver -> check driver {})
+
+checked-good := with canned-quint do (checked good)
+checked-broken := with canned-quint do (checked broken)
+
+r21 := test "check replays what the generator returned" (-> assert-true checked-good.ok?)
+r22 := test "check reports how many traces it replayed" (-> assert-eq 1 checked-good.traces)
+r23 := test "check carries the seed that produced them" (-> assert-eq 1 checked-good.seed)
+r24 := test "check finds the same divergence" (-> assert-false checked-broken.ok?)
+r25 := test "the failure says which trace it was in" (-> assert-eq "run_0.itf.json" checked-broken.failure.trace-name)
+
+;; A generator that produced nothing is a broken setup, not a pass.
+handler empty-quint :: Quint
+  quint-version _ => resume "0.32.0"
+  quint-run opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "run"] dir= "." seed= 1 traces= #[]}
+  quint-test opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "test"] dir= "." traces= #[]}
+  quint-verify opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "verify"] dir= "." traces= #[]}
+
+fn check-with-nothing :: _ _ ::: Quint
+  (_ -> check good {})
+
+r26 := test "a run that generated no traces is an error" (-> assert-throws (-> with empty-quint do (check-with-nothing ())))
+
+;; An invariant that holds writes no counterexample, and that is the
+;; pass rather than the empty-result error above.
+fn verify-holding :: _ _ ::: Quint
+  (_ -> verify good {invariant= "noNegatives"})
+
+holding := with empty-quint do (verify-holding ())
+
+r27 := test "an invariant that holds passes" (-> assert-true holding.ok?)
+r28 := test "and says so" (-> assert-true holding.invariant.holds?)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29]

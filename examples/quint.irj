@@ -1,0 +1,83 @@
+;; Model-based testing against a Quint specification.
+;;
+;; The spec is tests/quint/bank.qnt: two accounts, deposits,
+;; withdrawals, and an overdraft that leaves the balances alone and
+;; records an error. Quint generates random traces from it; this file
+;; replays them against Irij code and fails at the first step where
+;; the two disagree.
+;;
+;; Needs `quint` on PATH for the generating half:
+;;   npm i -g @informalsystems/quint
+;;
+;; Run:  irij run examples/quint.irj
+
+use std.quint :open
+use std.fs :open
+
+;; ── The implementation ─────────────────────────────────────────
+;;
+;; A pure state machine, so the model is a fold: each action takes the
+;; state and the picks Quint made, and returns the next state.
+
+fn deposit :: Map Map Map
+  => st p
+  balance := get p.who st.balances
+  {...st balances= (assoc st.balances p.who (balance + p.amount)) last-error= ""}
+
+fn withdraw :: Map Map Map
+  => st p
+  balance := get p.who st.balances
+  {...st balances= (assoc st.balances p.who (balance - p.amount)) last-error= ""}
+
+fn overdraft :: Map Map Map
+  (st p -> {...st last-error= "insufficient funds"})
+
+;; ── The model ──────────────────────────────────────────────────
+;;
+;; `spec-file` rather than `spec`, because `spec` is a reserved word.
+;; Picks arrive as one record, so `p.who` is the name the spec gave
+;; it — normalized to Irij's convention: the spec's `lastError` is
+;; `last-error` here.
+
+bank := {spec-file= "tests/quint/bank.qnt" \
+         main= "bankTest" \
+         mode= :pure \
+         start= {balances= {alice= 0 bob= 0} last-error= ""} \
+         actions= {deposit= deposit withdraw= withdraw overdraft= overdraft}}
+
+;; ── Generating and replaying ───────────────────────────────────
+
+result := with default-quint
+  check bank {traces= 20 max-steps= 10 max-samples= 500 seed= 42}
+
+println ("agrees with the spec: " ++ (to-str result.ok?))
+println ((to-str result.traces) ++ " traces, " ++ (to-str result.steps) ++ " steps, seed " ++ (to-str result.seed))
+print (report result)
+
+;; ── The same thing, one step wrong ─────────────────────────────
+;;
+;; An off-by-one no test written by hand would think to make. The
+;; spec finds it, names the step, and prints the command that
+;; reproduces it.
+
+fn deposit-off-by-one :: Map Map Map
+  => st p
+  balance := get p.who st.balances
+  {...st balances= (assoc st.balances p.who (balance + p.amount + 1)) last-error= ""}
+
+broken := {...bank actions= {deposit= deposit-off-by-one withdraw= withdraw overdraft= overdraft}}
+
+println ""
+bad := with default-quint
+  check broken {traces= 20 max-steps= 10 max-samples= 500 seed= 42}
+print (report bad)
+
+;; ── A committed trace needs no Quint at all ────────────────────
+;;
+;; This is what makes a random failure a regression test: the file
+;; replays in milliseconds, in CI, on a machine with no Node.
+
+println ""
+replayed := with default-fs
+  replay-file bank "tests/quint/bank_run_0.itf.json"
+println ("committed trace replays: " ++ (to-str replayed.ok?))

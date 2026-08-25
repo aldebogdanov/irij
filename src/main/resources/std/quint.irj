@@ -1,0 +1,491 @@
+mod std.quint
+
+use std.list :open
+use std.collection :open
+use std.text :open
+use std.fs :open
+use std.quint.itf :as itf
+
+;; ── Model-based testing against a Quint specification ──────────
+;;
+;; You write a formal model of the system in Quint. Quint generates
+;; traces from it — sequences of state, action, state. This module
+;; replays those traces against your Irij code and fails at the first
+;; step where the two disagree.
+;;
+;;   spec.qnt --quint run --mbt--> ITF traces --replay--> your code
+;;                                                  |
+;;                                       the diff, at the step it
+;;                                       first appeared
+;;
+;; Two ways to say what the code is, because Irij has both kinds:
+;;
+;; A **pure** model is a fold. `start` is the initial state and each
+;; action is `(state picks -> state)`. Nothing is set up, nothing is
+;; torn down, and there is no way for one trace to leak into the
+;; next.
+;;
+;;   driver := {spec-file= "spec/counter.qnt"
+;;              mode=    :pure
+;;              start=   {n= 0}
+;;              actions= {incr= (st p -> {...st n= st.n + p.by})
+;;                        decr= (st p -> {...st n= st.n - p.by})}}
+;;
+;; A **live** model drives something running — a database, a server,
+;; a session. `init` starts or resets it, each action is
+;; `(picks -> whatever)` and its return value is ignored, and `state`
+;; reads the world back for comparison.
+;;
+;;   driver := {spec-file= "spec/bank.qnt"
+;;              mode=    :live
+;;              init=    (-> reset-bank ())
+;;              actions= {deposit= (p -> deposit p.who p.amount)}
+;;              state=   (-> {balances= (balances ()) lastError= (last-error ())})
+;;              halt=    (-> close-bank ())}
+;;
+;; Picks arrive as one record, so a handler reads `p.who` by the name
+;; the spec gave it. There is no argument-shape declaration to keep in
+;; sync: the lambda in the model *is* the mapping.
+;;
+;; Then, in a test file:
+;;
+;;   r1 := test "bank conforms to its spec" (-> qcheck driver {traces= 50})
+;;
+;; Divergence is data, not an exception — `check` returns a result
+;; record and `qcheck` is the thin wrapper that turns one into a
+;; failed assertion.
+;;
+;; ── A live model's effects ─────────────────────────────────────
+;;
+;; A model's actions reach this module inside a `Map` and are called
+;; through it. Irij carries an effect row through a single `(Fn):eff`
+;; field — that is how `std.serve` types a route — but there is no way
+;; yet to say "a `Map` whose values are functions with row eff", so a
+;; live model's effects do not appear in `check`'s own row.
+;;
+;; They still run. Two things are on you rather than on the checker:
+;;
+;;   1. Each of the model's own functions declares the row it
+;;      performs, as any Irij function does — `fn do-deposit :: Map ()
+;;      ::: Bank`. A bare lambda performing an effect is rejected at
+;;      the perform, because it declared nothing.
+;;   2. The handlers are installed around the call, not inside it, so
+;;      one system lives across the whole run:
+;;
+;;        with in-memory-bank
+;;          with default-quint
+;;            qcheck driver {traces= 50}
+;;
+;; Pure models perform nothing and need neither.
+
+;; ── The Quint CLI, as an effect ────────────────────────────────
+;;
+;; Generating traces needs the `quint` binary; replaying one does not.
+;; That split is the handler boundary: run under `default-quint` to
+;; generate, and a committed `.itf.json` replays under no handler at
+;; all. A mock handler returning canned records exercises everything
+;; between the two with no binary installed.
+
+pub effect Quint
+  quint-version :: _ Str
+  quint-run :: Map Map
+  quint-test :: Map Map
+  quint-verify :: Map Map
+
+;; Capability binding. `quint-cli` resolves only inside Quint-handler
+;; clauses (lint-enforced by EffectRowChecker).
+cap quint-cli :: Quint = "dev.irij.runtime.QuintCapability"
+
+pub handler default-quint :: Quint ::: JVM
+  quint-version _ => resume (quint-cli.version ())
+  quint-run opts => resume (quint-cli.run opts)
+  quint-test opts => resume (quint-cli.test opts)
+  quint-verify opts => resume (quint-cli.verify opts)
+
+;; ── Reading the model ──────────────────────────────────────────
+
+fn live? :: Map Bool
+  (driver -> (get "mode" driver) == :live)
+
+fn opt :: Map Str _ _
+  => driver key fallback
+  v := get key driver
+  if (v == ()) fallback else v
+
+fn decode-opts :: Map Map
+  => driver
+  wanted := #["key-fn" "action-path" "nondet-path"]
+  present := /? (k -> (get k driver) /= ())
+  fold (acc k -> assoc acc k (get k driver)) {} (present wanted)
+
+fn handler-for :: Map Str _
+  => driver action
+  h := get action (opt driver "actions" {})
+  if (h == ())
+    error (no-handler-message driver action)
+  else
+    h
+
+fn no-handler-message :: Map Str Str
+  => driver action
+  known := join ", " (sort (keys (opt driver "actions" {})))
+  if (action == ())
+    ("this trace carries no action: generate it with `quint run --mbt`,"
+     ++ " or point action-path at the variable the spec records it in")
+  else if (action == "")
+    ("the spec took an anonymous action — a branch built from bare"
+     ++ " assignments with no named action inside it. Name the"
+     ++ " combination in the spec; nothing here can dispatch on \"\"")
+  else
+    ("no handler for the action " ++ action ++ "; the model has " ++ known)
+
+;; ── One step ───────────────────────────────────────────────────
+
+;; State 0 is compared straight after the model starts, so an `init`
+;; that does not fully reset shows up as a step-0 divergence on the
+;; second trace rather than as corruption of the seventeenth.
+fn begin :: Map _
+  => driver
+  if (live? driver)
+    run-init driver
+  else
+    opt driver "start" {}
+
+fn run-init :: Map _
+  => driver
+  i := get "init" driver
+  if (i == ()) () else (i ())
+
+fn observe :: Map _ Map
+  => driver st
+  if (live? driver)
+    (get "state" driver) ()
+  else
+    st
+
+fn invoke :: Map _ Map _ _
+  => driver h expected st
+  if (live? driver)
+    h expected.picks
+    st
+  else
+    h st expected.picks
+
+;; Only the variables the trace carries are compared. A model reading
+;; back more than the spec declares is not an error; a spec variable
+;; nothing supplies diverges here against nothing, on the first state
+;; that carries it — which is the earliest anything can know it
+;; exists, since the model never sees the spec.
+fn mismatch :: Map Map Map _
+  => driver expected actual
+  ignored := opt driver "ignore" #{}
+  differs := /? (k -> (not (contains? ignored k)) && ((get k expected) /= (get k actual)))
+  bad := differs (keys expected)
+  if (empty? bad)
+    ()
+  else
+    ({expected= (pick-keys bad expected) actual= (pick-keys bad actual)})
+
+fn pick-keys :: Vec Map Map
+  (ks m -> fold (acc k -> assoc acc k (get k m)) {} ks)
+
+;; ── Replaying a trace ──────────────────────────────────────────
+
+;; The handler is resolved before the step is attempted, and outside
+;; the `try`. An action nothing handles is a model that does not
+;; match its spec — a mistake in the test — and it raises. Only what
+;; the model's own code throws is caught and reported as a failure,
+;; because that is news about the system under test.
+fn advance :: Map Map Map Map
+  => driver expected acc
+  h := if (acc.i == 0) () else (handler-for driver expected.action)
+  outcome := try (-> if (acc.i == 0) (begin driver) else (invoke driver h expected acc.st))
+  match outcome
+    Err cause => {...acc i= (acc.i + 1) failure= (thrown expected cause)}
+    Ok st =>
+      actual := observe driver st
+      diff := mismatch driver expected.state actual
+      if (diff == ())
+        {...acc i= (acc.i + 1) st= st used= (bump acc.used expected.action acc.i)}
+      else
+        {...acc i= (acc.i + 1) failure= (diverged expected diff)}
+
+fn thrown :: Map Str Map
+  (expected cause -> {step= expected.index action= expected.action picks= expected.picks expected= expected.state actual= () cause= cause})
+
+fn diverged :: Map Map Map
+  (expected diff -> {step= expected.index action= expected.action picks= expected.picks expected= diff.expected actual= diff.actual cause= ()})
+
+;; Step 0 is the model starting, not an action being exercised: a
+;; pure model answers it from `start` and a live one from `init`, and
+;; neither is in `actions`. Counting it would put a name in the
+;; coverage report that no handler is declared for.
+fn bump :: Map _ Int Map
+  => used action i
+  if ((i == 0) || (action == ()) || (action == ""))
+    used
+  else
+    assoc used action (1 + (if ((get action used) == ()) 0 else (get action used)))
+
+fn walk :: Map Vec Map Map
+  => driver states acc
+  if ((acc.failure /= ()) || (acc.i >= (length states)))
+    acc
+  else
+    walk driver states (advance driver (nth acc.i states) acc)
+
+fn unused-actions :: Map Map Vec
+  => driver used
+  declared := keys (opt driver "actions" {})
+  never := /? (a -> (get a used) == ())
+  sort (never declared)
+
+;; Replay one decoded trace. Divergence is a value; a broken model —
+;; an action nothing handles, a `state` reader that is not a function
+;; — still raises, because that is a mistake in the test rather than a
+;; finding about the code.
+pub fn run-trace :: Map Map Map
+  => driver trace
+  acc := walk driver trace.states {i= 0 st= () used= {} failure= ()}
+  halt-model driver
+  {ok?= (acc.failure == ())
+   steps= acc.i
+   coverage= {used= acc.used unused= (unused-actions driver acc.used)}
+   failure= acc.failure}
+
+fn halt-model :: Map ()
+  => driver
+  h := get "halt" driver
+  if (h == ()) () else (h ())
+
+;; ── Replaying every trace of a run ─────────────────────────────
+
+fn replay-json :: Map Str Map
+  (driver json -> run-trace driver (itf.parse-trace (decode-opts driver) json))
+
+fn replay-all :: Map Map Map
+  => driver generated
+  acc := replay-each driver generated.traces {i= 0 steps= 0 used= {} failure= ()}
+  {ok?= (acc.failure == ())
+   seed= (get "seed" generated)
+   traces= (length generated.traces)
+   steps= acc.steps
+   cmd= generated.cmd
+   dir= generated.dir
+   coverage= {used= acc.used unused= (unused-actions driver acc.used)}
+   failure= acc.failure}
+
+fn replay-each :: Map Vec Map Map
+  => driver traces acc
+  if ((acc.failure /= ()) || (acc.i >= (length traces)))
+    acc
+  else
+    replay-each driver traces (replay-one driver (nth acc.i traces) acc)
+
+fn replay-one :: Map Map Map Map
+  => driver trace acc
+  r := replay-json driver trace.json
+  merged := merge-counts acc.used r.coverage.used
+  moved := {...acc i= (acc.i + 1) steps= (acc.steps + r.steps) used= merged}
+  if (r.ok?) moved else ({...moved failure= (with-trace r.failure acc.i trace)})
+
+;; Which trace a failure came from, and the trace itself. The JSON
+;; travels in the result rather than a path: the scratch directory
+;; quint wrote it to is deleted before `check` returns, and a failure
+;; nobody can re-run is half a report.
+fn with-trace :: Map Int Map Map
+  => f i trace
+  {...f trace= i trace-name= trace.name trace-json= trace.json}
+
+fn merge-counts :: Map Map Map
+  (a b -> fold (acc k -> assoc acc k ((if ((get k acc) == ()) 0 else (get k acc)) + (get k b))) a (keys b))
+
+;; ── Generating ─────────────────────────────────────────────────
+
+fn generated! :: Map Str Map
+  => raw what
+  if (raw.exit /= 0)
+    error (cli-failure raw what)
+  else if (empty? raw.traces)
+    error (no-traces raw what)
+  else
+    raw
+
+fn cli-failure :: Map Str Str
+  => raw what
+  said := raw.stdout ++ raw.stderr
+  spec-broke := (what == "test") && (contains-substr? said "Tests failed")
+  if spec-broke
+    ("the spec's own scripted run failed its own .expect — that is a"
+     ++ " problem in the spec, before any implementation is involved."
+     ++ (nonempty-tail raw))
+  else
+    ("quint " ++ what ++ " exited " ++ (to-str raw.exit) ++ "." ++ (nonempty-tail raw))
+
+fn no-traces :: Map Str Str
+  => raw what
+  if (what == "test")
+    ("quint test matched no run of that name in the spec; it exits 0"
+     ++ " and writes nothing when the name is unknown, so silence is"
+     ++ " the whole signal")
+  else
+    ("quint wrote no traces; the spec may have no enabled actions."
+     ++ (nonempty-tail raw))
+
+fn nonempty-tail :: Map Str
+  => raw
+  said := trim (raw.stderr ++ raw.stdout)
+  if (said == "") "" else (" quint said: " ++ said)
+
+fn cli-opts :: Map Map Map
+  => driver overrides
+  fold (acc k -> assoc acc k (get k overrides)) (spec-keys driver) (keys overrides)
+
+fn spec-keys :: Map Map
+  => driver
+  wanted := #["spec-file" "main" "init-action" "step-action" "seed" "traces"
+              "max-steps" "max-samples" "test" "invariant"]
+  present := /? (k -> (get k driver) /= ())
+  fold (acc k -> assoc acc k (get k driver)) {} (present wanted)
+
+;; ── The four ways in ───────────────────────────────────────────
+
+;; The default: generate N random traces and replay every one,
+;; stopping at the first that diverges.
+pub fn check :: Map Map Map ::: Quint
+  => driver overrides
+  replay-all driver (generated! (quint-run (cli-opts driver overrides)) "run")
+
+;; One scripted `run` from the spec — the scenario a person wrote
+;; down, for the case that must keep working. `quint test` emits no
+;; mbt:: variables, so the spec has to record its own action and the
+;; model has to say where with action-path.
+pub fn check-run :: Map Map Map ::: Quint
+  => driver overrides
+  replay-all driver (generated! (quint-test (cli-opts driver overrides)) "test")
+
+;; Prove an invariant with Apalache, then replay the counterexample
+;; if there is one.
+;;
+;; A violated invariant is a failure whether or not the code agrees
+;; with the counterexample, because those are two different facts and
+;; both are reported. `invariant` says the spec's own property does
+;; not hold. `failure` says the code diverged from the counterexample,
+;; and is absent when it did not — which means the code reproduces the
+;; spec's bug faithfully. That is an answer, not a pass, and it points
+;; at the spec.
+pub fn verify :: Map Map Map ::: Quint
+  => driver overrides
+  raw := quint-verify (cli-opts driver overrides)
+  name := get "invariant" (cli-opts driver overrides)
+  if ((raw.exit == 0) && (empty? raw.traces))
+    {ok?= true traces= 0 steps= 0 cmd= raw.cmd dir= raw.dir seed= ()
+     invariant= {name= name holds?= true}
+     coverage= {used= {} unused= (unused-actions driver {})}
+     failure= ()}
+  else if (empty? raw.traces)
+    error ("quint verify exited " ++ (to-str raw.exit) ++ " and wrote no"
+           ++ " counterexample, so the invariant was never checked; the"
+           ++ " spec or the invariant name is the likely cause."
+           ++ (nonempty-tail raw))
+  else
+    counterexample driver name raw
+
+fn counterexample :: Map _ Map Map
+  => driver name raw
+  trace := head raw.traces
+  r := replay-json driver trace.json
+  failed := if (r.failure == ()) () else (with-trace r.failure 0 trace)
+  broken := {name= name holds?= false trace-name= trace.name trace-json= trace.json}
+  {ok?= false traces= 1 steps= r.steps cmd= raw.cmd dir= raw.dir seed= () \
+   invariant= broken coverage= r.coverage failure= failed}
+
+;; Replay one committed `.itf.json`. Needs no quint installed, which
+;; is what turns a trace that found a bug once into a regression test
+;; that finds it again in milliseconds, on a machine with no Node.
+pub fn replay-file :: Map Str Map ::: FileIO
+  (driver path -> replay-json driver (fs-read path))
+
+;; ── Reporting ──────────────────────────────────────────────────
+
+pub fn report :: Map Str
+  => result
+  f := get "failure" result
+  inv := get "invariant" result
+  head-line := (if (inv /= ()) (invariant-line inv) else "")
+  if (f == ())
+    head-line ++ (coverage-line result)
+  else
+    head-line ++ (failure-report result f)
+
+fn invariant-line :: Map Str
+  => inv
+  if inv.holds?
+    ("the invariant " ++ (to-str inv.name) ++ " holds\n")
+  else
+    ("the invariant " ++ (to-str inv.name) ++ " does NOT hold; Apalache found a counterexample\n")
+
+fn failure-report :: Map Map Str
+  => result f
+  (("the spec and the implementation diverged" ++ (trace-line result f) ++ "\n")
+   ++ ("  step     " ++ (to-str f.step) ++ (if ((get "action" f) == ()) "" else (", action " ++ (to-str f.action))) ++ "\n")
+   ++ (if (empty? (keys f.picks)) "" else ("  picks    " ++ (to-str f.picks) ++ "\n"))
+   ++ (if (f.cause == ())
+        (("  expected " ++ (to-str f.expected) ++ "\n")
+         ++ ("  actual   " ++ (to-str f.actual) ++ "\n"))
+        else ("  the handler threw: " ++ (to-str f.cause) ++ "\n"))
+   ++ (reproduce-line result))
+
+fn trace-line :: Map Map Str
+  => result f
+  n := get "traces" result
+  which := if ((get "trace" f) == ()) "" else (" on trace " ++ (to-str f.trace) ++ (if (n == ()) "" else (" of " ++ (to-str n))))
+  which ++ (if ((get "seed" result) == ()) "" else (", seed " ++ (to-str result.seed)))
+
+fn reproduce-line :: Map Str
+  => result
+  cmd := get "cmd" result
+  if (cmd == ())
+    ""
+  else
+    ("  reproduce  cd " ++ (to-str (get "dir" result)) ++ " && " ++ (join " " cmd) ++ "\n")
+
+;; A handler the traces never reached is not a failure, but it is
+;; worth saying: it usually means the model and the spec have drifted.
+;; Only reported for a run that finished and replayed something —
+;; replay stops at the first divergence, and an invariant that holds
+;; replays nothing at all, so coverage in either case is a fact about
+;; where it stopped rather than about the model.
+fn coverage-line :: Map Str
+  => result
+  c := get "coverage" result
+  nothing-ran := (get "steps" result) == 0
+  if ((c == ()) || nothing-ran || (empty? c.unused))
+    ""
+  else
+    ("  never exercised: " ++ (join ", " c.unused) ++ "\n")
+
+;; ── The one-line bridge to std.test ────────────────────────────
+
+;; `check` returns data so it can be read, stored and compared.
+;; `qcheck` is the assertion: run it, and raise the report if the
+;; implementation and the spec disagree.
+pub fn qcheck :: Map Map () ::: Quint
+  => driver overrides
+  result := check driver overrides
+  if (result.ok?) () else (error (report result))
+
+pub fn qcheck-run :: Map Map () ::: Quint
+  => driver overrides
+  result := check-run driver overrides
+  if (result.ok?) () else (error (report result))
+
+pub fn qverify :: Map Map () ::: Quint
+  => driver overrides
+  result := verify driver overrides
+  if (result.ok?) () else (error (report result))
+
+pub fn qreplay :: Map Str () ::: FileIO
+  => driver path
+  result := replay-file driver path
+  if (result.ok?) () else (error (report result))

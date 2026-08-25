@@ -1,0 +1,359 @@
+mod std.quint.itf
+
+use std.list :open
+use std.collection :open
+use std.text :open
+
+;; ── ITF trace decoding ─────────────────────────────────────────
+;;
+;; Turns the JSON that Quint writes with `--out-itf` into ordinary
+;; Irij values. Pure: no file or process I/O, so a committed
+;; `.itf.json` decodes in CI with no `quint` binary anywhere.
+;;
+;; Format reference: ITF / Apalache ADR-015. What Quint 0.32.0
+;; actually emits — including the two places it disagrees with the
+;; specification — is recorded in docs/internals/quint.md.
+;;
+;;   use std.quint.itf :as itf
+;;
+;;   trace := itf.parse-trace {} (fs-read "bank_run_0.itf.json")
+;;   ;; {source= "bank.qnt"
+;;   ;;  vars=   #["balances" "lastError"]
+;;   ;;  states= #[{index= 0 action= "init" picks= {} state= {...}}]}
+;;
+;; ── Value encodings ────────────────────────────────────────────
+;;
+;; | Quint         | ITF JSON                      | Irij         |
+;; |---------------|-------------------------------|--------------|
+;; | int           | {"#bigint": "39"}             | 39           |
+;; | str / bool    | "why" / true                  | as-is        |
+;; | Set(1,2)      | {"#set": [...]}               | #{1 2}       |
+;; | (7, "seven")  | {"#tup": [...]}               | #(7 "seven") |
+;; | {x: 1}        | {"x": {"#bigint": "1"}}       | {x= 1}       |
+;; | Map(1 -> "a") | {"#map": [[k, v], ...]}       | {"1"= "a"}   |
+;; | List          | [ ... ]                       | #[...]       |
+;; | variant       | {"tag": "Busy", "value": ...} | {tag= value=}|
+;;
+;; Two of these are worth dwelling on.
+;;
+;; A Quint `Map` becomes an Irij `Map`, whose keys are strings — so
+;; every key goes through `to-str`. That is not a lossy shortcut:
+;; `assoc m 1 v` stringifies too, so a spec's `Int -> a` map compares
+;; equal to an implementation's map built the same way. It does mean
+;; a spec keying both `1` and `"1"` cannot be decoded, which is an
+;; error here rather than a silently dropped entry.
+;;
+;; A record and a sum-type variant are the same JSON object, so a
+;; variant stays `{tag= "Busy" value= 2}`. Reshaping it belongs to
+;; the model, which is the only side that knows which of the two it
+;; declared.
+
+fn map? :: _ Bool
+  (v -> type-of v == "Map")
+
+fn vector? :: _ Bool
+  (v -> type-of v == "Vector")
+
+;; The `#`-prefixed tags this decoder understands. `#unserializable`
+;; is in the ITF specification and is deliberately absent: no Quint
+;; or Apalache output has been observed emitting one, so there is
+;; nothing to decode it against, and a plausible-looking guess would
+;; be worse than an error naming the gap.
+fn known-tag? :: Str Bool
+  (k -> contains? #["#bigint" "#set" "#tup" "#map"] k)
+
+fn unknown-tags :: Map Vec
+  => m
+  odd := /? (k -> (starts-with? k "#") && (not (known-tag? k)))
+  odd (keys m)
+
+pub fn decode-value :: _ _
+  => v
+  if (map? v)
+    decode-object v
+  else if (vector? v)
+    @ decode-value v
+  else
+    v
+
+fn decode-object :: Map _
+  => m
+  bad := unknown-tags m
+  if (not (empty? bad))
+    error (unknown-tag-message (head bad))
+  else if (contains? m "#bigint")
+    decode-bigint (get "#bigint" m)
+  else if (contains? m "#set")
+    to-set (@ decode-value (get "#set" m))
+  else if (contains? m "#tup")
+    to-tuple (@ decode-value (get "#tup" m))
+  else if (contains? m "#map")
+    decode-pairs (get "#map" m)
+  else if (bignumber? m)
+    decode-bignumber m
+  else
+    decode-record m
+
+fn unknown-tag-message :: Str Str
+  => tag
+  if (tag == "#unserializable")
+    ("ITF: unsupported encoding #unserializable — it is in the ITF"
+     ++ " specification, but no Quint or Apalache output has been observed"
+     ++ " emitting one, so there is nothing to decode it against. A trace"
+     ++ " that carries one is exactly what would fix that.")
+  else
+    ("ITF: unsupported encoding " ++ tag)
+
+fn decode-record :: Map Map
+  => m
+  fold (acc k -> assoc acc (kebab k) (decode-value (get k m))) {} (keys m)
+
+fn decode-pairs :: Vec Map
+  (pairs -> fold add-pair {} pairs)
+
+fn add-pair :: Map Vec Map
+  => acc pair
+  k := to-str (decode-value (nth 0 pair))
+  if (contains? acc k)
+    error ("ITF: a #map has two keys that both read as " ++ k
+           ++ "; Irij map keys are strings, so this map cannot be decoded")
+  else
+    assoc acc k (decode-value (nth 1 pair))
+
+;; Irij `Int` is 64-bit and Quint's is unbounded, so this is the one
+;; place a legitimate trace can be undecodable. Say so plainly rather
+;; than truncate in silence.
+pub fn decode-bigint :: Str Int
+  => s
+  parsed := try (-> parse-int s)
+  match parsed
+    Ok n => n
+    Err _ =>
+      error ("ITF: the integer " ++ s ++ " does not fit in an Irij Int"
+             ++ " (64-bit signed); Quint integers are unbounded and Irij's"
+             ++ " are not")
+
+;; ── The large-integer trap ─────────────────────────────────────
+;;
+;; With Quint's default `--backend=rust`, an integer of absolute
+;; value >= 10^15 is written as bignumber.js internals instead of
+;; `#bigint`:
+;;
+;;   {"s": {"#bigint": "1"}, "e": {"#bigint": "15"},
+;;    "c": [{"#bigint": "90"}, {"#bigint": "7199254740993"}]}
+;;
+;; which is 9007199254740993 — `c` holds base-1e14 limbs. The
+;; threshold is exact: 999999999999999 encodes correctly and
+;; 1000000000000000 does not. `--backend=typescript` gets both right
+;; but is much slower, so this decodes the broken form rather than
+;; pushing users off the default.
+;;
+;; The digits are assembled as a string and parsed once, so nothing
+;; overflows on the way to a value that would have fit.
+
+fn bigint-field? :: _ Bool
+  (v -> (map? v) && (contains? v "#bigint"))
+
+fn bignumber? :: Map Bool
+  => m
+  if (not ((to-set (keys m)) == #{"s" "e" "c"}))
+    false
+  else
+    sign := get "s" m
+    limbs := get "c" m
+    ((bigint-field? sign)
+     && (contains? #["1" "-1"] (get "#bigint" sign))
+     && (bigint-field? (get "e" m))
+     && (vector? limbs)
+     && (not (empty? limbs))
+     && (all? bigint-field? limbs))
+
+fn decode-bignumber :: Map Int
+  => m
+  sign := decode-bigint (get "#bigint" (get "s" m))
+  exp := decode-bigint (get "#bigint" (get "e" m))
+  limbs := @ (x -> get "#bigint" x) (get "c" m)
+  digits := (head limbs) ++ (join "" (@ (pad-left 14 "0") (tail limbs)))
+  scale := exp + 1 - (length digits)
+  if (scale < 0)
+    error ("ITF: bignumber exponent " ++ (to-str exp)
+           ++ " is smaller than its digit count " ++ (to-str (length digits)))
+  else
+    sign * (decode-bigint (digits ++ (repeat scale "0")))
+
+;; ── States ─────────────────────────────────────────────────────
+
+;; Variables carry their full module path (`bankTest::bank::balances`).
+;; The last segment is the name the spec author wrote.
+pub fn short-name :: Str Str
+  (full -> last (split full "::"))
+
+;; ── Names cross into Irij's own convention ─────────────────────
+;;
+;; Quint names are camelCase and Irij identifiers are kebab-case —
+;; not by preference but by grammar: `lastError` is not a legal Irij
+;; identifier, so a model could not write `{last-error= ...}` for it,
+;; could not read `st.lastError`, and would be reduced to `get` and
+;; `assoc` with string literals for its own state.
+;;
+;; So every name that crosses the boundary is rewritten:
+;; `lastError` -> `last-error`, `lastAction` -> `last-action`,
+;; `aBigInt` -> `a-big-int`. Underscores become hyphens too, since
+;; Quint permits snake_case as well. This applies to state variables,
+;; record fields, `nondet` pick names and action names — every place
+;; Quint wrote an identifier — and never to the keys of a `#map`,
+;; which are data rather than names.
+;;
+;; A spec that has both `lastError` and `last_error` is the price:
+;; they collide, and that is an error naming both rather than one
+;; silently winning. Set `key-fn` in the model to opt out for
+;; variables.
+pub fn kebab :: Str Str
+  (s -> fold kebab-char "" (chars s))
+
+fn kebab-char :: Str Str Str
+  => acc c
+  if (c == "_")
+    (if ((acc == "") || (ends-with? acc "-")) acc else (acc ++ "-"))
+  else if ((c /= (lower-case c)) && (acc /= "") && (not (ends-with? acc "-")))
+    acc ++ "-" ++ (lower-case c)
+  else
+    acc ++ (lower-case c)
+
+fn key-name :: Map Str Str
+  => opts full
+  f := get "key-fn" opts
+  if (f == ()) (kebab (short-name full)) else (f full)
+
+fn meta-key? :: Str Bool
+  (k -> contains? #["#meta" "mbt::actionTaken" "mbt::nondetPicks"] k)
+
+;; Quint's runtime wraps every `nondet` pick in Some/None whatever the
+;; spec declares, so unwrapping undoes Quint's encoding rather than
+;; the author's. `None` means the pick was never bound on the branch
+;; that fired, so the name is absent rather than unit.
+fn decode-picks :: Map Map
+  => raw
+  fold (acc k -> add-pick acc k (get k raw)) {} (keys raw)
+
+fn add-pick :: Map Str _ Map
+  => acc k v
+  tag := if (map? v) (get "tag" v) else ()
+  if (tag == "Some")
+    assoc acc (kebab k) (decode-value (get "value" v))
+  else if (tag == "None")
+    acc
+  else
+    error ("ITF: the nondet pick " ++ k ++ " is not wrapped in Some/None")
+
+fn decode-state :: Map Map Map
+  => opts raw
+  blank := {index= 0 action= () picks= {} state= {}}
+  fold (acc k -> place-key acc opts k (get k raw)) blank (keys raw)
+
+fn place-key :: Map Map Str _ Map
+  => acc opts k v
+  if (k == "#meta")
+    {...acc index= (get "index" v)}
+  else if (k == "mbt::actionTaken")
+    {...acc action= (kebab v)}
+  else if (k == "mbt::nondetPicks")
+    {...acc picks= (decode-picks v)}
+  else
+    {...acc state= (assoc acc.state (key-name opts k) (decode-value v))}
+
+;; ── Specs that track their own action ──────────────────────────
+;;
+;; A trace with no `mbt::` variables can still drive an
+;; implementation if the spec records what it did in an ordinary
+;; variable — which is the only option for `quint test` and
+;; `quint verify`, since neither emits `mbt::` at all. `action-path`
+;; and `nondet-path` are `get-in` paths into the decoded state saying
+;; where. The variable each one starts at leaves `state`: it is the
+;; spec's own bookkeeping, and the implementation must not be asked
+;; to reproduce it.
+
+fn path-get :: Map Vec _
+  (m path -> fold (acc k -> if (acc == ()) () else (get k acc)) m path)
+
+fn apply-paths :: Map Map Map
+  => opts st
+  ap := get "action-path" opts
+  np := get "nondet-path" opts
+  with-action := if (ap == ()) st else {...st action= (action-at st ap)}
+  with-picks := if (np == ()) with-action else {...with-action picks= (picks-at st np)}
+  {...with-picks state= (drop-roots with-picks.state #[ap np])}
+
+fn drop-roots :: Map Vec Map
+  => state paths
+  fold (acc p -> if (p == ()) acc else (dissoc acc (head p))) state paths
+
+fn action-at :: Map Vec Str
+  => st path
+  v := path-get st.state path
+  if (type-of v == "Str")
+    kebab v
+  else if (v == ())
+    error ("ITF: action-path " ++ (to-str path) ++ " found nothing in state "
+           ++ (to-str st.index) ++ "; it has "
+           ++ (join ", " (sort (keys st.state))))
+  else
+    error ("ITF: action-path " ++ (to-str path) ++ " found " ++ (to-str v)
+           ++ ", which is not an action name"
+           ++ (if (map? v) ". For a sum type, end the path in \"tag\"." else ""))
+
+;; Not unwrapped: Some/None is Quint's encoding of `mbt::nondetPicks`,
+;; not something a spec author writes into an ordinary variable.
+fn picks-at :: Map Vec Map
+  => st path
+  v := path-get st.state path
+  if (map? v)
+    v
+  else
+    error ("ITF: nondet-path " ++ (to-str path) ++ " found " ++ (to-str v)
+           ++ " in state " ++ (to-str st.index)
+           ++ ", and picks must be a record of pick name to value")
+
+;; ── Traces ─────────────────────────────────────────────────────
+
+;; Two full names that normalize alike would silently overwrite one
+;; another, so the raw keys are checked before anything is decoded.
+fn check-collisions :: Map Vec ()
+  => opts raw-states
+  fold (acc st -> fold (a k -> note-name opts a k) acc (keys st)) {} raw-states
+  ()
+
+fn note-name :: Map Map Str Map
+  => opts acc full
+  if (meta-key? full)
+    acc
+  else
+    short := key-name opts full
+    seen := get short acc
+    if ((seen /= ()) && (seen /= full))
+      error ("ITF: two spec variables both read as " ++ short ++ ": "
+             ++ seen ++ ", " ++ full)
+    else
+      assoc acc short full
+
+;; The file's own `vars` array is informational, and Quint writes the
+;; `mbt::` entries into it twice, so the variable set comes from the
+;; decoded state keys instead.
+fn trace-vars :: Vec Vec
+  => states
+  sort (distinct (fold (acc st -> acc ++ (keys st.state)) #[] states))
+
+pub fn decode-trace :: Map Map Map
+  => opts itf
+  raw-states := get "states" itf
+  if (not (vector? raw-states))
+    error "ITF: the file has no states array"
+  else
+    check-collisions opts raw-states
+    states := @ (st -> apply-paths opts (decode-state opts st)) raw-states
+    {source= (get "source" (get "#meta" itf))
+     vars=   (trace-vars states)
+     states= states}
+
+pub fn parse-trace :: Map Str Map
+  (opts json -> decode-trace opts (json-parse json))

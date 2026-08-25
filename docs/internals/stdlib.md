@@ -38,6 +38,11 @@ Registered as `BuiltinFn` objects in the global environment:
 - Crypto + auth (`sha256-hex`, `hmac-sha256-hex`, `random-token`)
 - Effect / handler internals (`raw-*` calls for HTTP, DB, SSE, session)
 
+The capability providers in `dev.irij.runtime` are the other half of
+the boundary: `FsCapability`, `JdbcCapability`, `HttpClientCapability`,
+`ServeCapability`, `SessionCapability`, `TermCapability` and
+`QuintCapability` (the only one that starts a process).
+
 Why some live in Java:
 
 - **Raw access to internal types** — `length` on `IrijVector` needs
@@ -72,6 +77,8 @@ Real Irij code, parsed + compiled like user code:
 | `std.convert` | Type coercions (`to-int`, `to-float`, `to-bool`) |
 | `std.test` | Test runner (`test`, `assert-eq`, `assert-throws`, ...) |
 | `std.jvm` | `JVM` effect + `unsafe-jvm` handler |
+| `std.quint` | `Quint` effect + model-based testing against a Quint spec — see [quint.md](quint.md) |
+| `std.quint.itf` | ITF trace decoding, pure |
 
 ## The boundary
 

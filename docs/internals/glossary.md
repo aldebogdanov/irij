@@ -49,4 +49,6 @@ Terms used throughout the internals docs.
 | **Trampoline** | The dispatch loop pattern: catch a control-flow exception, update state, iterate. Used by SM-mode resume to avoid stack growth. |
 | **Vector** | Irij's primary sequential collection. `#[1 2 3]`. Backed by `Values.IrijVector` (wraps `List<Object>`). |
 | **vthread** | JVM virtual thread (`Thread.startVirtualThread`). Cheap (~1 KB), block-friendly. Underlies all Irij concurrency. |
+| **ITF** | Informal Trace Format (Apalache ADR-015) — the JSON Quint writes with `--out-itf`, decoded by `std.quint.itf`. |
+| **Model (Quint)** | A record mapping a Quint spec's actions and state onto Irij code, replayed by `std.quint`. Not to be confused with a `spec` declaration. |
 | **`with`** | Effect-handler block. `with handler body` runs body with handler installed for the body's dynamic extent. |
