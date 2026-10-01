@@ -134,10 +134,72 @@ public final class JavaInterop {
             if (m.getName().equals(name)
                     && !Modifier.isStatic(m.getModifiers())
                     && m.getParameterCount() == args.size()) {
-                candidates.add(m);
+                candidates.add(accessible(m));
             }
         }
         return dispatchMethod(candidates, recv, cls, name, args);
+    }
+
+    // ── Reaching a method through a type the caller can see ─────────────
+
+    /**
+     * The method to invoke for {@code m}: itself when its declaring class is
+     * public and exported, otherwise the same signature on a public
+     * supertype. {@code getMethods()} on a JDK implementation class
+     * ({@code java.lang.ProcessImpl}, behind every {@code Process}) returns
+     * the overrides that class declares, and reflection refuses to invoke
+     * them from outside {@code java.base} even though {@code Process}
+     * declares each one public. Invoking through the supertype is what Java
+     * source does, and dispatch still lands on the override.
+     */
+    static Method accessible(Method m) {
+        if (reachable(m.getDeclaringClass())) return m;
+        var found = onSupertype(m.getDeclaringClass(), m.getName(), m.getParameterTypes());
+        return found != null ? found : m;
+    }
+
+    /** Public, enclosed only by public classes, and in an exported package. */
+    static boolean reachable(Class<?> c) {
+        for (Class<?> k = c; k != null; k = k.getEnclosingClass()) {
+            if (!Modifier.isPublic(k.getModifiers())) return false;
+        }
+        return c.getModule().isExported(c.getPackageName());
+    }
+
+    private static Method onSupertype(Class<?> c, String name, Class<?>[] params) {
+        for (Class<?> k = c; k != null; k = k.getSuperclass()) {
+            if (k != c && reachable(k)) {
+                var m = declared(k, name, params);
+                if (m != null) return m;
+            }
+            for (var i : k.getInterfaces()) {
+                var m = onInterface(i, name, params);
+                if (m != null) return m;
+            }
+        }
+        return null;
+    }
+
+    private static Method onInterface(Class<?> i, String name, Class<?>[] params) {
+        if (reachable(i)) {
+            var m = declared(i, name, params);
+            if (m != null) return m;
+        }
+        for (var sup : i.getInterfaces()) {
+            var m = onInterface(sup, name, params);
+            if (m != null) return m;
+        }
+        return null;
+    }
+
+    /** {@code k.getMethod}, kept only if the method found is itself reachable. */
+    private static Method declared(Class<?> k, String name, Class<?>[] params) {
+        try {
+            var m = k.getMethod(name, params);
+            return reachable(m.getDeclaringClass()) ? m : null;
+        } catch (NoSuchMethodException e) {
+            return null;
+        }
     }
 
     private static Object dispatchMethod(List<Method> candidates, Object recv,
@@ -310,10 +372,9 @@ public final class JavaInterop {
             if (v instanceof Character c) return c;
             throw new CoercionError("not a char: " + v);
         }
-        if (target == byte[].class) {
-            if (v instanceof byte[] b) return b;
-            throw new CoercionError("not a byte[]: " + v);
-        }
+        // A byte[] handed out by Java arrives as a vector of Ints (javaToIrij),
+        // so a vector goes back in through the general array case below.
+        if (target == byte[].class && v instanceof byte[] b) return b;
         if (target == Object.class) {
             return irijToJavaAny(v);
         }
