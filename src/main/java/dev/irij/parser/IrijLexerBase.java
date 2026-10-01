@@ -53,6 +53,42 @@ public abstract class IrijLexerBase extends Lexer {
         indentStack.push(0);
     }
 
+    // ── `model` is a soft keyword ───────────────────────────────────────
+
+    /**
+     * Whether the {@code model} just matched starts a model declaration:
+     * first on its line (after an optional {@code pub}) and followed by a
+     * name and {@code ::}. Anywhere else it lexes as an ordinary IDENT, so
+     * a parameter or binding called {@code model} — the obvious name for an
+     * app's state — keeps working ({@code => model ev}, {@code model.sel}).
+     */
+    protected boolean atModelDecl() {
+        CharStream in = getInputStream();
+        int start = _tokenStartCharIndex;
+        int lineStart = start;
+        while (lineStart > 0) {
+            int c = in.getText(org.antlr.v4.runtime.misc.Interval.of(lineStart - 1, lineStart - 1)).charAt(0);
+            if (c == '\n' || c == '\r') break;
+            lineStart--;
+        }
+        String before = lineStart < start
+                ? in.getText(org.antlr.v4.runtime.misc.Interval.of(lineStart, start - 1)).strip()
+                : "";
+        if (!before.isEmpty() && !before.equals("pub")) return false;
+
+        int k = 1;
+        if (in.LA(k) != ' ') return false;
+        while (in.LA(k) == ' ') k++;
+        if (in.LA(k) < 'a' || in.LA(k) > 'z') return false;
+        while (isNameChar(in.LA(k))) k++;
+        while (in.LA(k) == ' ') k++;
+        return in.LA(k) == ':' && in.LA(k + 1) == ':';
+    }
+
+    private static boolean isNameChar(int c) {
+        return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '?' || c == '!';
+    }
+
     @Override
     public Token nextToken() {
         // Drain pending tokens first.

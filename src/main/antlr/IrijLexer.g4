@@ -22,7 +22,7 @@ EFFECT      : 'effect' ;
 PARTY       : 'party' ;
 CAP         : 'cap' ;
 HANDLER     : 'handler' ;
-MODEL       : 'model' ;
+MODEL       : 'model' {atModelDecl()}? ;   // keyword only where a declaration starts
 IMPL        : 'impl' ;
 PROTO       : 'proto' ;
 PRE         : 'pre' ;

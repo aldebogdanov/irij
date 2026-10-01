@@ -888,4 +888,37 @@ class ParserSmokeTest {
             assertParses("(_ -> 42)\n");
         }
     }
+
+    // ── `model` is a soft keyword ───────────────────────────────────────
+
+    @Test void modelIsAnOrdinaryNameOutsideADeclaration() {
+        assertParses("""
+            fn step
+              => model ev
+              if (ev == "q")
+                {...model quit= true}
+              else
+                tick model.sel ev
+            """);
+        assertParses("model := {sel= 0}\nprintln model.sel\n");
+        assertParses("fn f\n  (model -> model)\n");
+    }
+
+    @Test void modelStillStartsADeclaration() {
+        assertParses("""
+            model bank :: "spec/bank.qnt" :pure {main= "bankTest"}
+              start => {balances= {}}
+            """);
+        assertParses("""
+            pub model bank :: "spec/bank.qnt" :pure
+              start => {balances= {}}
+            """);
+    }
+
+    @Test void modelTokenOnlyAtADeclaration() {
+        var decl = IrijParseDriver.tokenize("model bank :: \"b.qnt\" :pure\n");
+        assertEquals(dev.irij.parser.IrijLexer.MODEL, decl.get(0).getType());
+        var name = IrijParseDriver.tokenize("x := model\n");
+        assertTrue(name.stream().noneMatch(t -> t.getType() == dev.irij.parser.IrijLexer.MODEL));
+    }
 }
