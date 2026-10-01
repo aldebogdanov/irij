@@ -5,6 +5,21 @@ public final class RtIo {
 
     private RtIo() {}
 
+    // ── Program arguments ───────────────────────────────────────────────
+
+    /** What the program was started with; set first thing in every emitted
+     *  {@code main(String[])}, so `irij file.irj a b` and a built jar agree. */
+    private static volatile java.util.List<String> PROGRAM_ARGS = java.util.List.of();
+
+    public static void setProgramArgs(String[] args) {
+        PROGRAM_ARGS = args == null ? java.util.List.of() : java.util.List.of(args);
+    }
+
+    /** {@code program-args ()} — the arguments after the program, as a Vec of Str. */
+    public static Object programArgs() {
+        return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<Object>(PROGRAM_ARGS));
+    }
+
 
     // ── JSON (delegates to interp's Builtins helpers; same semantics) ──
 

@@ -23,6 +23,7 @@ irij examples/hello.irj
 ```sh
 irij                          # launch REPL
 irij file.irj                 # run a file
+irij file.irj --port 9090     # args after the file reach the program (env-args)
 irij test                     # run tests/ directory
 irij --nrepl-server            # start nREPL (port 7888)
 irij --nrepl-server=9000       # nREPL on custom port

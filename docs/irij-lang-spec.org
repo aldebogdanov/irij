@@ -1323,7 +1323,7 @@
   std.db          ;; Db effect (SQLite via JDBC)
   std.session     ;; Session effect (server-side sessions)
   std.auth        ;; password hashing / token helpers
-  std.env         ;; Env effect (environment variables)
+  std.env         ;; Env effect (environment variables, program arguments)
   std.time        ;; Time effect (clock + sleep)
   std.random      ;; Random effect
   std.log         ;; Log effect — leveled logging (default/silent handlers)

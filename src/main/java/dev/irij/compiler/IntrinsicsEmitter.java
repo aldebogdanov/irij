@@ -218,6 +218,12 @@ final class IntrinsicsEmitter implements Opcodes {
                 mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nowMs"), "nowMs", "()Ljava/lang/Object;", false);
                 return true;
             }
+            case "program-args" -> {
+                if (!isZeroArgCall(args)) return false;
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("programArgs"), "programArgs",
+                        "()Ljava/lang/Object;", false);
+                return true;
+            }
             case "env" -> {
                 ce.exprEm.pushObjectArray(args, mv, locals);
                 mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("envBuiltin"), "envBuiltin",

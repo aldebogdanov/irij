@@ -45,7 +45,8 @@ runtime classes themselves are the single source of truth.
 For `irij.Program`:
 
 - One `public final class irij.Program` (the **root class**).
-- `public static main(String[])` — entry point.
+- `public static main(String[])` — entry point. Its first instruction hands the
+  argument array to `RtIo.setProgramArgs`, which `program-args` reads back.
 - `public static <name>(Object, Object, ...) -> Object` per top-level
   user `fn` **from the root source file**.
 - `static synthetic lambda$N(captures..., Object[] args) -> Object`
