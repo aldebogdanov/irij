@@ -105,7 +105,7 @@ public final class EffectRowChecker {
         // FileIO raw-* removed phase 3d — routed through FsCapability
         // via std.fs.
         // Env
-        for (String n : java.util.List.of("get-env", "env")) m.put(n, "Env");
+        for (String n : java.util.List.of("get-env", "env", "program-args")) m.put(n, "Env");
         // Http client raw-* removed phase 3b — routed through
         // HttpClientCapability via std.http.
         // Db raw-* entries removed phase 3a; the Db effect ops go through

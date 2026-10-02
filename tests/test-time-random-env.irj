@@ -107,13 +107,26 @@ fn wrap-env-default ::: Env
 
 test "env-var returns default when unset" (-> wrap-env-default ())
 
+fn run-env-args-default ::: Env
+  =>
+  assert-eq #[] (env-args ())
+
+fn wrap-env-args-default ::: Env
+  =>
+  with default-env
+    run-env-args-default ()
+
+test "env-args is empty when a test file runs" (-> wrap-env-args-default ())
+
 handler mock-env :: Env
   env-var name default => resume ("mocked-" ++ name)
+  env-args () => resume #["--ui" "cli"]
 
 fn run-env-mock ::: Env
   =>
   assert-eq "mocked-HOME" (env-var "HOME" "")
   assert-eq "mocked-PATH" (env-var "PATH" "")
+  assert-eq #["--ui" "cli"] (env-args ())
 
 fn wrap-env-mock ::: Env
   =>

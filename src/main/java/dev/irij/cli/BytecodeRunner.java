@@ -56,6 +56,12 @@ public final class BytecodeRunner {
      * propagates any runtime exception thrown by the user program.
      */
     public static void runFile(Path sourceFile, PrintStream captureOut) throws IOException {
+        runFile(sourceFile, captureOut, new String[0]);
+    }
+
+    /** As above, handing {@code programArgs} to the program's {@code main}
+     *  (read back with {@code program-args} / {@code env-args}). */
+    public static void runFile(Path sourceFile, PrintStream captureOut, String[] programArgs) throws IOException {
         Path projectRoot = sourceFile.toAbsolutePath().getParent();
         List<Path> seedRoots = DependencyResolver.resolveSeedRoots(projectRoot, System.out);
 
@@ -72,7 +78,7 @@ public final class BytecodeRunner {
         if (captureOut != null) System.setOut(captureOut);
         try {
             Method main = cls.getMethod("main", String[].class);
-            main.invoke(null, (Object) new String[0]);
+            main.invoke(null, (Object) programArgs);
         } catch (java.lang.reflect.InvocationTargetException ite) {
             Throwable cause = ite.getCause();
             if (cause instanceof RuntimeException re) throw re;

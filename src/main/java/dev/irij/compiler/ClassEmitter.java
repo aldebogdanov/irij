@@ -483,6 +483,10 @@ final class ClassEmitter implements Opcodes {
         MethodVisitor mv = cw.visitMethod(ACC_PUBLIC | ACC_STATIC, "main",
                 "([Ljava/lang/String;)V", null, null);
         mv.visitCode();
+        // The arguments the program was started with, for `program-args`.
+        mv.visitVarInsn(ALOAD, 0);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("setProgramArgs"), "setProgramArgs",
+                "([Ljava/lang/String;)V", false);
         Locals locals = new Locals();
         locals.reserveArgsArray();
         // Remembered so lambda capture can tell a top-level binding's

@@ -64,7 +64,7 @@ public final class IrijCli {
             case "help"             -> { printHelp(); return; }
             case "run"              -> {
                 if (rest.length == 0) {
-                    System.err.println("Usage: irij run <file.irj>");
+                    System.err.println("Usage: irij run <file.irj> [args...]");
                     System.exit(1);
                 }
                 args = rest;
@@ -79,8 +79,13 @@ public final class IrijCli {
         boolean noSpecLint   = false;
         int     nreplPort    = -1;
         String  filePath     = null;
+        String[] programArgs = new String[0];
 
-        for (String arg : args) {
+        // Flags come before the file; everything after it belongs to the
+        // program (`irij app.irj --port 9090` → env-args () = #["--port" "9090"]).
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            if (filePath != null) break;
             switch (arg) {
                 case "--parse-only" -> parseOnly = true;
                 case "--ast"        -> dumpAst   = true;
@@ -109,6 +114,7 @@ public final class IrijCli {
                         System.exit(1);
                     } else {
                         filePath = arg;
+                        programArgs = programArgsAfter(args, i);
                     }
                 }
             }
@@ -133,12 +139,18 @@ public final class IrijCli {
             System.exit(1);
         }
 
-        runFile(Path.of(filePath), parseOnly, dumpAst, noSpecLint);
+        runFile(Path.of(filePath), parseOnly, dumpAst, noSpecLint, programArgs);
+    }
+
+    /** The arguments after position {@code fileIndex}: the program's own. */
+    static String[] programArgsAfter(String[] args, int fileIndex) {
+        return java.util.Arrays.copyOfRange(args, fileIndex + 1, args.length);
     }
 
     // ── File runner ──────────────────────────────────────────────────────
 
-    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean noSpecLint) throws IOException {
+    private static void runFile(Path path, boolean parseOnly, boolean dumpAst, boolean noSpecLint,
+                                String[] programArgs) throws IOException {
         IrijParseDriver.ParseResult result;
         try {
             result = IrijParseDriver.parseFile(path);
@@ -173,7 +185,7 @@ public final class IrijCli {
         // v0.6.13: single execution model — bytecode. The interpreter
         // was removed in R5d.
         try {
-            BytecodeRunner.runFile(path, null);
+            BytecodeRunner.runFile(path, null, programArgs);
         } catch (IrijCompiler.CompileException e) {
             System.err.println(path + ":" + e.getMessage());
             System.exit(1);
@@ -202,7 +214,7 @@ public final class IrijCli {
 
             Usage:
               irij                       start interactive REPL (alias: irij repl)
-              irij <file.irj>            run a source file (alias: irij run <file.irj>)
+              irij <file.irj> [args...]  run a source file; args reach it as env-args (alias: irij run)
               irij build                 package app into self-contained JAR (bytecode-sm, default since v0.6.x)
               irij build <file.irj>      build with explicit entry point
               irij build -o out.jar      build with custom output path
