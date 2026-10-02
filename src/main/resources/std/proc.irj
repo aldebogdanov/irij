@@ -1,0 +1,66 @@
+mod std.proc
+
+;; Child processes as an effect.
+;;
+;; Usage:
+;;   use std.proc :open
+;;
+;;   fn branch :: Str ::: Proc
+;;     _ =>
+;;       r := proc-run {cmd= #["git" "branch" "--show-current"] dir= "."}
+;;       r.stdout
+;;
+;;   with default-proc
+;;     branch ()
+;;
+;;   ;; A process you talk to while it runs:
+;;   fn first-line :: Str ::: Proc
+;;     _ =>
+;;       h := proc-start {cmd= #["tail" "-f" "app.log"]}
+;;       ev := proc-line h 1000        ;; ms; -1 blocks, 0 polls
+;;       proc-kill h
+;;       if (ev.kind == "line") ev.text else ""
+;;
+;;   ;; Mock in tests — no process starts:
+;;   handler mock-proc :: Proc
+;;     proc-run opts => resume {exit= 0 stdout= "main\n" stderr= "" timed-out?= false}
+;;
+;; Options: cmd (Vec of Str, required), dir, env (a map merged over the
+;; inherited environment), stdin and timeout-ms (proc-run only; 0 waits
+;; forever). A timed-out command is killed with its descendants and comes
+;; back with exit -1 and timed-out? true.
+;;
+;; proc-line returns {kind= "line" text= …}, {kind= "eof"} once stdout is
+;; closed, or {kind= "timeout"}. proc-wait returns {exit= stderr=
+;; timed-out?=}; a process still running at its deadline keeps running.
+
+pub effect Proc
+  proc-run   :: Map Map            ;; run to completion → {exit= stdout= stderr= timed-out?=}
+  proc-start :: Map Map            ;; start → a handle {id= pid=}
+  proc-line  :: Map Int Map        ;; handle, timeout-ms → next stdout line event
+  proc-send  :: Map Str ()         ;; write to stdin (no newline added)
+  proc-close :: Map ()             ;; close stdin
+  proc-wait  :: Map Int Map        ;; handle, timeout-ms → {exit= stderr= timed-out?=}
+  proc-kill  :: Map ()             ;; kill it and its descendants
+
+;; Capability binding. `proc-os` resolves only inside Proc-handler clauses.
+cap proc-os :: Proc = "dev.irij.runtime.ProcCapability"
+
+pub handler default-proc :: Proc ::: JVM
+  proc-run opts =>
+    resume (proc-os.run opts)
+  proc-start opts =>
+    resume (proc-os.start opts)
+  proc-line h ms =>
+    resume (proc-os.line h ms)
+  proc-send h text =>
+    proc-os.send h text
+    resume ()
+  proc-close h =>
+    proc-os.close h
+    resume ()
+  proc-wait h ms =>
+    resume (proc-os.await h ms)
+  proc-kill h =>
+    proc-os.kill h
+    resume ()

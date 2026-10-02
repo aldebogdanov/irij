@@ -1,0 +1,54 @@
+use std.test :open
+use std.proc :open
+
+;; std.proc under a mock handler: the effect's surface, with no process
+;; started (CI runs these suites with no external binaries). The real
+;; capability is covered by ProcCapabilityTest.
+
+handler scripted-proc :: Proc
+  lines :! #["one" "two"]
+  proc-run opts => resume {exit= 0 stdout= (to-str (length opts.cmd)) stderr= "" timed-out?= false}
+  proc-start opts => resume {id= 1 pid= 42}
+  proc-line h ms =>
+    if (empty? lines)
+      resume {kind= "eof"}
+    else
+      next := head lines
+      lines <- tail lines
+      resume {kind= "line" text= next}
+  proc-wait h ms => resume {exit= 0 stderr= "" timed-out?= false}
+
+fn count-args ::: Proc
+  =>
+  r := proc-run {cmd= #["git" "status" "--short"]}
+  r.stdout
+
+fn read-all ::: Proc
+  => h acc
+  ev := proc-line h 100
+  if (ev.kind == "line")
+    read-all h (conj acc ev.text)
+  else
+    acc
+
+fn stream ::: Proc
+  =>
+  h := proc-start {cmd= #["tail" "-f" "log"]}
+  got := read-all h #[]
+  w := proc-wait h 100
+  #(got w.exit)
+
+fn run-mocked ::: Proc
+  =>
+  with scripted-proc
+    count-args ()
+
+fn stream-mocked ::: Proc
+  =>
+  with scripted-proc
+    stream ()
+
+r1 := test "proc-run returns a result record" (-> assert-eq "3" (run-mocked ()))
+r2 := test "proc-line streams until eof" (-> assert-eq #(#["one" "two"] 0) (stream-mocked ()))
+
+summarize #[r1 r2]

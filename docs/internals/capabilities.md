@@ -96,6 +96,30 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
     that reports 0×0 (CI harnesses, `script`) falls back to
     `$COLUMNS`/`$LINES`, then 80×24 — a layout engine handed a zero
     divides by it.
+- **3g — Proc (shipped)**: `ProcCapability` + the new `std.proc`
+  module, for programs that drive other programs (git, compilers,
+  agent CLIs). Like Term, not a migration: before it a program could
+  only reach `ProcessBuilder` through raw JVM interop, which works but
+  cannot be mocked. Two shapes:
+  - `proc-run` — start, feed `stdin`, wait up to `timeout-ms`, return
+    `{exit stdout stderr timed-out?}`. A command past its deadline is
+    killed with its descendants (`ProcessHandle.descendants`), since a
+    shell wrapper killed alone leaves its children running.
+  - `proc-start` returns a handle `{id pid}`; `proc-line` reads stdout
+    a line at a time as `{kind= "line" text=}` / `{kind= "eof"}` /
+    `{kind= "timeout"}` (the shape of std.term's events), `proc-send`
+    and `proc-close` write stdin, `proc-wait` collects
+    `{exit stderr timed-out?}`, `proc-kill` ends it. Handles live in a
+    `ConcurrentHashMap` keyed by `id`; `proc-wait` on an exited process
+    and `proc-kill` remove them.
+  - Both streams are drained on their own virtual threads from the
+    start: a pipe that fills blocks the child, and reading one stream
+    after the other deadlocks the moment the second fills. Stderr is
+    kept as a tail (the last 1 MiB, prefixed `…` when cut) so a chatty
+    child cannot grow the heap without bound.
+  - Tests: `ProcCapabilityTest` runs real `sh` children;
+    `tests/test-proc.irj` drives the effect through a scripted handler,
+    because the integration suites run with no external binaries.
 
 ## Syntax
 

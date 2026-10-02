@@ -60,6 +60,7 @@ irij test                     # 427 integration tests (tests/*.irj)
 - **Model-based testing** &mdash; `model bank :: "spec/bank.qnt" :pure` binds a [Quint](https://quint-lang.org/) specification to the code implementing it, one clause per action with the spec's `nondet` picks bound by name. Quint generates traces, Irij replays them and fails at the first diverging step; Apalache proves invariants; a committed trace replays in CI with no Quint installed. (Replaces the `law` property testing removed in v0.6.12 — sampling is not proof, and the tool that samples also proves.)
 - **Protocols** &mdash; type-dispatched methods: `proto`, `impl`
 - **Structured concurrency** &mdash; `scope`, `fork`, `par`, `race`, `timeout`
+- **Child processes** &mdash; `std.proc`'s `Proc` effect: run a command to completion (stdin, timeout, both streams) or start one and talk to it a line at a time; mockable like every effect
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
