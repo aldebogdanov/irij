@@ -87,7 +87,10 @@ public final class RtOps {
 
 
     public static Object mod(Object a, Object b) {
-        if (a instanceof Long la && b instanceof Long lb) return la % lb;
+        if (a instanceof Long la && b instanceof Long lb) {
+            if (lb == 0) throw new ArithmeticException("division by zero");
+            return la % lb;
+        }
         return asDouble(a) % asDouble(b);
     }
 
@@ -106,6 +109,9 @@ public final class RtOps {
     public static boolean eq(Object a, Object b) {
         if (a == b) return true;
         if (a == null || b == null) return false;
+        // Int == Int compares exactly: through double, every pair of Ints
+        // past 2^53 that round to the same double compared equal.
+        if (a instanceof Long la && b instanceof Long lb) return la.longValue() == lb.longValue();
         if (a instanceof Number na && b instanceof Number nb) {
             return na.doubleValue() == nb.doubleValue();
         }

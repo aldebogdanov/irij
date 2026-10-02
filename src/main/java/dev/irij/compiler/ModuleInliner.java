@@ -39,11 +39,20 @@ final class ModuleInliner {
     private final Set<String> loading = new HashSet<>();
     private final Set<String> aliases = new HashSet<>();
 
+    /** Receives spec-lint warnings; null = lint off. */
+    private final java.util.function.Consumer<String> specLint;
+
     ModuleInliner(Path sourceRoot) { this(sourceRoot, List.of()); }
 
     ModuleInliner(Path sourceRoot, List<Path> extraRoots) {
+        this(sourceRoot, extraRoots, null);
+    }
+
+    ModuleInliner(Path sourceRoot, List<Path> extraRoots,
+                  java.util.function.Consumer<String> specLint) {
         this.sourceRoot = sourceRoot;
         this.extraRoots = extraRoots == null ? List.of() : extraRoots;
+        this.specLint = specLint;
     }
 
     /**
@@ -121,6 +130,15 @@ final class ModuleInliner {
             Decl inner = d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di ? di : d;
             if (inner instanceof Decl.FnDecl fn) {
                 fnFile.put(fn.name(), currentFile);
+                // Spec-lint: every pub fn must carry a spec (`_` where the
+                // shape is undetermined) — project policy, see specs.md.
+                if (specLint != null && d instanceof Decl.PubDecl
+                        && !(fn.body() instanceof Decl.FnBody.NoBody)
+                        && (fn.specAnnotations() == null || fn.specAnnotations().isEmpty())) {
+                    specLint.accept("warning: pub fn '" + fn.name() + "' in " + currentFile
+                            + " has no spec annotation"
+                            + (fn.loc() != null ? " (" + fn.loc() + ")" : ""));
+                }
             }
             // ModDecls are preserved so downstream passes (notably
             // EffectRowChecker) can determine which module each fn

@@ -22,10 +22,10 @@ package dev.irij.compiler;
  *       successive evals share state. Off in normal build.</li>
  * </ul>
  */
-public record CompileOptions(boolean directLinking, boolean namespaceMode) {
+public record CompileOptions(boolean directLinking, boolean namespaceMode, boolean specLint) {
 
     public static CompileOptions defaults() {
-        return new CompileOptions(false, false);
+        return new CompileOptions(false, false, true);
     }
 
     /** @deprecated Threaded handler mode was removed in v0.6.13.
@@ -37,10 +37,20 @@ public record CompileOptions(boolean directLinking, boolean namespaceMode) {
     }
 
     public CompileOptions withDirectLinking(boolean enabled) {
-        return new CompileOptions(enabled, namespaceMode);
+        return new CompileOptions(enabled, namespaceMode, specLint);
     }
 
+    /** Namespace mode is for interactive evals (REPL, nREPL, MCP,
+     *  Playground), where a spec-lint warning on every eval is noise —
+     *  so it also turns the lint off. */
     public CompileOptions withNamespaceMode(boolean enabled) {
-        return new CompileOptions(directLinking, enabled);
+        return new CompileOptions(directLinking, enabled, specLint && !enabled);
+    }
+
+    /** {@code specLint}: warn (on stderr) about every {@code pub fn}
+     *  without a spec annotation. On by default; {@code --no-spec-lint}
+     *  turns it off. */
+    public CompileOptions withSpecLint(boolean enabled) {
+        return new CompileOptions(directLinking, namespaceMode, enabled);
     }
 }

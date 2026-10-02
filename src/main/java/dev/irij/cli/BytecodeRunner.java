@@ -63,12 +63,20 @@ public final class BytecodeRunner {
     /** As above, handing {@code programArgs} to the program's {@code main}
      *  (read back with {@code program-args} / {@code env-args}). */
     public static void runFile(Path sourceFile, PrintStream captureOut, String[] programArgs) throws IOException {
+        // Embedded callers (the test runner, the MCP server) run code
+        // they didn't author; the spec-lint is for `irij <file>` / build.
+        runFile(sourceFile, captureOut, programArgs, false);
+    }
+
+    /** As above; {@code specLint} reports pub fns without a spec on stderr. */
+    public static void runFile(Path sourceFile, PrintStream captureOut, String[] programArgs,
+                               boolean specLint) throws IOException {
         Path projectRoot = sourceFile.toAbsolutePath().getParent();
         List<Path> seedRoots = DependencyResolver.resolveSeedRoots(projectRoot, System.out);
 
         String className = "irij.CliRun$" + COUNTER.incrementAndGet();
         Map<String, byte[]> classes = IrijCompiler.compileFileMulti(sourceFile, className,
-                CompileOptions.defaults(), seedRoots);
+                CompileOptions.defaults().withSpecLint(specLint), seedRoots);
 
         // Run in a fresh classloader so subsequent runs don't see
         // each other's static state (e.g. SpecValidator registry).
@@ -83,7 +91,7 @@ public final class BytecodeRunner {
     public static void runSource(String source, String fileLabel, PrintStream captureOut) {
         String className = "irij.CliEval$" + COUNTER.incrementAndGet();
         Map<String, byte[]> classes = IrijCompiler.compileSourceMulti(source, className,
-                null, CompileOptions.defaults(), List.of(), fileLabel);
+                null, CompileOptions.defaults().withSpecLint(false), List.of(), fileLabel);
         BytesLoader loader = new BytesLoader();
         Class<?> cls = loader.defineAll(classes, className);
 

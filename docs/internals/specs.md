@@ -234,8 +234,17 @@ proof).
 
 ## Spec-lint
 
-At parse time, `pub fn` without `:: ...` triggers a warning (or error
-under `--strict`). The recommendation:
+While inlining modules (`ModuleInliner.expand`), every `pub fn` without
+`:: ...` — in the program, its modules and its seeds — is reported on
+stderr as `warning: pub fn 'f' in mod/file.irj has no spec annotation
+(line:col)`. It is on for `irij <file>` and `irij build`
+(`CompileOptions.specLint`), off for interactive evals
+(`withNamespaceMode` turns it off), the test runner and the MCP server;
+`--no-spec-lint` turns it off for a run. The stdlib is lint-clean
+(`SpecLintTest.stdlibIsClean`). (The lint lived in the tree-walk
+interpreter and was lost with it in v0.6.20 while the flag kept being
+parsed; it was restored in the bytecode pipeline in v0.9.) The
+recommendation:
 
 - All `pub fn` declarations MUST have spec annotations.
 - Use `_` for positions where the shape is too complex or

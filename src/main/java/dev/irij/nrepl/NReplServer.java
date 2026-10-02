@@ -61,7 +61,15 @@ public final class NReplServer {
      * Start the server. Blocks until {@link #stop()} is called.
      */
     public void start() throws IOException {
-        serverSocket = new ServerSocket(port);
+        // nREPL evaluates whatever it is sent, with no authentication, so
+        // it listens on loopback only (as Clojure's nREPL does). A remote
+        // editor should come in over an SSH tunnel; `-Dirij.nrepl.host=`
+        // overrides for a trusted network.
+        String host = System.getProperty("irij.nrepl.host");
+        java.net.InetAddress bindAddr = (host == null || host.isBlank())
+                ? java.net.InetAddress.getLoopbackAddress()
+                : java.net.InetAddress.getByName(host);
+        serverSocket = new ServerSocket(port, 50, bindAddr);
         running = true;
 
         int actualPort = serverSocket.getLocalPort();
@@ -73,7 +81,7 @@ public final class NReplServer {
             System.err.println("Warning: could not write .nrepl-port: " + e.getMessage());
         }
 
-        System.out.println("nREPL server started on port " + actualPort);
+        System.out.println("nREPL server started on " + bindAddr.getHostAddress() + ":" + actualPort);
         System.out.println("  Project root: " + projectRoot);
         var tomlPath = projectRoot.resolve("irij.toml");
         if (Files.exists(tomlPath)) {

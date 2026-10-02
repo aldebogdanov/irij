@@ -39,6 +39,14 @@ class PrimitivesTest {
         return buf.toString().trim();
     }
 
+    @Test void int_equality_is_exact_past_2_pow_53() throws Exception {
+        // Both round to the same double; as Ints they differ.
+        assertEquals("false", run("println (9007199254740993 == 9007199254740992)"));
+        assertEquals("true", run("println (9007199254740993 /= 9007199254740992)"));
+        assertEquals("true", run("println (9007199254740993 == 9007199254740993)"));
+        assertEquals("true", run("println (2 == 2.0)"));
+    }
+
     @Test void length_works_on_string_and_vector() throws Exception {
         assertEquals("5", run("println (length \"hello\")"));
         assertEquals("3", run("println (length #[1 2 3])"));

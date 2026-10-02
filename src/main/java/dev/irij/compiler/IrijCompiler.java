@@ -98,7 +98,8 @@ public final class IrijCompiler {
         // root fns into a phantom per-file class.
         String rootFile = sourceFile != null ? sourceFile
                 : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
-        var inliner = new ModuleInliner(sourceRoot, seedRoots);
+        var inliner = new ModuleInliner(sourceRoot, seedRoots,
+                opts.specLint() ? System.err::println : null);
         List<Decl> inlined = inliner.inline(decls, rootFile);
         EffectRowChecker.check(inlined, inliner.fnFile());
         return new ClassEmitter(className, inliner.aliases(), opts, rootFile, inliner.fnFile())
