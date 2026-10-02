@@ -498,7 +498,7 @@ public class AstBuilder {
             var fields = new ArrayList<Decl.SpecField>();
             for (var f : ctx.specField()) {
                 fields.add(new Decl.SpecField(
-                        f.IDENT().getText(),
+                        f.fieldName().getText(),
                         buildSpecExpr(f.specExpr())));
             }
             return new Decl.SpecBody.ProductSpec(fields);
@@ -1137,15 +1137,17 @@ public class AstBuilder {
     private Expr visitPostfixExpr(PostfixExprContext ctx) {
         Expr result = visitAtomExpr(ctx.atomExpr());
         // Dot access chain: walk children after atomExpr
-        // Grammar: atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT | MODEL))* (MAP_AT PARTY_NAME)?
+        // Grammar: atomExpr (DOT (fieldName | UPPER_NAME | CAMEL_IDENT))* (MAP_AT PARTY_NAME)?
         boolean afterDot = false;
         for (var child : ctx.children) {
-            if (child instanceof TerminalNode tn) {
+            if (child instanceof FieldNameContext fn && afterDot) {
+                result = new Expr.DotAccess(result, fn.getText(), loc(ctx));
+                afterDot = false;
+            } else if (child instanceof TerminalNode tn) {
                 int type = tn.getSymbol().getType();
                 if (type == IrijParser.DOT) {
                     afterDot = true;
-                } else if (afterDot && (type == IrijParser.IDENT || type == IrijParser.UPPER_NAME
-                        || type == IrijParser.CAMEL_IDENT || type == IrijParser.MODEL)) {
+                } else if (afterDot && (type == IrijParser.UPPER_NAME || type == IrijParser.CAMEL_IDENT)) {
                     result = new Expr.DotAccess(result, tn.getText(), loc(ctx));
                     afterDot = false;
                 }
@@ -1393,12 +1395,9 @@ public class AstBuilder {
                 // {(expr)= val} — dynamic key, evaluated at runtime
                 entries.add(new Expr.MapEntry.DynField(
                         visitExpr(entry.expr(0)), visitExpr(entry.expr(1))));
-            } else if (entry.MODEL() != null) {
-                // `model` is a soft keyword: a declaration head, and an
-                // ordinary field name everywhere else.
-                entries.add(new Expr.MapEntry.Field(entry.MODEL().getText(), visitExpr(entry.expr(0))));
             } else {
-                entries.add(new Expr.MapEntry.Field(entry.IDENT().getText(), visitExpr(entry.expr(0))));
+                // A field name may be any identifier or keyword (`{spec= 1}`).
+                entries.add(new Expr.MapEntry.Field(entry.fieldName().getText(), visitExpr(entry.expr(0))));
             }
         }
         if (hasSpreadFirst) {
@@ -1619,7 +1618,7 @@ public class AstBuilder {
     private Pattern visitDestructurePattern(DestructurePatternContext ctx) {
         var fields = new ArrayList<Pattern.DestructureField>();
         for (var f : ctx.destructureField()) {
-            fields.add(new Pattern.DestructureField(f.IDENT().getText(), visitPattern(f.pattern())));
+            fields.add(new Pattern.DestructureField(f.fieldName().getText(), visitPattern(f.pattern())));
         }
         return new Pattern.DestructurePat(fields, loc(ctx));
     }

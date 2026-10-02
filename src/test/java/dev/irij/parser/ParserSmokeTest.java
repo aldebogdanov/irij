@@ -921,4 +921,14 @@ class ParserSmokeTest {
         var name = IrijParseDriver.tokenize("x := model\n");
         assertTrue(name.stream().noneMatch(t -> t.getType() == dev.irij.parser.IrijLexer.MODEL));
     }
+
+    // ── keywords as field names ─────────────────────────────────────────
+
+    @Test void keywordsAreFieldNames() {
+        assertParses("c := {base= 4 spec= 1 code= 3}\nprintln c.spec\n");
+        assertParses("o := {with= 1 use= 2 in= 3 out= 4 if= 5}\nprintln o.with\n");
+        assertParses("{spec= s} := c\n");
+        assertParses("spec Candidate\n  base :: Int\n  spec :: Int\n  code :: Int\n");
+        assertParses("n := {...c spec= 2}\n");
+    }
 }

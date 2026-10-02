@@ -52,7 +52,10 @@
      2–10 characters each —
      plus =model= (§6.4a), which is *soft*: it is a keyword only where
      it heads a declaration and an ordinary name everywhere else, since
-     a word that common has to stay usable —
+     a word that common has to stay usable. Every keyword is also a
+     valid *field name* — after =.=, before === in a map or a
+     destructuring pattern, and as a product spec's field — because
+     data decoded from JSON or a Quint spec names its fields freely —
      typically one BPE token. These are distinct from operators:
      operators act on values, keywords introduce structural forms.
      Keeping keywords as readable words costs negligible tokens

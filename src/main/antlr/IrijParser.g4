@@ -162,7 +162,21 @@ specVariant
     ;
 
 specField
-    : IDENT SPEC_ANN specExpr
+    : fieldName SPEC_ANN specExpr
+    ;
+
+// A field name: an identifier, or any keyword. A field position — after
+// `.`, before `=` in a map literal or a destructuring pattern, a product
+// spec's field — never starts a declaration or a statement, so a keyword
+// there is unambiguous. Data decoded from JSON or a Quint spec names its
+// fields freely (`cand.spec`, `{with= …}`), and a program has to be able
+// to write them.
+fieldName
+    : IDENT | MODEL
+    | FN | DO | IF | ELSE | MATCH | SPEC | NEWTYPE | MOD | USE | PUB
+    | WITH | SCOPE | EFFECT | PARTY | CAP | HANDLER | IMPL | PROTO
+    | PRE | POST | CONTRACT | SELECT | ENCLAVE
+    | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF
     ;
 
 newtypeDecl
@@ -482,7 +496,7 @@ appExpr
 
 // Postfix: dot access, located-at
 postfixExpr
-    : atomExpr (DOT (IDENT | UPPER_NAME | CAMEL_IDENT | MODEL))* (MAP_AT PARTY_NAME)?
+    : atomExpr (DOT (fieldName | UPPER_NAME | CAMEL_IDENT))* (MAP_AT PARTY_NAME)?
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -590,8 +604,7 @@ mapEntryList
 
 mapEntry
     : SPREAD IDENT                            // {...record} spread
-    | IDENT EQUALS expr                       // name= "jo"
-    | MODEL EQUALS expr                       // model= "opus" — soft keyword
+    | fieldName EQUALS expr                   // name= "jo", spec= 1 (keywords allowed)
     | ATTR_IDENT EQUALS expr                  // data-on:click= "..."
     | STRING EQUALS expr                      // "content-type"= "text/html"
     | LPAREN expr RPAREN EQUALS expr          // {(expr)= val} dynamic key
@@ -696,7 +709,7 @@ destructurePattern
     ;
 
 destructureField
-    : IDENT EQUALS pattern
+    : fieldName EQUALS pattern
     ;
 
 patternListWithSpread

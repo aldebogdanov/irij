@@ -1,0 +1,28 @@
+use std.test :open
+
+;; Keywords are field names wherever a field is named: after `.`, before
+;; `=` in a map or a destructuring pattern, and as a product spec's field.
+;; Data decoded from JSON or a Quint spec names its fields freely.
+
+spec Candidate
+  base :: Int
+  spec :: Int
+  code :: Int
+
+cand := {base= 4 spec= 1 code= 3}
+opts := {with= "tls" use= :fast in= 1 out= 2 if= true match= "x"}
+moved := {...cand spec= 2}
+{spec= s code= c} := cand
+built := Candidate 4 7 3
+
+fn spec-of
+  {spec= n} => n
+
+r1 := test "keyword as a map field" (-> assert-eq 1 cand.spec)
+r2 := test "several keywords as fields" (-> assert-eq #("tls" :fast 1 2 true "x") #(opts.with opts.use opts.in opts.out opts.if opts.match))
+r3 := test "record update of a keyword field" (-> assert-eq #(2 3) #(moved.spec moved.code))
+r4 := test "destructuring binds a keyword field" (-> assert-eq #(1 3) #(s c))
+r5 := test "product spec with a keyword field" (-> assert-eq 7 built.spec)
+r6 := test "match arm destructures a keyword field" (-> assert-eq 1 (spec-of cand))
+
+summarize #[r1 r2 r3 r4 r5 r6]

@@ -26,6 +26,13 @@ no special-cased layout rules in `.g4`.
   `spec` are language structure. If you try to use one as an
   identifier, the parser will complain in surprising places — it
   often manifests as "expecting `->`" rather than "reserved word."
+  Field positions are the exception: the `fieldName` parser rule
+  accepts an IDENT or any keyword token, and is used after `.`, before
+  `=` in a map literal (`mapEntry`) and a destructuring pattern
+  (`destructureField`), and for a product spec's fields (`specField`).
+  None of those positions can start a declaration or statement, so the
+  keyword is unambiguous there; `AstBuilder` takes the field name from
+  `fieldName().getText()`.
 - **Operators are tokens, not identifiers.** `+`, `-`, `==`, `++`, etc.
   Operator *sections* `(+)` are lifted to `Expr.OpSection` in the AST
   and lowered to runtime constants in the emitter.
