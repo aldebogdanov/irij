@@ -55,6 +55,58 @@ class EffectRowLintTest {
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
     }
 
+    // ── (1b) local names shadow globals ─────────────────────────────
+
+    @Test
+    void localBindingShadowsEffectfulGlobal() {
+        // `func` needs Console, but inside `caller` the name is a local
+        // value: calling it performs nothing of `func`'s.
+        String src = """
+            fn func :: Int Unit ::: Console
+              (x -> println x)
+            fn caller :: Map Int
+              => m
+              func := m.f
+              func 1
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void paramsAndPatternVarsShadowEffectfulGlobal() {
+        String src = """
+            fn func :: Int Unit ::: Console
+              (x -> println x)
+            fn by-param :: Fn Int
+              (func -> func 1)
+            fn by-arm :: _ Int
+              => v
+              match v
+                #(func) => func 1
+                _ => 0
+            fn by-lambda :: Int Int
+              (x -> (func -> func x) (y -> y))
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
+    @Test
+    void shadowingEndsWithItsScope() {
+        // The lambda's parameter shadows `func` only inside the lambda;
+        // the call after it is the global again and needs Console.
+        String src = """
+            fn func :: Int Unit ::: Console
+              (x -> println x)
+            fn caller :: Int Unit
+              => x
+              g := (func -> func x)
+              func x
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("Console"),
+                () -> "expected Console-effect error, got: " + e.getMessage());
+    }
+
     // ── (2) JVM capability ──────────────────────────────────────────
 
     @Test

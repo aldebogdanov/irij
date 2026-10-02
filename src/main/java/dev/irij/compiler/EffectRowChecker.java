@@ -3,6 +3,7 @@ package dev.irij.compiler;
 import dev.irij.ast.Decl;
 import dev.irij.ast.Expr;
 import dev.irij.ast.Node.SourceLoc;
+import dev.irij.ast.Pattern;
 import dev.irij.ast.SpecExpr;
 import dev.irij.ast.Stmt;
 
@@ -300,16 +301,97 @@ public final class EffectRowChecker {
         // Reset per-fn local-var-capability map. Each fn has its own
         // scope; bindings don't leak between fns.
         varCap = new java.util.HashMap<>();
+        locals.clear();
         switch (fn.body()) {
-            case Decl.FnBody.LambdaBody lb -> walkExpr(lb.body(), avail, ctx);
-            case Decl.FnBody.MatchArmsBody mab -> {
-                for (var arm : mab.arms()) {
-                    if (arm.guard() != null) walkExpr(arm.guard(), avail, ctx);
-                    walkExpr(arm.body(), avail, ctx);
-                }
+            case Decl.FnBody.LambdaBody lb -> {
+                enter(lb.params(), lb.restParam());
+                walkExpr(lb.body(), avail, ctx);
             }
-            case Decl.FnBody.ImperativeBody ib -> walkStmts(ib.stmts(), avail, ctx);
+            case Decl.FnBody.MatchArmsBody mab -> {
+                for (var arm : mab.arms()) walkArm(arm, avail, ctx);
+            }
+            case Decl.FnBody.ImperativeBody ib -> {
+                enter(ib.params(), ib.restParam());
+                walkStmts(ib.stmts(), avail, ctx);
+            }
             default -> {}
+        }
+        locals.clear();
+    }
+
+    // ── Local names ─────────────────────────────────────────────────
+    //
+    // A name bound inside the fn being checked — a parameter, a `:=`
+    // binding, a lambda parameter, a pattern variable — shadows the
+    // global fn, effect op or builtin of the same name, so calling it
+    // is calling a local value: `check := m.validator` then `check x`
+    // must not demand the row of std.quint's `check`. The innermost
+    // scope is first.
+
+    private final java.util.ArrayDeque<Set<String>> locals = new java.util.ArrayDeque<>();
+
+    private boolean isLocal(String name) {
+        for (Set<String> scope : locals) if (scope.contains(name)) return true;
+        return false;
+    }
+
+    /** Open a scope holding the names {@code params} bind. */
+    private void enter(List<Pattern> params, String restParam) {
+        Set<String> scope = new HashSet<>();
+        if (params != null) for (Pattern p : params) bindNames(p, scope);
+        if (restParam != null) scope.add(restParam);
+        locals.push(scope);
+    }
+
+    private void bind(String name) {
+        if (locals.isEmpty()) locals.push(new HashSet<>());
+        locals.peek().add(name);
+    }
+
+    private static void bindNames(Pattern p, Set<String> into) {
+        switch (p) {
+            case Pattern.VarPat v -> into.add(v.name());
+            case Pattern.ConstructorPat c -> { for (Pattern a : c.args()) bindNames(a, into); }
+            case Pattern.KeywordPat k -> { if (k.arg() != null) bindNames(k.arg(), into); }
+            case Pattern.GroupedPat g -> bindNames(g.inner(), into);
+            case Pattern.VectorPat v -> {
+                for (Pattern e : v.elements()) bindNames(e, into);
+                if (v.spread() != null) bindNames(v.spread(), into);
+            }
+            case Pattern.TuplePat t -> { for (Pattern e : t.elements()) bindNames(e, into); }
+            case Pattern.DestructurePat d -> { for (var f : d.fields()) bindNames(f.value(), into); }
+            case Pattern.SpreadPat sp -> { if (!"_".equals(sp.name())) into.add(sp.name()); }
+            default -> {}
+        }
+    }
+
+    private void bindTarget(Stmt.BindTarget target) {
+        switch (target) {
+            case Stmt.BindTarget.Simple sn -> bind(sn.name());
+            case Stmt.BindTarget.Destructure d -> {
+                Set<String> names = new HashSet<>();
+                bindNames(d.pattern(), names);
+                for (String n : names) bind(n);
+            }
+        }
+    }
+
+    private void walkArm(Expr.MatchArm arm, Set<String> avail, String ctx) {
+        enter(List.of(arm.pattern()), null);
+        try {
+            if (arm.guard() != null) walkExpr(arm.guard(), avail, ctx);
+            walkExpr(arm.body(), avail, ctx);
+        } finally {
+            locals.pop();
+        }
+    }
+
+    private void walkScoped(List<Stmt> stmts, Set<String> avail, String ctx) {
+        locals.push(new HashSet<>());
+        try {
+            walkStmts(stmts, avail, ctx);
+        } finally {
+            locals.pop();
         }
     }
 
@@ -328,8 +410,11 @@ public final class EffectRowChecker {
         currentClauseEffect = hd.effectName();
         try {
             for (var c : hd.clauses()) {
+                locals.clear();
+                enter(c.params(), null);
                 walkExpr(c.body(), inner, ctx + " clause " + c.opName());
             }
+            locals.clear();
         } finally {
             currentClauseEffect = savedClauseEffect;
         }
@@ -382,20 +467,21 @@ public final class EffectRowChecker {
             case Stmt.Bind b -> {
                 walkExpr(b.value(), avail, ctx);
                 recordCapability(b);
+                bindTarget(b.target());
             }
-            case Stmt.MutBind mb -> walkExpr(mb.value(), avail, ctx);
+            case Stmt.MutBind mb -> {
+                walkExpr(mb.value(), avail, ctx);
+                bindTarget(mb.target());
+            }
             case Stmt.Assign a -> walkExpr(a.value(), avail, ctx);
             case Stmt.IfStmt ifs -> {
                 walkExpr(ifs.cond(), avail, ctx);
-                walkStmts(ifs.thenBranch(), avail, ctx);
-                if (ifs.elseBranch() != null) walkStmts(ifs.elseBranch(), avail, ctx);
+                walkScoped(ifs.thenBranch(), avail, ctx);
+                if (ifs.elseBranch() != null) walkScoped(ifs.elseBranch(), avail, ctx);
             }
             case Stmt.MatchStmt ms -> {
                 walkExpr(ms.scrutinee(), avail, ctx);
-                for (var arm : ms.arms()) {
-                    if (arm.guard() != null) walkExpr(arm.guard(), avail, ctx);
-                    walkExpr(arm.body(), avail, ctx);
-                }
+                for (var arm : ms.arms()) walkArm(arm, avail, ctx);
             }
             case Stmt.With w -> {
                 walkExpr(w.handler(), avail, ctx);
@@ -418,8 +504,8 @@ public final class EffectRowChecker {
                     inner = new HashSet<>(avail);
                     inner.addAll(added);
                 }
-                walkStmts(w.body(), inner, ctx);
-                if (w.onFailure() != null) walkStmts(w.onFailure(), inner, ctx);
+                walkScoped(w.body(), inner, ctx);
+                if (w.onFailure() != null) walkScoped(w.onFailure(), inner, ctx);
             }
             default -> {}
         }
@@ -429,6 +515,11 @@ public final class EffectRowChecker {
         if (e == null) return;
         switch (e) {
             case Expr.App app -> {
+                // A local value called by name is not the global of that name.
+                if (app.fn() instanceof Expr.Var lv && isLocal(lv.name())) {
+                    for (Expr a : app.args()) walkExpr(a, avail, ctx);
+                    return;
+                }
                 if (app.fn() instanceof Expr.Var v && effectOps.containsKey(v.name())) {
                     String eff = effectOps.get(v.name());
                     requireEffect(eff, "perform '" + v.name() + "'", ctx, avail, app.loc());
@@ -531,15 +622,19 @@ public final class EffectRowChecker {
             }
             case Expr.MatchExpr me -> {
                 walkExpr(me.scrutinee(), avail, ctx);
-                for (var arm : me.arms()) {
-                    if (arm.guard() != null) walkExpr(arm.guard(), avail, ctx);
-                    walkExpr(arm.body(), avail, ctx);
-                }
+                for (var arm : me.arms()) walkArm(arm, avail, ctx);
             }
             case Expr.BinaryOp bo -> { walkExpr(bo.left(), avail, ctx); walkExpr(bo.right(), avail, ctx); }
             case Expr.UnaryOp uo -> walkExpr(uo.operand(), avail, ctx);
-            case Expr.Block blk -> walkStmts(blk.stmts(), avail, ctx);
-            case Expr.Lambda lam -> walkExpr(lam.body(), avail, ctx);
+            case Expr.Block blk -> walkScoped(blk.stmts(), avail, ctx);
+            case Expr.Lambda lam -> {
+                enter(lam.params(), lam.restParam());
+                try {
+                    walkExpr(lam.body(), avail, ctx);
+                } finally {
+                    locals.pop();
+                }
+            }
             case Expr.VectorLit vl -> { for (Expr x : vl.elements()) walkExpr(x, avail, ctx); }
             case Expr.SetLit sl -> { for (Expr x : sl.elements()) walkExpr(x, avail, ctx); }
             case Expr.DoExpr de -> { for (Expr x : de.exprs()) walkExpr(x, avail, ctx); }

@@ -224,6 +224,15 @@ The checker rejects three patterns:
    compile rather than throwing at runtime — the static check
    subsumes interp's `BuiltinFn.requiredEffects` runtime gate.
 
+All three look the callee up by name, so the checker tracks the names
+bound inside the fn it is checking — parameters, `:=` and `:!`
+bindings, lambda parameters and pattern variables, each for the extent
+of its scope. A call through a local name is a call of a local value:
+`check := m.validator` then `check x` does not demand the row of
+std.quint's `check`, and a lambda parameter called `println` performs
+nothing. Before, any local that happened to share a global's name was
+checked as that global.
+
 The build fails on subsumption violations; no runtime cost. Per-ref
 JVM capability propagation refines the JVM tag at handle-binding
 sites.
