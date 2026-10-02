@@ -13,7 +13,7 @@ primitives are inspired by Missionary (Clojure) and Trio (Python).
 | `par` | `par combiner t1 t2 ... → combiner r1 r2 ...` | Run all in parallel, combine results. |
 | `race` | `race t1 t2 ... → result of first to finish` | Others interrupted. |
 | `timeout` | `timeout ms t → result or error` | Cancel after deadline. |
-| `try` | `try t → Ok r / Err msg` | Catch errors. |
+| `try` | `try t → Ok r / Err v` | Catch errors. `v` is the value raised with `error v` (a map stays a map), or the message of a runtime/JVM error. |
 | `scope` | `scope { body }` | Structured fork/join — see below. |
 
 ## Virtual threads

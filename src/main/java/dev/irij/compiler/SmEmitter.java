@@ -79,8 +79,8 @@ final class SmEmitter implements Opcodes {
             Locals ofLocals = outer.childScope();
             int errorSlot = ofLocals.allocate("error");
             mv.visitVarInsn(ALOAD, teSlot);
-            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("errorMessage"), "errorMessage",
-                    "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
+            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("errorValue"), "errorValue",
+                    "(Ljava/lang/Throwable;)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, errorSlot);
             List<Stmt> of = w.onFailure();
             for (int i = 0; i < of.size() - 1; i++) ce.exprEm.emitStmt(of.get(i), mv, ofLocals);
@@ -427,8 +427,8 @@ final class SmEmitter implements Opcodes {
             Locals ofLocals = inner.childScope();
             int errorSlot = ofLocals.allocate("error");
             sm.visitVarInsn(ALOAD, teSlot);
-            sm.visitMethodInsn(INVOKESTATIC, RtOwners.of("errorMessage"), "errorMessage",
-                    "(Ljava/lang/Throwable;)Ljava/lang/String;", false);
+            sm.visitMethodInsn(INVOKESTATIC, RtOwners.of("errorValue"), "errorValue",
+                    "(Ljava/lang/Throwable;)Ljava/lang/Object;", false);
             sm.visitVarInsn(ASTORE, errorSlot);
             List<Stmt> of = w.onFailure();
             for (int i = 0; i < of.size() - 1; i++) ce.exprEm.emitStmt(of.get(i), sm, ofLocals);

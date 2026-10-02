@@ -431,16 +431,26 @@ public final class RuntimeSupport {
         return new IllegalStateException("No impl of " + method + " for " + typeTag(arg));
     }
 
-    /** `error "msg"` builtin — throws IrijRuntimeError, caught by `on-failure`. */
-    public static Object errorBuiltin(Object msg) {
-        throw new dev.irij.IrijRuntimeError(
-                msg == null ? "error" : dev.irij.runtime.Values.toIrijString(msg));
+    /** `error v` builtin — raises `v`, which `try` and `on-failure` hand
+     *  back unchanged: a string stays a string, a map stays a map. The
+     *  message (for an uncaught error) is `v`'s printed form. */
+    public static Object errorBuiltin(Object v) {
+        if (v == null) throw new dev.irij.IrijRuntimeError("error");
+        throw new dev.irij.IrijRuntimeError(dev.irij.runtime.Values.toIrijString(v), v);
     }
 
-    /** Extract message for `on-failure` binding — never null. */
+    /** Extract message for an error with no raised value — never null. */
     public static String errorMessage(Throwable t) {
         String m = t.getMessage();
         return m == null ? t.getClass().getSimpleName() : m;
+    }
+
+    /** What `try`'s `Err` and `on-failure`'s `error` binding carry: the value
+     *  raised with `error v` when there is one, the message otherwise
+     *  (runtime errors, JVM exceptions). */
+    public static Object errorValue(Throwable t) {
+        if (t instanceof dev.irij.IrijRuntimeError ire && ire.payload() != null) return ire.payload();
+        return errorMessage(t);
     }
 
     /**
@@ -476,7 +486,7 @@ public final class RuntimeSupport {
     public static final ThreadLocal<java.util.Deque<java.util.List<CompiledHandler>>>
             SM_STACK = ThreadLocal.withInitial(java.util.ArrayDeque::new);
 
-    /** `try thunk` — return Ok(result) / Err(msg).
+    /** `try thunk` — return Ok(result) / Err(the raised value, or the message).
      *
      *  <p>Catches every Throwable except {@link InterruptedException}
      *  (must propagate so virtual-thread cancellation still works).
@@ -495,6 +505,9 @@ public final class RuntimeSupport {
                 Thread.currentThread().interrupt();
                 throw ex instanceof RuntimeException re
                         ? re : new RuntimeException(ex);
+            }
+            if (ex instanceof dev.irij.IrijRuntimeError ire && ire.payload() != null) {
+                return new dev.irij.runtime.Values.Tagged("Err", java.util.List.of(ire.payload()));
             }
             String msg = ex.getMessage();
             if (msg == null || msg.isEmpty()) msg = ex.getClass().getSimpleName();

@@ -900,6 +900,28 @@
        $RECEIVER.rollback
    #+end_example
 
+   =error v= raises any value =v=. Inside =on-failure= the name =error=
+   is bound to that value, and =try thunk= returns =Ok r= or =Err v=, so a
+   raised map stays a map and a caller acts on its fields rather than on
+   its printed form. A string stays a string; an error the runtime raises
+   (division by zero, a failed spec, a JVM exception) arrives as its
+   message. The value survives =await=, =par=, =race=, =timeout= and
+   =scope=, and a call into Java that fails with an Irij error.
+
+   #+begin_example
+   fn load-config :: Str Map
+     => path
+     if (not (exists? path))
+       error {code= :missing-config path= path}
+     else
+       parse path
+
+   match (try (-> load-config "app.toml"))
+     Ok cfg => run cfg
+     Err {code= :missing-config path= p} => println ("no config at " ++ p)
+     Err other => error other                 ;; re-raise, unchanged
+   #+end_example
+
 ** 5.6 Scope Semantics in Choreographies
 
    When =scope= appears inside a choreography, it obeys the same
