@@ -139,9 +139,14 @@ Three things are load-bearing:
   top-level declaration it appends, since the functions must precede
   the binding that references them.
 
-`MODEL` is a **soft keyword** — the first one. It is a declaration head
-and still an ordinary name in `mapEntry` (`{model= "opus"}`),
-in dot access (`cfg.model`) and in a `use` list. Those are the
-positions where a word this ordinary actually turns up. It is still
-reserved elsewhere, like every other keyword; the general fix is the
-soft-keyword work TODO.md tracks under the `party`/`quo` rename.
+`MODEL` is a **soft keyword** — the first one. The lexer decides:
+`MODEL : 'model' {atModelDecl()}?` emits the keyword only where a
+declaration starts — first on its line, after an optional `pub`, and
+followed by a name and `::` (`IrijLexerBase.atModelDecl`, a
+lookbehind to the line start and a lookahead past the name). Anywhere
+else `model` lexes as an IDENT, so it is an ordinary binding,
+parameter, map field (`{model= "opus"}`) and dot-access field
+(`cfg.model`). Reserving it outright broke every app whose state is
+called `model` (uzor's `=> model ev`). The general fix for the other
+keywords is the soft-keyword work TODO.md tracks under the
+`party`/`quo` rename.

@@ -222,9 +222,11 @@ handlerClause
 // This desugars to the `std.quint` model record — see AstBuilder — so
 // nothing downstream of the parser knows the declaration exists.
 //
-// `model` is a soft keyword: it is still usable as a map field and as
-// a dot-access field, which is where a name this ordinary actually
-// turns up (`{model= "opus"}`, `cfg.model`).
+// `model` is a soft keyword. The lexer emits MODEL only where a
+// declaration starts (first on its line, after an optional `pub`, and
+// followed by a name and `::`); anywhere else it is an IDENT, so a
+// binding, parameter, map field or dot-access field called `model`
+// keeps working (`=> model ev`, `{model= "opus"}`, `cfg.model`).
 
 modelDecl
     : PUB? MODEL fnName SPEC_ANN STRING KEYWORD mapLiteral? effectAnnotation? (NEWLINE INDENT modelBody NEWLINE* DEDENT)?

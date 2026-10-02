@@ -50,8 +50,8 @@
      =handler=, =impl=, =proto=, =pre=, =post=, =contract=,
      =select=, =enclave=, =par-each=, =on-failure=) are
      2–10 characters each —
-     plus =model= (§6.4a), which is *soft*: it heads a declaration and
-     is still an ordinary name as a map field and in dot access, since
+     plus =model= (§6.4a), which is *soft*: it is a keyword only where
+     it heads a declaration and an ordinary name everywhere else, since
      a word that common has to stay usable —
      typically one BPE token. These are distinct from operators:
      operators act on values, keywords introduce structural forms.
@@ -1069,8 +1069,10 @@
    model* — an action nothing handles — raises instead, because that is
    a mistake in the test rather than news about the code.
 
-   =model= is a soft keyword: a declaration head, and still an ordinary
-   name as a map field and in dot access.
+   =model= is a soft keyword: a keyword only at the head of a
+   declaration (first on its line, after an optional =pub=, followed by
+   a name and =::=), and an ordinary name everywhere else — a binding, a
+   parameter, a map field, a dot-access field.
 
    Implementation: =docs/internals/quint.md=.
 

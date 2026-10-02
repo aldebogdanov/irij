@@ -185,8 +185,8 @@ to functions rather than lambdas — a lambda declares no row, and an
 effect performed from one is refused at the perform. See
 [parser.md](parser.md) for the desugaring.
 
-`model` is a soft keyword: still a map field and a dot-access field,
-which is where a name this ordinary turns up.
+`model` is a soft keyword: a keyword only at the head of a
+declaration, and an ordinary name everywhere else.
 
 ### The record
 
