@@ -517,6 +517,7 @@ Effect-based I/O operations, mockable via handlers in tests.
   - All fully mockable: `handler fixed-clock :: Time`, `handler fixed-random :: Random`, `handler mock-env :: Env`
   - 8 integration tests (`tests/test-time-random-env.irj`)
 - [x] **Terminal I/O** — `std.term` module with `Term` effect (TUI substrate)
+- [x] **Child processes** — `std.proc` module with `Proc` effect (`ProcCapability`)
   - Ops: `term-enter`, `term-leave`, `term-size`, `term-read`, `term-post`, `term-write`, `term-flush`, `term-str-width`
   - `default-term` handler → `TermCapability` (JLine: raw mode, non-blocking reader, wcwidth); alt-screen / cursor / mouse toggles are plain ANSI
   - `TermDecoder` — escape-sequence grammar (arrows, editing + function keys, xterm modifiers, SGR mouse, alt-prefix) behind a `Source` interface, so it decodes with no tty

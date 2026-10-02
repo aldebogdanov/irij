@@ -1328,6 +1328,7 @@
   std.random      ;; Random effect
   std.log         ;; Log effect — leveled logging (default/silent handlers)
   std.test        ;; assert-eq / assert-true / assert-throws / test / summarize
+  std.proc        ;; Proc effect (child processes: run, or start and stream)
   std.jvm         ;; JVM interop conveniences
   std.datastar    ;; Datastar SSE frontend helpers
   #+end_example

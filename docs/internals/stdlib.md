@@ -71,6 +71,7 @@ Real Irij code, parsed + compiled like user code:
 | `std.db` | `Db` effect + SQLite handler |
 | `std.serve` | Web server framework (routes, middleware, request/response) |
 | `std.session` | nREPL session effects |
+| `std.proc` | `Proc` effect — child processes: `proc-run` (to completion, with stdin and a timeout) and `proc-start`/`proc-line`/`proc-send`/`proc-close`/`proc-wait`/`proc-kill` (streaming); `default-proc` handler |
 | `std.term` | `Term` effect — raw-mode terminal I/O for TUI apps; `default-term` handler + `esc`/`csi`/`with-term` helpers |
 | `std.datastar` | Datastar SSE protocol |
 | `std.json` | JSON parser + serialiser |
