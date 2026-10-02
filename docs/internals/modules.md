@@ -84,8 +84,21 @@ path dep, `…/uzor`) or the one above it (an installed seed,
    - `mod` declaration removed.
    - `pub` prefix removed from each pub decl (kept as a marker for
      blame envelopes).
-   - Private decls renamed with module-prefix to avoid clashes
-     (e.g. `helper` → `mymod__helpers__helper`).
+   - Private top-level fns, bindings and handlers are renamed to
+     `name$module$path` (`helper` in `mymod.helpers` →
+     `helper$mymod$helpers`) by `ModulePrivacy.privatize` before the
+     module is flattened in. `$` can't occur in an Irij identifier, so
+     the name is fresh, and every occurrence of the identifier in the
+     module is renamed (uses, binders, parameters, patterns) — renaming
+     one identifier consistently is meaning-preserving whatever the
+     scoping, so no scope analysis is needed. Without this the emitter's
+     program-wide names made privacy fictional: a program defining
+     `find-route` replaced `std.serve`'s router internals, and two seeds
+     with the same private helper name called each other's. (The
+     interpreter had per-module environments; the flattening bytecode
+     pipeline lost privacy until v0.9.) Pub names are still one
+     program-wide namespace: a program's `fn f` and an `:open`-imported
+     `pub fn f` are the same name, last definition wins.
 4. Open / qualified resolution:
    - `:open` rewrites every Var reference to the unqualified name.
    - Default (qualified) rewrites `text.trim x` to `trim x` and adds

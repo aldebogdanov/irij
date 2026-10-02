@@ -26,6 +26,11 @@ r8 := test "json-parse int" (-> assert-eq (json-parse "42") 42)
 r9 := test "json-parse float" (-> assert-eq (json-parse "3.14") 3.14)
 r10 := test "json-parse string" (-> assert-eq (json-parse "\"hello\"") "hello")
 r11 := test "json-parse empty array" (-> assert-eq (json-parse "[]") #[])
+;; Integral values past the Int range are Floats, not wrapped Ints.
+r11b := test "json-parse huge exponent" (-> assert-true ((json-parse "1e30") > 10000000000000000000.0))
+r11c := test "json-parse beyond Int range" (-> assert-true ((json-parse "12345678901234567890") > 10000000000000000000.0))
+r11d := test "json-parse integral exponent" (-> assert-eq (json-parse "1e2") 100)
+r11e := test "json-parse Int max" (-> assert-eq (json-parse "9223372036854775807") 9223372036854775807)
 
 ;; ── JSON encoding ─────────────────────────────────────────────────
 

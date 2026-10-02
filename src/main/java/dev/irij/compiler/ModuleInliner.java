@@ -197,7 +197,8 @@ final class ModuleInliner {
                         "Parse errors in module '" + qualifiedName + "': "
                                 + String.join("\n", parsed.errors()));
             }
-            List<Decl> modDecls = new AstBuilder().build(parsed.tree());
+            List<Decl> modDecls = ModulePrivacy.privatize(
+                    new AstBuilder().build(parsed.tree()), qualifiedName);
             expand(modDecls, out, moduleFile(qualifiedName));
         } finally {
             loading.remove(qualifiedName);

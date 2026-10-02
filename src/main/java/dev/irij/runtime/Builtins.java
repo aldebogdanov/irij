@@ -343,14 +343,13 @@ public final class Builtins {
             if (p.isBoolean()) return p.getAsBoolean();
             if (p.isString()) return p.getAsString();
             if (p.isNumber()) {
-                // Try long first (exact integers)
+                // An integral value that fits an Int is an Int; anything
+                // else is a Float. (getAsLong wraps out-of-range values —
+                // 1e30 came back as 5076944270305263616.)
                 try {
-                    long l = p.getAsLong();
-                    if (String.valueOf(l).equals(p.getAsString())
-                        || p.getAsBigDecimal().stripTrailingZeros().scale() <= 0) {
-                        return l;
-                    }
-                } catch (NumberFormatException ignored) {}
+                    var bd = p.getAsBigDecimal();
+                    if (bd.stripTrailingZeros().scale() <= 0) return bd.longValueExact();
+                } catch (NumberFormatException | ArithmeticException ignored) {}
                 return p.getAsDouble();
             }
         }
