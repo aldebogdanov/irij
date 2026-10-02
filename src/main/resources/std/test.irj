@@ -57,7 +57,7 @@ pub fn test :: Str Fn Tuple ::: Console Time Random Env FileIO Http Db Serve Ses
       println ~ "  [ok] " ++ name
       #(:pass name)
     Err msg =>
-      println ~ "  [FAIL] " ++ name ++ " -- " ++ msg
+      println ~ "  [FAIL] " ++ name ++ " -- " ++ (to-str msg)
       #(:fail name)
 
 ;; Summarize test results. Takes a vector of test results from `test`.

@@ -1,0 +1,70 @@
+use std.test :open
+
+;; `error v` raises v, and `try` and `on-failure` hand v back unchanged: a
+;; map stays a map, so a caller can act on what went wrong instead of
+;; parsing its printed form. A string stays a string, and errors the runtime
+;; raises (division by zero, a spec failure) arrive as their message.
+
+fn bad-setup
+  => missing
+  error {code= :bad-setup missing= missing}
+
+fn raised-map
+  =>
+  match (try (-> bad-setup #[3]))
+    Err e => #(e.code e.missing)
+    Ok _ => #()
+
+fn raised-str
+  =>
+  match (try (-> error "boom"))
+    Err e => e
+    Ok _ => ""
+
+fn runtime-raised
+  =>
+  match (try (-> 1 / 0))
+    Err e => e
+    Ok _ => 0
+
+fn from-a-fiber
+  =>
+  f := spawn (-> bad-setup #[7])
+  match (try (-> await f))
+    Err e => e.missing
+    Ok _ => #()
+
+fn re-raise
+  =>
+  match (try (-> bad-setup #[1]))
+    Err e => error {...e code= :retried}
+    Ok v => v
+
+fn retried
+  =>
+  match (try (-> re-raise ()))
+    Err e => e.code
+    Ok _ => :none
+
+effect Boom
+  boom :: Map ()
+
+handler boom-raises :: Boom
+  boom v => error v
+
+fn on-failure-binds-the-value ::: Boom
+  =>
+  with boom-raises
+    boom {code= :late}
+    :unreached
+  on-failure
+    error.code
+
+r1 := test "try returns the raised map" (-> assert-eq #(:bad-setup #[3]) (raised-map ()))
+r2 := test "a raised string stays a string" (-> assert-eq "boom" (raised-str ()))
+r3 := test "a runtime error arrives as its message" (-> assert-true (length (runtime-raised ()) > 0))
+r4 := test "the raised value crosses await" (-> assert-eq #[7] (from-a-fiber ()))
+r5 := test "a caught value can be re-raised, changed" (-> assert-eq :retried (retried ()))
+r6 := test "on-failure binds error to the raised value" (-> assert-eq :late (on-failure-binds-the-value ()))
+
+summarize #[r1 r2 r3 r4 r5 r6]

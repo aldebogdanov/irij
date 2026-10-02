@@ -223,6 +223,9 @@ public final class JavaInterop {
                 return javaToIrij(m.invoke(recv, coerced));
             } catch (InvocationTargetException e) {
                 var cause = e.getCause();
+                // An Irij error raised inside the call (a callback, a cap
+                // calling back into Irij) keeps its raised value.
+                if (cause instanceof IrijRuntimeError ire) throw ire;
                 throw new IrijRuntimeError("Java call " + cls.getName() + "/" + name
                         + " threw: " + (cause != null ? cause.toString() : e.toString()));
             } catch (IllegalAccessException | IllegalArgumentException e) {
@@ -297,6 +300,7 @@ public final class JavaInterop {
                 return javaToIrij(c.newInstance(coerced));
             } catch (InvocationTargetException e) {
                 var cause = e.getCause();
+                if (cause instanceof IrijRuntimeError ire) throw ire;
                 throw new IrijRuntimeError("Constructor " + cls.getName()
                         + " threw: " + (cause != null ? cause.toString() : e.toString()));
             } catch (Exception e) {

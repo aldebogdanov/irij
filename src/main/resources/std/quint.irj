@@ -210,7 +210,7 @@ fn advance :: Map Map Map Map
       else
         {...acc i= (acc.i + 1) failure= (diverged expected diff)}
 
-fn thrown :: Map Str Map
+fn thrown :: Map _ Map
   (expected cause -> {step= expected.index action= expected.action picks= expected.picks expected= expected.state actual= () cause= cause})
 
 fn diverged :: Map Map Map
