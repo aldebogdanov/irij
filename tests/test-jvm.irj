@@ -37,4 +37,16 @@ r12 := test "Random seeded is deterministic" (-> assert-eq (rnd.nextInt 1000) (r
 r13 := test "int arg coerced from Long"  (-> assert-eq 3 (Math/floorDiv 10 3))
 r14 := test "static field read Math/PI"  (-> assert-eq true ((Math/PI) > 3.0))
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14]
+;; ── Objects of a class the caller cannot see ───────────
+;; ProcessBuilder.start returns a java.lang.ProcessImpl, package-private
+;; in java.base; its methods are reached through Process.
+
+pb := java.lang.ProcessBuilder/new (java.util.List/of "echo" "hi")
+child := pb.start ()
+child-out := child.getInputStream ()
+child-text := String/new (child-out.readAllBytes ())
+child-code := child.waitFor ()
+r15 := test "Process methods on ProcessImpl" (-> assert-eq "hi" (child-text.trim ()))
+r16 := test "Process exit code" (-> assert-eq 0 child-code)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16]

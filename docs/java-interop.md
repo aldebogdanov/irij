@@ -71,6 +71,25 @@ When multiple Java methods match the arg count, Irij picks the one with the best
 
 Lowest total score wins. This means `Math/abs 7` picks `abs(long)` (not `abs(double)`), and `Math/max 3 5` returns `Int`, not `Float`.
 
+## Objects of a class you cannot see
+
+An instance method is invoked through the most specific **public, exported**
+type that declares it. `ProcessBuilder.start` returns a `java.lang.ProcessImpl`,
+which is package-private inside `java.base`: reflection refuses to call the
+overrides it declares, even though `Process` declares every one of them
+public. So `p.getInputStream ()` resolves to `Process.getInputStream` and
+dispatch still lands on the override, exactly as it does from Java source.
+The same holds for any implementation class behind a public interface or
+superclass.
+
+## Arrays round-trip
+
+An array Java hands out becomes an `IrijVector`, and a vector passed where
+Java expects an array (`byte[]` included) is converted back element by
+element, so `String/new (stream.readAllBytes ())` works. That costs a boxed
+value per element: for large binary data keep the array inside Java, or use
+an effect whose capability returns a `Str`.
+
 ## Effect tag
 
 Every JVM call is tagged with the `JVM` effect. Any function that touches Java must declare it:
