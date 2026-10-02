@@ -24,7 +24,7 @@ import java.util.Set;
  * {@code std.serve}'s router; two seeds with the same private helper name
  * called each other's.
  *
- * <p>Each private top-level fn, binding and handler of a module is renamed
+ * <p>Each private top-level fn, binding, handler and cap of a module is renamed
  * to {@code name$module$path} — {@code $} can't occur in an Irij
  * identifier, so the new name is fresh. The rename is applied to <em>every</em>
  * occurrence of the identifier in the module (uses, binders, parameters,
@@ -58,6 +58,10 @@ final class ModulePrivacy {
                 }
                 case Decl.BindingDecl bd -> simpleTarget(bd.stmt());
                 case Decl.HandlerDecl hd -> hd.name();
+                case Decl.CapDecl cd -> {
+                    if (cd.isPub()) isPub = true;
+                    yield cd.name();
+                }
                 default -> null;
             };
             if (name == null) continue;
@@ -115,9 +119,8 @@ final class ModulePrivacy {
                                 .map(b -> new Decl.ImplBinding(b.name(), expr(b.value())))
                                 .toList(),
                         im.loc());
-                case Decl.CapDecl cd -> cd.recordExpr() == null ? cd
-                        : new Decl.CapDecl(cd.isPub(), cd.name(), cd.effectName(),
-                                cd.providerClass(), expr(cd.recordExpr()), cd.loc());
+                case Decl.CapDecl cd -> new Decl.CapDecl(cd.isPub(), id(cd.name()), cd.effectName(),
+                        cd.providerClass(), expr(cd.recordExpr()), cd.loc());
                 case Decl.BindingDecl bd -> new Decl.BindingDecl(stmt(bd.stmt()), bd.loc());
                 case Decl.ExprDecl ed -> new Decl.ExprDecl(expr(ed.expr()), ed.loc());
                 case Decl.MatchDecl md -> new Decl.MatchDecl((Stmt.MatchStmt) stmt(md.match()), md.loc());

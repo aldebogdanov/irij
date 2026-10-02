@@ -43,3 +43,10 @@ fn match-route :: _ _ _
 
 r9 := test "module-private names stay private" (-> assert-eq (app (req "GET" "/")).body "hello")
 r10 := test "the program's own same-named fn still works" (-> assert-eq (find-route 1 2) "user find-route")
+
+;; std.serve's private `cap server` doesn't claim the name `server` for
+;; the program: a parameter called `server` is an ordinary value.
+fn port-of :: Map Int
+  (server -> server.port)
+
+r11 := test "a private cap name is free for the program" (-> assert-eq (port-of {port= 8080}) 8080)

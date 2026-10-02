@@ -207,10 +207,13 @@ otherwise be a member-access chain or a classpath). A dedicated
 want prettier syntax; nothing about the design forces strings
 specifically.
 
-`pub cap` re-exports the binding through `use mod :open`. Phase 1
-makes every cap (pub or not) visible to the effect-row checker
-across the whole module-inlined program — sufficient for stdlib +
-seed scenarios. Per-module private caps are tracked as future work.
+`pub cap` re-exports the binding through `use mod :open`. A cap
+without `pub` is private to its module: `ModulePrivacy` renames it
+(with every use in the module) to `name$module$path` before inlining,
+like any private top-level name (`modules.md`). Before that, every
+cap was visible program-wide, so `std.serve`'s private `cap server`
+made a program's own parameter called `server` a compile error
+("Capability 'server' is bound to effect 'Serve'…").
 
 Example:
 
@@ -334,9 +337,6 @@ of static dispatchers around the underlying JDK API.
 - **Multi-language caps**: same RHS form, different scheme — `cap
   db-rs :: Db = "rust://crate@version"` once Irij grows JNI / Panama
   bindings.
-- **Per-module private caps**: filter non-`pub` cap decls from the
-  re-export pass in `ModuleInliner` so a library can keep a cap
-  internal to itself.
 - **Tech-debt: option (b) — caps as opaque-typed unstoreable
   values**: revisit once linear / affine types land. Would let caps
   be values without losing the safety property option (a) gives via

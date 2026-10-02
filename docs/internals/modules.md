@@ -84,7 +84,7 @@ path dep, `…/uzor`) or the one above it (an installed seed,
    - `mod` declaration removed.
    - `pub` prefix removed from each pub decl (kept as a marker for
      blame envelopes).
-   - Private top-level fns, bindings and handlers are renamed to
+   - Private top-level fns, bindings, handlers and caps are renamed to
      `name$module$path` (`helper` in `mymod.helpers` →
      `helper$mymod$helpers`) by `ModulePrivacy.privatize` before the
      module is flattened in. `$` can't occur in an Irij identifier, so
