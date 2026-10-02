@@ -295,4 +295,37 @@ r40 := test "the name is deterministic, so nothing piles up" (-> assert-true (co
 r41 := test "a passing run writes nothing" (-> assert-eq "" saved-nothing)
 r42 := test "what was written is the trace itself" (-> assert-true (contains-substr? written "bank.qnt"))
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r38 r39 r40 r41 r42]
+;; ── A pure model with a view ───────────────────────────────────
+;;
+;; The model keeps its own shape (an account record per name, an error
+;; as a keyword) and `view` renders it the way the trace decodes,
+;; before every comparison.
+
+fn bank-view :: Map Map
+  => st
+  {balances= (map-vals (a -> a.cents) st.accounts)
+   last-error= (if (st.err == :none) "" else "insufficient funds")}
+
+fn move :: Map Str Int Map
+  (st who amount -> {...st accounts= (assoc st.accounts who {cents= (get who st.accounts).cents + amount}) err= :none})
+
+model viewed :: "tests/quint/bank.qnt" :pure {main= "bankTest" view= bank-view}
+  start                  => {accounts= {alice= {cents= 0} bob= {cents= 0}} err= :none}
+  deposit  st who amount => move st who amount
+  withdraw st who amount => move st who (0 - amount)
+  overdraft st _ _       => {...st err= :overdraft}
+
+model unviewed :: "tests/quint/bank.qnt" :pure {main= "bankTest"}
+  start                  => {accounts= {alice= {cents= 0} bob= {cents= 0}} err= :none}
+  deposit  st who amount => move st who amount
+  withdraw st who amount => move st who (0 - amount)
+  overdraft st _ _       => {...st err= :overdraft}
+
+viewed-result := with default-fs do (replay-file viewed bank-trace)
+unviewed-result := with default-fs do (replay-file unviewed bank-trace)
+
+r43 := test "a view renders the model's state for comparison" (-> assert-true viewed-result.ok?)
+r44 := test "it is compared at every step" (-> assert-eq ok-result.steps viewed-result.steps)
+r45 := test "without the view the same model diverges at step 0" (-> assert-eq 0 unviewed-result.failure.step)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31 r32 r33 r34 r35 r36 r37 r38 r39 r40 r41 r42 r43 r44 r45]

@@ -31,6 +31,11 @@ use std.quint.itf :as itf
 ;;              actions= {incr= (st p -> {...st n= st.n + p.by})
 ;;                        decr= (st p -> {...st n= st.n - p.by})}}
 ;;
+;; A pure model whose state is shaped differently from the spec's — a
+;; kernel with richer values than ITF decodes to — names a `view`, a
+;; pure `(state -> map)` applied before every comparison. The fold
+;; still carries the model's own state; only what is compared changes.
+;;
 ;; A **live** model drives something running — a database, a server,
 ;; a session. `init` starts or resets it, each action is
 ;; `(picks -> whatever)` and its return value is ignored, and `state`
@@ -161,7 +166,8 @@ fn observe :: Map _ Map
   if (live? driver)
     (get "state" driver) ()
   else
-    st
+    view := get "view" driver
+    if (view == ()) st else (view st)
 
 fn invoke :: Map _ Map _ _
   => driver h expected st

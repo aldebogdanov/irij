@@ -204,6 +204,14 @@ driver := {spec-file= "spec/counter.qnt" mode= :pure \
            actions= {incr= (st p -> {...st n= st.n + p.by})}}
 ```
 
+A pure model whose own state is shaped differently from what ITF
+decodes to — a kernel that keeps sum-spec values where the trace has
+`{tag= "Busy" value= 3}` — names a `view`: a pure `(state -> map)`
+applied before every comparison, the pure counterpart of a live
+model's `state` reader. The fold still carries the model's own state;
+only what is compared changes. In the declaration it goes in the
+options map: `model bank :: "spec/bank.qnt" :pure {view= bank-view}`.
+
 **Live** — something is running. `init` starts or resets it, each
 action is `(picks -> ignored)`, `state` reads the world back, `halt`
 stops it.
