@@ -549,8 +549,12 @@ operatorAsValue
 
 // ── Inline if expression ─────────────────────────────────────────────
 
+// Each part is a postfix expression, so a field access belongs to the part
+// it is written in: `if (a) x else s.p` takes `s.p` when `a` is false, and
+// `if c.ok "y" else "n"` tests `c.ok`. As atoms, the `.p` closed over the
+// whole `if`, and a dotted condition did not parse.
 ifExpr
-    : IF atomExpr atomExpr ELSE atomExpr
+    : IF postfixExpr postfixExpr ELSE postfixExpr
     ;
 
 // ── Lambda ───────────────────────────────────────────────────────────
