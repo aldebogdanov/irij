@@ -105,6 +105,48 @@ public final class RtMath {
     }
 
 
+    /** {@code pbkdf2-sha256-hex password salt iterations}: PBKDF2-HMAC-SHA256
+     *  (RFC 8018) of the UTF-8 password under the UTF-8 salt, 32-byte key,
+     *  lower-case hex. A deliberately slow, salted key derivation — the
+     *  right shape for storing passwords, unlike a single fast hash. */
+    public static Object pbkdf2Sha256Hex(Object pwArg, Object saltArg, Object itersArg) {
+        String pw = RtStrings.asStr(pwArg, "pbkdf2-sha256-hex");
+        String salt = RtStrings.asStr(saltArg, "pbkdf2-sha256-hex");
+        long iters = RtCollections.asLongArg(itersArg, "pbkdf2-sha256-hex");
+        if (iters < 1 || iters > 100_000_000L) {
+            throw new dev.irij.IrijRuntimeError(
+                    "pbkdf2-sha256-hex: iterations must be in [1, 100000000], got " + iters);
+        }
+        if (salt.isEmpty()) {
+            throw new dev.irij.IrijRuntimeError("pbkdf2-sha256-hex: salt must not be empty");
+        }
+        var spec = new javax.crypto.spec.PBEKeySpec(pw.toCharArray(),
+                salt.getBytes(java.nio.charset.StandardCharsets.UTF_8), (int) iters, 256);
+        try {
+            byte[] dk = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                    .generateSecret(spec).getEncoded();
+            return bytesToHex(dk);
+        } catch (java.security.GeneralSecurityException e) {
+            throw new dev.irij.IrijRuntimeError("pbkdf2-sha256-hex: " + e.getMessage());
+        } finally {
+            spec.clearPassword();
+        }
+    }
+
+
+    /** {@code constant-time-eq? a b}: string equality whose running time
+     *  doesn't depend on where the strings first differ — for comparing a
+     *  secret (a MAC, a password hash) against an attacker's guess, where
+     *  {@code ==} would leak how long a prefix was right. */
+    public static Object constantTimeEq(Object aArg, Object bArg) {
+        String a = RtStrings.asStr(aArg, "constant-time-eq?");
+        String b = RtStrings.asStr(bArg, "constant-time-eq?");
+        return java.security.MessageDigest.isEqual(
+                a.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                b.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+
     /** {@code random-token n}: n bytes from {@link java.security.SecureRandom},
      *  URL-safe base64-encoded (no padding). Suitable for session IDs. */
     public static Object randomToken(Object lenArg) {

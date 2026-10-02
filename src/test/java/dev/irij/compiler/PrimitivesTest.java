@@ -39,6 +39,12 @@ class PrimitivesTest {
         return buf.toString().trim();
     }
 
+    @Test void applying_an_inline_if_with_a_literal_branch_is_a_compile_error() {
+        var e = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+                () -> run("fn g\n  (a b -> a == b)\nfn f\n  (x -> if (x < 1) false else g x 2)\nprintln (f 0)"));
+        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("Parenthesize the branch"), e.getMessage());
+    }
+
     @Test void int_equality_is_exact_past_2_pow_53() throws Exception {
         // Both round to the same double; as Ints they differ.
         assertEquals("false", run("println (9007199254740993 == 9007199254740992)"));

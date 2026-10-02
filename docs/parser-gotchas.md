@@ -33,7 +33,7 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 - **Lambda body is an `exprSeq`:** `(x -> body)` accepts only expressions — no `:=`, no statements. For anything with local bindings or control flow, use `fn name => args` imperative form.
 - **Chained lambdas must nest:** `(a -> b -> body)` fails. Write `(a -> (b -> body))`.
 - **`fn name (x -> ...)` on one line** fails — body must start on the next indented line.
-- **Inline `if`:** `if cond-atom then-atom else else-atom` — each part must be an atomic expression. For complex branches use the block-form (now usable as an expression: `x := if cond\n  a\nelse\n  b`).
+- **Inline `if`:** `if cond then else other` — each part is a single postfix expression (an atom plus any `.field`s). An application is not: `if c a else f x` means `(if c a else f) x`, so parenthesize it — `if c a else (f x)` (a compile error names this when a branch is a literal). For complex branches use the block-form (now usable as an expression: `x := if cond\n  a\nelse\n  b`).
 - **Block-form `with`, `scope`, `if`, `match`** are all valid in expression position (wrapped by the AST builder into an `Expr.Block`). E.g. `n := with default-fs\n  fs-read path` works.
 
 ## Handlers

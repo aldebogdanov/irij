@@ -112,6 +112,13 @@ parse at all. Each part is now a `postfixExpr`, so a field access
 belongs to the part it is written in. A parenthesised `if` is still an
 atom, so `(if c a else b).p` reads the field of the result as before.
 
+Application is not part of a branch: `if c a else f x` is
+`(if c a else f) x` — the whole `if` applied to `x`. When either branch
+is a literal (`false`, `0`, `"n"`, `()`), that call can never succeed, so
+`ExprEmitter.emitApp` rejects it at compile time with a hint to write
+`if c a else (f x)`, instead of the run-time "Not callable: false" it
+used to produce.
+
 ## The `model` declaration desugars in the builder (2026-08)
 
 ```

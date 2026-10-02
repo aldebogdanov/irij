@@ -37,7 +37,12 @@ Registered as `BuiltinFn` objects in the global environment:
 - Higher-order (`fold`)
 - Concurrency (`spawn`, `await`, `sleep`, `par`, `race`, `timeout`,
   `try`)
-- Crypto + auth (`sha256-hex`, `hmac-sha256-hex`, `random-token`)
+- Crypto + auth (`sha256-hex`, `hmac-sha256-hex`, `pbkdf2-sha256-hex`,
+  `constant-time-eq?`, `random-token`). `std.auth` stores passwords as
+  `pbkdf2-sha256$<iterations>$<salt>$<hex>` (600 000 iterations) and
+  compares secrets with `constant-time-eq?`; the pre-v0.9 single-SHA-256
+  `<salt>$<hex>` format still verifies, and `password-needs-rehash?`
+  flags it.
 - Effect / handler internals (`raw-*` calls for HTTP, DB, SSE, session)
 
 The capability providers in `dev.irij.runtime` are the other half of

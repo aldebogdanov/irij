@@ -224,6 +224,10 @@ public final class Builtins {
 
         env.define("hmac-sha256-hex", new BuiltinFn("hmac-sha256-hex", 2, args -> dev.irij.compiler.RtMath.hmacSha256Hex(args.get(0), args.get(1))));
 
+        env.define("pbkdf2-sha256-hex", new BuiltinFn("pbkdf2-sha256-hex", 3, args -> dev.irij.compiler.RtMath.pbkdf2Sha256Hex(args.get(0), args.get(1), args.get(2))));
+
+        env.define("constant-time-eq?", new BuiltinFn("constant-time-eq?", 2, args -> dev.irij.compiler.RtMath.constantTimeEq(args.get(0), args.get(1))));
+
         env.define("random-token", new BuiltinFn("random-token", 1, List.of("Random"), args -> dev.irij.compiler.RtMath.randomToken(args.get(0))));
 
         // ── Conversion primitives ──────────────────────────────────────

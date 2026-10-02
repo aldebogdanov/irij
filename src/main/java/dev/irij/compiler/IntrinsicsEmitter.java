@@ -264,6 +264,8 @@ final class IntrinsicsEmitter implements Opcodes {
             // ── crypto / auth ────────────────────────────────────────
             case "sha256-hex"       -> { return emitRT1(args, mv, locals, "sha256Hex"); }
             case "hmac-sha256-hex"  -> { return emitRT2(args, mv, locals, "hmacSha256Hex"); }
+            case "pbkdf2-sha256-hex" -> { return emitRT3(args, mv, locals, "pbkdf2Sha256Hex"); }
+            case "constant-time-eq?" -> { return emitRT2(args, mv, locals, "constantTimeEq"); }
             case "random-token"     -> { return emitRT1(args, mv, locals, "randomToken"); }
             // ── R3: string parsing / chars ───────────────────────────
             case "parse-int"      -> { return emitRT1(args, mv, locals, "parseInt"); }

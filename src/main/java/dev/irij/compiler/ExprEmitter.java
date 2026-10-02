@@ -32,6 +32,22 @@ final class ExprEmitter implements Opcodes {
      * {@code ARETURN}. Recurses into tail-propagating shapes (if/else) so a
      * deeply-nested self call still gets the optimisation.
      */
+    /** A literal that can never be called (`false`, `0`, `"x"`, …). */
+    private static boolean isNonFnLiteral(Expr e) {
+        return switch (e) {
+            case Expr.IntLit l -> true;
+            case Expr.FloatLit l -> true;
+            case Expr.RationalLit l -> true;
+            case Expr.HexLit l -> true;
+            case Expr.StrLit l -> true;
+            case Expr.BoolLit l -> true;
+            case Expr.KeywordLit l -> true;
+            case Expr.UnitLit l -> true;
+            case Expr.Var v -> v.name().equals("true") || v.name().equals("false");
+            default -> false;
+        };
+    }
+
     void emitTailExpr(Expr e, MethodVisitor mv, Locals locals) {
         // 1. Direct self-tail-call: `App(Var(currentFn), args)` with matching arity.
         if (e instanceof Expr.App app
@@ -1137,6 +1153,19 @@ final class ExprEmitter implements Opcodes {
                 return;
             }
         } else {
+            // An inline `if` takes one postfix expression per branch, so
+            // `if c false else f x` parses as `(if c false else f) x`. With a
+            // literal branch that can never be a function, the call is
+            // always a misparse — say so here rather than fail at run time
+            // with "Not callable: false".
+            if (app.fn() instanceof Expr.IfExpr ie
+                    && (isNonFnLiteral(ie.thenBranch()) || isNonFnLiteral(ie.elseBranch()))) {
+                throw new IrijCompiler.CompileException(
+                        (app.loc() != null ? app.loc() + ": " : "")
+                        + "this applies a whole inline `if` to the arguments after it: an "
+                        + "inline `if` branch is a single term, so `if c a else f x` means "
+                        + "`(if c a else f) x`. Parenthesize the branch: `if c a else (f x)`.");
+            }
             // Non-Var callee (Lambda expr, App result, etc.): call as IrijFn.
             emitIrijFnCall(app.fn(), app.args(), mv, locals);
             return;
