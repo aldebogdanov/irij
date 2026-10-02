@@ -81,6 +81,27 @@ class HotRedefTest {
         RuntimeSupport.redefine(key, original);
     }
 
+    @Test void redef_swaps_every_call_site_of_the_fn() throws Exception {
+        // Two separate call sites of `greet`; both must follow a redefine
+        // (the registry used to keep only the last one bootstrapped).
+        String src = """
+            fn greet ::: Console
+              _ => println "hi"
+            fn twice ::: Console
+              _ => greet ()
+            greet ()
+            twice ()
+            """;
+        Class<?> cls = compileAndLoad(src, "irij.HotRedef3", CompileOptions.defaults());
+        assertEquals("hi\nhi", runMain(cls));
+        MethodHandle replacement = MethodHandles.lookup()
+                .findStatic(HotRedefTest.class, "greetReplacement",
+                        MethodType.methodType(Object.class, Object.class));
+        String key = cls.getName() + ".greet:(Ljava/lang/Object;)Ljava/lang/Object;";
+        assertTrue(RuntimeSupport.redefine(key, replacement));
+        assertEquals("yo!\nyo!", runMain(cls));
+    }
+
     @Test void direct_linking_skips_indy_so_redef_has_no_effect() throws Exception {
         // Compile the same program with --direct-linking. The call site is
         // a plain invokestatic; redefine() finds no site for that key.

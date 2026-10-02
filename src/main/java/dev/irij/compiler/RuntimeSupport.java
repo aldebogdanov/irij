@@ -563,15 +563,25 @@ public final class RuntimeSupport {
     // skips indy and uses plain {@code invokestatic} for max JIT
     // inlinability — same trade-off Clojure exposes.
 
-    /** Registry of mutable call sites keyed by "owner.method:descriptor". */
+    /** Mutable call sites per owner class, keyed "method:descriptor".
+     *  Held in a {@link ClassValue}, so the sites go away with their
+     *  class: a static map from key to site kept every class (and its
+     *  classloader) that ever ran alive — every Playground, nREPL and
+     *  MCP eval, forever. */
+    private static final ClassValue<java.util.concurrent.ConcurrentHashMap<String,
+            java.util.List<java.lang.invoke.MutableCallSite>>> REDEF_SITES = new ClassValue<>() {
+        @Override protected java.util.concurrent.ConcurrentHashMap<String,
+                java.util.List<java.lang.invoke.MutableCallSite>> computeValue(Class<?> type) {
+            return new java.util.concurrent.ConcurrentHashMap<>();
+        }
+    };
+
+    /** Owner-class name → the class, weakly, for {@link #redefine}'s
+     *  string keys. */
     private static final java.util.concurrent.ConcurrentHashMap<String,
-            java.lang.invoke.MutableCallSite> REDEF_SITES =
+            java.lang.ref.WeakReference<Class<?>>> REDEF_OWNERS =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    private static String redefKey(Class<?> owner, String name,
-                                    java.lang.invoke.MethodType mt) {
-        return owner.getName() + "." + name + ":" + mt.toMethodDescriptorString();
-    }
 
     /**
      * Bootstrap method for the hot-redef invokedynamic. The {@code name}
@@ -579,10 +589,9 @@ public final class RuntimeSupport {
      * is the method type. The bootstrap looks up the static impl on the
      * caller's class, registers a MutableCallSite for it, and returns it.
      *
-     * <p>If the same call site is requested twice (e.g. two source files
-     * each calling the same fn), each gets its own MutableCallSite — they
-     * happen to share the impl. {@link #redefine} updates them all via the
-     * registry's collision list.
+     * <p>If the same fn is called from several sites, each gets its own
+     * MutableCallSite sharing the impl; the registry keeps them all, and
+     * {@link #redefine} swaps them together.
      */
     public static java.lang.invoke.CallSite redefBootstrap(
             java.lang.invoke.MethodHandles.Lookup lookup,
@@ -621,7 +630,11 @@ public final class RuntimeSupport {
         }
         java.lang.invoke.MethodHandle target = lookup.findStatic(owner, name, mt);
         java.lang.invoke.MutableCallSite cs = new java.lang.invoke.MutableCallSite(target);
-        REDEF_SITES.put(redefKey(owner, name, mt), cs);
+        REDEF_SITES.get(owner).computeIfAbsent(name + ":" + mt.toMethodDescriptorString(),
+                k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(cs);
+        if (REDEF_OWNERS.put(owner.getName(), new java.lang.ref.WeakReference<>(owner)) == null) {
+            REDEF_OWNERS.values().removeIf(r -> r.get() == null); // forget unloaded classes
+        }
         return cs;
     }
 
@@ -635,15 +648,26 @@ public final class RuntimeSupport {
      * was found and updated, {@code false} otherwise.
      */
     public static boolean redefine(String key, java.lang.invoke.MethodHandle newImpl) {
-        java.lang.invoke.MutableCallSite cs = REDEF_SITES.get(key);
-        if (cs == null) return false;
-        cs.setTarget(newImpl);
-        java.lang.invoke.MutableCallSite.syncAll(new java.lang.invoke.MutableCallSite[]{cs});
+        int colon = key.indexOf(':');
+        int dot = colon < 0 ? -1 : key.lastIndexOf('.', colon);
+        if (dot < 0) return false;
+        var ref = REDEF_OWNERS.get(key.substring(0, dot));
+        Class<?> owner = ref == null ? null : ref.get();
+        if (owner == null) return false;
+        var sites = REDEF_SITES.get(owner).get(key.substring(dot + 1));
+        if (sites == null || sites.isEmpty()) return false;
+        for (var cs : sites) cs.setTarget(newImpl);
+        java.lang.invoke.MutableCallSite.syncAll(sites.toArray(new java.lang.invoke.MutableCallSite[0]));
         return true;
     }
 
     /** Test/inspection helper — number of registered redef sites. */
     public static int redefSiteCount() {
-        return REDEF_SITES.size();
+        int n = 0;
+        for (var ref : REDEF_OWNERS.values()) {
+            Class<?> c = ref.get();
+            if (c != null) for (var l : REDEF_SITES.get(c).values()) n += l.size();
+        }
+        return n;
     }
 }

@@ -16,15 +16,21 @@ Each user-fn call site compiles to:
 The bootstrap `RuntimeSupport.redefBootstrap(Lookup, name, MethodType)`:
 
 ```java
-MethodHandle target = lookup.findStatic(callerClass, name, mt);
+MethodHandle target = lookup.findStatic(ownerClass, name, mt);
 MutableCallSite cs = new MutableCallSite(target);
-REDEF_SITES.put("owner.method:descriptor", cs);
+REDEF_SITES.get(ownerClass).computeIfAbsent("method:descriptor", …).add(cs);
 return cs;
 ```
 
-The `REDEF_SITES` map (a `ConcurrentHashMap`) keys by
-`owner.method:descriptor` so call sites for the same fn share one
-entry.
+`REDEF_SITES` is a `ClassValue` — a registry hung off each owner class,
+holding every call site of each of its fns — plus a weak
+owner-name → class index for `redefine`'s string keys. Being attached to
+the class, the sites are collected with it: the registry used to be a
+static `ConcurrentHashMap<String, MutableCallSite>`, which kept every
+class that ever ran (and its classloader) alive — a metaspace leak of
+one classloader per Playground / nREPL / MCP eval
+(`SessionClassUnloadingTest`). It also kept only the last call site per
+key, so `redefine` left the others on the old target.
 
 ## Swap
 
