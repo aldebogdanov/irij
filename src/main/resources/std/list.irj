@@ -19,12 +19,20 @@ mod std.list
 ;;     A pure caller can call them; a `::: Console` caller can too.
 
 pub fn fold :: (Fn):eff _ _ _ ::: eff
+  (f acc v -> fold-step f acc (walkable v))
+
+fn fold-step :: (Fn):eff _ _ _ ::: eff
   (f acc v ->
     if (empty? v) acc
-    else (fold f (f acc (head v)) (tail v)))
+    else (fold-step f (f acc (head v)) (tail v)))
+
+;; `head` and `tail` have no meaning on a Set, which keeps no order, so
+;; a Set is walked as a vector of its elements, in no particular order.
+fn walkable :: _ _
+  (v -> if (type-of v == "Set") (to-vec v) else v)
 
 pub fn map :: (Fn):eff _ _ ::: eff
-  (f v -> map-step f v #[])
+  (f v -> map-step f (walkable v) #[])
 
 ;; Tail-recursive map driver. Same row-var so it inherits the
 ;; callback's effects.
@@ -34,7 +42,7 @@ fn map-step :: (Fn):eff _ _ _ ::: eff
     else (map-step f (tail v) (conj acc (f (head v)))))
 
 pub fn filter :: (_ -> Bool):eff _ _ ::: eff
-  (pred v -> filter-step pred v #[])
+  (pred v -> filter-step pred (walkable v) #[])
 
 fn filter-step :: (_ -> Bool):eff _ _ _ ::: eff
   (pred v acc ->
