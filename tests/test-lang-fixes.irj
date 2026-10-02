@@ -29,4 +29,12 @@ r9  := test "map value captures outer var" (-> assert-eq ((mk-map 7) 0).val 7)
 r10 := test "interp captures outer var" (-> assert-eq ((mk-interp "jo") 0) "hi jo")
 r11 := test "range captures outer var" (-> assert-eq (length ((mk-range 3) 0)) 3)
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11]
+;; inline `if`: a field access belongs to the part it is written in
+rec := {a= 1 p= 9}
+fallback := {q= 1}
+r12 := test "else branch keeps its field access" (-> assert-eq 9 (if (rec.a == 2) 0 else rec.p))
+r13 := test "then branch is taken whole" (-> assert-eq fallback (if (rec.missing == ()) fallback else rec.missing))
+r14 := test "condition may be a field access" (-> assert-eq "on" (if rec.flag "off" else "on"))
+r15 := test "a parenthesised if still takes a field" (-> assert-eq 1 ((if true fallback else rec).q))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15]

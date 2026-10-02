@@ -27,7 +27,9 @@ Registered as `BuiltinFn` objects in the global environment:
   `#{}` and `#(...)` literals: a Tuple whose size is only known at
   runtime cannot be built any other way. `conj` appends to a Vector
   and adds to a Set (`conj #{1} 2` → `#{1 2}`). `to-set` collapses
-  duplicates and keeps no order; `to-tuple` keeps order.
+  duplicates and keeps no order; `to-tuple` keeps order. `empty?` and
+  `fold` take a Set as they take a Vector; a Set is walked in no
+  particular order.
 - Collection raw ops (`length`, `head`, `tail`, `nth`, `last`,
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)

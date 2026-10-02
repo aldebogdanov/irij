@@ -98,6 +98,20 @@ map literals and `{...base (k)= v}` record updates. Dynamic keys are
 skipped by row-var inference over record specs (key unknowable at
 compile time).
 
+## Inline `if` parts are postfix expressions (2026-10)
+
+```
+ifExpr : IF postfixExpr postfixExpr ELSE postfixExpr
+```
+
+The condition and both branches were `atomExpr`. A field access is not
+an atom, so in `if (a) x else s.p` the branch was `s` and the `.p` was
+parsed as postfix on the whole `if` — `(if (a) x else s).p` — which
+silently returned the wrong value; and `if c.ok "y" else "n"` did not
+parse at all. Each part is now a `postfixExpr`, so a field access
+belongs to the part it is written in. A parenthesised `if` is still an
+atom, so `(if c a else b).p` reads the field of the result as before.
+
 ## The `model` declaration desugars in the builder (2026-08)
 
 ```

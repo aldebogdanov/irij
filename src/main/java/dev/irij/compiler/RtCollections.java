@@ -149,12 +149,15 @@ public final class RtCollections {
     }
 
 
-    /** `empty? x` — true if String/Vector/Map/Tuple/Range is empty, or null. */
+    /** `empty? x` — true if String/Vector/Set/Map/Tuple/Range is empty, or null. */
     public static Object isEmpty(Object v) {
         if (v == null) return Boolean.TRUE;
         if (v instanceof String s) return s.isEmpty();
         if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             return vec.elements().isEmpty();
+        }
+        if (v instanceof dev.irij.runtime.Values.IrijSet set) {
+            return set.elements().isEmpty();
         }
         if (v instanceof dev.irij.runtime.Values.IrijMap m) {
             return m.entries().isEmpty();
@@ -167,7 +170,7 @@ public final class RtCollections {
             return r.from() >= upper;
         }
         throw new dev.irij.IrijRuntimeError(
-                "empty?: expected Str/Vector/Map/Tuple/Range, got " + RuntimeSupport.typeTag(v));
+                "empty?: expected Str/Vector/Set/Map/Tuple/Range, got " + RuntimeSupport.typeTag(v));
     }
 
 
@@ -183,12 +186,16 @@ public final class RtCollections {
             list = new java.util.ArrayList<>();
             long upper = r.exclusive() ? r.to() : r.to() + 1;
             for (long i = r.from(); i < upper; i++) list.add(i);
+        } else if (coll instanceof dev.irij.runtime.Values.IrijSet set) {
+            // A Set keeps no order, so fold it only with an operation
+            // whose result does not depend on one (a union, a count, a sum).
+            list = new java.util.ArrayList<>(set.elements());
         } else if (coll instanceof java.util.List<?> raw) {
             @SuppressWarnings("unchecked") var cast = (java.util.List<Object>) raw;
             list = cast;
         } else {
             throw new dev.irij.IrijRuntimeError(
-                    "fold: expected Vector/Range/List, got " + RuntimeSupport.typeTag(coll));
+                    "fold: expected Vector/Set/Range/List, got " + RuntimeSupport.typeTag(coll));
         }
         Object acc = init;
         for (Object elem : list) acc = RuntimeSupport.callAny(fn, new Object[]{acc, elem});

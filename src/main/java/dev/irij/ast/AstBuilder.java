@@ -1286,9 +1286,9 @@ public class AstBuilder {
     }
 
     private Expr visitIfExpr(IfExprContext ctx) {
-        var cond = visitAtomExpr(ctx.atomExpr(0));
-        var then_ = visitAtomExpr(ctx.atomExpr(1));
-        var else_ = visitAtomExpr(ctx.atomExpr(2));
+        var cond = visitPostfixExpr(ctx.postfixExpr(0));
+        var then_ = visitPostfixExpr(ctx.postfixExpr(1));
+        var else_ = visitPostfixExpr(ctx.postfixExpr(2));
         return new Expr.IfExpr(cond, then_, else_, loc(ctx));
     }
 

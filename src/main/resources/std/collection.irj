@@ -50,11 +50,13 @@ pub fn group-by :: Fn Vec Map
   => f vec
   fold (m x -> if (get (to-str (f x)) m == ()) (assoc m (to-str (f x)) #[x]) else (assoc m (to-str (f x)) ((get (to-str (f x)) m) ++ #[x]))) {} vec
 
+;; The position breaks ties, so the sort is stable and never compares
+;; the elements themselves, which may have no order (records, sum values).
 pub fn sort-by :: Fn Vec Vec
   => f vec
-  pairs := to-vec ~ vec |> @ (x -> #((f x) x))
-  sorted := sort pairs
-  to-vec ~ sorted |> @ (p -> nth 1 p)
+  keyed := to-vec ~ vec |> @i (i x -> #((f x) i x))
+  sorted := sort keyed
+  to-vec ~ sorted |> @ (p -> nth 2 p)
 
 pub fn map-vals :: Fn Map Map
   => f m
