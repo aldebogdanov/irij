@@ -24,10 +24,10 @@ Registered as `BuiltinFn` objects in the global environment:
 - IO (`print`, `println`, `dbg`, `read-line`)
 - Conversion (`to-str`, `to-vec`, `to-set`, `to-tuple`) —
   `to-set`/`to-tuple` are the dynamic-arity counterparts of the
-  `#{}` and `#(...)` literals. `conj` is Vector-only, so without
-  them a Set or Tuple whose size is only known at runtime could
-  not be built at all. `to-set` collapses duplicates and keeps no
-  order; `to-tuple` keeps order.
+  `#{}` and `#(...)` literals: a Tuple whose size is only known at
+  runtime cannot be built any other way. `conj` appends to a Vector
+  and adds to a Set (`conj #{1} 2` → `#{1 2}`). `to-set` collapses
+  duplicates and keeps no order; `to-tuple` keeps order.
 - Collection raw ops (`length`, `head`, `tail`, `nth`, `last`,
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)

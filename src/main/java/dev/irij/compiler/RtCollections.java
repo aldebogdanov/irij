@@ -132,14 +132,20 @@ public final class RtCollections {
     }
 
     /** `conj v x` — append x, return new vector (immutable semantics). */
+    /** `conj coll x` — a Vector with x appended, or a Set with x added. */
     public static Object conj(Object v, Object x) {
         if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
             var out = new java.util.ArrayList<>(vec.elements());
             out.add(x);
             return new dev.irij.runtime.Values.IrijVector(out);
         }
+        if (v instanceof dev.irij.runtime.Values.IrijSet set) {
+            var out = new java.util.HashSet<>(set.elements());
+            out.add(x);
+            return new dev.irij.runtime.Values.IrijSet(out);
+        }
         throw new dev.irij.IrijRuntimeError(
-                "conj: expected Vector, got " + RuntimeSupport.typeTag(v));
+                "conj: expected Vector or Set, got " + RuntimeSupport.typeTag(v));
     }
 
 
