@@ -1,6 +1,7 @@
 package dev.irij.cli;
 
 import dev.irij.compiler.CompileOptions;
+import dev.irij.compiler.RuntimeSupport;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.module.DependencyResolver;
 
@@ -74,21 +75,7 @@ public final class BytecodeRunner {
         BytesLoader loader = new BytesLoader();
         Class<?> cls = loader.defineAll(classes, className);
 
-        PrintStream prevOut = System.out;
-        if (captureOut != null) System.setOut(captureOut);
-        try {
-            Method main = cls.getMethod("main", String[].class);
-            main.invoke(null, (Object) programArgs);
-        } catch (java.lang.reflect.InvocationTargetException ite) {
-            Throwable cause = ite.getCause();
-            if (cause instanceof RuntimeException re) throw re;
-            if (cause instanceof Error err) throw err;
-            throw new RuntimeException(cause);
-        } catch (NoSuchMethodException | IllegalAccessException e) {
-            throw new RuntimeException(e);
-        } finally {
-            if (captureOut != null) System.setOut(prevOut);
-        }
+        invokeMain(cls, programArgs, captureOut);
     }
 
     /** Compile + run a source string (no file). Used by {@code
@@ -100,21 +87,30 @@ public final class BytecodeRunner {
         BytesLoader loader = new BytesLoader();
         Class<?> cls = loader.defineAll(classes, className);
 
-        PrintStream prevOut = System.out;
-        if (captureOut != null) System.setOut(captureOut);
-        try {
-            Method main = cls.getMethod("main", String[].class);
-            main.invoke(null, (Object) new String[0]);
-        } catch (java.lang.reflect.InvocationTargetException ite) {
-            Throwable cause = ite.getCause();
-            if (cause instanceof RuntimeException re) throw re;
-            if (cause instanceof Error err) throw err;
-            throw new RuntimeException(cause);
-        } catch (NoSuchMethodException | IllegalAccessException e) {
-            throw new RuntimeException(e);
-        } finally {
-            if (captureOut != null) System.setOut(prevOut);
-        }
+        invokeMain(cls, new String[0], captureOut);
+    }
+
+    /** Run {@code cls.main(args)}; with {@code captureOut}, everything the
+     *  program prints — its own thread, its fibers, and Java-side writes
+     *  to {@code System.out} from them — goes there. Bound per thread, so
+     *  concurrent runs (the MCP server, the test runner) don't capture
+     *  each other's output. */
+    private static void invokeMain(Class<?> cls, String[] args, PrintStream captureOut) {
+        if (captureOut != null) RuntimeSupport.routeSystemOutThroughSessions();
+        RuntimeSupport.callBoundSession(null, captureOut, () -> {
+            try {
+                Method main = cls.getMethod("main", String[].class);
+                main.invoke(null, (Object) args);
+                return null;
+            } catch (java.lang.reflect.InvocationTargetException ite) {
+                Throwable cause = ite.getCause();
+                if (cause instanceof RuntimeException re) throw re;
+                if (cause instanceof Error err) throw err;
+                throw new RuntimeException(cause);
+            } catch (NoSuchMethodException | IllegalAccessException e) {
+                throw new RuntimeException(e);
+            }
+        });
     }
 
     private static final class BytesLoader extends ClassLoader {

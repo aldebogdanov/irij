@@ -254,7 +254,8 @@ binds works; cross-eval fn defs do not yet (see `nrepl.md`).
 See `tco.md`. Short version: at a tail-position call to the
 currently-being-emitted fn, the emitter rebinds param slots and emits
 `GOTO methodEntry` instead of `INVOKESTATIC`. Recursion stays in one
-JVM frame.
+JVM frame. Each back-edge first calls `RtConcurrency.checkCancelled()`
+so interrupted loops stop (`concurrency.md` § Cancellation).
 
 ## Remaining shortcuts (not user-visible)
 

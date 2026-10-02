@@ -100,14 +100,36 @@ public final class RtConcurrency {
     }
 
 
-    /** `sleep ms` — blocks the current thread. */
+    /** `sleep ms` — blocks the current thread. An interrupted sleep is a
+     *  cancellation (a losing `race` fiber, a timed-out eval): it ends the
+     *  computation rather than returning early, which would turn a
+     *  cancelled sleep loop into a busy loop. */
     public static Object sleep(Object msArg) {
         long ms = (msArg instanceof Long l) ? l
                 : (msArg instanceof Number n) ? n.longValue()
                 : 0L;
         try { Thread.sleep(ms); }
-        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+        catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw cancelled();
+        }
         return dev.irij.runtime.Values.UNIT;
+    }
+
+    /**
+     * Cooperative cancellation point. Emitted on every self-tail-call
+     * back-edge — the one loop compiled Irij code has — so an interrupted
+     * thread (a timed-out eval, a losing `race` fiber, a `timeout` that
+     * fired, a cancelled scope) stops there instead of spinning forever.
+     * The interrupt flag is left set: an error handler that swallows this
+     * error is stopped again at its next poll.
+     */
+    public static void checkCancelled() {
+        if (Thread.currentThread().isInterrupted()) throw cancelled();
+    }
+
+    private static dev.irij.IrijRuntimeError cancelled() {
+        return new dev.irij.IrijRuntimeError("cancelled: the computation was interrupted");
     }
 
 

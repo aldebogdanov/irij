@@ -135,7 +135,9 @@ final class PublishCommand {
                 tarArgs.add("-C");
                 tarArgs.add(projectRoot.toString());
                 for (var f : filesToBundle) {
-                    tarArgs.add(projectRoot.relativize(f).toString());
+                    var rel = projectRoot.relativize(f).toString();
+                    // A file named `-…` would be read as a tar option.
+                    tarArgs.add(rel.startsWith("-") ? "./" + rel : rel);
                 }
                 var pb = new ProcessBuilder(tarArgs)
                     .redirectErrorStream(true);
@@ -220,7 +222,22 @@ final class PublishCommand {
 
     private static String jsonStr(String s) {
         if (s == null) return "\"\"";
-        return "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
+        var sb = new StringBuilder("\"");
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                default -> {
+                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
+                    else sb.append(c);
+                }
+            }
+        }
+        return sb.append('"').toString();
     }
 
     private PublishCommand() {}

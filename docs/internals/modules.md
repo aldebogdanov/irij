@@ -75,8 +75,10 @@ path dep, `…/uzor`) or the one above it (an installed seed,
    - Standard library: `std/*.irj` in resources (classpath
      `/std/X.irj`).
    - User modules: relative to project `sourceRoot`.
-   - Git deps: pulled to `~/.irij/cache/...` via `irij install`,
-     then resolved like local.
+   - Seeds (dependencies from `irij.toml [seeds]`): fetched into
+     `~/.irij/seeds/<name>/<version-or-ref>/` by `DependencyResolver`
+     (on first use, or ahead of time with `irij install`), then
+     resolved like local.
 2. Recursively inline the imported module's AST.
 3. Stripping rules:
    - `mod` declaration removed.
@@ -125,16 +127,31 @@ What we gained:
 
 ## `irij install`
 
-Resolves `deps.irj` (TOML-shaped):
+Resolves the `[seeds]` table of `irij.toml` (transitively, through
+each seed's own `irij.toml`):
 
 ```
-[deps]
-mymod = { git = "https://github.com/user/mymod", ref = "v1.2.3" }
-util  = { git = "git@github.com:user/util",  ref = "main" }
+[seeds]
+vrata = "0.1"                                                   # registry
+utils = { git = "https://github.com/user/utils.git", tag = "v1.0" }
+local = { path = "../my-lib" }                                  # dev only
 ```
 
-Downloads to `~/.irij/cache/<sha>/`. Stamped with the resolved git
-commit hash. Re-runs do `git fetch && checkout` if `ref` is a branch.
+Registry and git seeds land in `~/.irij/seeds/<name>/<version>/` and
+`~/.irij/seeds/<name>/<ref>/`; a directory that exists is reused as is
+(tags are not re-fetched). Every fetch is built in a scratch sibling
+directory and renamed into place only when complete, so an interrupted
+download or clone never leaves a half-filled seed for later runs to
+trust.
+
+A seed's `irij.toml` is someone else's input, so its values are
+checked before they reach the filesystem or a command line: names and
+versions must be one plain path segment (`[A-Za-z0-9][A-Za-z0-9._+-]*`,
+no `..`); a git URL may not start with `-` (git would read
+`--upload-pack=<cmd>` as an option and run `<cmd>`) nor use the
+`<transport>::` form (`ext::` runs a shell command); a ref may not start
+with `-`. Git runs with `-c protocol.ext.allow=never` and `--` before
+the URL.
 
 ## Module-boundary blame
 

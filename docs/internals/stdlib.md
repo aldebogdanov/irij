@@ -69,9 +69,9 @@ Real Irij code, parsed + compiled like user code:
 | `std.env` | `Env` effect + handler: `env-var`, and `env-args` (the arguments after the program, from the `program-args` builtin) |
 | `std.log` | `Log` effect — leveled logging; `default-log`/`silent-log` handlers |
 | `std.fs` | `FileIO` effect + handlers |
-| `std.http` | HTTP client (`http-get`, `http-post`) + server |
+| `std.http` | HTTP client (`http-get`, `http-post`, `http-request` — the latter takes an optional `timeout-ms`) |
 | `std.db` | `Db` effect + SQLite handler |
-| `std.serve` | Web server framework (routes, middleware, request/response) |
+| `std.serve` | Web server framework (routes, middleware, request/response); serves the app's `resources/` directory as static files, nothing else |
 | `std.session` | nREPL session effects |
 | `std.proc` | `Proc` effect — child processes: `proc-run` (to completion, with stdin and a timeout) and `proc-start`/`proc-line`/`proc-send`/`proc-close`/`proc-wait`/`proc-kill` (streaming); `default-proc` handler |
 | `std.term` | `Term` effect — raw-mode terminal I/O for TUI apps; `default-term` handler + `esc`/`csi`/`with-term` helpers |

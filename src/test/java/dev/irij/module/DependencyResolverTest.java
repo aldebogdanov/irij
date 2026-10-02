@@ -16,6 +16,43 @@ import static org.junit.jupiter.api.Assertions.*;
 class DependencyResolverTest {
 
     @Nested
+    class UntrustedManifestValues {
+
+        private DependencyResolver resolver(Path root) {
+            return new DependencyResolver(root, new PrintStream(new ByteArrayOutputStream()));
+        }
+
+        @Test void seedNamesMustBeOnePathSegment(@TempDir Path tmp) {
+            for (var bad : List.of("../evil", "a/b", "..", ".hidden", "", "x\\y")) {
+                var dep = new ProjectFile.Dependency(bad, new ProjectFile.DepSource.RegistryDep("1.0.0"));
+                var e = assertThrows(IOException.class, () -> resolver(tmp).resolveAll(List.of(dep)), bad);
+                assertTrue(e.getMessage().contains("Invalid seed name"), e.getMessage());
+            }
+        }
+
+        @Test void registryVersionsMustBeOnePathSegment(@TempDir Path tmp) {
+            var dep = new ProjectFile.Dependency("ok-name",
+                new ProjectFile.DepSource.RegistryDep("1.0.0/../../../../tmp/x"));
+            var e = assertThrows(IOException.class, () -> resolver(tmp).resolveAll(List.of(dep)));
+            assertTrue(e.getMessage().contains("Invalid version"), e.getMessage());
+        }
+
+        @Test void gitUrlsAndRefsCannotBecomeOptions(@TempDir Path tmp) {
+            for (var url : List.of("--upload-pack=touch /tmp/irij-pwned", "ext::sh -c touch% /tmp/irij-pwned")) {
+                var dep = new ProjectFile.Dependency("gitseed-" + Math.abs(url.hashCode()),
+                    new ProjectFile.DepSource.GitDep(url, "v1"));
+                var e = assertThrows(IOException.class, () -> resolver(tmp).resolveAll(List.of(dep)), url);
+                assertTrue(e.getMessage().contains("unsupported git URL"), e.getMessage());
+            }
+            var dep = new ProjectFile.Dependency("gitseed-ref",
+                new ProjectFile.DepSource.GitDep("https://example.invalid/x.git", "--orphan=x"));
+            var e = assertThrows(IOException.class, () -> resolver(tmp).resolveAll(List.of(dep)));
+            assertTrue(e.getMessage().contains("invalid git ref"), e.getMessage());
+            assertFalse(Files.exists(Path.of("/tmp/irij-pwned")));
+        }
+    }
+
+    @Nested
     class LocalPathDeps {
 
         @Test void resolveLocalPath(@TempDir Path tmp) throws IOException {

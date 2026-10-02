@@ -71,6 +71,24 @@ class ProcCapabilityTest {
         assertThrows(IrijRuntimeError.class, () -> ProcCapability.line(h, 0L), "a killed handle is gone");
     }
 
+    @Test void run_timeout_covers_a_child_that_never_reads_stdin() {
+        // 1 MiB of stdin fills the pipe; the write used to block before
+        // the timeout had started, so `run` hung for the child's lifetime.
+        long t0 = System.nanoTime();
+        var r = ProcCapability.run(opts("cmd", cmd("sleep", "30"),
+                "stdin", "x".repeat(1 << 20), "timeout-ms", 300L));
+        assertEquals(true, get(r, "timed-out?"));
+        assertTrue((System.nanoTime() - t0) / 1_000_000 < 10_000, "stdin write outlived the timeout");
+    }
+
+    @Test void await_reports_all_of_stderr() {
+        for (int i = 0; i < 20; i++) {
+            var h = ProcCapability.start(opts("cmd", cmd("sh", "-c", "printf 'e%.0s' $(seq 1 5000) 1>&2")));
+            var w = ProcCapability.await(h, 10_000L);
+            assertEquals(5000, ((String) get(w, "stderr")).length(), "stderr cut short on run " + i);
+        }
+    }
+
     @Test void a_missing_command_is_an_error_naming_it() {
         var e = assertThrows(IrijRuntimeError.class,
                 () -> ProcCapability.run(opts("cmd", cmd("no-such-binary-irij"))));

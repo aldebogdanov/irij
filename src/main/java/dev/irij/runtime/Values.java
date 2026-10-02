@@ -191,10 +191,16 @@ public final class Values {
             if (closed) throw new java.io.IOException("SSE stream closed");
             var sb = new StringBuilder();
             if (eventType != null && !eventType.isEmpty()) {
+                if (eventType.indexOf('\n') >= 0 || eventType.indexOf('\r') >= 0) {
+                    throw new java.io.IOException("SSE event type contains a line break");
+                }
                 sb.append("event: ").append(eventType).append('\n');
             }
-            // Each line of data gets its own "data: " prefix
-            for (var line : data.split("\n", -1)) {
+            // Each line of data gets its own "data: " prefix. SSE ends a
+            // line at CR, LF or CRLF alike, so all three must split here —
+            // a bare CR left inside a data line would let the payload end
+            // the event early and start one of its own.
+            for (var line : data.split("\r\n|\r|\n", -1)) {
                 sb.append("data: ").append(line).append('\n');
             }
             sb.append('\n'); // blank line terminates event
@@ -215,12 +221,26 @@ public final class Values {
         public synchronized void close() {
             if (!closed) {
                 closed = true;
+                notifyAll();
                 try { outputStream.flush(); } catch (Exception ignored) {}
                 try { outputStream.close(); } catch (Exception ignored) {}
             }
         }
 
         public boolean isClosed() { return closed; }
+
+        /** Block until the writer is closed or {@code ms} elapse; true
+         *  once closed. Lets the stream's owner sleep between heartbeats
+         *  yet wake the moment anyone closes the stream. */
+        public synchronized boolean awaitClosed(long ms) throws InterruptedException {
+            long deadline = System.nanoTime() + ms * 1_000_000L;
+            while (!closed) {
+                long left = (deadline - System.nanoTime()) / 1_000_000L;
+                if (left <= 0) return false;
+                wait(left);
+            }
+            return true;
+        }
 
         @Override
         public String toString() { return "<SseWriter>"; }

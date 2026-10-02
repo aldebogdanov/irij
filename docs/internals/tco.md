@@ -52,6 +52,16 @@ GOTO currentFnEntry
 
 Stack discipline is simpler than introducing temp slots.
 
+## Cancellation poll on the back-edge
+
+Just before the `GOTO`, the emitter inserts
+`INVOKESTATIC RtConcurrency.checkCancelled()V`. A self-tail-call is
+the only loop compiled Irij code has, so this one poll makes every
+loop interruptible: a timed-out playground eval, a losing `race`
+fiber or a `timeout`-cancelled fork stops at its next iteration (see
+`concurrency.md` § Cancellation). The poll is a
+`Thread.isInterrupted()` read — the JIT inlines it to a field load.
+
 ## Test coverage
 
 `TcoTest`:

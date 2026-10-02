@@ -115,6 +115,38 @@ public final class RuntimeSupport {
         return SESSION_OUT.isBound() ? SESSION_OUT.get() : null;
     }
 
+    /**
+     * Route {@code System.out} through {@link #SESSION_OUT}: a thread with
+     * a session bound (a session eval and every fiber it forks) writes
+     * into its session, any other thread to the real stdout. Installed
+     * once, by the first capturing eval. This replaces swapping
+     * {@code System.out} around each eval, which — being process-global —
+     * captured every other thread's output for the duration, and, when an
+     * eval outlived its timeout, never gave stdout back.
+     */
+    public static synchronized void routeSystemOutThroughSessions() {
+        if (!(System.out instanceof SessionRoutedOut)) {
+            System.setOut(new SessionRoutedOut(System.out));
+        }
+    }
+
+    private static final class SessionRoutedOut extends java.io.PrintStream {
+        SessionRoutedOut(java.io.PrintStream process) {
+            super(new java.io.OutputStream() {
+                @Override public void write(int b) { target(process).write(b); }
+                @Override public void write(byte[] b, int off, int len) {
+                    target(process).write(b, off, len);
+                }
+                @Override public void flush() { target(process).flush(); }
+            }, true);
+        }
+
+        private static java.io.PrintStream target(java.io.PrintStream process) {
+            java.io.PrintStream s = sessionOut();
+            return s != null ? s : process;
+        }
+    }
+
     /** Fallback namespace for nsGet/nsPut outside any session binding
      *  (normal `irij run` never emits ns calls; this keeps a stray
      *  namespace-mode class loaded outside a session working). */

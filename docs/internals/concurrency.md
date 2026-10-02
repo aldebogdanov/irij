@@ -128,11 +128,30 @@ non-tail clauses might surprise.
 
 ## Cancellation
 
-`Thread.interrupt()` is the primary signal. Effect ops that block in
-`SynchronousQueue.put/take` propagate `InterruptedException` →
-translated to `IrijRuntimeError("Effect operation interrupted: ...")`.
-The interrupting code (race, timeout, scope.race) collects winners and
-errors via `CompletableFuture`.
+`Thread.interrupt()` is the primary signal. The interrupting code
+(race, timeout, scope.race, a cancelled scope, the playground's eval
+timeout) collects winners and errors via `CompletableFuture`. The
+interrupted fiber stops at its next **cancellation point**, which
+throws `IrijRuntimeError("cancelled: the computation was interrupted")`:
+
+- **Loop back-edges.** Every self-tail-call `GOTO` (the only loop
+  compiled Irij code has — see `tco.md`) is preceded by
+  `RtConcurrency.checkCancelled()`, a `Thread.isInterrupted()` poll.
+  Without it a CPU-bound fiber ignored its interrupt and ran on after
+  `timeout` had already returned; `scope`'s `cancelAll` (interrupt,
+  then join) hung on it outright.
+- **`sleep`.** An interrupted sleep throws instead of returning early.
+  Returning early turned a cancelled sleep loop into a busy loop: the
+  flag was re-set, so every later sleep returned at once.
+- **Blocking ops** — effect ops blocked in `SynchronousQueue.put/take`
+  (`"Effect operation interrupted: ..."`), `proc` waits, the HTTP
+  client.
+
+The check reads the flag without clearing it, so cancellation is
+sticky: a `try` that swallows the error is stopped again at the next
+poll. Non-tail recursion has no poll; it ends at `StackOverflowError`.
+Java-side loops inside builtins (a `fold` over a huge collection) are
+not cancellation points.
 
 ## Why not channels / actors
 

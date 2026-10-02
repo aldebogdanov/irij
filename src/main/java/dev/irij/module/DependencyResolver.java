@@ -25,6 +25,9 @@ public final class DependencyResolver {
 
     private static final Path CACHE_DIR = Path.of(System.getProperty("user.home"), ".irij", "seeds");
     private static final String DEFAULT_REGISTRY = "https://irij.online";
+    private static final java.net.http.HttpClient HTTP = java.net.http.HttpClient.newBuilder()
+        .connectTimeout(java.time.Duration.ofSeconds(30))
+        .build();
 
     private final Path projectRoot;
     private final java.io.PrintStream out;
@@ -81,7 +84,7 @@ public final class DependencyResolver {
     private void resolveRecursive(List<Dependency> deps, Path contextRoot,
                                    Map<String, Path> resolved, Set<String> visiting) throws IOException {
         for (var dep : deps) {
-            var name = dep.name();
+            var name = requireSafeSegment("seed name", dep.name());
 
             // Cycle detection — check before resolved (a seed in both sets = cycle)
             if (visiting.contains(name)) {
@@ -127,9 +130,11 @@ public final class DependencyResolver {
         // highest published patch in that line (the patch is a commit count,
         // so you almost always want the latest). An exact 3-part pin is
         // honoured verbatim for reproducible builds.
-        var version = reg.version();
+        var version = requireSafeSegment("version of seed '" + name + "'", reg.version());
         if (ProjectVersion.isMajorMinor(version)) {
-            version = resolveLatestPatch(name, version);
+            // The registry's answer names a cache directory too.
+            version = requireSafeSegment("registry version of seed '" + name + "'",
+                resolveLatestPatch(name, version));
         }
 
         var seedDir = CACHE_DIR.resolve(name).resolve(version);
@@ -138,31 +143,34 @@ public final class DependencyResolver {
             return seedDir;
         }
 
-        // Download from registry
-        Files.createDirectories(seedDir);
+        // Download from registry into a scratch directory; it becomes
+        // seedDir only once fully extracted, so a failed or interrupted
+        // fetch never leaves a half-filled seed that later runs trust.
         out.println("Fetching " + name + " " + version + " from registry ...");
+        var staging = stagingDir(seedDir);
 
         var url = registryUrl + "/api/seeds/" + name + "/" + version + "/download";
         try {
-            var client = java.net.http.HttpClient.newHttpClient();
             var request = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(url))
                 .GET().build();
-            var response = client.send(request,
+            var response = HTTP.send(request,
                 java.net.http.HttpResponse.BodyHandlers.ofInputStream());
 
             if (response.statusCode() != 200) {
-                cleanup(seedDir);
+                response.body().close();
                 throw new IOException("Seed '" + name + "' version " + version
                     + " not found in registry (HTTP " + response.statusCode() + ")");
             }
 
-            // Response is a tarball — extract to seedDir
-            extractTarGz(response.body(), seedDir);
+            // Response is a tarball — extract to the staging dir
+            extractTarGz(response.body(), staging);
+            publish(staging, seedDir);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            cleanup(seedDir);
             throw new IOException("Registry download interrupted", e);
+        } finally {
+            cleanup(staging);
         }
 
         return seedDir;
@@ -176,11 +184,10 @@ public final class DependencyResolver {
     private String resolveLatestPatch(String name, String minorBase) throws IOException {
         var url = registryUrl + "/api/seeds/" + name;
         try {
-            var client = java.net.http.HttpClient.newHttpClient();
             var request = java.net.http.HttpRequest.newBuilder()
                 .uri(java.net.URI.create(url))
                 .GET().build();
-            var response = client.send(request,
+            var response = HTTP.send(request,
                 java.net.http.HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) {
                 throw new IOException("Seed '" + name + "' not found in registry "
@@ -224,32 +231,67 @@ public final class DependencyResolver {
             return seedDir;
         }
 
-        // Clone to cache
-        Files.createDirectories(seedDir.getParent());
-        out.println("Fetching " + name + " from " + git.url() + " @ " + git.ref() + " ...");
+        // Both strings reach git's command line. A URL or ref that starts
+        // with `-` would be read as an option (`--upload-pack=<cmd>` runs
+        // <cmd>), and `<transport>::<address>` URLs hand the address to a
+        // helper program (`ext::` runs it as a shell command).
+        var url = git.url();
+        var ref = git.ref();
+        if (url == null || url.isBlank() || url.startsWith("-") || url.matches("^[A-Za-z][A-Za-z0-9+.-]*::.*")) {
+            throw new IOException("Seed '" + name + "' has an unsupported git URL: " + url);
+        }
+        if (ref == null || ref.isBlank() || ref.startsWith("-")) {
+            throw new IOException("Seed '" + name + "' has an invalid git ref: " + ref);
+        }
+
+        // Clone into a scratch directory; it becomes the cached seed only
+        // once checked out, so an interrupted clone is never reused.
+        out.println("Fetching " + name + " from " + url + " @ " + ref + " ...");
+        var staging = stagingDir(seedDir);
 
         try {
-            var cloneResult = exec("git", "clone", "--depth", "1", "--branch", git.ref(),
-                git.url(), seedDir.toString());
+            var cloneResult = exec("git", "-c", "protocol.ext.allow=never",
+                "clone", "--depth", "1", "--branch", ref, "--", url, staging.toString());
             if (cloneResult != 0) {
-                cleanup(seedDir);
-                var fullClone = exec("git", "clone", git.url(), seedDir.toString());
+                cleanup(staging);
+                var fullClone = exec("git", "-c", "protocol.ext.allow=never",
+                    "clone", "--", url, staging.toString());
                 if (fullClone != 0) {
-                    throw new IOException("Failed to clone " + git.url());
+                    throw new IOException("Failed to clone " + url);
                 }
-                var checkout = exec("git", "-C", seedDir.toString(), "checkout", git.ref());
+                var checkout = exec("git", "-C", staging.toString(), "checkout", "--detach", ref);
                 if (checkout != 0) {
-                    cleanup(seedDir);
-                    throw new IOException("Failed to checkout ref '" + git.ref()
-                        + "' in " + git.url());
+                    throw new IOException("Failed to checkout ref '" + ref
+                        + "' in " + url);
                 }
             }
+            publish(staging, seedDir);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IOException("Git operation interrupted", e);
+        } finally {
+            cleanup(staging);
         }
 
         return seedDir;
+    }
+
+    /** A fresh, empty sibling of {@code target} to build it in. */
+    private static Path stagingDir(Path target) throws IOException {
+        Files.createDirectories(target.getParent());
+        return Files.createTempDirectory(target.getParent(), "." + target.getFileName() + ".partial-");
+    }
+
+    /** Move a fully built {@code staging} dir into place as {@code target}.
+     *  If another process got there first, its copy wins and ours is
+     *  discarded by the caller. */
+    private static void publish(Path staging, Path target) throws IOException {
+        try {
+            Files.move(staging, target, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (java.nio.file.FileAlreadyExistsException
+                 | java.nio.file.DirectoryNotEmptyException e) {
+            if (!Files.isDirectory(target)) throw e;
+        }
     }
 
     private Path resolveLocal(String name, DepSource.PathDep local, Path contextRoot) throws IOException {
@@ -302,8 +344,23 @@ public final class DependencyResolver {
         } catch (IOException ignored) {}
     }
 
+    /** Seed names and versions become directory names under the seed
+     *  cache (and come from any transitive seed's irij.toml, or from the
+     *  registry), so each must be one plain path segment. */
+    private static final java.util.regex.Pattern SAFE_SEGMENT =
+        java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._+-]*");
+
+    static String requireSafeSegment(String what, String s) throws IOException {
+        if (s == null || !SAFE_SEGMENT.matcher(s).matches() || s.contains("..")) {
+            throw new IOException("Invalid " + what + ": '" + s + "'");
+        }
+        return s;
+    }
+
     /** Sanitize a git ref for use as a directory name. */
     private static String sanitizeRef(String ref) {
-        return ref.replaceAll("[^a-zA-Z0-9._-]", "_");
+        var safe = ref.replaceAll("[^a-zA-Z0-9._-]", "_");
+        // "." and ".." survive the character filter but name the parent.
+        return safe.chars().allMatch(c -> c == '.') ? "_" + safe : safe;
     }
 }

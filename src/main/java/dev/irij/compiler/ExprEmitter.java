@@ -47,6 +47,10 @@ final class ExprEmitter implements Opcodes {
             for (int i = ce.currentFnArity - 1; i >= 0; i--) {
                 mv.visitVarInsn(ASTORE, i);
             }
+            // Cancellation poll on the back-edge (see RtConcurrency.checkCancelled):
+            // without it an interrupted loop never stops.
+            mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtConcurrency",
+                    "checkCancelled", "()V", false);
             mv.visitJumpInsn(GOTO, ce.currentFnEntry);
             return;
         }

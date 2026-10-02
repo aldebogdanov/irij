@@ -46,7 +46,10 @@ public final class BytecodeSession {
 
     private static final AtomicInteger COUNTER = new AtomicInteger();
 
-    private final Map<String, Object> namespace = new LinkedHashMap<>();
+    /** Synchronized: fibers forked by one eval keep reading it while
+     *  the next eval writes it. */
+    private final Map<String, Object> namespace =
+            java.util.Collections.synchronizedMap(new LinkedHashMap<>());
     private final Loader loader = new Loader();
     private final String classPrefix;
 
@@ -116,12 +119,13 @@ public final class BytecodeSession {
 
         // Bind the session's namespace + (optional) session
         // PrintStream around the eval. SESSION_OUT routes println /
-        // print; spawned virtual threads re-bind from ParentSnapshot —
-        // so a fork's stdout still hits the session buffer even after
-        // the synchronous eval returns. ScopedValue bindings end with
-        // the call, so per-session state cannot leak to later evals.
-        PrintStream prevOut = System.out;
-        if (captureOut != null) System.setOut(captureOut);
+        // print and (via the System.out router) Java-side writes;
+        // spawned virtual threads re-bind from ParentSnapshot — so a
+        // fork's stdout still hits the session buffer even after the
+        // synchronous eval returns. ScopedValue bindings end with the
+        // call, so per-session state cannot leak to later evals or to
+        // other threads.
+        if (captureOut != null) RuntimeSupport.routeSystemOutThroughSessions();
         try {
             Method main = cls.getMethod("main", String[].class);
             RuntimeSupport.callBoundSession(namespace, captureOut, () -> {
@@ -139,8 +143,6 @@ public final class BytecodeSession {
             });
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(e);
-        } finally {
-            if (captureOut != null) System.setOut(prevOut);
         }
     }
 

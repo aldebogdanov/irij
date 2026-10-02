@@ -306,7 +306,7 @@ public final class RtEffects {
         try {
             return dispatchLoopSMImpl(hs, k, reentryValue, stack);
         } finally {
-            stack.pop();
+            stack.pollFirst(); // never throws — see exitFn
         }
     }
 
@@ -493,8 +493,12 @@ public final class RtEffects {
     }
 
 
+    /** Pop the frame {@link #enterFn} pushed. Never throws: these pops
+     *  run in catch-all handlers while a StackOverflowError unwinds, and a
+     *  frame torn by that overflow (an ArrayDeque op cut off mid-way)
+     *  must not replace the real error with a NoSuchElementException. */
     public static void exitFn() {
-        EFFECT_ROW.get().pop();
+        EFFECT_ROW.get().pollFirst();
     }
 
 
@@ -514,7 +518,7 @@ public final class RtEffects {
 
 
     public static void exitWith() {
-        EFFECT_ROW.get().pop();
+        EFFECT_ROW.get().pollFirst(); // never throws — see exitFn
     }
 
 
@@ -548,7 +552,7 @@ public final class RtEffects {
 
     public static void exitWithCount(int count) {
         var stack = EFFECT_ROW.get();
-        for (int i = 0; i < count; i++) stack.pop();
+        for (int i = 0; i < count; i++) stack.pollFirst(); // never throws — see exitFn
     }
 
 
@@ -557,7 +561,7 @@ public final class RtEffects {
     public static void checkPerformEffect(String effectName, String opName) {
         if (effectName == null) return;
         var top = EFFECT_ROW.get().peek();
-        if (top.contains(effectName)) return;
+        if (top == null || top.contains(effectName)) return; // null: torn by an overflow
         throw new dev.irij.IrijRuntimeError(
                 "Effect '" + effectName + "' not declared: '" + opName
                         + "' requires ::: " + effectName

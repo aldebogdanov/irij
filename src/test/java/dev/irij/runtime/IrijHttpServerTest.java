@@ -10,8 +10,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * The virtual-thread-per-connection server that replaced
@@ -63,6 +62,12 @@ class IrijHttpServerTest {
                         Thread.sleep(30);
                     }
                 } catch (IOException gone) { /* client left — vthread ends */ }
+            } else if (ex.getRequestURI().getPath().equals("/inject")) {
+                // A handler copying request data into a header.
+                ex.getResponseHeaders().set("Location", "/x\r\nSet-Cookie: pwned=1");
+                ex.sendResponseHeaders(302, -1);
+            } else if (ex.getRequestURI().getPath().equals("/boom")) {
+                throw new IllegalStateException("db password is hunter2");
             } else if (ex.getRequestMethod().equals("POST")) {
                 byte[] body = ex.getRequestBody().readAllBytes();
                 ex.sendResponseHeaders(200, body.length);
@@ -102,6 +107,108 @@ class IrijHttpServerTest {
             String resp = new String(s.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             assertTrue(resp.endsWith(body), "POST body should echo: " + resp);
         }
+    }
+
+    private static String raw(int port, String request) throws IOException {
+        try (Socket s = new Socket("127.0.0.1", port)) {
+            s.setSoTimeout(10_000);
+            s.getOutputStream().write(request.getBytes(StandardCharsets.ISO_8859_1));
+            s.getOutputStream().flush();
+            return new String(s.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test void chunkedRequestBodyIsDecoded() throws Exception {
+        int port = freePort();
+        startServer(port);
+        waitForPort(port);
+        String resp = raw(port, "POST /echo HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n"
+                + "5\r\nhello\r\n7;ext=1\r\n-world!\r\n0\r\nX-Trailer: y\r\n\r\n");
+        assertTrue(resp.startsWith("HTTP/1.1 200"), resp);
+        assertTrue(resp.endsWith("hello-world!"), resp);
+    }
+
+    @Test void expectContinueGetsAnInterimResponse() throws Exception {
+        int port = freePort();
+        startServer(port);
+        waitForPort(port);
+        try (Socket s = new Socket("127.0.0.1", port)) {
+            s.setSoTimeout(10_000);
+            s.getOutputStream().write(("POST /echo HTTP/1.1\r\nHost: t\r\nContent-Length: 3\r\n"
+                    + "Expect: 100-continue\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            s.getOutputStream().flush();
+            byte[] interim = new byte[25];
+            int n = s.getInputStream().readNBytes(interim, 0, interim.length);
+            assertEquals("HTTP/1.1 100 Continue\r\n\r\n", new String(interim, 0, n, StandardCharsets.ISO_8859_1));
+            s.getOutputStream().write("abc".getBytes(StandardCharsets.ISO_8859_1));
+            String rest = new String(s.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            assertTrue(rest.endsWith("abc"), rest);
+        }
+    }
+
+    @Test void malformedRequestsGetAStatusNotASilentDrop() throws Exception {
+        int port = freePort();
+        startServer(port);
+        waitForPort(port);
+        assertTrue(raw(port, "GARBAGE\r\n\r\n").startsWith("HTTP/1.1 400"));
+        assertTrue(raw(port, "POST /echo HTTP/1.1\r\nContent-Length: nope\r\n\r\n").startsWith("HTTP/1.1 400"));
+        assertTrue(raw(port, "POST /echo HTTP/1.1\r\nContent-Length: 999999999999\r\n\r\n").startsWith("HTTP/1.1 413"));
+        assertTrue(raw(port, "GET /\r\n\r\n").startsWith("HTTP/1.1 400"));
+    }
+
+    @Test void unescapedTargetCharactersAreTolerated() throws Exception {
+        // Browsers send `{`, `|`, `[` unescaped; java.net.URI rejects them.
+        var ex = IrijHttpServer.parse(new java.io.ByteArrayInputStream(
+                "GET /a{b}?q=[1]|x&r=%41 HTTP/1.1\r\nHost: t\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1)),
+                new java.io.ByteArrayOutputStream());
+        assertEquals("/a{b}", ex.getRequestURI().getPath());
+        assertEquals("q=[1]|x&r=A", ex.getRequestURI().getQuery());
+    }
+
+    @Test void headerValuesCannotSplitTheResponse() throws Exception {
+        int port = freePort();
+        startServer(port);
+        waitForPort(port);
+        String resp = raw(port, "GET /inject HTTP/1.1\r\nHost: t\r\n\r\n");
+        assertTrue(resp.startsWith("HTTP/1.1 500"), resp);
+        assertFalse(resp.contains("Set-Cookie"), resp);
+    }
+
+    @Test void handlerErrorsStayInTheServerLog() throws Exception {
+        int port = freePort();
+        startServer(port);
+        waitForPort(port);
+        var err = System.err;
+        System.setErr(new java.io.PrintStream(java.io.OutputStream.nullOutputStream()));
+        try {
+            String resp = raw(port, "GET /boom HTTP/1.1\r\nHost: t\r\n\r\n");
+            assertTrue(resp.startsWith("HTTP/1.1 500"), resp);
+            assertFalse(resp.contains("hunter2"), resp);
+        } finally {
+            System.setErr(err);
+        }
+    }
+
+    @Test void sseDataCannotStartItsOwnEvent() throws Exception {
+        var buf = new java.io.ByteArrayOutputStream();
+        var sse = new Values.SseWriter(buf);
+        sse.send("msg", "a\r\revent: evil\rdata: x\r\nb");
+        String wire = buf.toString(StandardCharsets.UTF_8);
+        // Every CR/LF-separated piece is its own data line; no bare CR survives.
+        assertEquals("event: msg\ndata: a\ndata: \ndata: event: evil\ndata: data: x\ndata: b\n\n", wire);
+        assertThrows(IOException.class, () -> sse.send("msg\nid: 9", "x"));
+    }
+
+    @Test void sseAwaitClosedWakesOnClose() throws Exception {
+        var sse = new Values.SseWriter(new java.io.ByteArrayOutputStream());
+        assertFalse(sse.awaitClosed(10));
+        Thread.ofVirtual().start(() -> {
+            try { Thread.sleep(50); } catch (InterruptedException ignored) {}
+            sse.close();
+        });
+        long t0 = System.nanoTime();
+        assertTrue(sse.awaitClosed(10_000));
+        assertTrue((System.nanoTime() - t0) / 1_000_000 < 5_000);
     }
 
     @Test void sseDisconnectDoesNotWedgeOtherConnections() throws Exception {

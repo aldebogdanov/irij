@@ -69,23 +69,28 @@ public final class JdbcCapability {
         List<Object> params = extractParams(paramsArg, "db-jdbc.query");
         try {
             synchronized (conn) {
-                PreparedStatement ps = conn.prepareStatement(sql);
-                bindParams(ps, params);
-                ResultSet rs = ps.executeQuery();
-                ResultSetMetaData meta = rs.getMetaData();
-                int cols = meta.getColumnCount();
-                List<Object> rows = new ArrayList<>();
-                while (rs.next()) {
-                    LinkedHashMap<String, Object> row = new LinkedHashMap<>();
-                    for (int i = 1; i <= cols; i++) {
-                        row.put(meta.getColumnLabel(i),
-                                sqlToIrij(rs, i, meta.getColumnType(i)));
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    bindParams(ps, params);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        ResultSetMetaData meta = rs.getMetaData();
+                        int cols = meta.getColumnCount();
+                        String[] labels = new String[cols + 1];
+                        int[] types = new int[cols + 1];
+                        for (int i = 1; i <= cols; i++) {
+                            labels[i] = meta.getColumnLabel(i);
+                            types[i] = meta.getColumnType(i);
+                        }
+                        List<Object> rows = new ArrayList<>();
+                        while (rs.next()) {
+                            LinkedHashMap<String, Object> row = new LinkedHashMap<>();
+                            for (int i = 1; i <= cols; i++) {
+                                row.put(labels[i], sqlToIrij(rs, i, types[i]));
+                            }
+                            rows.add(new IrijMap(row));
+                        }
+                        return new IrijVector(rows);
                     }
-                    rows.add(new IrijMap(row));
                 }
-                rs.close();
-                ps.close();
-                return new IrijVector(rows);
             }
         } catch (SQLException e) {
             throw new IrijRuntimeError("db-jdbc.query: " + e.getMessage());
@@ -99,11 +104,10 @@ public final class JdbcCapability {
         List<Object> params = extractParams(paramsArg, "db-jdbc.exec");
         try {
             synchronized (conn) {
-                PreparedStatement ps = conn.prepareStatement(sql);
-                bindParams(ps, params);
-                long affected = ps.executeUpdate();
-                ps.close();
-                return affected;
+                try (PreparedStatement ps = conn.prepareStatement(sql)) {
+                    bindParams(ps, params);
+                    return (long) ps.executeUpdate();
+                }
             }
         } catch (SQLException e) {
             throw new IrijRuntimeError("db-jdbc.exec: " + e.getMessage());
