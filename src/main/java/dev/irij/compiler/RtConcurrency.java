@@ -6,14 +6,6 @@ public final class RtConcurrency {
     private RtConcurrency() {}
 
 
-    /** Snapshot the current effect stack + push onto the child fiber's stack. */
-    public static void inheritEffectStack(java.util.Deque<
-            dev.irij.runtime.EffectSystem.HandlerContext> parentStack) {
-        var fiberStack = dev.irij.runtime.EffectSystem.STACK.get();
-        fiberStack.addAll(parentStack);
-    }
-
-
     /** Inherit the parent's SM dispatch frames so a fiber's body can find
      *  matching SM handlers via the SM_STACK fallback (concurrency parity). */
     public static void inheritSMStack(java.util.Deque<java.util.List<CompiledHandler>> parentSMStack) {
@@ -31,7 +23,6 @@ public final class RtConcurrency {
 
     public static ParentSnapshot snapParent() {
         return new ParentSnapshot(
-                new java.util.ArrayDeque<>(dev.irij.runtime.EffectSystem.STACK.get()),
                 new java.util.ArrayDeque<>(RuntimeSupport.SM_STACK.get()),
                 new java.util.ArrayDeque<>(RtEffects.EFFECT_ROW.get()),
                 RuntimeSupport.NS.isBound() ? RuntimeSupport.NS.get() : null,
@@ -56,17 +47,10 @@ public final class RtConcurrency {
     }
 
 
-    private static java.util.Deque<dev.irij.runtime.EffectSystem.HandlerContext> snapStack() {
-        return new java.util.ArrayDeque<>(
-                dev.irij.runtime.EffectSystem.STACK.get());
-    }
-
-
     /** Spawn a virtual thread running the thunk (IrijFn or BuiltinFn). */
     public static Fiber forkOne(Object thunk, ParentSnapshot parent) {
         var future = new java.util.concurrent.CompletableFuture<Object>();
         var t = Thread.startVirtualThread(() -> {
-            inheritEffectStack(parent.effectStack());
             inheritSMStack(parent.smStack());
             inheritEffectRow(parent.effectRow());
             RuntimeSupport.runBoundSession(parent.namespace(), parent.sessionOut(), () -> {
@@ -225,19 +209,3 @@ public final class RtConcurrency {
         }
     }
 }
-
-
-// ── Concurrency ─────────────────────────────────────────────────────
-
-
-
-/** Snapshot of both the threaded EffectSystem.STACK and the SM_STACK
- *  taken at fork time so the fiber can re-establish the parent's
- *  effect-handling context (both 14c.2 threaded and 14c.3 SM frames). */
-
-
-/**
- * Compiled scope handle — bound to a name inside a `scope { ... }` block.
- * `handle.fork thunk` spawns a fiber tied to this scope; join semantics
- * run after the block body via {@link #joinByModifier}.
- */

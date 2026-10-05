@@ -17,10 +17,9 @@ Terms used throughout the internals docs.
 | **CompiledScopeHandle** | Runtime handle for `scope { fork ... }` blocks. Tracks spawned fibers + parent effect snapshots. |
 | **Deep handler** | Handler whose clauses resume into the same dynamic extent as the body. Irij's only kind of handler. |
 | **Direct linking** | Build mode (`--direct-linking`) where top-level fn calls compile to plain `invokestatic`. Disables hot-redef. Mirrors Clojure deploy mode. |
-| **EffectSystem.STACK** | Thread-local stack of `HandlerContext` records. Walked by `dispatchLoopSMImpl` as a bridging fallback when no SM handler matches a `PerformSignal` and no SM_STACK frame matches either — relevant for fibers spawned outside any SM `with`. |
 | **EffIR** | SM body shape for bodies with branching that contain effect ops. CFG of blocks with `Return`/`Perform`/`Branch`/`Jump` terminators. |
-| **fireOp** | `EffectSystem.fireOp(eff, op, args)` — legacy synchronous effect-op entry kept for fibers spawned outside any SM `with`. Walks `EffectSystem.STACK`, falls through to `fireOpToSM`. |
-| **fireOpToSM** | Synchronous SM-dispatch from `fireOp` — lets a fiber (running outside any SM dispatch loop) reach an inherited SM handler via `SM_STACK`. |
+| **perform (runtime)** | `RtEffects.perform(eff, op, args)` — synchronous effect-op entry for a perform outside any SM body (a fiber, a plain fn reached from a `with`): `fireOpToSM` against the innermost matching `SM_STACK` frame, else "Unhandled effect". |
+| **fireOpToSM** | Synchronous SM-dispatch from `RtEffects.perform` — lets a fiber (running outside any SM dispatch loop) reach an inherited SM handler via `SM_STACK`. |
 | **Hot redef** | Swap a fn's implementation at runtime via `MutableCallSite.setTarget`. |
 | **IndentRewriter** | ANTLR4 token-stream filter that emits `INDENT`/`DEDENT` tokens around lines based on indentation. Pre-parse pass. |
 | **IrijContinuation** | Concrete struct (`int state, Object[] fields, IrijFn step`) used by SM-mode bodies. Holds machine state across perform throws. |

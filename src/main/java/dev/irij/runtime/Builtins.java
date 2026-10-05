@@ -28,32 +28,8 @@ public final class Builtins {
     private static final java.io.BufferedReader STDIN_READER =
         new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
 
-    /** Forbidden builtins in sandbox mode. After phase 3d the raw FS
-     *  + multipart entries are gone too (FileIO + Serve effects route
-     *  through cap providers that aren't on the sandbox classpath; the
-     *  sandbox handlers reject those effect ops directly). */
-    private static final List<String> SANDBOX_FORBIDDEN = List.of();
-
-    /**
-     * Install sandboxed builtins — all standard builtins, but I/O, file, DB,
-     * and HTTP operations are replaced with error stubs.
-     */
-    public static void installSandboxed(Environment env, PrintStream out) {
-        install(env, out, null);
-        for (var name : SANDBOX_FORBIDDEN) {
-            String msg = name + ": not available in sandbox mode";
-            int arity = env.isDefined(name)
-                ? (env.lookup(name) instanceof BuiltinFn fn ? fn.arity() : 1)
-                : 1;
-            env.define(name, new BuiltinFn(name, arity, args -> {
-                throw new IrijRuntimeError(msg);
-            }));
-        }
-    }
-
-    /** Install all builtins into the given environment.
-     *  @param pathResolver resolves relative file paths (null = use CWD) */
-    public static void install(Environment env, PrintStream out, java.util.function.Function<String, Path> pathResolver) {
+    /** Install all builtins into the given registry. */
+    public static void install(Environment env) {
         // Boolean constants
         env.define("true", Boolean.TRUE);
         env.define("false", Boolean.FALSE);
@@ -300,14 +276,6 @@ public final class Builtins {
     // Utilities
     // ═══════════════════════════════════════════════════════════════════
 
-    /** Convert a duration argument to milliseconds (Int=ms, Float=seconds). */
-    static long toMillis(Object value) {
-        if (value instanceof Long l) return l;
-        if (value instanceof Double d) return (long)(d * 1000);
-        throw new IrijRuntimeError(
-            "Duration expects Int (milliseconds) or Float (seconds), got " + Values.typeName(value));
-    }
-
     // ── JSON conversion helpers ────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
@@ -432,15 +400,6 @@ public final class Builtins {
         throw new IrijRuntimeError(context + " expects Str, got " + Values.typeName(value));
     }
 
-    /**
-     * Resolve a file path using the given resolver function.
-     * If no resolver is provided, paths resolve against CWD (Path.of behavior).
-     */
-    static Path resolvePath(String path, java.util.function.Function<String, Path> resolver) {
-        if (resolver != null) return resolver.apply(path);
-        return Path.of(path);
-    }
-
     public static int compare(Object a, Object b) {
         if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
         if (a instanceof Double da && b instanceof Double db) return Double.compare(da, db);
@@ -495,111 +454,6 @@ public final class Builtins {
             for (var e : range) list.add(e);
             return list;
         }
-        if (value instanceof LazyIterable li) {
-            var list = new ArrayList<Object>();
-            for (var e : li) list.add(e);
-            return list;
-        }
         throw new IrijRuntimeError("Cannot iterate over " + Values.typeName(value));
-    }
-
-    /** Get an iterable view of any collection-like value. */
-    static Iterable<Object> toIterable(Object value) {
-        if (value instanceof IrijVector vec) return vec.elements();
-        if (value instanceof IrijSet set) return set.elements();
-        if (value instanceof IrijRange range) return range;
-        if (value instanceof LazyIterable li) return li;
-        throw new IrijRuntimeError("Cannot iterate over " + Values.typeName(value));
-    }
-
-    // ── Rational arithmetic ───────────────────────────────────────────────
-
-    static Rational addRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.den() + b.num() * a.den(), a.den() * b.den());
-    }
-
-    static Rational subRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.den() - b.num() * a.den(), a.den() * b.den());
-    }
-
-    static Rational mulRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.num(), a.den() * b.den());
-    }
-
-    static Rational divRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.den(), a.den() * b.num());
-    }
-
-    // ── Lazy iterable wrappers ──────────────────────────────────────────
-
-    /** A lazy mapped iterable. */
-    public record LazyIterable(Iterable<Object> source, java.util.function.Function<Object, Object> transform,
-                               java.util.function.Predicate<Object> filter) implements Iterable<Object> {
-        /** Map-only constructor. */
-        public LazyIterable(Iterable<Object> source, java.util.function.Function<Object, Object> transform) {
-            this(source, transform, null);
-        }
-
-        /** Filter-only constructor. */
-        public LazyIterable(Iterable<Object> source, java.util.function.Predicate<Object> filter, boolean dummy) {
-            this(source, null, filter);
-        }
-
-        @Override
-        public Iterator<Object> iterator() {
-            if (transform != null && filter == null) {
-                return new Iterator<>() {
-                    final Iterator<Object> it = source.iterator();
-                    @Override public boolean hasNext() { return it.hasNext(); }
-                    @Override public Object next() { return transform.apply(it.next()); }
-                };
-            }
-            if (filter != null && transform == null) {
-                return new Iterator<>() {
-                    final Iterator<Object> it = source.iterator();
-                    Object nextVal;
-                    boolean hasNext;
-                    { advance(); }
-                    private void advance() {
-                        while (it.hasNext()) {
-                            nextVal = it.next();
-                            if (filter.test(nextVal)) { hasNext = true; return; }
-                        }
-                        hasNext = false;
-                    }
-                    @Override public boolean hasNext() { return hasNext; }
-                    @Override public Object next() {
-                        var v = nextVal;
-                        advance();
-                        return v;
-                    }
-                };
-            }
-            // Both map and filter
-            return new Iterator<>() {
-                final Iterator<Object> it = source.iterator();
-                Object nextVal;
-                boolean hasNext;
-                { advance(); }
-                private void advance() {
-                    while (it.hasNext()) {
-                        var raw = it.next();
-                        var mapped = transform != null ? transform.apply(raw) : raw;
-                        if (filter == null || filter.test(mapped)) {
-                            nextVal = mapped;
-                            hasNext = true;
-                            return;
-                        }
-                    }
-                    hasNext = false;
-                }
-                @Override public boolean hasNext() { return hasNext; }
-                @Override public Object next() {
-                    var v = nextVal;
-                    advance();
-                    return v;
-                }
-            };
-        }
     }
 }

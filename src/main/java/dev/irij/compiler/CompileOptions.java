@@ -28,14 +28,6 @@ public record CompileOptions(boolean directLinking, boolean namespaceMode, boole
         return new CompileOptions(false, false, true);
     }
 
-    /** @deprecated Threaded handler mode was removed in v0.6.13.
-     *  Kept only as a no-op alias for source compatibility — returns
-     *  the default SM-strategy options. */
-    @Deprecated
-    public static CompileOptions stateMachine() {
-        return defaults();
-    }
-
     public CompileOptions withDirectLinking(boolean enabled) {
         return new CompileOptions(enabled, namespaceMode, specLint);
     }

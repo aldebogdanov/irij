@@ -37,7 +37,6 @@ public final class RtCollections {
 
     public static boolean isTuple(Object v)  { return v instanceof dev.irij.runtime.Values.IrijTuple; }
 
-    public static boolean isMap(Object v)    { return v instanceof dev.irij.runtime.Values.IrijMap; }
 
 
     public static int vecSize(Object v) {
@@ -265,16 +264,6 @@ public final class RtCollections {
     }
 
 
-    public static Object mapGet(Object v, String k) {
-        return ((dev.irij.runtime.Values.IrijMap) v).entries().get(k);
-    }
-
-
-    public static boolean mapHas(Object v, String k) {
-        return ((dev.irij.runtime.Values.IrijMap) v).entries().containsKey(k);
-    }
-
-
     /** Field lookup across IrijMap and Tagged-with-named-fields. */
     public static boolean recordHas(Object v, String k) {
         if (v instanceof dev.irij.runtime.Values.IrijMap m) return m.entries().containsKey(k);
@@ -320,11 +309,6 @@ public final class RtCollections {
         if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             java.util.List<Object> out = new java.util.ArrayList<>(r.size());
             for (Object x : r) out.add(x);
-            return out;
-        }
-        if (v instanceof dev.irij.runtime.Builtins.LazyIterable li) {
-            java.util.List<Object> out = new java.util.ArrayList<>();
-            for (Object x : li) out.add(x);
             return out;
         }
         if (v instanceof java.util.List<?> raw) {

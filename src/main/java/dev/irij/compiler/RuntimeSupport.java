@@ -75,11 +75,6 @@ public final class RuntimeSupport {
         }
     }
 
-    /** Helper for App sites when callee is an expression of unknown type. */
-    public static Object callFn(Object fn, Object[] args) {
-        return callAny(fn, args);
-    }
-
     // ── Namespace mode (nREPL eval-bytecode cross-eval state) ────────
     //
     // The nREPL session sets `NS` to a per-session map before invoking
@@ -369,14 +364,11 @@ public final class RuntimeSupport {
 
     private static java.util.Map<String, IrijFn> initBuiltinRegistry() {
         java.util.Map<String, IrijFn> out = new java.util.HashMap<>();
-        dev.irij.runtime.Environment env =
-                new dev.irij.runtime.Environment(null);
-        dev.irij.runtime.Builtins.install(env, System.out, null);
+        dev.irij.runtime.Environment env = new dev.irij.runtime.Environment();
+        dev.irij.runtime.Builtins.install(env);
         for (var entry : env.getBindings().entrySet()) {
             String name = entry.getKey();
-            var cell = entry.getValue();
-            Object value = unwrapCell(cell);
-            if (value instanceof dev.irij.runtime.Values.BuiltinFn bf) {
+            if (entry.getValue() instanceof dev.irij.runtime.Values.BuiltinFn bf) {
                 out.put(name, args ->
                         bf.apply(java.util.Arrays.asList(args)));
             }
@@ -384,25 +376,10 @@ public final class RuntimeSupport {
         return out;
     }
 
-    private static Object unwrapCell(dev.irij.runtime.Environment.Cell c) {
-        if (c instanceof dev.irij.runtime.Environment.ImmutableCell ic) {
-            return ic.value();
-        }
-        if (c instanceof dev.irij.runtime.Environment.MutableCell mc) {
-            return mc.get();
-        }
-        return null;
-    }
-
     // ── Misc ─────────────────────────────────────────────────────────
 
     public static void dbg(Object v) {
         System.err.println("[dbg] " + display(v));
-    }
-
-    public static Object printlnVal(Object v) {
-        println(v);
-        return dev.irij.runtime.Values.UNIT;
     }
 
     // rawHttpRequest removed phase 3b — Http effect now routes through
@@ -487,9 +464,8 @@ public final class RuntimeSupport {
 
     /**
      * Sentinel returned by {@link #fireOpToSM} when no SM handler matches
-     * — distinct from any legal Irij value so {@link
-     * dev.irij.runtime.EffectSystem#fireOp} can fall through to
-     * "Unhandled effect" without ambiguity.
+     * — distinct from any legal Irij value so {@link RtEffects#perform}
+     * can fall through to "Unhandled effect" without ambiguity.
      */
     public static final Object SM_NO_MATCH = new Object();
 
@@ -503,11 +479,6 @@ public final class RuntimeSupport {
      * the synthesised {@code resumeFn} unwinds the clause via
      * {@link TailResume} so the loop re-enters with the resume value rather
      * than via a recursive JVM call.
-     *
-     * <p>Bridges to threaded outer {@code with}: if no SM handler matches,
-     * walk {@link dev.irij.runtime.EffectSystem#STACK}; if a threaded
-     * outer handles this effect, route via {@code fireOp} and continue the
-     * loop with the result.
      */
     /** Per-thread stack of active SM dispatch frames — innermost on top.
      *  Lets a clause body's `perform` (tier-c) find a matching handler in

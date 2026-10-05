@@ -120,39 +120,16 @@ pick a lowering strategy. v0.6.13 removed the threaded back-end, so
 only one mode exists. The field is silently ignored for backwards
 compat with old client builds.
 
-## Connect-to-running-JAR
+## Connect-to-running-JAR (not supported)
 
-`irij build --nrepl-port=N entry.irj -o app.jar` writes an
-`Irij-NRepl-Port` manifest entry. When the bundled JAR boots,
-`IrijCli.runBundled` checks the manifest, starts an
-`NReplServer` on the configured port in a background vthread,
-then runs the entry on main. The JVM stays alive as long as the
-nREPL socket is open — attach an editor, send `eval` ops, live-patch
-fns.
-
-```
-irij build --nrepl-port=7888 server.irj -o server.jar
-java -jar server.jar
-# Embedded nREPL listening on 7888 (connect with: irij nrepl-connect localhost:7888)
-```
-
-Caveat: the embedded nREPL gets its OWN `BytecodeSession`, not
-the entry's. So it can't read the running app's bindings directly.
-What works:
-
-- Redefine top-level fns via `eval` — the nREPL's `BytecodeSession`
-  updates its namespace map; if the entry uses hot-redef indy sites
-  (which it does by default), the swap propagates.
-- Ad-hoc eval against the bundled stdlib.
-
-What doesn't:
-
-- Inspect or mutate the entry's local state from nREPL. Would need
-  the embedded session to share the entry's namespace map +
-  classloader. Future work.
-
-Auth: not implemented. Don't expose the port to the public internet
-without a TCP-level guard (firewall rule, SSH tunnel, etc.).
+Built JARs don't embed an nREPL server: since builds went bytecode-only
+the bundled program runs straight from `irij.Program.main`, and
+`irij build --nrepl-port=N` (which used to write an `Irij-NRepl-Port`
+manifest entry for the old source-bundling runner) is refused. An
+embedded nREPL would also be unauthenticated code execution for anyone
+who can reach its port. To work on a running service, run it from
+source under `irij --nrepl-server` locally — that server listens on
+loopback only (`-Dirij.nrepl.host` to override).
 
 ## Sessions + concurrency
 

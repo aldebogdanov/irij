@@ -218,8 +218,9 @@ final class EffectEmitter implements Opcodes {
 
     /**
      * Emit `with handler body [on-failure block]` as an expression, leaving the
-     * block's result on the stack. 14c.2: body runs on a virtual thread under
-     * EffectSystem; handler clauses compiled as IrijFns receiving (args…, resume).
+     * block's result on the stack. The body is lowered to a state machine run by
+     * {@code RtEffects.runWithSM}; handler clauses are IrijFns receiving
+     * (args…, resume).
      */
     void emitWith(Stmt.With w, MethodVisitor mv, Locals outer) {
         // Static path: handler expression resolves to known handler

@@ -211,7 +211,7 @@ fn shape?
 ├── TypeRef Foo                → Tagged-value constructor
 ├── Var v
 │   ├── v is in emitBuiltinApp's table       → INVOKESTATIC RT.builtin
-│   ├── v is an effect op                    → emitPerform (throws PerformSignal in SM body emit, fireOp elsewhere)
+│   ├── v is an effect op                    → emitPerform (throws PerformSignal in SM body emit, `RtEffects.perform` elsewhere)
 │   ├── v starts with uppercase              → constructor application
 │   ├── v is a JVM local                     → emit as IrijFn invocation
 │   ├── v is in currentLiftedLocals          → emit as IrijFn invocation

@@ -699,7 +699,6 @@ public final class SpecValidator {
 
     private static boolean isCallable(Object v) {
         return v instanceof RuntimeSupport.IrijFn
-                || v instanceof Values.BuiltinFn
-                || v instanceof Values.Lambda;
+                || v instanceof Values.BuiltinFn;
     }
 }

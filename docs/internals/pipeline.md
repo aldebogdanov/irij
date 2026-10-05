@@ -51,7 +51,7 @@ state-machine bytecode lowering (14c.3) handles every `with` —
 single execution model, single contract.
 
 The runtime-support shapes the emitter depends on (`Values`,
-`Builtins`, `EffectSystem`, `JavaInterop`, `Environment`) live in
+`Builtins`, `JavaInterop`, `Environment`) live in
 `dev.irij.runtime` (renamed from `dev.irij.interpreter` in v0.7.0
 once it became clear the old name was misleading). They are *not*
 an interpreter.

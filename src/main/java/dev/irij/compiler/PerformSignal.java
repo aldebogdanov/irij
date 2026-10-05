@@ -1,5 +1,11 @@
 package dev.irij.compiler;
 
+/**
+ * Stack-trace-free signal a state-machine body throws to yield an effect
+ * op to the nearest enclosing {@code runWithSM} dispatch loop. Overriding
+ * stack-trace capture away (the 4-arg super constructor) is the standard
+ * trick for control-flow-only exceptions.
+ */
 public final class PerformSignal extends RuntimeException {
     public String effectName;
     public String opName;

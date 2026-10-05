@@ -37,10 +37,12 @@ Note: the tree-walking `Interpreter` class was removed in v0.6.20
 removed in v0.6.13. The state-machine bytecode lowering (14c.3) is
 the only execution model.
 
-The runtime-support classes (`Values`, `Builtins`, `EffectSystem`,
-`JavaInterop`, `Environment`) moved to `dev.irij.runtime` in v0.7.0
-to retire the misleading package name. They are bytecode-mode
-**runtime support** — `Values` (Irij value reps), `Builtins` (name
-registry), `EffectSystem` (handler frame stack used by SM_STACK
-bridging) and `JavaInterop`. They are referenced from
-`RuntimeSupport`, not driven by an interpreter.
+The runtime-support classes (`Values`, `Builtins`, `JavaInterop`,
+`Environment`) moved to `dev.irij.runtime` in v0.7.0 to retire the
+misleading package name. They are bytecode-mode **runtime support** —
+`Values` (Irij value reps), `Builtins` (the builtin functions),
+`Environment` (the flat name → builtin registry `Builtins` fills) and
+`JavaInterop`. They are referenced from `RuntimeSupport`, not driven by
+an interpreter. (`EffectSystem`, the threaded effect runtime's handler
+stack, was removed in v0.9: nothing had pushed onto it since the
+threaded lowering went in v0.6.13.)

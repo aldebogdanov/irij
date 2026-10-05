@@ -262,6 +262,6 @@ runtime assertion could observe the error.
 Spawned fibers inherit `SM_STACK` (SM handler frames), `EFFECT_ROW`
 (declared row stack), the session namespace map (`NS`) and the
 per-thread session PrintStream (`SESSION_OUT`) via `ParentSnapshot`
-— see `concurrency.md`. `fireOp` from a fiber walks `SM_STACK` and
+— see `concurrency.md`. `RtEffects.perform` from a fiber walks `SM_STACK` and
 dispatches synchronously.
 
