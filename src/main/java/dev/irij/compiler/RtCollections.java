@@ -138,9 +138,8 @@ public final class RtCollections {
                     ((dev.irij.runtime.PVec) vec.elements()).cons(x));
         }
         if (v instanceof dev.irij.runtime.Values.IrijSet set) {
-            var out = new java.util.HashSet<>(set.elements());
-            out.add(x);
-            return new dev.irij.runtime.Values.IrijSet(out);
+            return new dev.irij.runtime.Values.IrijSet(
+                    ((dev.irij.runtime.PSet) set.elements()).cons(x));
         }
         throw new dev.irij.IrijRuntimeError(
                 "conj: expected Vector or Set, got " + RuntimeSupport.typeTag(v));

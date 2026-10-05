@@ -29,7 +29,7 @@ Terms used throughout the internals docs.
 | **MutableCallSite** | JSR-292 (`java.lang.invoke`) call site whose target can be swapped at runtime. Used for hot-redef. |
 | **nREPL** | Network REPL — Clojure-flavoured protocol. Irij hosts an nREPL server with bytecode-backed sessions (`BytecodeSession`); each connection gets a per-session classloader + namespace. |
 | **OpSection** | `(+)` etc. as a first-class fn value. Lowered to `GETSTATIC RuntimeSupport.OP_ADD` etc. |
-| **PMap / PVec** | The persistent structures behind Irij Maps and Vectors: an insertion-ordered HAMT (flat array up to 8 entries) and a 32-way trie vector. Share structure across versions; `assoc` / `conj` / `tail` don't copy. See `stdlib.md`. |
+| **PMap / PVec / PSet** | The persistent structures behind Irij Maps, Vectors and Sets: an insertion-ordered HAMT (flat array up to 8 entries), a 32-way trie vector, and a HAMT set. Share structure across versions; `assoc` / `conj` / `tail` don't copy. See `stdlib.md`. |
 | **Perform** | An effect-op invocation. SM mode (the only execution path): throw `PerformSignal`. |
 | **PerformSignal** | Pooled `RuntimeException` (stack-trace-free) carrying `(effectName, opName, args, continuation)`. Thrown by SM bodies at perform sites. |
 | **runWithSM** | SM-mode entry. Allocates `IrijContinuation`, enters `dispatchLoopSM`. |

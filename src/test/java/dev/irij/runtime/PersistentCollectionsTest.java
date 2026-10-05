@@ -160,6 +160,51 @@ class PersistentCollectionsTest {
         assertEquals(keys.get(1), m.keySet().iterator().next(), "insertion order survives");
     }
 
+    @Test void psetMatchesHashSetUnderRandomOps() {
+        Random r = new Random(3);
+        PSet s = PSet.EMPTY;
+        java.util.Set<Object> ref = new java.util.HashSet<>();
+        for (int i = 0; i < 50_000; i++) {
+            Object x = switch (r.nextInt(4)) {
+                case 0 -> (long) r.nextInt(2_000);
+                case 1 -> "s" + r.nextInt(2_000);
+                case 2 -> (double) r.nextInt(50);
+                default -> r.nextInt(100) == 0 ? null : (Object) PVec.of((long) r.nextInt(30));
+            };
+            if (r.nextInt(3) < 2) { s = s.cons(x); ref.add(x); }
+            else { s = s.without(x); ref.remove(x); }
+            if (i % 4_999 == 0) assertEquals(ref, s);
+        }
+        assertEquals(ref, s);
+        assertEquals(ref.hashCode(), s.hashCode());
+        assertEquals(ref.size(), new ArrayList<>(s).size(), "iterator yields each element once");
+        assertEquals(ref, PSet.from(ref));
+    }
+
+    @Test void psetStaysFastUnderAHashFlood() {
+        // Strings from "Aa"/"BB" blocks share a hashCode; so do longs of
+        // the form (k << 32) | k (hashCode 0 for every k).
+        List<Object> xs = new ArrayList<>();
+        List<String> keys = new ArrayList<>(List.of(""));
+        for (int round = 0; round < 14; round++) {
+            List<String> next = new ArrayList<>();
+            for (String k : keys) { next.add(k + "Aa"); next.add(k + "BB"); }
+            keys = next;
+        }
+        xs.addAll(keys);
+        for (long k = 0; k < 16_384; k++) xs.add((k << 32) | k);
+        long t0 = System.nanoTime();
+        PSet s = PSet.EMPTY;
+        for (Object x : xs) s = s.cons(x);
+        for (Object x : xs) assertTrue(s.contains(x));
+        for (int i = 0; i < xs.size(); i += 2) s = s.without(xs.get(i));
+        assertEquals(xs.size() / 2, s.size());
+        assertFalse(s.contains(xs.get(0)));
+        assertTrue(s.contains(xs.get(1)));
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertTrue(ms < 5_000, "hash flood took " + ms + " ms");
+    }
+
     @Test void pmapVersionsAreIndependent() {
         PMap base = PMap.EMPTY;
         for (int i = 0; i < 200; i++) base = base.assoc("k" + i, i);

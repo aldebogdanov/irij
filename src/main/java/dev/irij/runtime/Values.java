@@ -133,9 +133,11 @@ public final class Values {
         }
     }
 
+    /** A Set. Its elements are a {@link PSet} — persistent, so
+     *  {@code conj} shares structure instead of copying. */
     public record IrijSet(Set<Object> elements) {
         public IrijSet {
-            elements = Set.copyOf(elements);
+            elements = PSet.from(elements);
         }
 
         @Override

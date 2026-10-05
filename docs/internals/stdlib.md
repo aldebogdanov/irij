@@ -34,7 +34,7 @@ Registered as `BuiltinFn` objects in the global environment:
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)
 
-### Persistent Vectors and Maps
+### Persistent Vectors, Maps and Sets
 
 `IrijVector`'s elements are a `PVec` and `IrijMap`'s entries a `PMap`
 (`dev.irij.runtime`), each implementing the plain `java.util` interface
@@ -64,7 +64,13 @@ Each version shares structure with the one it came from. Before, every
 two `LinkedHashMap` copies), so building one element at a time was
 quadratic: a 30 000-element `conj` loop took ~0.7 s and a 20 000-key
 `assoc` loop ~6 s (now ~2 ms and ~7 ms); `head`/`tail` recursion over
-20 000 elements went from ~0.7 s to ~2 ms. Sets still copy on `conj`.
+20 000 elements went from ~0.7 s to ~2 ms.
+
+`IrijSet`'s elements are a `PSet` — a HAMT over the elements'
+`hashCode`s, no order. Fully colliding strings, numbers, keywords and
+booleans go into a second trie keyed by the same seeded SipHash; other
+colliding values share a flat list. A 20 000-element `conj` loop went
+from ~6 s to ~6 ms.
 - Math (`abs`, `min`, `max`, `pi`, `e`)
 - Higher-order (`fold`)
 - Concurrency (`spawn`, `await`, `sleep`, `par`, `race`, `timeout`,
