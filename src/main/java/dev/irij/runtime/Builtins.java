@@ -23,11 +23,6 @@ public final class Builtins {
 
     private Builtins() {}
 
-    /** Single stdin reader shared across all read-line calls — re-wrapping
-     *  System.in per call would fragment the underlying buffer and drop input. */
-    private static final java.io.BufferedReader STDIN_READER =
-        new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
-
     /** Forbidden builtins in sandbox mode. After phase 3d the raw FS
      *  + multipart entries are gone too (FileIO + Serve effects route
      *  through cap providers that aren't on the sandbox classpath; the

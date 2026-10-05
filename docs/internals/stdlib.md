@@ -21,7 +21,9 @@ Registered as `BuiltinFn` objects in the global environment:
   `mod` is the module-decl keyword, so the old `mod` builtin could
   never be written down. The Java statics behind them keep the names
   `RtOps.div` / `RtOps.mod`, since those also back `/` and `%`.
-- IO (`print`, `println`, `dbg`, `read-line`)
+- IO (`print`, `println`, `dbg`, `read-line`). `read-line` reads stdin through
+  one shared reader, so piped input arrives line by line, and returns ()
+  at the end of input
 - Conversion (`to-str`, `to-vec`, `to-set`, `to-tuple`) —
   `to-set`/`to-tuple` are the dynamic-arity counterparts of the
   `#{}` and `#(...)` literals: a Tuple whose size is only known at
