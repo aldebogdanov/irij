@@ -131,6 +131,9 @@ public final class NReplSession {
             return errorResponseWithOut(bgPrefix, capture, "Compile error: " + e.getMessage());
         } catch (IrijRuntimeError e) {
             return errorResponseWithOut(bgPrefix, capture, "Runtime error: " + e.getMessage());
+        } catch (StackOverflowError e) {
+            // Not an Exception: left uncaught it ended the connection.
+            return errorResponseWithOut(bgPrefix, capture, "Runtime error: stack overflow (recursion too deep)");
         } catch (Exception e) {
             Throwable cause = e.getCause() != null ? e.getCause() : e;
             return errorResponseWithOut(bgPrefix, capture, "Runtime error: " + cause.getMessage());

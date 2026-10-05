@@ -160,3 +160,17 @@ without colliding with subsequent eval output.
   decoder; spec-compliant clients should "just work" but edge cases
   with binary data aren't fuzz-tested.
 - **`clone`** is registered in `describe` but not fully implemented.
+
+## Robustness
+
+An eval that overflows the stack is an error response (`err`
+"stack overflow"), not a dropped connection: `StackOverflowError` is not
+an `Exception`, and escaping the op handler used to end the client's
+connection thread. The MCP server (`irij --mcp-server`) runs each
+`irij_eval` / `irij_run` call on its own thread with a deadline
+(`irij.mcp.timeout.ms`, 120 s): the server reads one message at a time,
+so an eval that never returned used to wedge it for good; now the eval
+is interrupted (compiled loops stop at their next back-edge, see
+`concurrency.md`) and reported, and the message loop catches
+`Throwable`.
+

@@ -24,6 +24,13 @@ class NReplSessionTest {
         return session.handleOp(Map.of("op", "eval", "code", code));
     }
 
+    @Test void stackOverflowIsAnErrorResponseAndTheSessionLivesOn() {
+        var session = new NReplSession();
+        var resp = eval(session, "fn deep\n  (n -> 1 + (deep (n + 1)))\ndeep 0");
+        assertTrue(String.valueOf(resp.get("err")).contains("stack overflow"), resp.toString());
+        assertEquals("3", eval(session, "1 + 2").get("value"));
+    }
+
     @Test void evalSimpleExpressionPrintsToOut() {
         var session = new NReplSession();
         var resp = eval(session, "println (1 + 2)");

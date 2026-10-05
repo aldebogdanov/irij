@@ -98,6 +98,21 @@ map literals and `{...base (k)= v}` record updates. Dynamic keys are
 skipped by row-var inference over record specs (key unknowable at
 compile time).
 
+## Nesting limit (2026-10)
+
+ANTLR's adaptive prediction recurses — and allocates — once per nesting
+level. A couple of thousand nested brackets overflowed the parser
+thread's stack, and ~20 000 (a 40 KB file) exhausted a 256 MB heap
+before that; from the CLI that was a JVM stack trace, in the LSP an
+`Error` its `catch (Exception)` didn't stop. `IrijParseDriver.parse`
+now fills the token stream first and counts bracket depth (`(`, `[`,
+`{`, `#[`, `#{`, `#(` against their closers; strings and comments
+don't count): past `irij.parse.max.nesting` (512) it returns a parse
+error — "expression nested too deeply to parse" — without running the
+parser. A `StackOverflowError` that still escapes ANTLR, or the AST
+builder and compiler passes (`IrijCompiler`), becomes the same kind of
+error.
+
 ## Inline `if` parts are postfix expressions (2026-10)
 
 ```
