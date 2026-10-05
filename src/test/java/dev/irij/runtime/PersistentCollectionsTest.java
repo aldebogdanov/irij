@@ -134,6 +134,32 @@ class PersistentCollectionsTest {
         assertEquals(5, m.get("AaBB"));
     }
 
+    @Test void pmapStaysFastUnderAHashFlood() {
+        // 2^15 keys built from "Aa"/"BB" blocks all share one
+        // String.hashCode. A linear collision bucket makes this
+        // quadratic (~5e8 comparisons); the keyed second trie doesn't.
+        List<String> keys = new ArrayList<>();
+        keys.add("");
+        for (int round = 0; round < 15; round++) {
+            List<String> next = new ArrayList<>(keys.size() * 2);
+            for (String k : keys) { next.add(k + "Aa"); next.add(k + "BB"); }
+            keys = next;
+        }
+        int h = keys.get(0).hashCode();
+        assertTrue(keys.stream().allMatch(k -> k.hashCode() == h));
+        long t0 = System.nanoTime();
+        PMap m = PMap.EMPTY;
+        for (int i = 0; i < keys.size(); i++) m = m.assoc(keys.get(i), i);
+        for (int i = 0; i < keys.size(); i++) assertEquals(i, m.get(keys.get(i)));
+        for (int i = 0; i < keys.size(); i += 2) m = m.without(keys.get(i));
+        assertEquals(keys.size() / 2, m.size());
+        assertNull(m.get(keys.get(0)));
+        assertEquals(1, m.get(keys.get(1)));
+        long ms = (System.nanoTime() - t0) / 1_000_000;
+        assertTrue(ms < 5_000, "hash flood took " + ms + " ms");
+        assertEquals(keys.get(1), m.keySet().iterator().next(), "insertion order survives");
+    }
+
     @Test void pmapVersionsAreIndependent() {
         PMap base = PMap.EMPTY;
         for (int i = 0; i < 200; i++) base = base.assoc("k" + i, i);

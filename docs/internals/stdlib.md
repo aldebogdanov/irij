@@ -52,7 +52,12 @@ so code reading `.elements()` / `.entries()` is unchanged.
   plus a `PVec` of keys for order, with tombstones for removed keys
   until they outnumber live ones. Replacing a value keeps its place;
   removing and re-adding moves the key to the end — `LinkedHashMap`'s
-  order, which it replaces.
+  order, which it replaces. Keys whose `String.hashCode`s collide
+  (trivial to craft: `"Aa"` and `"BB"`, and every concatenation of
+  them) go into a second trie keyed by a per-JVM-seeded SipHash, so a
+  request full of crafted JSON keys stays O(n log n) to parse —
+  `LinkedHashMap` defended by treeifying; a flat collision list would
+  have made it quadratic.
 
 Each version shares structure with the one it came from. Before, every
 `conj` / `assoc` / `tail` copied the whole collection (`List.copyOf`,

@@ -150,7 +150,7 @@ public final class PMap extends AbstractMap<String, Object> {
             return new PMap(r, size, order, dead);
         }
         Slot s = new Slot(order.size(), value);
-        Node r = root == null ? BitmapNode.EMPTY.assoc(0, h, key, s) : root.assoc(0, h, key, s);
+        Node r = root == null ? BitmapNode.PRIMARY.assoc(0, h, key, s) : root.assoc(0, h, key, s);
         return new PMap(r, size + 1, order.cons(key), dead);
     }
 
@@ -176,7 +176,7 @@ public final class PMap extends AbstractMap<String, Object> {
 
     /** The same entries in trie mode (for growing past {@link #ARRAY_MAX}). */
     private PMap toTrie() {
-        Node r = BitmapNode.EMPTY;
+        Node r = BitmapNode.PRIMARY;
         PVec.Builder keys = new PVec.Builder();
         for (int i = 0; i < pairs.length; i += 2) {
             String k = (String) pairs[i];
@@ -245,15 +245,20 @@ public final class PMap extends AbstractMap<String, Object> {
     }
 
     /** Up to 32 children, present ones packed in bitmap order. Each
-     *  present position holds either a key + slot or (key null) a child. */
+     *  present position holds either a key + slot or (key null) a child.
+     *  {@code secondary} nodes live inside a {@link CollisionNode} and are
+     *  indexed by {@link #hash2} instead of {@link #hash}. */
     private static final class BitmapNode implements Node {
-        static final BitmapNode EMPTY = new BitmapNode(0, new Object[0]);
+        static final BitmapNode PRIMARY = new BitmapNode(false, 0, new Object[0]);
+        static final BitmapNode SECONDARY = new BitmapNode(true, 0, new Object[0]);
 
+        final boolean secondary;
         final int bitmap;
         /** Pairs: [key, slot] for an entry, [null, Node] for a subtree. */
         final Object[] array;
 
-        BitmapNode(int bitmap, Object[] array) {
+        BitmapNode(boolean secondary, int bitmap, Object[] array) {
+            this.secondary = secondary;
             this.bitmap = bitmap;
             this.array = array;
         }
@@ -287,7 +292,8 @@ public final class PMap extends AbstractMap<String, Object> {
                 if (key.equals(k)) return withPair(i, k, slot);
                 // Two keys share this position: push both one level down.
                 String other = (String) k;
-                Node sub = pair(shift + BITS, PMap.hash(other), other, (Slot) v, hash, key, slot);
+                int otherHash = secondary ? hash2(other) : PMap.hash(other);
+                Node sub = pair(shift + BITS, otherHash, other, (Slot) v, hash, key, slot);
                 return withPair(i, null, sub);
             }
             Object[] a = new Object[array.length + 2];
@@ -295,7 +301,7 @@ public final class PMap extends AbstractMap<String, Object> {
             a[2 * idx] = key;
             a[2 * idx + 1] = slot;
             System.arraycopy(array, 2 * idx, a, 2 * idx + 2, array.length - 2 * idx);
-            return new BitmapNode(bitmap | bit, a);
+            return new BitmapNode(secondary, bitmap | bit, a);
         }
 
         @Override public Node without(int shift, int hash, String key) {
@@ -315,29 +321,74 @@ public final class PMap extends AbstractMap<String, Object> {
             Object[] a = new Object[array.length - 2];
             System.arraycopy(array, 0, a, 0, i);
             System.arraycopy(array, i + 2, a, i, array.length - i - 2);
-            return new BitmapNode(bitmap ^ bit, a);
+            return new BitmapNode(secondary, bitmap ^ bit, a);
         }
 
         private BitmapNode withPair(int i, Object k, Object v) {
             Object[] a = array.clone();
             a[i] = k;
             a[i + 1] = v;
-            return new BitmapNode(bitmap, a);
+            return new BitmapNode(secondary, bitmap, a);
         }
 
         /** A node holding two entries whose hashes agree below {@code shift}. */
-        private static Node pair(int shift, int h1, String k1, Slot s1, int h2, String k2, Slot s2) {
-            if (h1 == h2) return new CollisionNode(h1, new Object[]{k1, s1, k2, s2});
-            return EMPTY.assoc(shift, h1, k1, s1).assoc(shift, h2, k2, s2);
+        private Node pair(int shift, int h1, String k1, Slot s1, int h2, String k2, Slot s2) {
+            if (h1 == h2) {
+                if (secondary) return new ListNode(h1, new Object[]{k1, s1, k2, s2});
+                Node inner = SECONDARY.assoc(0, hash2(k1), k1, s1).assoc(0, hash2(k2), k2, s2);
+                return new CollisionNode(h1, inner);
+            }
+            BitmapNode empty = secondary ? SECONDARY : PRIMARY;
+            return empty.assoc(shift, h1, k1, s1).assoc(shift, h2, k2, s2);
         }
     }
 
-    /** Keys whose full 32-bit hashes collide: a flat list of pairs. */
+    /**
+     * Keys whose {@code String.hashCode}s collide entirely. Such keys are
+     * trivial to manufacture ("Aa" and "BB" collide, and so does every
+     * concatenation of them), so a flat list here would make a request
+     * full of crafted JSON keys quadratic to parse — the LinkedHashMap
+     * this replaces defended by treeifying. Instead the colliding keys go
+     * into a second trie indexed by {@link #hash2}, a keyed SipHash whose
+     * collisions an attacker can't predict.
+     */
     private static final class CollisionNode implements Node {
+        final int hash;
+        final Node inner;
+
+        CollisionNode(int hash, Node inner) {
+            this.hash = hash;
+            this.inner = inner;
+        }
+
+        @Override public Slot find(int shift, int h, String key) {
+            return h == hash ? inner.find(0, hash2(key), key) : null;
+        }
+
+        @Override public Node assoc(int shift, int h, String key, Slot slot) {
+            if (h != hash) {
+                // Different hash: nest this node under a bitmap node.
+                Node n = new BitmapNode(false, 1 << ((hash >>> shift) & MASK), new Object[]{null, this});
+                return n.assoc(shift, h, key, slot);
+            }
+            Node in = inner.assoc(0, hash2(key), key, slot);
+            return in == inner ? this : new CollisionNode(hash, in);
+        }
+
+        @Override public Node without(int shift, int h, String key) {
+            if (h != hash) return this;
+            Node in = inner.without(0, hash2(key), key);
+            if (in == inner) return this;
+            return in == null ? null : new CollisionNode(hash, in);
+        }
+    }
+
+    /** Keys whose {@link #hash2}es collide too: a flat list of pairs. */
+    private static final class ListNode implements Node {
         final int hash;
         final Object[] array;
 
-        CollisionNode(int hash, Object[] array) {
+        ListNode(int hash, Object[] array) {
             this.hash = hash;
             this.array = array;
         }
@@ -354,8 +405,7 @@ public final class PMap extends AbstractMap<String, Object> {
 
         @Override public Node assoc(int shift, int h, String key, Slot slot) {
             if (h != hash) {
-                // Different hash: nest this collision node under a bitmap node.
-                Node n = new BitmapNode(1 << ((hash >>> shift) & MASK), new Object[]{null, this});
+                Node n = new BitmapNode(true, 1 << ((hash >>> shift) & MASK), new Object[]{null, this});
                 return n.assoc(shift, h, key, slot);
             }
             int i = indexOf(key);
@@ -368,7 +418,7 @@ public final class PMap extends AbstractMap<String, Object> {
                 a[array.length] = key;
                 a[array.length + 1] = slot;
             }
-            return new CollisionNode(hash, a);
+            return new ListNode(hash, a);
         }
 
         @Override public Node without(int shift, int h, String key) {
@@ -378,7 +428,54 @@ public final class PMap extends AbstractMap<String, Object> {
             Object[] a = new Object[array.length - 2];
             System.arraycopy(array, 0, a, 0, i);
             System.arraycopy(array, i + 2, a, i, array.length - i - 2);
-            return new CollisionNode(hash, a);
+            return new ListNode(hash, a);
         }
+    }
+
+    // ── Keyed hash for colliding keys: SipHash-2-4 over UTF-16 code units ──
+
+    private static final long K0, K1;
+    static {
+        var rnd = new java.security.SecureRandom();
+        K0 = rnd.nextLong();
+        K1 = rnd.nextLong();
+    }
+
+    static int hash2(String s) {
+        long v0 = K0 ^ 0x736f6d6570736575L, v1 = K1 ^ 0x646f72616e646f6dL;
+        long v2 = K0 ^ 0x6c7967656e657261L, v3 = K1 ^ 0x7465646279746573L;
+        int n = s.length();
+        int i = 0;
+        for (; i + 4 <= n; i += 4) {
+            long m = s.charAt(i) | ((long) s.charAt(i + 1) << 16)
+                    | ((long) s.charAt(i + 2) << 32) | ((long) s.charAt(i + 3) << 48);
+            v3 ^= m;
+            for (int r = 0; r < 2; r++) {
+                v0 += v1; v1 = Long.rotateLeft(v1, 13); v1 ^= v0; v0 = Long.rotateLeft(v0, 32);
+                v2 += v3; v3 = Long.rotateLeft(v3, 16); v3 ^= v2;
+                v0 += v3; v3 = Long.rotateLeft(v3, 21); v3 ^= v0;
+                v2 += v1; v1 = Long.rotateLeft(v1, 17); v1 ^= v2; v2 = Long.rotateLeft(v2, 32);
+            }
+            v0 ^= m;
+        }
+        long b = ((long) (2 * n) & 0xff) << 56;
+        for (int j = 0; i < n; i++, j++) b |= (long) s.charAt(i) << (16 * j);
+        v3 ^= b;
+        for (int r = 0; r < 2; r++) {
+            v0 += v1; v1 = Long.rotateLeft(v1, 13); v1 ^= v0; v0 = Long.rotateLeft(v0, 32);
+            v2 += v3; v3 = Long.rotateLeft(v3, 16); v3 ^= v2;
+            v0 += v3; v3 = Long.rotateLeft(v3, 21); v3 ^= v0;
+            v2 += v1; v1 = Long.rotateLeft(v1, 17); v1 ^= v2; v2 = Long.rotateLeft(v2, 32);
+        }
+        v0 ^= b;
+        v2 ^= 0xff;
+        for (int r = 0; r < 4; r++) {
+            v0 += v1; v1 = Long.rotateLeft(v1, 13); v1 ^= v0; v0 = Long.rotateLeft(v0, 32);
+            v2 += v3; v3 = Long.rotateLeft(v3, 16); v3 ^= v2;
+            v0 += v3; v3 = Long.rotateLeft(v3, 21); v3 ^= v0;
+            v2 += v1; v1 = Long.rotateLeft(v1, 17); v1 ^= v2; v2 = Long.rotateLeft(v2, 32);
+        }
+        long h = v0 ^ v1 ^ v2 ^ v3;
+        return (int) (h ^ (h >>> 32));
     }
 }
