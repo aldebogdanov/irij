@@ -284,7 +284,7 @@ public final class IrijHttpServer {
 
         private static String canonical(String key) {
             if (key.isEmpty()) return key;
-            char[] c = key.toLowerCase().toCharArray();
+            char[] c = key.toLowerCase(java.util.Locale.ROOT).toCharArray();
             boolean up = true;
             for (int i = 0; i < c.length; i++) {
                 if (up && Character.isLetter(c[i])) { c[i] = Character.toUpperCase(c[i]); up = false; }

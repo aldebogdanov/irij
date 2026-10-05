@@ -151,7 +151,7 @@ public final class IrijLspServer implements LanguageServer,
             if (!sym.docComment().isEmpty()) {
                 b.append(sym.docComment()).append("\n\n");
             }
-            b.append("*").append(sym.kind().name().toLowerCase()).append("* ")
+            b.append("*").append(sym.kind().name().toLowerCase(java.util.Locale.ROOT)).append("* ")
                     .append("(line ").append(sym.loc().line()).append(")");
             body = b.toString();
         } else {

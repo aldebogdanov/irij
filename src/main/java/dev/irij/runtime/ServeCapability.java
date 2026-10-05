@@ -391,7 +391,7 @@ public final class ServeCapability {
         reqMap.put("params", new IrijMap(parseQueryParams(uri.getRawQuery())));
         LinkedHashMap<String, Object> headers = new LinkedHashMap<>();
         exchange.getRequestHeaders().forEach((k, v) ->
-                headers.put(k.toLowerCase(),
+                headers.put(k.toLowerCase(java.util.Locale.ROOT),
                         v.size() == 1 ? v.get(0) : String.join(", ", v)));
         reqMap.put("headers", new IrijMap(headers));
         byte[] bodyBytes = exchange.getRequestBody().readAllBytes();

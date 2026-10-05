@@ -78,7 +78,7 @@ public final class TermDecoder {
                 }
                 if (c >= 28 && c <= 31) {
                     // Ctrl-\ Ctrl-] Ctrl-^ Ctrl-_
-                    yield key(String.valueOf((char) (c + 64)).toLowerCase(), "", "ctrl");
+                    yield key(String.valueOf((char) (c + 64)).toLowerCase(java.util.Locale.ROOT), "", "ctrl");
                 }
                 if (c == 32) yield key("space", " ");
                 String s = new String(Character.toChars(c));
