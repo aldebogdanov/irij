@@ -51,6 +51,15 @@ final class FnEmitter implements Opcodes {
             dev.irij.ast.SpecExpr spec = specs.get(i);
             if (skipSpec(spec)) continue;
             String encoded = SpecValidator.encode(spec);
+            String cls = primitiveSpecClass(spec);
+            Label ok = new Label();
+            if (cls != null) {
+                // Fast path: a primitive spec is one type test. The
+                // validator runs only on a mismatch, to raise the error.
+                mv.visitVarInsn(ALOAD, i);
+                mv.visitTypeInsn(INSTANCEOF, cls);
+                mv.visitJumpInsn(IFNE, ok);
+            }
             mv.visitVarInsn(ALOAD, i);
             mv.visitLdcInsn(encoded);
             mv.visitLdcInsn(fn.name());
@@ -59,7 +68,29 @@ final class FnEmitter implements Opcodes {
                     "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
                     false);
             mv.visitVarInsn(ASTORE, i);
+            mv.visitLabel(ok);
         }
+    }
+
+    /** The JVM class a value must be an instance of to satisfy {@code spec},
+     *  when that test is the whole check (see SpecValidator.validateNamed);
+     *  null otherwise. Lets the emitter inline the common case. */
+    static String primitiveSpecClass(dev.irij.ast.SpecExpr spec) {
+        if (!(spec instanceof dev.irij.ast.SpecExpr.Name n)) return null;
+        return switch (n.name()) {
+            case "Int" -> "java/lang/Long";
+            case "Float" -> "java/lang/Double";
+            case "Bool" -> "java/lang/Boolean";
+            case "Str" -> "java/lang/String";
+            case "Keyword" -> "dev/irij/runtime/Values$Keyword";
+            case "Vec", "Vector" -> "dev/irij/runtime/Values$IrijVector";
+            case "Set" -> "dev/irij/runtime/Values$IrijSet";
+            case "Tuple" -> "dev/irij/runtime/Values$IrijTuple";
+            // Also accepts records (Tagged with named fields) — those take
+            // the slow path, which knows.
+            case "Map" -> "dev/irij/runtime/Values$IrijMap";
+            default -> null;
+        };
     }
 
 
@@ -67,6 +98,14 @@ final class FnEmitter implements Opcodes {
      *  has no validatable output (no spec annotation, wildcard, or
      *  lowercase type variable). The output spec is the last entry
      *  in {@code specAnnotations()}. */
+    /** The output spec, for {@link #primitiveSpecClass}; null if none. */
+    static dev.irij.ast.SpecExpr outputSpec(Decl.FnDecl fn) {
+        List<dev.irij.ast.SpecExpr> specs = fn.specAnnotations();
+        if (specs == null || specs.isEmpty()) return null;
+        dev.irij.ast.SpecExpr out = specs.get(specs.size() - 1);
+        return skipSpec(out) ? null : out;
+    }
+
     static String outputSpecEncoded(Decl.FnDecl fn) {
         List<dev.irij.ast.SpecExpr> specs = fn.specAnnotations();
         if (specs == null || specs.isEmpty()) return null;
@@ -83,7 +122,7 @@ final class FnEmitter implements Opcodes {
         if (spec instanceof dev.irij.ast.SpecExpr.Var) return true;
         if (spec instanceof dev.irij.ast.SpecExpr.Name n) {
             String nm = n.name();
-            if (nm.equals("_")) return true;
+            if (nm.equals("_") || nm.equals("Any")) return true;
             if (!nm.isEmpty() && Character.isLowerCase(nm.charAt(0))) return true;
         }
         return false;
@@ -96,12 +135,19 @@ final class FnEmitter implements Opcodes {
     void emitTailReturn(MethodVisitor mv) {
         emitPostChecks(mv);
         if (ce.currentOutputSpec != null) {
+            Label ok = new Label();
+            if (ce.currentOutputSpecClass != null) {
+                mv.visitInsn(DUP);
+                mv.visitTypeInsn(INSTANCEOF, ce.currentOutputSpecClass);
+                mv.visitJumpInsn(IFNE, ok);
+            }
             mv.visitLdcInsn(ce.currentOutputSpec);
             mv.visitLdcInsn(ce.currentFnName);
             mv.visitInsn(ICONST_M1);
             mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "validateEncoded",
                     "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
                     false);
+            mv.visitLabel(ok);
         }
         // Pop the effect-row frame this fn pushed on entry. The result
         // is already on the stack; exitFn returns void, so the stack
@@ -317,6 +363,7 @@ final class FnEmitter implements Opcodes {
         int savedFnArity = ce.currentFnArity;
         Label savedFnEntry = ce.currentFnEntry;
         String savedOutputSpec = ce.currentOutputSpec;
+        String savedOutputSpecClass = ce.currentOutputSpecClass;
         List<Integer> savedPostSlots = ce.currentPostSlots;
         int savedPostTemp = ce.currentPostTempSlot;
         List<String> savedPostBlame = ce.currentPostBlame;
@@ -328,6 +375,7 @@ final class FnEmitter implements Opcodes {
         // every tail-return validates against it. Non-validatable specs
         // (wildcard / lowercase var) → null, no per-return overhead.
         ce.currentOutputSpec = outputSpecEncoded(fn);
+        ce.currentOutputSpecClass = primitiveSpecClass(outputSpec(fn));
         installPostSlots(fn, mv, locals);
 
         // Runtime effect-row tracking. Push this fn's declared row onto
@@ -340,8 +388,8 @@ final class FnEmitter implements Opcodes {
         if (ambient) {
             mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterFnAmbient"), "enterFnAmbient", "()V", false);
         } else {
-            ce.smEm.emitStringArrayConst(mv, fn.effectRow());
-            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterFn"), "enterFn", "([Ljava/lang/String;)V", false);
+            ce.smEm.emitEffectRowConst(mv, fn.effectRow());
+            mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtEffects", "enterFnRow", "(Ljava/util/Set;)V", false);
         }
         Label efTryStart = new Label();
         Label efTryEnd = new Label();
@@ -374,6 +422,7 @@ final class FnEmitter implements Opcodes {
             ce.currentFnArity = savedFnArity;
             ce.currentFnEntry = savedFnEntry;
             ce.currentOutputSpec = savedOutputSpec;
+            ce.currentOutputSpecClass = savedOutputSpecClass;
             ce.currentPostSlots = savedPostSlots;
             ce.currentPostTempSlot = savedPostTemp;
             ce.currentPostBlame = savedPostBlame;

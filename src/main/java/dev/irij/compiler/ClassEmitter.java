@@ -133,6 +133,9 @@ final class ClassEmitter implements Opcodes {
      *  Pushed/popped around {@link #emitFn} so lambdas (which build
      *  their own methods) don't inherit the outer fn's output spec. */
     String currentOutputSpec = null;
+    /** JVM class for an inlined output-spec type test, when the output
+     *  spec is primitive ({@link FnEmitter#primitiveSpecClass}). */
+    String currentOutputSpecClass = null;
 
     /** Post-condition slots (each holds a compiled post-lambda
      *  IrijFn) for the surrounding fn. Each {@link #emitTailReturn}

@@ -99,7 +99,9 @@ Effect 'Console' not declared: 'call to f' requires ::: Console
 
 Checked statically by `EffectRowChecker` (callee row ⊆ available
 set at every call site), with a runtime backstop: the emitter calls
-`RtEffects.enterFn(declaredRow)` on fn entry and
+`RtEffects.enterFnRow(row)` on fn entry — `row` an immutable set loaded
+as a `ConstantDynamic` (`RtEffects.effectRow`), resolved once per site
+instead of an array and a set allocated per call — and
 `RtEffects.checkPerformEffect` at every perform site, which peeks
 the top frame of the thread's `EFFECT_ROW` stack.
 
@@ -271,10 +273,18 @@ INVOKESTATIC SpecValidator.validateEncoded;
 ASTORE param_i;
 ```
 
-The output spec is captured into `currentOutputSpec` on entry to
-`emitFn` and consumed by `emitTailReturn`, which prepends the same
-`validateEncoded` call (with `argIdx = -1`) before every ARETURN at
-fn-body tail positions. Lambda bodies, SM continuations, handler-
+When the spec is a primitive whose whole check is one type test
+(`Int Float Bool Str Keyword Vec Set Tuple`, and `Map` for the common
+case), `FnEmitter.primitiveSpecClass` lets the emitter put an inline
+`INSTANCEOF` in front: the validator call above runs only on a
+mismatch, to raise the blame error. That made a spec'd `fib` ~3× faster
+— the decode-and-dispatch per argument had been ~45% of a call. `Any`,
+like `_`, emits nothing.
+
+The output spec is captured into `currentOutputSpec` (and its inline
+class into `currentOutputSpecClass`) on entry to `emitFn` and consumed
+by `emitTailReturn`, which prepends the same check (with
+`argIdx = -1`) before every ARETURN at fn-body tail positions. Lambda bodies, SM continuations, handler-
 build methods and the like emit raw ARETURN — they don't inherit
 the outer fn's output spec.
 

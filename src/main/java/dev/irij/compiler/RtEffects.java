@@ -364,6 +364,19 @@ public final class RtEffects {
     }
 
 
+    /** Push a fn's declared effect row, loaded as a per-call-site constant
+     *  ({@link #effectRow}): no per-call array or set allocation. */
+    public static void enterFnRow(java.util.Set<String> row) {
+        EFFECT_ROW.get().push(row);
+    }
+
+    /** {@code ConstantDynamic} bootstrap: the immutable set of a declared
+     *  effect row, resolved once per call site by the JVM. */
+    public static java.util.Set<String> effectRow(java.lang.invoke.MethodHandles.Lookup lookup,
+            String name, Class<?> type, String... effects) {
+        return java.util.Set.copyOf(java.util.Arrays.asList(effects));
+    }
+
     /** Push an ambient frame — fn body inherits caller's effects. Used
      *  for {@code ::: Any} and parametric row-variables. */
     public static void enterFnAmbient() {
