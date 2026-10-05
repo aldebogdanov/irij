@@ -64,8 +64,9 @@ final class FnEmitter implements Opcodes {
             mv.visitLdcInsn(encoded);
             mv.visitLdcInsn(fn.name());
             ce.exprEm.pushIconst(mv, i);
+            mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
             mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "validateEncoded",
-                    "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
+                    "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;)Ljava/lang/Object;",
                     false);
             mv.visitVarInsn(ASTORE, i);
             mv.visitLabel(ok);
@@ -144,8 +145,9 @@ final class FnEmitter implements Opcodes {
             mv.visitLdcInsn(ce.currentOutputSpec);
             mv.visitLdcInsn(ce.currentFnName);
             mv.visitInsn(ICONST_M1);
+            mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
             mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "validateEncoded",
-                    "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;I)Ljava/lang/Object;",
+                    "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/String;ILjava/lang/Class;)Ljava/lang/Object;",
                     false);
             mv.visitLabel(ok);
         }

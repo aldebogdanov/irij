@@ -258,9 +258,13 @@ public final class RuntimeSupport {
     /** `validate spec-name value` — returns Ok(v) on pass, Err(msg)
      *  on failure. Mirrors the interpreter's `validate` builtin. */
     public static Object validate(Object specNameArg, Object value) {
+        return validate(specNameArg, value, null);
+    }
+
+    public static Object validate(Object specNameArg, Object value, Class<?> owner) {
         String name = RtStrings.asStr(specNameArg, "validate");
         try {
-            Object result = dev.irij.compiler.SpecValidator.validate(
+            Object result = SpecValidator.validateIn(SpecValidator.registryOf(owner),
                     value, new dev.irij.ast.SpecExpr.Name(name));
             return new dev.irij.runtime.Values.Tagged(
                     "Ok", java.util.List.of(result));
@@ -283,8 +287,12 @@ public final class RuntimeSupport {
     }
 
     public static Object validateBang(Object specNameArg, Object value) {
+        return validateBang(specNameArg, value, null);
+    }
+
+    public static Object validateBang(Object specNameArg, Object value, Class<?> owner) {
         String name = RtStrings.asStr(specNameArg, "validate!");
-        return dev.irij.compiler.SpecValidator.validate(
+        return SpecValidator.validateIn(SpecValidator.registryOf(owner),
                 value, new dev.irij.ast.SpecExpr.Name(name));
     }
 

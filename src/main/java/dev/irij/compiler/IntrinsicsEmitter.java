@@ -200,8 +200,8 @@ final class IntrinsicsEmitter implements Opcodes {
             case "to-tuple"     -> { return emitRT1(args, mv, locals, "toTuple"); }
             case "not"          -> { return emitRT1(args, mv, locals, "notOp"); }
             case "type-of"      -> { return emitRT1(args, mv, locals, "typeOf"); }
-            case "validate"     -> { return emitRT2(args, mv, locals, "validate"); }
-            case "validate!"    -> { return emitRT2(args, mv, locals, "validateBang"); }
+            case "validate"     -> { return emitValidate(args, mv, locals, "validate"); }
+            case "validate!"    -> { return emitValidate(args, mv, locals, "validateBang"); }
             // raw-db-* emit entries removed phase 3a; the Db effect ops
             // route through `db-jdbc.method` dispatch in std/db.irj.
             // raw-sse-* emit entries removed phase 3c (ServeCapability)
@@ -401,6 +401,18 @@ final class IntrinsicsEmitter implements Opcodes {
 
 
     /** Emit a 2-arg call to RT.<method>(Object, Object): Object. */
+    /** {@code validate} / {@code validate!}: like {@link #emitRT2}, plus the
+     *  calling class, so spec names resolve in this program's registry. */
+    private boolean emitValidate(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
+        if (args.size() != 2) return false;
+        ce.exprEm.emitExpr(args.get(0), mv, locals);
+        ce.exprEm.emitExpr(args.get(1), mv, locals);
+        mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
+        mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RuntimeSupport", method,
+                "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Class;)Ljava/lang/Object;", false);
+        return true;
+    }
+
     boolean emitRT2(List<Expr> args, MethodVisitor mv, Locals locals, String method) {
         if (args.size() != 2) return false;
         ce.exprEm.emitExpr(args.get(0), mv, locals);

@@ -78,6 +78,26 @@ class SandboxEvalTest {
                 "error: " + r.get("error"));
     }
 
+    @Test void sessionsKeepTheirOwnSpecDeclarations() {
+        String a = (String) RuntimeSessions.rawSessionCreate();
+        String b = (String) RuntimeSessions.rawSessionCreate();
+        try {
+            var r1 = ((Values.IrijMap) RuntimeSessions.rawSessionEval(a,
+                    "spec Person\n  name :: Str\nfn who :: Person Str\n  (p -> p.name)\nwho {name= \"ann\"}", 5000L)).entries();
+            assertEquals("ann", r1.get("value"), "error: " + r1.get("error"));
+            // Another visitor declares a different Person.
+            var r2 = ((Values.IrijMap) RuntimeSessions.rawSessionEval(b,
+                    "spec Person\n  age :: Int\nfn old :: Person Int\n  (p -> p.age)\nold {age= 70}", 5000L)).entries();
+            assertEquals("70", r2.get("value"), "error: " + r2.get("error"));
+            // The first session's Person is still its own.
+            var r3 = ((Values.IrijMap) RuntimeSessions.rawSessionEval(a, "who {name= \"bob\"}", 5000L)).entries();
+            assertEquals("bob", r3.get("value"), "error: " + r3.get("error"));
+        } finally {
+            RuntimeSessions.rawSessionDestroy(a);
+            RuntimeSessions.rawSessionDestroy(b);
+        }
+    }
+
     @Test void sessionEvalsRunOneAtATime() throws Exception {
         String id = (String) RuntimeSessions.rawSessionCreate();
         try {

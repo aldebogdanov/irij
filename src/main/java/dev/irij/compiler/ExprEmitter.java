@@ -961,8 +961,9 @@ final class ExprEmitter implements Opcodes {
                 // straight through every later check: `R "str" 2` would
                 // satisfy `x :: Int` forever after.
                 mv.visitLdcInsn(specName);
+                mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
                 mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "certifyProduct",
-                        "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
+                        "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;", false);
             } else {
                 mv.visitMethodInsn(INVOKESPECIAL, ClassEmitter.VALUES + "$Tagged", "<init>",
                         "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;)V", false);

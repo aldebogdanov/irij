@@ -61,18 +61,59 @@ public final class SpecValidator {
         record Sum(java.util.LinkedHashMap<String, Integer> variants) implements Descriptor {}
     }
 
-    private static final ConcurrentHashMap<String, Descriptor> REGISTRY = new ConcurrentHashMap<>();
+    /** Declared product/sum specs of one program: name → descriptor. */
+    public static final class Registry {
+        final ConcurrentHashMap<String, Descriptor> specs = new ConcurrentHashMap<>();
+    }
+
+    /** One registry per classloader. Every program run, and every
+     *  session (whose evals share one loader), has its own loader, so its
+     *  `spec` declarations are its own: a process-wide map let two
+     *  Playground visitors who both declared `spec Person` validate
+     *  against each other's. */
+    private static final java.util.Map<ClassLoader, Registry> BY_LOADER =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+
+    private static final ClassValue<Registry> OF_CLASS = new ClassValue<>() {
+        @Override protected Registry computeValue(Class<?> type) {
+            return forLoader(type.getClassLoader());
+        }
+    };
+
+    private static Registry forLoader(ClassLoader cl) {
+        return BY_LOADER.computeIfAbsent(cl, k -> new Registry());
+    }
+
+    /** The registry used by entry points that don't name a program. */
+    private static final Registry SHARED = forLoader(SpecValidator.class.getClassLoader());
+
+    /** The registry of the program whose code {@code owner} is. */
+    public static Registry registryOf(Class<?> owner) {
+        return owner == null ? SHARED : OF_CLASS.get(owner);
+    }
+
+    /** The registry the validation in progress on this thread resolves
+     *  user-declared spec names against. */
+    private static final ScopedValue<Registry> CURRENT = ScopedValue.newInstance();
+
+    private static Registry current() {
+        return CURRENT.isBound() ? CURRENT.get() : SHARED;
+    }
 
     /** Emitter-side: register a product spec (record-shaped). The
      *  fields array carries field names in declaration order; the
      *  parallel specs array carries each field's {@link #encode}d
      *  spec, or {@code ""} where the declaration left it open. */
-    public static void registerProduct(String name, String[] fields, String[] fieldSpecs) {
+    public static void registerProduct(Class<?> owner, String name, String[] fields, String[] fieldSpecs) {
         var specs = new java.util.ArrayList<String>(fields.length);
         for (int i = 0; i < fields.length; i++) {
             specs.add(i < fieldSpecs.length && fieldSpecs[i] != null ? fieldSpecs[i] : "");
         }
-        REGISTRY.put(name, new Descriptor.Product(List.of(fields), List.copyOf(specs)));
+        registryOf(owner).specs.put(name, new Descriptor.Product(List.of(fields), List.copyOf(specs)));
+    }
+
+    public static void registerProduct(String name, String[] fields, String[] fieldSpecs) {
+        registerProduct(null, name, fields, fieldSpecs);
     }
 
     /** Names-only registration — every field unconstrained. Kept for
@@ -85,18 +126,22 @@ public final class SpecValidator {
      *  {@code variantName, arity, variantName, arity, ...}. Order is
      *  preserved for error-message determinism. */
     public static void registerSum(String name, Object[] flatVariants) {
+        registerSum(null, name, flatVariants);
+    }
+
+    public static void registerSum(Class<?> owner, String name, Object[] flatVariants) {
         java.util.LinkedHashMap<String, Integer> map = new java.util.LinkedHashMap<>();
         for (int i = 0; i + 1 < flatVariants.length; i += 2) {
             String vname = (String) flatVariants[i];
             int arity = ((Number) flatVariants[i + 1]).intValue();
             map.put(vname, arity);
         }
-        REGISTRY.put(name, new Descriptor.Sum(map));
+        registryOf(owner).specs.put(name, new Descriptor.Sum(map));
     }
 
-    /** Test/inspection helper. */
-    public static Descriptor lookup(String name) {
-        return REGISTRY.get(name);
+    /** Test/inspection helper: {@code name} as declared by {@code owner}'s program. */
+    public static Descriptor lookup(Class<?> owner, String name) {
+        return registryOf(owner).specs.get(name);
     }
 
     // ── Encode ──────────────────────────────────────────────────────────
@@ -333,13 +378,24 @@ public final class SpecValidator {
      *  fn for error messages. Returns {@code value} on success so the
      *  call site can re-store it without a separate dup/swap. */
     public static Object validateEncoded(Object value, String encodedSpec,
-                                          String fnName, int argIdx) {
+                                          String fnName, int argIdx, Class<?> owner) {
         SpecExpr spec = decode(encodedSpec);
         try {
-            return validate(value, spec);
+            return validateIn(registryOf(owner), value, spec);
         } catch (IrijRuntimeError e) {
             throw new IrijRuntimeError(blameMessage(e.getMessage(), fnName, argIdx));
         }
+    }
+
+    public static Object validateEncoded(Object value, String encodedSpec,
+                                          String fnName, int argIdx) {
+        return validateEncoded(value, encodedSpec, fnName, argIdx, null);
+    }
+
+    /** {@link #validate} with user-declared names resolved in {@code reg}. */
+    public static Object validateIn(Registry reg, Object value, SpecExpr spec) {
+        if (CURRENT.isBound() && CURRENT.get() == reg) return validate(value, spec);
+        return ScopedValue.where(CURRENT, reg).call(() -> validate(value, spec));
     }
 
     private static String blameMessage(String reason, String fnName, int argIdx) {
@@ -433,7 +489,7 @@ public final class SpecValidator {
         };
     }
 
-    /** Look up {@code name} in {@link #REGISTRY} and validate against
+    /** Look up {@code name} in the current program's {@link Registry} and validate against
      *  the descriptor. Falls through (returns value) if no descriptor
      *  is registered — same behaviour as before product/sum specs
      *  were wired into bytecode mode. */
@@ -445,7 +501,7 @@ public final class SpecValidator {
         if (value instanceof Values.Tagged t && name.equals(t.specName())) {
             return value;
         }
-        Descriptor d = REGISTRY.get(name);
+        Descriptor d = current().specs.get(name);
         if (d == null) return value;
         return switch (d) {
             case Descriptor.Product p -> validateProductShape(value, name, p);
@@ -459,14 +515,19 @@ public final class SpecValidator {
      * fast-path in {@link #validateUserDeclared} — that fast-path is
      * sound only because this ran first.
      */
-    public static Object certifyProduct(Object value, String specName) {
-        Descriptor d = REGISTRY.get(specName);
+    public static Object certifyProduct(Object value, String specName, Class<?> owner) {
+        Registry reg = registryOf(owner);
+        Descriptor d = reg.specs.get(specName);
         if (d instanceof Descriptor.Product p
                 && value instanceof Values.Tagged t
                 && t.namedFields() != null) {
-            checkProductFields(t.namedFields(), specName, p);
+            ScopedValue.where(CURRENT, reg).run(() -> checkProductFields(t.namedFields(), specName, p));
         }
         return value;
+    }
+
+    public static Object certifyProduct(Object value, String specName) {
+        return certifyProduct(value, specName, null);
     }
 
     /**

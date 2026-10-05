@@ -560,13 +560,15 @@ final class ClassEmitter implements Opcodes {
             }
         }
         for (var e : productFields.entrySet()) {
+            cl.visitLdcInsn(org.objectweb.asm.Type.getObjectType(internalName));
             cl.visitLdcInsn(e.getKey());
             pushStringArray(cl, e.getValue());
             pushStringArray(cl, productFieldSpecs.getOrDefault(e.getKey(), List.of()));
             cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerProduct",
-                    "(Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
+                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
         }
         for (var e : sumVariants.entrySet()) {
+            cl.visitLdcInsn(org.objectweb.asm.Type.getObjectType(internalName));
             cl.visitLdcInsn(e.getKey());
             // Object[] {name, arity, name, arity, ...}
             exprEm.pushIconst(cl, e.getValue().size() * 2);
@@ -586,7 +588,7 @@ final class ClassEmitter implements Opcodes {
                 cl.visitInsn(AASTORE);
             }
             cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerSum",
-                    "(Ljava/lang/String;[Ljava/lang/Object;)V", false);
+                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Object;)V", false);
         }
         // Phase 3 — materialise every Irij-record cap once at class-load
         // time. Each cap's recordExpr (a map-literal Expr) is evaluated

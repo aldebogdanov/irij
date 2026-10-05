@@ -294,8 +294,8 @@ Tuple Fn Any Unit`), `App` (`Vec Set Map Tuple Fn` with parametric
 args), `Arrow` (callable check), `Enum` (keyword membership),
 `VecSpec` / `SetSpec` / `TupleSpec` (element-wise recursion),
 `Wildcard` / `Var` / `Unit`. User-declared product/sum specs go
-through `SpecValidator.REGISTRY` (populated by `<clinit>` on each
-emitted class).
+through the program's `SpecValidator.Registry` (populated by
+`<clinit>` on each emitted class).
 
 Encoding (`SpecValidator.encode`):
 
@@ -362,7 +362,19 @@ HTML children) instead of loosening to `#[_]`.
 The blame strings are stable so `tests/test-contracts.irj` assertions
 keep passing across releases.
 
-**User-declared product/sum specs** (`SpecValidator.REGISTRY`):
+**User-declared product/sum specs** (`SpecValidator.Registry`):
+
+One registry per classloader — every program run has its own loader,
+and a session's evals share one — reached from code through a
+`ClassValue` on the calling class (`SpecValidator.registryOf`). Every
+emitted call that may resolve a spec name passes its class
+(`LDC <program class>`): `validateEncoded`, `certifyProduct`,
+`validate` / `validate!`, and the registrations. The registry used to
+be one process-wide map by name, so two Playground visitors who both
+declared `spec Person` validated against each other's (and test files
+run in one JVM saw each other's specs). Name resolution during a
+validation reads the registry from a `ScopedValue` bound by the entry
+point, so the recursive validators don't each take it as a parameter.
 
 Populated by a generated `<clinit>` on every emitted class. For
 each `Decl.SpecDecl` the emitter records the variant arities (sum)
@@ -370,10 +382,10 @@ or the field names *and their encoded specs* (product) and emits
 `clinit` calls:
 
 ```
-SpecValidator.registerProduct("Point",
+SpecValidator.registerProduct(Program.class, "Point",
         new String[]{"x","y"},
         new String[]{"Int","Int"});
-SpecValidator.registerSum("Shape",
+SpecValidator.registerSum(Program.class, "Shape",
         new Object[]{"Circle", 1, "Rect", 2});
 ```
 
