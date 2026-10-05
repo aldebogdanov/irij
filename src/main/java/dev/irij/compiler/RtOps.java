@@ -42,13 +42,22 @@ public final class RtOps {
         }
         if (a instanceof dev.irij.runtime.Values.IrijVector va
                 && b instanceof dev.irij.runtime.Values.IrijVector vb) {
-            java.util.List<Object> out = new java.util.ArrayList<>(va.elements());
-            out.addAll(vb.elements());
-            return new dev.irij.runtime.Values.IrijVector(out);
+            return concatVectors(va, vb);
         }
         throw new IllegalArgumentException("++ not defined for: " + a + " and " + b);
     }
 
+
+    /** {@code a ++ b} on Vectors: appends b's elements to a's persistent
+     *  vector — O(|b|), so accumulating with {@code acc ++ #[x]} is linear. */
+    static dev.irij.runtime.Values.IrijVector concatVectors(
+            dev.irij.runtime.Values.IrijVector a, dev.irij.runtime.Values.IrijVector b) {
+        if (b.elements().isEmpty()) return a;
+        if (a.elements().isEmpty()) return b;
+        var out = (dev.irij.runtime.PVec) a.elements();
+        for (Object x : b.elements()) out = out.cons(x);
+        return new dev.irij.runtime.Values.IrijVector(out);
+    }
 
     public static boolean and(Object a, Object b) { return truthy(a) && truthy(b); }
 
@@ -178,9 +187,7 @@ public final class RtOps {
         if (a instanceof String sa && b instanceof String sb) return sa + sb;
         if (a instanceof dev.irij.runtime.Values.IrijVector va
                 && b instanceof dev.irij.runtime.Values.IrijVector vb) {
-            java.util.List<Object> out = new java.util.ArrayList<>(va.elements());
-            out.addAll(vb.elements());
-            return new dev.irij.runtime.Values.IrijVector(out);
+            return concatVectors(va, vb);
         }
         throw new dev.irij.IrijRuntimeError(
                 "concat: type mismatch (" + RuntimeSupport.typeTag(a) + ", " + RuntimeSupport.typeTag(b) + ")");

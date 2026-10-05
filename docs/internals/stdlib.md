@@ -33,6 +33,33 @@ Registered as `BuiltinFn` objects in the global environment:
 - Collection raw ops (`length`, `head`, `tail`, `nth`, `last`,
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)
+
+### Persistent Vectors and Maps
+
+`IrijVector`'s elements are a `PVec` and `IrijMap`'s entries a `PMap`
+(`dev.irij.runtime`), each implementing the plain `java.util` interface
+so code reading `.elements()` / `.entries()` is unchanged.
+
+- `PVec` — Clojure's persistent vector: a 32-way trie plus a tail.
+  `conj` and `++` append in amortised O(1) per element, `get` /
+  replace are O(log₃₂ n). `tail` (and a `#[x ...rest]` pattern's rest)
+  is an O(1) view that skips a prefix, compacted once the skipped part
+  outweighs the live one.
+- `PMap` — insertion-ordered, String keys. Up to 8 entries it is a flat
+  `[k0 v0 k1 v1 …]` array scanned linearly (record-sized maps — request
+  maps, JSON objects, `{status= … body= …}` — are the common case and
+  build fastest this way); past 8, a hash array mapped trie for lookup
+  plus a `PVec` of keys for order, with tombstones for removed keys
+  until they outnumber live ones. Replacing a value keeps its place;
+  removing and re-adding moves the key to the end — `LinkedHashMap`'s
+  order, which it replaces.
+
+Each version shares structure with the one it came from. Before, every
+`conj` / `assoc` / `tail` copied the whole collection (`List.copyOf`,
+two `LinkedHashMap` copies), so building one element at a time was
+quadratic: a 30 000-element `conj` loop took ~0.7 s and a 20 000-key
+`assoc` loop ~6 s (now ~2 ms and ~7 ms); `head`/`tail` recursion over
+20 000 elements went from ~0.7 s to ~2 ms. Sets still copy on `conj`.
 - Math (`abs`, `min`, `max`, `pi`, `e`)
 - Higher-order (`fold`)
 - Concurrency (`spawn`, `await`, `sleep`, `par`, `race`, `timeout`,

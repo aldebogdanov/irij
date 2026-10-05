@@ -114,9 +114,11 @@ public final class Values {
 
     // ── Collections ─────────────────────────────────────────────────────
 
+    /** A Vector. Its elements are a {@link PVec} — persistent, so
+     *  {@code conj} / {@code tail} share structure instead of copying. */
     public record IrijVector(List<Object> elements) {
         public IrijVector {
-            elements = List.copyOf(elements);
+            elements = PVec.from(elements);
         }
 
         @Override
@@ -150,9 +152,12 @@ public final class Values {
         }
     }
 
+    /** A Map with Str keys, in insertion order. Its entries are a
+     *  {@link PMap} — persistent, so {@code assoc} / {@code dissoc} share
+     *  structure instead of copying. */
     public record IrijMap(Map<String, Object> entries) {
         public IrijMap {
-            entries = Collections.unmodifiableMap(new LinkedHashMap<>(entries));
+            entries = PMap.from(entries);
         }
 
         @Override

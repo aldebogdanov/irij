@@ -50,8 +50,8 @@ public final class RtCollections {
 
 
     public static Object vecSlice(Object v, int from, int to) {
-        var es = ((dev.irij.runtime.Values.IrijVector) v).elements();
-        return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<>(es.subList(from, to)));
+        var es = (dev.irij.runtime.PVec) ((dev.irij.runtime.Values.IrijVector) v).elements();
+        return new dev.irij.runtime.Values.IrijVector(es.slice(from, to));
     }
 
 
@@ -134,9 +134,8 @@ public final class RtCollections {
     /** `conj coll x` — a Vector with x appended, or a Set with x added. */
     public static Object conj(Object v, Object x) {
         if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
-            var out = new java.util.ArrayList<>(vec.elements());
-            out.add(x);
-            return new dev.irij.runtime.Values.IrijVector(out);
+            return new dev.irij.runtime.Values.IrijVector(
+                    ((dev.irij.runtime.PVec) vec.elements()).cons(x));
         }
         if (v instanceof dev.irij.runtime.Values.IrijSet set) {
             var out = new java.util.HashSet<>(set.elements());
@@ -228,12 +227,8 @@ public final class RtCollections {
      *  on Vector and IrijRange. */
     public static Object tail(Object v) {
         if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
-            var es = vec.elements();
-            if (es.isEmpty()) {
-                return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<>());
-            }
             return new dev.irij.runtime.Values.IrijVector(
-                    new java.util.ArrayList<>(es.subList(1, es.size())));
+                    ((dev.irij.runtime.PVec) vec.elements()).dropFirst());
         }
         if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             long upper = r.exclusive() ? r.to() : r.to() + 1;
@@ -345,10 +340,8 @@ public final class RtCollections {
 
     public static Object assoc(Object m, Object key, Object val) {
         if (m instanceof dev.irij.runtime.Values.IrijMap map) {
-            java.util.LinkedHashMap<String, Object> entries =
-                    new java.util.LinkedHashMap<>(map.entries());
-            entries.put(dev.irij.runtime.Values.toIrijString(key), val);
-            return new dev.irij.runtime.Values.IrijMap(entries);
+            return new dev.irij.runtime.Values.IrijMap(((dev.irij.runtime.PMap) map.entries())
+                    .assoc(dev.irij.runtime.Values.toIrijString(key), val));
         }
         throw new dev.irij.IrijRuntimeError(
                 "assoc expects a Map as first argument, got " + RuntimeSupport.typeTag(m));
@@ -357,10 +350,8 @@ public final class RtCollections {
 
     public static Object dissoc(Object m, Object key) {
         if (m instanceof dev.irij.runtime.Values.IrijMap map) {
-            java.util.LinkedHashMap<String, Object> entries =
-                    new java.util.LinkedHashMap<>(map.entries());
-            entries.remove(dev.irij.runtime.Values.toIrijString(key));
-            return new dev.irij.runtime.Values.IrijMap(entries);
+            return new dev.irij.runtime.Values.IrijMap(((dev.irij.runtime.PMap) map.entries())
+                    .without(dev.irij.runtime.Values.toIrijString(key)));
         }
         throw new dev.irij.IrijRuntimeError(
                 "dissoc expects a Map as first argument, got " + RuntimeSupport.typeTag(m));
@@ -370,10 +361,9 @@ public final class RtCollections {
     public static Object merge(Object a, Object b) {
         if (a instanceof dev.irij.runtime.Values.IrijMap m1
                 && b instanceof dev.irij.runtime.Values.IrijMap m2) {
-            java.util.LinkedHashMap<String, Object> entries =
-                    new java.util.LinkedHashMap<>(m1.entries());
-            entries.putAll(m2.entries());
-            return new dev.irij.runtime.Values.IrijMap(entries);
+            var out = (dev.irij.runtime.PMap) m1.entries();
+            for (var e : m2.entries().entrySet()) out = out.assoc(e.getKey(), e.getValue());
+            return new dev.irij.runtime.Values.IrijMap(out);
         }
         throw new dev.irij.IrijRuntimeError(
                 "merge expects two Maps, got " + RuntimeSupport.typeTag(a) + " and " + RuntimeSupport.typeTag(b));

@@ -29,6 +29,7 @@ Terms used throughout the internals docs.
 | **MutableCallSite** | JSR-292 (`java.lang.invoke`) call site whose target can be swapped at runtime. Used for hot-redef. |
 | **nREPL** | Network REPL — Clojure-flavoured protocol. Irij hosts an nREPL server with bytecode-backed sessions (`BytecodeSession`); each connection gets a per-session classloader + namespace. |
 | **OpSection** | `(+)` etc. as a first-class fn value. Lowered to `GETSTATIC RuntimeSupport.OP_ADD` etc. |
+| **PMap / PVec** | The persistent structures behind Irij Maps and Vectors: an insertion-ordered HAMT (flat array up to 8 entries) and a 32-way trie vector. Share structure across versions; `assoc` / `conj` / `tail` don't copy. See `stdlib.md`. |
 | **Perform** | An effect-op invocation. SM mode (the only execution path): throw `PerformSignal`. |
 | **PerformSignal** | Pooled `RuntimeException` (stack-trace-free) carrying `(effectName, opName, args, continuation)`. Thrown by SM bodies at perform sites. |
 | **runWithSM** | SM-mode entry. Allocates `IrijContinuation`, enters `dispatchLoopSM`. |
@@ -48,7 +49,7 @@ Terms used throughout the internals docs.
 | **Tier (b)** | Bodies that perform tier-a effects only. |
 | **Tier (c)** | Clauses that themselves perform foreign effects (have `::: Other` rows). Compile clause body as its own SM. |
 | **Trampoline** | The dispatch loop pattern: catch a control-flow exception, update state, iterate. Used by SM-mode resume to avoid stack growth. |
-| **Vector** | Irij's primary sequential collection. `#[1 2 3]`. Backed by `Values.IrijVector` (wraps `List<Object>`). |
+| **Vector** | Irij's primary sequential collection. `#[1 2 3]`. Backed by `Values.IrijVector`, whose elements are a persistent `PVec` (see `stdlib.md`). |
 | **vthread** | JVM virtual thread (`Thread.startVirtualThread`). Cheap (~1 KB), block-friendly. Underlies all Irij concurrency. |
 | **ITF** | Informal Trace Format (Apalache ADR-015) — the JSON Quint writes with `--out-itf`, decoded by `std.quint.itf`. |
 | **Model (Quint)** | A record mapping a Quint spec's actions and state onto Irij code, replayed by `std.quint`. Not to be confused with a `spec` declaration. |
