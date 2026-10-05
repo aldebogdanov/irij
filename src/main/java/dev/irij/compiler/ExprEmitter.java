@@ -427,8 +427,15 @@ final class ExprEmitter implements Opcodes {
                 }
             }
             case Expr.SeqOp so -> emitSeqOp(so, mv, locals);
+            // The lexer reads `10/2` (no spaces) as a rational literal,
+            // which nothing compiles; say what to write instead.
+            case Expr.RationalLit r -> throw new IrijCompiler.CompileException(
+                    (r.loc() != null ? r.loc() + ": " : "") + "`" + r.num() + "/" + r.den()
+                    + "` reads as a rational literal, which isn't supported; for division "
+                    + "put spaces around the operator: `" + r.num() + " / " + r.den() + "`");
             default -> throw new IrijCompiler.CompileException(
-                    "MVP: unsupported expression: " + e.getClass().getSimpleName());
+                    (e.loc() != null ? e.loc() + ": " : "")
+                    + "unsupported expression: " + e.getClass().getSimpleName());
         }
     }
 

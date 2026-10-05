@@ -236,3 +236,4 @@ Previously listed gotchas that no longer apply:
 - ~~String keys in map literals~~ — `{"content-type"= val}` parses.
 - ~~`with` / `scope` only at statement position~~ — now usable in expression position.
 - ~~`else if` chain requires nesting~~ — `else if cond` chains are supported natively (0.2.11+).
+- **`10/2` without spaces** lexes as a rational literal (`RATIONAL : [0-9]+ '/' [0-9]+`), which no back end compiles. The compile error says so and suggests `10 / 2`; write division with spaces.

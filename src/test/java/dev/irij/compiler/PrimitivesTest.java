@@ -45,6 +45,12 @@ class PrimitivesTest {
         org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("Parenthesize the branch"), e.getMessage());
     }
 
+    @Test void unspaced_division_explains_itself() {
+        var e = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+                () -> run("println (10/2)"));
+        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("`10 / 2`"), e.getMessage());
+    }
+
     @Test void int_equality_is_exact_past_2_pow_53() throws Exception {
         // Both round to the same double; as Ints they differ.
         assertEquals("false", run("println (9007199254740993 == 9007199254740992)"));
