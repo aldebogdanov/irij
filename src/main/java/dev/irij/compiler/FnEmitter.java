@@ -45,7 +45,7 @@ final class FnEmitter implements Opcodes {
     void emitInputSpecChecks(Decl.FnDecl fn, MethodVisitor mv,
                                       List<Pattern> params) {
         List<dev.irij.ast.SpecExpr> specs = fn.specAnnotations();
-        if (specs == null || specs.size() < 2) return;
+        if (specs == null || specs.size() < 2 || ce.forwarders.contains(fn)) return;
         int inputCount = specs.size() - 1; // last is output
         for (int i = 0; i < inputCount && i < params.size(); i++) {
             dev.irij.ast.SpecExpr spec = specs.get(i);
@@ -62,7 +62,7 @@ final class FnEmitter implements Opcodes {
             }
             mv.visitVarInsn(ALOAD, i);
             mv.visitLdcInsn(encoded);
-            mv.visitLdcInsn(fn.name());
+            mv.visitLdcInsn(ClassEmitter.displayName(fn.name()));
             ce.exprEm.pushIconst(mv, i);
             mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
             mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "validateEncoded",
@@ -143,7 +143,7 @@ final class FnEmitter implements Opcodes {
                 mv.visitJumpInsn(IFNE, ok);
             }
             mv.visitLdcInsn(ce.currentOutputSpec);
-            mv.visitLdcInsn(ce.currentFnName);
+            mv.visitLdcInsn(ClassEmitter.displayName(ce.currentFnName));
             mv.visitInsn(ICONST_M1);
             mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
             mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "validateEncoded",
@@ -171,7 +171,7 @@ final class FnEmitter implements Opcodes {
             int slot = compilePostLambda(p, mv, locals);
             if (slot >= 0) {
                 slots.add(slot);
-                blame.add("Post-condition violated in '" + fn.name()
+                blame.add("Post-condition violated in '" + ClassEmitter.displayName(fn.name())
                         + "' (implementation's fault)");
             }
         }
@@ -179,7 +179,7 @@ final class FnEmitter implements Opcodes {
             int slot = compilePostLambda(p, mv, locals);
             if (slot >= 0) {
                 slots.add(slot);
-                blame.add("Output contract violated in '" + fn.name()
+                blame.add("Output contract violated in '" + ClassEmitter.displayName(fn.name())
                         + "' (implementation's fault)");
             }
         }
@@ -252,9 +252,10 @@ final class FnEmitter implements Opcodes {
     void emitPreList(List<Expr> preList, String fnName, boolean isIn,
                               MethodVisitor mv, Locals locals, List<Pattern> params) {
         if (preList == null || preList.isEmpty()) return;
+        String shown = ClassEmitter.displayName(fnName);
         String blame = isIn
-                ? "Input contract violated in '" + fnName + "' (caller's fault)"
-                : "Pre-condition violated in '" + fnName + "' (caller's fault)";
+                ? "Input contract violated in '" + shown + "' (caller's fault)"
+                : "Pre-condition violated in '" + shown + "' (caller's fault)";
         for (Expr p : preList) {
             if (!(p instanceof Expr.Lambda lam)) continue;
             ce.lamEm.emitLambda(lam, mv, locals);  // stack: IrijFn
@@ -342,7 +343,7 @@ final class FnEmitter implements Opcodes {
             mv.visitLabel(paramFailL);
             mv.visitTypeInsn(NEW, "dev/irij/IrijRuntimeError");
             mv.visitInsn(DUP);
-            mv.visitLdcInsn("Pattern match failure in fn '" + fn.name() + "' parameter");
+            mv.visitLdcInsn("Pattern match failure in fn '" + ClassEmitter.displayName(fn.name()) + "' parameter");
             mv.visitMethodInsn(INVOKESPECIAL, "dev/irij/IrijRuntimeError",
                     "<init>", "(Ljava/lang/String;)V", false);
             mv.visitInsn(ATHROW);
@@ -376,8 +377,9 @@ final class FnEmitter implements Opcodes {
         // Capture the output spec (last entry in specAnnotations) so
         // every tail-return validates against it. Non-validatable specs
         // (wildcard / lowercase var) → null, no per-return overhead.
-        ce.currentOutputSpec = outputSpecEncoded(fn);
-        ce.currentOutputSpecClass = primitiveSpecClass(outputSpec(fn));
+        boolean fwd = ce.forwarders.contains(fn);
+        ce.currentOutputSpec = fwd ? null : outputSpecEncoded(fn);
+        ce.currentOutputSpecClass = fwd ? null : primitiveSpecClass(outputSpec(fn));
         installPostSlots(fn, mv, locals);
 
         // Runtime effect-row tracking. Push this fn's declared row onto

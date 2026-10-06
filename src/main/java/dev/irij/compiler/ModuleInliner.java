@@ -105,6 +105,15 @@ final class ModuleInliner {
 
     java.util.Map<String, String> fnFile() { return fnFile; }
 
+    /** Module → its exports (pub name → module-qualified name). */
+    private final java.util.Map<String, java.util.Map<String, String>> exportsByModule = new HashMap<>();
+
+    /** The pub-fn forwarders ModulePrivacy added, by identity. */
+    private final Set<Decl.FnDecl> forwarders =
+            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
+    Set<Decl.FnDecl> forwarders() { return forwarders; }
+
     /** @param rootFile source filename of the top-level program (used
      *  as the origin for its own fns; module fns get their module's
      *  derived file). */
@@ -126,7 +135,12 @@ final class ModuleInliner {
     }
 
     private void expand(List<Decl> decls, List<Decl> out, String currentFile) {
-        for (Decl d : decls) {
+        // `use m :as a` in this file: a.name → m's own definition of name.
+        java.util.Map<String, java.util.Map<String, String>> qualified = new HashMap<>();
+        for (Decl d0 : decls) {
+            Decl d = qualified.isEmpty() || d0 instanceof Decl.UseDecl
+                    || (d0 instanceof Decl.FnDecl f0 && forwarders.contains(f0))
+                    ? d0 : ModulePrivacy.qualify(List.of(d0), qualified).get(0);
             Decl inner = d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di ? di : d;
             if (inner instanceof Decl.FnDecl fn) {
                 fnFile.put(fn.name(), currentFile);
@@ -166,11 +180,13 @@ final class ModuleInliner {
                                     + "`:as <alias>` (rename), or "
                                     + "`{ name name ... }` (selective)");
                 }
-                if (um instanceof Decl.UseModifier.As asMod) {
-                    aliases.add(asMod.alias());
-                }
                 // `:open` and `:selective` paths don't register an alias.
                 loadAndInline(ud.qualifiedName(), out);
+                if (um instanceof Decl.UseModifier.As asMod) {
+                    aliases.add(asMod.alias());
+                    qualified.put(asMod.alias(),
+                            exportsByModule.getOrDefault(ud.qualifiedName(), java.util.Map.of()));
+                }
                 continue;
             }
             // (FnDecl origin already recorded above.)
@@ -197,9 +213,11 @@ final class ModuleInliner {
                         "Parse errors in module '" + qualifiedName + "': "
                                 + String.join("\n", parsed.errors()));
             }
-            List<Decl> modDecls = ModulePrivacy.privatize(
+            ModulePrivacy.Privatized p = ModulePrivacy.privatize(
                     IrijCompiler.buildAst(parsed), qualifiedName);
-            expand(modDecls, out, moduleFile(qualifiedName));
+            exportsByModule.put(qualifiedName, p.exports());
+            forwarders.addAll(p.forwarders());
+            expand(p.decls(), out, moduleFile(qualifiedName));
         } finally {
             loading.remove(qualifiedName);
         }

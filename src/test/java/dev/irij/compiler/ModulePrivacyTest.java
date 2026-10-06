@@ -11,7 +11,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.*;
 
 /** A module's private top-level names can't collide with any other's. */
 class ModulePrivacyTest {
@@ -83,6 +83,37 @@ class ModulePrivacyTest {
     @Test void privateTopLevelBindingsArePrivateToo() throws Exception {
         module("lib.d", "mod lib.d\n\nlimit := 5\n\npub fn clamp :: Int Int\n  (x -> if (x > limit) limit else x)\n");
         assertEquals("5", run("use lib.d :open\n\nlimit := 1000\n\nprintln (clamp 99)\n"));
+    }
+
+    @Test void programNameDoesNotReplaceAModulesPubFnInsideTheModule() throws Exception {
+        module("lib.p", "mod lib.p\n\npub fn shout :: Str Str\n  (s -> s ++ \"!\")\n\npub fn hello :: Str Str\n  (s -> shout (\"hi \" ++ s))\n");
+        // The program's own `shout` is what the program sees; lib.p's
+        // `hello` still calls lib.p's `shout`.
+        assertEquals("hi bo!\nx?", run("use lib.p :open\n\nfn shout :: Str Str\n  (s -> s ++ \"?\")\n\nprintln (hello \"bo\")\nprintln (shout \"x\")\n"));
+    }
+
+    @Test void twoModulesExportingOneNameKeepTheirOwnInternally() throws Exception {
+        module("lib.a", "mod lib.a\n\npub fn tag :: Str Str\n  (s -> \"a:\" ++ s)\n\npub fn a-api :: Str Str\n  (s -> tag s)\n");
+        module("lib.b", "mod lib.b\n\npub fn tag :: Str Str\n  (s -> \"b:\" ++ s)\n\npub fn b-api :: Str Str\n  (s -> tag s)\n");
+        assertEquals("a:x b:x", run("use lib.a :open\nuse lib.b :open\nprintln ((a-api \"x\") ++ \" \" ++ (b-api \"x\"))\n"));
+    }
+
+    @Test void aliasQualifiedCallsReachTheModuleDespiteAShadow() throws Exception {
+        module("lib.q", "mod lib.q\n\npub fn shout :: Str Str\n  (s -> s ++ \"!\")\n");
+        assertEquals("x! x?", run("use lib.q :as q\n\nfn shout :: Str Str\n  (s -> s ++ \"?\")\n\nprintln ((q.shout \"x\") ++ \" \" ++ (shout \"x\"))\n"));
+    }
+
+    @Test void pubBindingsAreTheModulesOwnToo() throws Exception {
+        module("lib.c2", "mod lib.c2\n\npub limit := 5\n\npub fn clamp :: Int Int\n  (x -> if (x > limit) limit else x)\n");
+        assertEquals("5 1000", run("use lib.c2 :open\n\nlimit := 1000\n\nprintln ((to-str (clamp 99)) ++ \" \" ++ (to-str limit))\n"));
+    }
+
+    @Test void specFailuresNameTheFnAsWritten() {
+        assertDoesNotThrow(() -> module("lib.s", "mod lib.s\n\npub fn shout :: Str Str\n  (s -> s ++ \"!\")\n"));
+        var e = assertThrows(Exception.class, () -> run("use lib.s :open\nprintln (shout 42)\n"));
+        Throwable t = e;
+        while (t.getCause() != null && !(t instanceof dev.irij.IrijRuntimeError)) t = t.getCause();
+        assertTrue(t.getMessage().contains("of shout:"), t.getMessage());
     }
 
     @Test void pubNamesStayReachable() throws Exception {

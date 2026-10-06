@@ -103,6 +103,7 @@ public final class IrijCompiler {
             List<Decl> inlined = inliner.inline(decls, rootFile);
             EffectRowChecker.check(inlined, inliner.fnFile());
             return new ClassEmitter(className, inliner.aliases(), opts, rootFile, inliner.fnFile())
+                    .withForwarders(inliner.forwarders())
                     .emitProgram(inlined);
         } catch (StackOverflowError e) {
             // Every pass recurses over the AST; past a few thousand levels

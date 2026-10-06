@@ -843,8 +843,11 @@ Full design and the recorded Quint behaviour it rests on:
 - [x] **Inline `if` rule (2026-10)** — a bare inline `if` may not be
       applied by juxtaposition or be an operator operand (compile error
       with fixes); parens or `~` disambiguate. Spec §1.3.2.
+- [x] **Pub names are module-scoped (2026-10)** — a module's own calls to
+      its pub fns/bindings always reach its own definitions (renamed +
+      public forwarder); `alias.name` is exact. Pub handlers/caps, mutable
+      pub bindings and rest-param pub fns stay program-wide.
 - [ ] **Open from the audit** —
-  - Pub names stay one program-wide namespace (last definition wins).
   - Composite set elements (vectors, maps) with colliding hashCodes share
     a flat bucket in PSet; scalars are SipHash-protected.
   - EffectRowChecker / SM lowering / AstBuilder were reviewed only through

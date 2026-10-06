@@ -82,11 +82,17 @@ also a compile error, since `false` can never be called.
   (a program that defined `find-route` used to rewire `std.serve`'s
   router), and a parameter you call `server`, `db-jdbc`, … is just a
   value again.
-- **`pub` names are still one program-wide namespace** (unchanged, not
-  yet fixed): if your program defines a fn with the same name as a
-  `pub` fn of a module you `use`, the last definition wins — **even for
-  calls inside that module**. Don't reuse the names of `pub` fns you
-  import. `:as` aliases don't protect you; pick distinct names.
+- **A module's `pub` fns are its own, too.** Before, if your program
+  defined a fn with the same name as a `pub` fn of a module you `use`,
+  the last definition won **even for calls inside that module** — your
+  `shout` silently replaced the library's `shout` everywhere. Now each
+  module's code always calls its own `pub` fns (and plain `pub` bindings).
+  Your own top-level `shout` shadows the imported one *for your code
+  only*. With `use m :as a`, `a.shout` always means the module's
+  `shout`, even if you have one too. Two modules you import `:open` that
+  both export a name still collide in *your* code (the later `use`
+  wins) — import one of them `:as` to choose explicitly. Pub handlers
+  and caps remain program-wide names: don't reuse them.
 - **Spec-lint is back.** `irij <file>` and `irij build` print a warning
   on stderr for every `pub fn` without a `::` spec annotation, including
   in your own modules and seeds. Add the specs (use `_` where the shape
@@ -224,8 +230,10 @@ So:
 3. Anything relying on 64-bit wraparound (hashing, checksums) must now
    apply the modulus explicitly (`% 18446744073709551616`).
 4. Calls into another module's non-`pub` fns: make them `pub` with a spec.
-5. Your own fn names that collide with `pub` fns of modules you use:
-   rename yours.
+5. Your own fn names that collide with `pub` fns of modules you use are
+   now harmless to the modules, but your code sees *yours* — make sure
+   that's what you mean; use `alias.name` (`use m :as alias`) to call
+   the module's. Don't reuse the names of pub *handlers*.
 6. Static assets: everything the browser fetches directly must be under
    `resources/`.
 7. Response headers built from request data: validate (no CR/LF).

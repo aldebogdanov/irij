@@ -523,6 +523,14 @@
    fn internal-helper ...      ;; module-private
    #+end_example
 
+   *Scoping.* A module's own code always refers to its own top-level
+   definitions, exported or not: nothing an importer defines can replace
+   them. An importer's own top-level definition of a name shadows an
+   imported one for the importer's code only, and =alias.name= (after
+   =use m :as alias=) always means =m='s definition. When two modules
+   imported with =:open= export the same name, import one of them with
+   =:as= to choose.
+
 * Part III: Algebraic Effects — The Universal Joint
 
 ** 3.1 Effect Declaration

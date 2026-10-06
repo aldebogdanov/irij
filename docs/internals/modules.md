@@ -96,9 +96,31 @@ path dep, `…/uzor`) or the one above it (an installed seed,
      `find-route` replaced `std.serve`'s router internals, and two seeds
      with the same private helper name called each other's. (The
      interpreter had per-module environments; the flattening bytecode
-     pipeline lost privacy until v0.9.) Pub names are still one
-     program-wide namespace: a program's `fn f` and an `:open`-imported
-     `pub fn f` are the same name, last definition wins.
+     pipeline lost privacy until v0.9.)
+   - **Pub fns and plain pub bindings** are renamed the same way, so a
+     module's own references to its pub names always mean its own
+     definitions. Each gets a public **forwarder** under the original
+     name for importers: `fn shout` with the same spec annotations and
+     effect row, whose body calls `shout$mod$path` (a binding gets
+     `x := x$mod$path`). The forwarder emits no spec checks — the real
+     fn checks them, and error messages show `shout`, not the qualified
+     name (`ClassEmitter.displayName`). Before this, last-definition-wins
+     reached *inside* modules: a program defining `shout` rewired a
+     library's own calls to its pub `shout`, and two modules exporting
+     one name called each other's.
+   - What an importer sees: a program's own top-level `shout` replaces
+     only the forwarder, so the program's code gets its own and the
+     module keeps its own. With `use m :as a`, `a.shout` is rewritten to
+     `shout$m` (`ModulePrivacy.qualify`) and reaches the module's
+     definition even when the importer has a `shout` of its own. Two
+     `:open`-imported modules exporting one name still collide for the
+     importer (the later `use` wins; std.collection and std.list both
+     export `sum`) — import one `:as` to pick explicitly.
+   - Still program-wide names: pub handlers and caps (a `with` must
+     resolve them statically), mutable pub bindings, pub fns with a rest
+     parameter, and a binding that mentions its own name — `pub sqrt :=
+     sqrt` re-exports the builtin, and renaming would make it refer to
+     itself.
 4. Open / qualified resolution:
    - `:open` rewrites every Var reference to the unqualified name.
    - Default (qualified) rewrites `text.trim x` to `trim x` and adds

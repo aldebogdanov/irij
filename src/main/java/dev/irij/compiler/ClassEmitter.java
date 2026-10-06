@@ -133,6 +133,23 @@ final class ClassEmitter implements Opcodes {
      *  Pushed/popped around {@link #emitFn} so lambdas (which build
      *  their own methods) don't inherit the outer fn's output spec. */
     String currentOutputSpec = null;
+
+    /** Pub-fn forwarders added by ModulePrivacy (by identity). Their only
+     *  job is to call the module's real fn, which checks the specs, so
+     *  they emit no spec checks of their own. */
+    java.util.Set<Decl.FnDecl> forwarders = java.util.Set.of();
+
+    ClassEmitter withForwarders(java.util.Set<Decl.FnDecl> fwd) {
+        this.forwarders = fwd;
+        return this;
+    }
+
+    /** A fn's name as the user wrote it: module-qualified names
+     *  ({@code shout$lib$p}, see ModulePrivacy) lose their suffix. */
+    static String displayName(String name) {
+        int i = name.indexOf('$');
+        return i > 0 ? name.substring(0, i) : name;
+    }
     /** JVM class for an inlined output-spec type test, when the output
      *  spec is primitive ({@link FnEmitter#primitiveSpecClass}). */
     String currentOutputSpecClass = null;
