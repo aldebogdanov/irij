@@ -474,18 +474,25 @@ public final class RtCollections {
         return new dev.irij.runtime.Values.IrijVector(out);
     }
 
+    /** `take n coll` — the first n elements (all of them if fewer; none
+     *  for n ≤ 0). */
     public static Object takeVal(Object nArg, Object collArg) {
         long n = asLongArg(nArg, "take");
         java.util.List<Object> list = asListAny(collArg);
-        return new dev.irij.runtime.Values.IrijVector(
-                new java.util.ArrayList<>(list.subList(0, (int) Math.min(n, list.size()))));
+        int k = (int) Math.max(0, Math.min(n, list.size()));
+        return new dev.irij.runtime.Values.IrijVector(list.subList(0, k));
     }
 
+    /** `drop n coll` — all but the first n elements (all for n ≤ 0). */
     public static Object dropVal(Object nArg, Object collArg) {
         long n = asLongArg(nArg, "drop");
         java.util.List<Object> list = asListAny(collArg);
-        return new dev.irij.runtime.Values.IrijVector(
-                new java.util.ArrayList<>(list.subList((int) Math.min(n, list.size()), list.size())));
+        int k = (int) Math.max(0, Math.min(n, list.size()));
+        if (list instanceof dev.irij.runtime.PVec pv && k <= 32) {
+            for (int i = 0; i < k; i++) pv = pv.dropFirst();
+            return new dev.irij.runtime.Values.IrijVector(pv);
+        }
+        return new dev.irij.runtime.Values.IrijVector(list.subList(k, list.size()));
     }
 
 
