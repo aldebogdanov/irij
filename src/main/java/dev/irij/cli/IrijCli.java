@@ -185,7 +185,7 @@ public final class IrijCli {
         // v0.6.13: single execution model — bytecode. The interpreter
         // was removed in R5d.
         try {
-            BytecodeRunner.runFile(path, null, programArgs);
+            BytecodeRunner.runFile(path, null, programArgs, !noSpecLint);
         } catch (IrijCompiler.CompileException e) {
             System.err.println(path + ":" + e.getMessage());
             System.exit(1);
@@ -218,7 +218,6 @@ public final class IrijCli {
               irij build                 package app into self-contained JAR (bytecode-sm, default since v0.6.x)
               irij build <file.irj>      build with explicit entry point
               irij build -o out.jar      build with custom output path
-              irij build --mode=interp   build with legacy interpreter bundling (deprecated)
               irij compile <file.irj>    (experimental) compile to .class
               irij compile <file> -o j.jar  (experimental) compile to runnable jar
               irij install               fetch seeds from irij.toml (alias: seed)

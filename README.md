@@ -403,20 +403,25 @@ kept misleading new readers. Five remaining runtime-support classes
 moved to `dev.irij.runtime`; the emitter's ASM-internal names also
 updated. No behaviour change.
 
-**`std.auth`** — minimal auth toolkit built on three new builtins
-(`sha256-hex`, `hmac-sha256-hex`, `random-token`):
+**`std.auth`** — minimal auth toolkit built on the crypto builtins
+(`sha256-hex`, `hmac-sha256-hex`, `pbkdf2-sha256-hex`,
+`constant-time-eq?`, `random-token`):
 
 - `new-salt ()` — per-credential SecureRandom salt (gated by `Random`).
-- `hash-password salt password` — `"<salt>$<sha256(salt ++ password)>"`.
-- `verify-password stored password` — constant-shape re-hash + compare.
+- `hash-password salt password` —
+  `"pbkdf2-sha256$<iterations>$<salt>$<pbkdf2(password, salt)>"`
+  (PBKDF2-HMAC-SHA256, 600 000 iterations).
+- `verify-password stored password` — re-derive + constant-time compare;
+  also accepts the pre-v0.9 `"<salt>$<sha256>"` format, which
+  `password-needs-rehash? stored` flags for upgrading at next login.
 - `new-session-token ()` — 256-bit URL-safe session ID.
 - `sign-token secret token` / `verify-signed-token secret signed` —
-  HMAC-SHA-256 envelope for stateless signed cookies.
+  HMAC-SHA-256 envelope for stateless signed cookies, verified in
+  constant time.
 
-For password storage today; production deployments should still
-prefer a memory-hard KDF (Argon2/scrypt/bcrypt) once one lands in
-the runtime — `std.auth` is the dogfooding baseline, not the final
-shape.
+A memory-hard KDF (Argon2/scrypt) would resist GPU cracking better than
+PBKDF2; it can replace it behind the same `scheme$…` format once one
+lands in the runtime.
 
 **State-machine lowering — all known correctness gaps closed.**
 

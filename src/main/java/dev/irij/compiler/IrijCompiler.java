@@ -64,8 +64,7 @@ public final class IrijCompiler {
         if (parsed.hasErrors()) {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
         }
-        List<Decl> decls = new AstBuilder().build(parsed.tree());
-        return compileDecls(decls, className, sourceRoot, opts, seedRoots, sourceFile);
+        return compileDecls(buildAst(parsed), className, sourceRoot, opts, seedRoots, sourceFile);
     }
 
     /** Compile a pre-parsed (and possibly rewritten) decl list. Lets
@@ -98,11 +97,19 @@ public final class IrijCompiler {
         // root fns into a phantom per-file class.
         String rootFile = sourceFile != null ? sourceFile
                 : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
-        var inliner = new ModuleInliner(sourceRoot, seedRoots);
-        List<Decl> inlined = inliner.inline(decls, rootFile);
-        EffectRowChecker.check(inlined, inliner.fnFile());
-        return new ClassEmitter(className, inliner.aliases(), opts, rootFile, inliner.fnFile())
-                .emitProgram(inlined);
+        var inliner = new ModuleInliner(sourceRoot, seedRoots,
+                opts.specLint() ? System.err::println : null);
+        try {
+            List<Decl> inlined = inliner.inline(decls, rootFile);
+            EffectRowChecker.check(inlined, inliner.fnFile());
+            return new ClassEmitter(className, inliner.aliases(), opts, rootFile, inliner.fnFile())
+                    .withForwarders(inliner.forwarders())
+                    .emitProgram(inlined);
+        } catch (StackOverflowError e) {
+            // Every pass recurses over the AST; past a few thousand levels
+            // of nesting that exhausts the stack.
+            throw new CompileException("program is nested too deeply to compile");
+        }
     }
 
     /** Multi-class compile from source text. */
@@ -113,8 +120,20 @@ public final class IrijCompiler {
         if (parsed.hasErrors()) {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
         }
-        List<Decl> decls = new AstBuilder().build(parsed.tree());
-        return compileDeclsMulti(decls, className, sourceRoot, opts, seedRoots, sourceFile);
+        return compileDeclsMulti(buildAst(parsed), className, sourceRoot, opts, seedRoots, sourceFile);
+    }
+
+    /** Build the AST of a parsed program, reporting the builder's own
+     *  errors (a bad `use` modifier, a `1/0` literal, absurd nesting) as
+     *  compile errors rather than raw Java exceptions. */
+    public static List<Decl> buildAst(IrijParseDriver.ParseResult parsed) {
+        try {
+            return new AstBuilder().build(parsed.tree());
+        } catch (StackOverflowError e) {
+            throw new CompileException("program is nested too deeply to compile");
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw new CompileException(e.getMessage(), e);
+        }
     }
 
     /** Multi-class compile from a file. */

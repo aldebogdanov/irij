@@ -29,9 +29,18 @@ public final class HttpClientCapability {
 
     private HttpClientCapability() {}
 
+    /** One client for the process: each {@link HttpClient} owns a
+     *  selector thread and a connection pool, so building one per call
+     *  leaks threads until GC and never reuses a connection. */
+    private static final HttpClient CLIENT = HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(30))
+            .build();
+
     /** {@code http-client.request opts} — opts is a Map with url +
-     *  optional method (default GET), body, headers. Returns a Map
-     *  with status (Long), body (Str), headers (Map). */
+     *  optional method (default GET), body, headers and timeout-ms
+     *  (whole-request deadline; absent waits as long as the server
+     *  keeps the connection alive). Returns a Map with status (Long),
+     *  body (Str), headers (Map). */
     public static Object request(Object optsArg) {
         if (!(optsArg instanceof IrijMap opts)) {
             throw new IrijRuntimeError("http-client.request: expects Map argument");
@@ -46,8 +55,10 @@ public final class HttpClientCapability {
         Object body = entries.get("body");
         Object headers = entries.get("headers");
         try {
-            HttpClient client = HttpClient.newHttpClient();
             HttpRequest.Builder reqBuilder = HttpRequest.newBuilder(URI.create(urlStr));
+            if (entries.get("timeout-ms") instanceof Long ms && ms > 0) {
+                reqBuilder.timeout(java.time.Duration.ofMillis(ms));
+            }
             if (headers instanceof IrijMap hm) {
                 for (var e : hm.entries().entrySet()) {
                     reqBuilder.header(e.getKey(), Values.toIrijString(e.getValue()));
@@ -58,7 +69,7 @@ public final class HttpClientCapability {
             } else {
                 reqBuilder.method(method, HttpRequest.BodyPublishers.noBody());
             }
-            HttpResponse<String> resp = client.send(reqBuilder.build(),
+            HttpResponse<String> resp = CLIENT.send(reqBuilder.build(),
                     HttpResponse.BodyHandlers.ofString());
             LinkedHashMap<String, Object> respHeaders = new LinkedHashMap<>();
             resp.headers().map().forEach((k, v) ->
@@ -68,8 +79,14 @@ public final class HttpClientCapability {
             result.put("body", resp.body());
             result.put("headers", new IrijMap(respHeaders));
             return new IrijMap(result);
+        } catch (InterruptedException e) {
+            // Keep the cancellation visible to the caller (a cancelled
+            // fork, a timed-out eval) rather than swallowing it.
+            Thread.currentThread().interrupt();
+            throw new IrijRuntimeError("http-client.request: interrupted");
         } catch (Exception e) {
-            throw new IrijRuntimeError("http-client.request: " + e.getMessage());
+            String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+            throw new IrijRuntimeError("http-client.request: " + msg);
         }
     }
 }

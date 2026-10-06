@@ -1198,7 +1198,12 @@ public class AstBuilder {
     private Expr visitLiteral(LiteralContext ctx) {
         var loc = loc(ctx);
         if (ctx.INT_LIT() != null) {
-            return new Expr.IntLit(parseLong(ctx.INT_LIT().getText()), loc);
+            String digits = ctx.INT_LIT().getText().replace("_", "");
+            try {
+                return new Expr.IntLit(Long.parseLong(digits), loc);
+            } catch (NumberFormatException tooBig) {
+                return new Expr.BigIntLit(new java.math.BigInteger(digits), loc);
+            }
         }
         if (ctx.FLOAT_LIT() != null) {
             return new Expr.FloatLit(parseDouble(ctx.FLOAT_LIT().getText()), loc);
@@ -1210,8 +1215,9 @@ public class AstBuilder {
         if (ctx.RATIONAL() != null) {
             String text = ctx.RATIONAL().getText();
             int slash = text.indexOf('/');
-            long num = Long.parseLong(text.substring(0, slash));
-            long den = Long.parseLong(text.substring(slash + 1));
+            var num = new java.math.BigInteger(text.substring(0, slash).replace("_", ""));
+            var den = new java.math.BigInteger(text.substring(slash + 1).replace("_", ""));
+            if (den.signum() == 0) throw new IllegalArgumentException(loc + ": rational literal " + text + " has a zero denominator");
             return new Expr.RationalLit(num, den, loc);
         }
         if (ctx.STRING() != null) {

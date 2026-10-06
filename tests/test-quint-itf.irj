@@ -22,7 +22,7 @@ r7 := test "a bare array decodes to a Vec" (-> assert-eq #["x" "y"] (value-of "[
 r8 := test "a variant keeps its tag and value" (-> assert-eq {tag= "Busy" value= 2} (value-of "{\"tag\": \"Busy\", \"value\": {\"#bigint\": \"2\"}}"))
 r9 := test "an unknown # tag is an error" (-> assert-throws (-> value-of "{\"#unserializable\": \"x\"}"))
 r10 := test "a #map whose keys collide is an error" (-> assert-throws (-> value-of "{\"#map\": [[{\"#bigint\": \"1\"}, 1], [\"1\", 2]]}"))
-r11 := test "an integer too big for Irij is an error, not a truncation" (-> assert-throws (-> value-of "{\"#bigint\": \"99999999999999999999\"}"))
+r11 := test "an integer past 64 bits decodes exactly" (-> assert-eq 99999999999999999999 (value-of "{\"#bigint\": \"99999999999999999999\"}"))
 
 ;; The bignumber.js leak: with --backend=rust, |n| >= 10^15 arrives as
 ;; {s, e, c} internals instead of #bigint.

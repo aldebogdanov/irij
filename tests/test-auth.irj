@@ -106,3 +106,48 @@ test "verify-signed-token rejects wrong secret" (->
 
 test "verify-signed-token rejects tampered envelope" (->
   assert-eq (verify-signed-token "secret" "no-dot-here") "")
+
+;; ── pbkdf2-sha256-hex / constant-time-eq? ─────────────────
+
+;; RFC 7914 §11 PBKDF2-HMAC-SHA256 vector (P="passwd", S="salt", c=1);
+;; the first 32 bytes of its 64-byte output.
+test "pbkdf2-sha256-hex RFC 7914 vector" (->
+  assert-eq (pbkdf2-sha256-hex "passwd" "salt" 1)
+            "55ac046e56e3089fec1691c22544b605f94185216dde0465e68b9d57c20dacbc")
+
+test "constant-time-eq? compares exactly" (->
+  assert-true ((constant-time-eq? "abc" "abc") && (! (constant-time-eq? "abc" "abd")) && (! (constant-time-eq? "abc" "abcd"))))
+
+;; ── stored-hash format, legacy hashes, rehash ─────────────
+
+fn run-format ::: Random
+  =>
+  stored := hash-password (new-salt ()) "pw"
+  assert-true (starts-with? stored ("pbkdf2-sha256$" ++ (to-str (pbkdf2-iterations ())) ++ "$"))
+  assert-true (! (password-needs-rehash? stored))
+
+fn wrap-format ::: Random
+  =>
+  with default-random
+    run-format ()
+
+test "hash-password stores a PBKDF2 hash" (-> wrap-format ())
+
+;; Hashes made before v0.9 ("<salt>$<sha256(salt ++ password)>") still
+;; verify, and are flagged for re-hashing.
+legacy-stored := "abc$" ++ (sha256-hex "abcpw")
+
+test "verify-password accepts a legacy hash" (->
+  assert-true ((verify-password legacy-stored "pw") && (! (verify-password legacy-stored "nope"))))
+
+test "legacy hashes need a rehash" (->
+  assert-true (password-needs-rehash? legacy-stored))
+
+test "fewer iterations than asked need a rehash" (->
+  assert-true (password-needs-rehash? ("pbkdf2-sha256$1000$abc$" ++ (pbkdf2-sha256-hex "pw" "abc" 1000))))
+
+test "verify-password honours the stored iteration count" (->
+  assert-true (verify-password ("pbkdf2-sha256$1000$abc$" ++ (pbkdf2-sha256-hex "pw" "abc" 1000)) "pw"))
+
+test "verify-password rejects a malformed PBKDF2 hash" (->
+  assert-true ((! (verify-password "pbkdf2-sha256$lots$abc$00" "pw")) && (! (verify-password "md5$1$abc$00" "pw"))))

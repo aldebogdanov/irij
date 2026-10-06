@@ -1,5 +1,10 @@
 package dev.irij.compiler;
 
+/**
+ * Compiled scope handle — bound to a name inside a `scope { ... }` block.
+ * `handle.fork thunk` spawns a fiber tied to this scope; join semantics
+ * run after the block body via {@link #joinByModifier}.
+ */
 public final class CompiledScopeHandle {
     public final String modifier; // null | "race" | "supervised"
     public final java.util.List<Fiber> fibers =
@@ -26,12 +31,6 @@ public final class CompiledScopeHandle {
             default -> throw new dev.irij.IrijRuntimeError(
                     "Unknown scope modifier: " + modifier);
         };
-    }
-
-    public Object cancelAll() {
-        for (Fiber f : fibers) f.thread.interrupt();
-        for (Fiber f : fibers) { try { f.result.join(); } catch (Exception ignored) {} }
-        return dev.irij.runtime.Values.UNIT;
     }
 
     public Object joinAll(Object bodyResult) {

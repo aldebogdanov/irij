@@ -36,124 +36,19 @@ public final class RtEffects {
     }
 
 
-    /** Emitted call-site for effect ops. Routes through EffectSystem.fireOp. */
+    /** Emitted call-site for an effect op performed outside any SM body
+     *  (a fiber, a plain fn reached from a `with`): dispatch synchronously
+     *  to the innermost matching handler on {@link RuntimeSupport#SM_STACK}. */
     public static Object perform(String effectName, String opName, Object[] args) {
-        return dev.irij.runtime.EffectSystem.fireOp(
-                effectName, opName, java.util.Arrays.asList(args));
+        Object r = fireOpToSM(effectName, opName, java.util.Arrays.asList(args));
+        if (r != RuntimeSupport.SM_NO_MATCH) return r;
+        throw new dev.irij.IrijRuntimeError("Unhandled effect: " + effectName + "." + opName
+                + " (no handler on stack)");
     }
 
 
     /**
-     * Run body under a compiled handler: spawns a virtual thread for the body,
-     * drives the handler loop on the calling thread, supports one-shot resume.
-     */
-    public static Object runWith(Object handlerObj, RuntimeSupport.IrijFn body) {
-        if (handlerObj instanceof CompiledComposedHandler cc) {
-            return runWithComposed(cc.handlers, 0, body);
-        }
-        if (!(handlerObj instanceof CompiledHandler h)) {
-            throw new dev.irij.IrijRuntimeError(
-                    "with requires a handler, got " + RuntimeSupport.typeTag(handlerObj));
-        }
-        var opChannel = new java.util.concurrent.SynchronousQueue<
-                dev.irij.runtime.EffectSystem.EffectMessage>();
-        var ctx = new dev.irij.runtime.EffectSystem.HandlerContext(
-                h.effectName, h, opChannel);
-        var parentStack = new java.util.ArrayDeque<>(
-                dev.irij.runtime.EffectSystem.STACK.get());
-
-        Thread bodyThread = Thread.startVirtualThread(() -> {
-            var bodyStack = dev.irij.runtime.EffectSystem.STACK.get();
-            bodyStack.addAll(parentStack);
-            bodyStack.push(ctx);
-            try {
-                Object result = body.apply(new Object[0]);
-                opChannel.put(new dev.irij.runtime.EffectSystem.EffectMessage.Done(result));
-            } catch (InterruptedException e) {
-                // aborted by handler (no resume)
-            } catch (Throwable t) {
-                try {
-                    opChannel.put(new dev.irij.runtime.EffectSystem.EffectMessage.Err(t));
-                } catch (InterruptedException ignored) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        });
-
-        try {
-            return runHandlerLoop(h, opChannel);
-        } finally {
-            if (bodyThread.isAlive()) bodyThread.interrupt();
-        }
-    }
-
-
-    /** Nested runWith: with (h0 >> h1 >> h2) body ≡ runWith h0 (\ -> runWith h1 (\ -> runWith h2 body)). */
-    private static Object runWithComposed(java.util.List<CompiledHandler> handlers, int idx, RuntimeSupport.IrijFn body) {
-        if (idx >= handlers.size()) return body.apply(new Object[0]);
-        RuntimeSupport.IrijFn nested = (args) -> runWithComposed(handlers, idx + 1, body);
-        return runWith(handlers.get(idx), nested);
-    }
-
-
-    private static Object runHandlerLoop(
-            CompiledHandler h,
-            java.util.concurrent.SynchronousQueue<dev.irij.runtime.EffectSystem.EffectMessage> opChannel) {
-        while (true) {
-            dev.irij.runtime.EffectSystem.EffectMessage msg;
-            try { msg = opChannel.take(); }
-            catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new dev.irij.IrijRuntimeError("Handler loop interrupted");
-            }
-            switch (msg) {
-                case dev.irij.runtime.EffectSystem.EffectMessage.Done d -> {
-                    return d.value();
-                }
-                case dev.irij.runtime.EffectSystem.EffectMessage.Err e -> {
-                    Throwable t = e.error();
-                    if (t instanceof dev.irij.IrijRuntimeError ire) throw ire;
-                    if (t instanceof RuntimeException re) throw re;
-                    throw new dev.irij.IrijRuntimeError(
-                            "Effect body error: " + t.getMessage());
-                }
-                case dev.irij.runtime.EffectSystem.EffectMessage.Op op -> {
-                    RuntimeSupport.IrijFn clause = h.clauses.get(op.opName());
-                    if (clause == null) {
-                        throw new dev.irij.IrijRuntimeError(
-                                "Handler " + h.name + " has no clause for " + op.opName());
-                    }
-                    var resumed = new java.util.concurrent.atomic.AtomicBoolean(false);
-                    RuntimeSupport.IrijFn resumeFn = (resumeArgs) -> {
-                        if (!resumed.compareAndSet(false, true)) {
-                            throw new dev.irij.IrijRuntimeError(
-                                    "resume called twice (one-shot continuation)");
-                        }
-                        try {
-                            op.resumeChannel().put(resumeArgs.length > 0
-                                    ? resumeArgs[0]
-                                    : dev.irij.runtime.Values.UNIT);
-                            return runHandlerLoop(h, opChannel);
-                        } catch (InterruptedException e2) {
-                            Thread.currentThread().interrupt();
-                            throw new dev.irij.IrijRuntimeError(
-                                    "Interrupted during resume");
-                        }
-                    };
-                    Object[] clauseArgs = new Object[op.args().size() + 1];
-                    for (int i = 0; i < op.args().size(); i++) clauseArgs[i] = op.args().get(i);
-                    clauseArgs[op.args().size()] = resumeFn;
-                    return clause.apply(clauseArgs);
-                }
-            }
-        }
-    }
-
-
-    /**
-     * State-machine runtime for {@code with handler body} — parallel to
-     * {@link #runWith}. Not yet selected by the emitter; invoked directly
-     * by tests (step 1) and by emitted code in later steps.
+     * State-machine runtime for {@code with handler body}.
      *
      * <p>Enters the body by calling {@code k.resume(null)}. Each
      * {@link PerformSignal} caught here dispatches to the matching clause;
@@ -193,7 +88,7 @@ public final class RtEffects {
 
 
     /**
-     * Synchronous SM-handler dispatch from {@code EffectSystem.fireOp} —
+     * Synchronous SM-handler dispatch from {@link #perform} —
      * lets a fiber spawned inside an SM {@code with} reach the parent's
      * SM handler via the inherited {@link #SM_STACK}.
      *
@@ -306,7 +201,7 @@ public final class RtEffects {
         try {
             return dispatchLoopSMImpl(hs, k, reentryValue, stack);
         } finally {
-            stack.pop();
+            stack.pollFirst(); // never throws — see exitFn
         }
     }
 
@@ -352,23 +247,7 @@ public final class RtEffects {
                     if (h != null) break;
                 }
             }
-            if (h == null) {
-                // Bridge to threaded outer (EffectSystem.STACK).
-                boolean bridged = false;
-                var threadedStack = dev.irij.runtime.EffectSystem.STACK.get();
-                for (var ctx : threadedStack) {
-                    if (ctx.effectName().equals(sigEffectName)) {
-                        resumeArg = dev.irij.runtime.EffectSystem.fireOp(
-                                sigEffectName, sigOpName,
-                                java.util.Arrays.asList(sigArgs));
-                        currentK = sigContinuation;
-                        bridged = true;
-                        break;
-                    }
-                }
-                if (bridged) continue;
-                throw sig; // truly unhandled
-            }
+            if (h == null) throw sig; // truly unhandled
 
             RuntimeSupport.IrijFn clause = h.clauses.get(sigOpName);
             if (clause == null) {
@@ -441,7 +320,6 @@ public final class RtEffects {
     public static Object runWithEffectSnapshot(EffectSnapshot snap,
             java.util.function.Supplier<Object> body) {
         ParentSnapshot p = snap.inner;
-        RtConcurrency.inheritEffectStack(p.effectStack());
         RtConcurrency.inheritSMStack(p.smStack());
         RtConcurrency.inheritEffectRow(p.effectRow());
         return RuntimeSupport.callBoundSession(p.namespace(), p.sessionOut(), body);
@@ -486,6 +364,19 @@ public final class RtEffects {
     }
 
 
+    /** Push a fn's declared effect row, loaded as a per-call-site constant
+     *  ({@link #effectRow}): no per-call array or set allocation. */
+    public static void enterFnRow(java.util.Set<String> row) {
+        EFFECT_ROW.get().push(row);
+    }
+
+    /** {@code ConstantDynamic} bootstrap: the immutable set of a declared
+     *  effect row, resolved once per call site by the JVM. */
+    public static java.util.Set<String> effectRow(java.lang.invoke.MethodHandles.Lookup lookup,
+            String name, Class<?> type, String... effects) {
+        return java.util.Set.copyOf(java.util.Arrays.asList(effects));
+    }
+
     /** Push an ambient frame — fn body inherits caller's effects. Used
      *  for {@code ::: Any} and parametric row-variables. */
     public static void enterFnAmbient() {
@@ -493,8 +384,12 @@ public final class RtEffects {
     }
 
 
+    /** Pop the frame {@link #enterFn} pushed. Never throws: these pops
+     *  run in catch-all handlers while a StackOverflowError unwinds, and a
+     *  frame torn by that overflow (an ArrayDeque op cut off mid-way)
+     *  must not replace the real error with a NoSuchElementException. */
     public static void exitFn() {
-        EFFECT_ROW.get().pop();
+        EFFECT_ROW.get().pollFirst();
     }
 
 
@@ -514,7 +409,7 @@ public final class RtEffects {
 
 
     public static void exitWith() {
-        EFFECT_ROW.get().pop();
+        EFFECT_ROW.get().pollFirst(); // never throws — see exitFn
     }
 
 
@@ -548,7 +443,7 @@ public final class RtEffects {
 
     public static void exitWithCount(int count) {
         var stack = EFFECT_ROW.get();
-        for (int i = 0; i < count; i++) stack.pop();
+        for (int i = 0; i < count; i++) stack.pollFirst(); // never throws — see exitFn
     }
 
 
@@ -557,95 +452,10 @@ public final class RtEffects {
     public static void checkPerformEffect(String effectName, String opName) {
         if (effectName == null) return;
         var top = EFFECT_ROW.get().peek();
-        if (top.contains(effectName)) return;
+        if (top == null || top.contains(effectName)) return; // null: torn by an overflow
         throw new dev.irij.IrijRuntimeError(
                 "Effect '" + effectName + "' not declared: '" + opName
                         + "' requires ::: " + effectName
                         + " in enclosing function's effect row");
     }
 }
-
-
-// ── Effects (14c.2: thread+channel lowering; reuses EffectSystem) ──
-
-/**
- * Compiled handler value: clause map from op-name to IrijFn.
- * Each clause IrijFn is invoked with arg-array that ends with the resume
- * IrijFn: {@code args..., resume}. Clause returns the value that should
- * be the result of the enclosing `with` block.
- */
-
-
-/** Flat ordered list of handlers from a `>>` composition. */
-
-
-// ── Effects (14c.3: state-machine lowering — runtime scaffolding) ──
-//
-// Parent design doc: docs/phase-14c3-state-machine.md
-//
-// This section provides the runtime surface that the state-machine lowering
-// pass (step 2+) will target. The emitter is NOT yet wired to emit
-// IrijContinuation subclasses — step 1 just lands the runtime so it can
-// be exercised with hand-written continuations in tests.
-
-/**
- * State-machine-lowered effect-bearing body or clause.
- *
- * <p>Concrete — not subclassed. The lowering pass emits a {@link IrijFn}
- * "step" closure that implements the switch-on-state; the continuation
- * holds the mutable state ({@code state} label + {@code fields} for
- * locals that cross {@code perform} boundaries).
- *
- * <p>Step contract: {@code step.apply([thisContinuation, resumeValue])}
- * either returns the final body value or throws {@link PerformSignal}.
- * The first entry passes {@code null} as {@code resumeValue}.
- *
- * <p>Lifted locals are stored in {@link #fields} so they survive across
- * state transitions (JVM operand stack does not survive a throw). The
- * lowering pass assigns each lifted local a stable index into this array.
- *
- * <p>Per-{@code with} freshly allocated (see design doc § 14 — pooling
- * deferred as tech debt).
- */
-
-
-/**
- * Pooled, stack-trace-free signal used by state-machine bodies to yield
- * to the nearest enclosing {@link #runWithSM} frame.
- *
- * <p>Allocated via {@link #of}, which reuses a thread-local instance — the
- * hot path does not allocate. Safe because a signal is either consumed by
- * the dispatcher before the next op call, or re-raised past the dispatcher
- * (in which case the outer dispatcher also consumes it synchronously).
- *
- * <p>Overriding {@link Throwable#fillInStackTrace()} to a no-op is the
- * standard trick for control-flow-only exceptions.
- */
-
-
-/**
- * Tail-resume sentinel — thrown by the synthesised {@code resumeFn} when
- * a clause invokes {@code resume v} so the dispatch loop unwinds the
- * clause's JVM frames and continues iteratively. Pooled, stack-trace-free.
- *
- * <p><b>Semantic note:</b> idiomatic Irij clauses put {@code resume} in
- * tail position ({@code "stmt; stmt; resume v"}). For those, this throw
- * is purely a control-flow shortcut and behaviour is unchanged. For
- * non-tail clauses ({@code "resume v; postStmt"}) the trampoline causes
- * post-resume statements to be skipped — a deliberate trade-off so that
- * tight perform-loops scale beyond the JVM stack. The same shape can be
- * expressed by moving post-resume code outside the clause.
- */
-
-
-/** Public, opaque snapshot of effect-handling state taken at the
- *  call site. Capabilities that hand control to a fresh thread
- *  (HTTP request handlers, scheduled callbacks, anything backed
- *  by a Java executor) snapshot here and replay via
- *  {@link #runWithEffectSnapshot} on the new thread so the user's
- *  Irij code finds the same handler chain it would have on the
- *  calling thread.
- *
- *  <p>Without this, fresh executor threads start with empty
- *  {@code EFFECT_ROW} / {@code SM_STACK} thread-locals and any
- *  {@code perform} blows up with "no handler on stack". */

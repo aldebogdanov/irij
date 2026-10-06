@@ -120,18 +120,14 @@ fn add-pair :: Map Vec Map
   else
     assoc acc k (decode-value (nth 1 pair))
 
-;; Irij `Int` is 64-bit and Quint's is unbounded, so this is the one
-;; place a legitimate trace can be undecodable. Say so plainly rather
-;; than truncate in silence.
+;; Quint and Irij integers are both unbounded, so every `#bigint`
+;; decodes exactly, however large.
 pub fn decode-bigint :: Str Int
   => s
   parsed := try (-> parse-int s)
   match parsed
     Ok n => n
-    Err _ =>
-      error ("ITF: the integer " ++ s ++ " does not fit in an Irij Int"
-             ++ " (64-bit signed); Quint integers are unbounded and Irij's"
-             ++ " are not")
+    Err _ => error ("ITF: `" ++ s ++ "` is not an integer")
 
 ;; ── The large-integer trap ─────────────────────────────────────
 ;;

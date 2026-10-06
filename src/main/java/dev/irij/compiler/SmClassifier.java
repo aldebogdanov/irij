@@ -30,12 +30,10 @@ final class SmClassifier implements Opcodes {
     java.util.List<Stmt> aNormalize(java.util.List<Stmt> body) { return new ANormalizer().normalize(body); }
 
     /**
-     * Step 7 gate: SM lowering only handles tier (a)+(b) handlers — clauses
-     * that don't themselves perform effects beyond their own resume. Any
-     * referenced handler with non-empty {@code requiredEffects} (declared via
-     * {@code ::: Other}) or whose clause body contains a perform of a
-     * different effect falls back to the threaded path (which natively
-     * supports the EffectSystem stack walk for clause-internal performs).
+     * Whether SM lowering can run a {@code with} over this handler expression.
+     * A false answer is a compile error ("handler shape not supported by
+     * state-machine lowering") — there has been no other lowering since the
+     * threaded one was removed in v0.6.13.
      */
     boolean smCanHandle(Expr handlerExpr) {
         for (String name : ce.effEm.collectHandlerNames(handlerExpr)) {
@@ -745,9 +743,8 @@ final class SmClassifier implements Opcodes {
             case Stmt.IfStmt ifs -> stmtContainsOpRecursive(ifs);
             // Step 8: nested `with` would require the outer continuation to
             // resume INSIDE the inner with rather than at its start, plus
-            // bridging PerformSignal across SM/threaded boundaries. Both
-            // are out of scope for 14c.3 — fall back to threaded for the
-            // outer (and inner) so EffectSystem dispatch handles it.
+            // bridging PerformSignal across nested dispatch loops — not
+            // something this flat classification decides.
             default -> true; // includes Stmt.With — conservatively unsupported
         };
     }

@@ -75,15 +75,52 @@ path dep, `…/uzor`) or the one above it (an installed seed,
    - Standard library: `std/*.irj` in resources (classpath
      `/std/X.irj`).
    - User modules: relative to project `sourceRoot`.
-   - Git deps: pulled to `~/.irij/cache/...` via `irij install`,
-     then resolved like local.
+   - Seeds (dependencies from `irij.toml [seeds]`): fetched into
+     `~/.irij/seeds/<name>/<version-or-ref>/` by `DependencyResolver`
+     (on first use, or ahead of time with `irij install`), then
+     resolved like local.
 2. Recursively inline the imported module's AST.
 3. Stripping rules:
    - `mod` declaration removed.
    - `pub` prefix removed from each pub decl (kept as a marker for
      blame envelopes).
-   - Private decls renamed with module-prefix to avoid clashes
-     (e.g. `helper` → `mymod__helpers__helper`).
+   - Private top-level fns, bindings, handlers and caps are renamed to
+     `name$module$path` (`helper` in `mymod.helpers` →
+     `helper$mymod$helpers`) by `ModulePrivacy.privatize` before the
+     module is flattened in. `$` can't occur in an Irij identifier, so
+     the name is fresh, and every occurrence of the identifier in the
+     module is renamed (uses, binders, parameters, patterns) — renaming
+     one identifier consistently is meaning-preserving whatever the
+     scoping, so no scope analysis is needed. Without this the emitter's
+     program-wide names made privacy fictional: a program defining
+     `find-route` replaced `std.serve`'s router internals, and two seeds
+     with the same private helper name called each other's. (The
+     interpreter had per-module environments; the flattening bytecode
+     pipeline lost privacy until v0.9.)
+   - **Pub fns and plain pub bindings** are renamed the same way, so a
+     module's own references to its pub names always mean its own
+     definitions. Each gets a public **forwarder** under the original
+     name for importers: `fn shout` with the same spec annotations and
+     effect row, whose body calls `shout$mod$path` (a binding gets
+     `x := x$mod$path`). The forwarder emits no spec checks — the real
+     fn checks them, and error messages show `shout`, not the qualified
+     name (`ClassEmitter.displayName`). Before this, last-definition-wins
+     reached *inside* modules: a program defining `shout` rewired a
+     library's own calls to its pub `shout`, and two modules exporting
+     one name called each other's.
+   - What an importer sees: a program's own top-level `shout` replaces
+     only the forwarder, so the program's code gets its own and the
+     module keeps its own. With `use m :as a`, `a.shout` is rewritten to
+     `shout$m` (`ModulePrivacy.qualify`) and reaches the module's
+     definition even when the importer has a `shout` of its own. Two
+     `:open`-imported modules exporting one name still collide for the
+     importer (the later `use` wins; std.collection and std.list both
+     export `sum`) — import one `:as` to pick explicitly.
+   - Still program-wide names: pub handlers and caps (a `with` must
+     resolve them statically), mutable pub bindings, pub fns with a rest
+     parameter, and a binding that mentions its own name — `pub sqrt :=
+     sqrt` re-exports the builtin, and renaming would make it refer to
+     itself.
 4. Open / qualified resolution:
    - `:open` rewrites every Var reference to the unqualified name.
    - Default (qualified) rewrites `text.trim x` to `trim x` and adds
@@ -125,16 +162,31 @@ What we gained:
 
 ## `irij install`
 
-Resolves `deps.irj` (TOML-shaped):
+Resolves the `[seeds]` table of `irij.toml` (transitively, through
+each seed's own `irij.toml`):
 
 ```
-[deps]
-mymod = { git = "https://github.com/user/mymod", ref = "v1.2.3" }
-util  = { git = "git@github.com:user/util",  ref = "main" }
+[seeds]
+vrata = "0.1"                                                   # registry
+utils = { git = "https://github.com/user/utils.git", tag = "v1.0" }
+local = { path = "../my-lib" }                                  # dev only
 ```
 
-Downloads to `~/.irij/cache/<sha>/`. Stamped with the resolved git
-commit hash. Re-runs do `git fetch && checkout` if `ref` is a branch.
+Registry and git seeds land in `~/.irij/seeds/<name>/<version>/` and
+`~/.irij/seeds/<name>/<ref>/`; a directory that exists is reused as is
+(tags are not re-fetched). Every fetch is built in a scratch sibling
+directory and renamed into place only when complete, so an interrupted
+download or clone never leaves a half-filled seed for later runs to
+trust.
+
+A seed's `irij.toml` is someone else's input, so its values are
+checked before they reach the filesystem or a command line: names and
+versions must be one plain path segment (`[A-Za-z0-9][A-Za-z0-9._+-]*`,
+no `..`); a git URL may not start with `-` (git would read
+`--upload-pack=<cmd>` as an option and run `<cmd>`) nor use the
+`<transport>::` form (`ext::` runs a shell command); a ref may not start
+with `-`. Git runs with `-c protocol.ext.allow=never` and `--` before
+the URL.
 
 ## Module-boundary blame
 

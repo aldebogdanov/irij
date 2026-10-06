@@ -114,7 +114,7 @@
     $BOB
     $DB-PRIMARY
 
-    ;; numeric: standard with underscore separators
+    ;; numeric: standard with underscore separators; 2/3 is a Rational
     42  3.14  0xFF  1_000_000  2/3
 
     ;; strings: double-quote, interpolation with ${}
@@ -126,6 +126,29 @@
     ;; comments: double-semicolon to end of line
     ;; this is a comment
     #+end_example
+
+    *Numbers.* Irij has three numeric kinds, and arithmetic never loses
+    a value silently:
+
+    - =Int= — an integer of any size. It never wraps or overflows: past
+      64 bits it simply keeps growing (=9223372036854775807 + 1= is
+      =9223372036854775808=). Integers that fit in 64 bits — nearly all
+      of them — take a fast 64-bit path; only a result that doesn't fit
+      is widened.
+    - =Rational= — an exact fraction. =2/3=, written *without* spaces
+      around the slash, is a Rational literal; it is always kept in
+      lowest terms with a positive denominator, and a whole value is an
+      Int (=4/2= is =2=). Rationals print as =2/3=.
+    - =Float= — a 64-bit IEEE double.
+
+    Mixed arithmetic takes the wider kind: Int with Rational gives a
+    Rational, anything with a Float gives a Float. =/= between two Ints
+    truncates toward zero (=7 / 2= is =3=; =quo= and =rem= are the named
+    integer quotient and remainder); with a Rational on either side it is
+    exact (=7/2 / 1/2= is =7=). =**= is exact for an Int or Rational base
+    and a non-negative Int exponent (=2 ** 100= is an Int), a Float
+    otherwise. =floor=, =ceil= and =round= return Ints. Comparisons and
+    equality (~==~) are exact between Ints and Rationals.
 
 *** 1.3.2 Core Digraph Operators
 
@@ -192,7 +215,7 @@
     ;; ── Effect & Control ────────────────────────────────────
     :::   ;; effect separator           fn f :: A B ::: E1 E2
     do    ;; sequence effects           do (print "a") (print "b")
-    if    ;; conditional                if cond then-expr else-expr
+    if    ;; conditional                if cond then-expr else-expr  (see below)
     match ;; pattern match              match x (:ok v => ...) (:err e => ...)
     with  ;; effect handler             with handler expr
 
@@ -203,6 +226,26 @@
     ~/    ;; select (inform branch)    decision ~/ $ROLE
     @     ;; located-at (types & exprs) Str @$BUYER  match cmd @$PRIMARY
     #+end_example
+
+    *Inline =if=.* =if cond then else other= takes one term for each
+    part — an atom, a parenthesized expression, a literal, possibly with
+    =.field= access — so it never swallows an application or an operator:
+    =if c a else f x= would read as =(if c a else f) x=, and
+    =if c 1 else n + 1= as =(if c 1 else n) + 1=. Because that is the
+    opposite of how they look, a bare inline =if= may not be applied to
+    arguments by juxtaposition, nor be the operand of an operator; both
+    are compile errors. Parenthesize the part you mean:
+
+    #+begin_example
+    if c a else (f x)          ;; apply f in the else branch
+    (if c f else g) x          ;; apply whichever function the if picks
+    if c f else g ~ x          ;; the same: ~ applies everything on its left
+    (if c 1 else n) + 1
+    #+end_example
+
+    A bare inline =if= that is a whole expression (a binding's value, a
+    function body, an argument in parentheses) needs nothing extra. The
+    block form of =if=, with indented branches, has no such limits.
 
 *** 1.3.3 Token Budget Comparison
 
@@ -479,6 +522,14 @@
    pub fn public-api ...       ;; exported
    fn internal-helper ...      ;; module-private
    #+end_example
+
+   *Scoping.* A module's own code always refers to its own top-level
+   definitions, exported or not: nothing an importer defines can replace
+   them. An importer's own top-level definition of a name shadows an
+   imported one for the importer's code only, and =alias.name= (after
+   =use m :as alias=) always means =m='s definition. When two modules
+   imported with =:open= export the same name, import one of them with
+   =:as= to choose.
 
 * Part III: Algebraic Effects — The Universal Joint
 

@@ -99,7 +99,9 @@ Effect 'Console' not declared: 'call to f' requires ::: Console
 
 Checked statically by `EffectRowChecker` (callee row ⊆ available
 set at every call site), with a runtime backstop: the emitter calls
-`RtEffects.enterFn(declaredRow)` on fn entry and
+`RtEffects.enterFnRow(row)` on fn entry — `row` an immutable set loaded
+as a `ConstantDynamic` (`RtEffects.effectRow`), resolved once per site
+instead of an array and a set allocated per call — and
 `RtEffects.checkPerformEffect` at every perform site, which peeks
 the top frame of the thread's `EFFECT_ROW` stack.
 
@@ -234,8 +236,17 @@ proof).
 
 ## Spec-lint
 
-At parse time, `pub fn` without `:: ...` triggers a warning (or error
-under `--strict`). The recommendation:
+While inlining modules (`ModuleInliner.expand`), every `pub fn` without
+`:: ...` — in the program, its modules and its seeds — is reported on
+stderr as `warning: pub fn 'f' in mod/file.irj has no spec annotation
+(line:col)`. It is on for `irij <file>` and `irij build`
+(`CompileOptions.specLint`), off for interactive evals
+(`withNamespaceMode` turns it off), the test runner and the MCP server;
+`--no-spec-lint` turns it off for a run. The stdlib is lint-clean
+(`SpecLintTest.stdlibIsClean`). (The lint lived in the tree-walk
+interpreter and was lost with it in v0.6.20 while the flag kept being
+parsed; it was restored in the bytecode pipeline in v0.9.) The
+recommendation:
 
 - All `pub fn` declarations MUST have spec annotations.
 - Use `_` for positions where the shape is too complex or
@@ -262,10 +273,19 @@ INVOKESTATIC SpecValidator.validateEncoded;
 ASTORE param_i;
 ```
 
-The output spec is captured into `currentOutputSpec` on entry to
-`emitFn` and consumed by `emitTailReturn`, which prepends the same
-`validateEncoded` call (with `argIdx = -1`) before every ARETURN at
-fn-body tail positions. Lambda bodies, SM continuations, handler-
+When the spec is a primitive whose whole check is one type test
+(`Int Float Bool Str Keyword Vec Set Tuple`, and `Map` for the common
+case — `Int`'s inline test is for a `Long`; a big Int takes the slow
+path, which accepts it), `FnEmitter.primitiveSpecClass` lets the emitter put an inline
+`INSTANCEOF` in front: the validator call above runs only on a
+mismatch, to raise the blame error. That made a spec'd `fib` ~3× faster
+— the decode-and-dispatch per argument had been ~45% of a call. `Any`,
+like `_`, emits nothing.
+
+The output spec is captured into `currentOutputSpec` (and its inline
+class into `currentOutputSpecClass`) on entry to `emitFn` and consumed
+by `emitTailReturn`, which prepends the same check (with
+`argIdx = -1`) before every ARETURN at fn-body tail positions. Lambda bodies, SM continuations, handler-
 build methods and the like emit raw ARETURN — they don't inherit
 the outer fn's output spec.
 
@@ -275,8 +295,8 @@ Tuple Fn Any Unit`), `App` (`Vec Set Map Tuple Fn` with parametric
 args), `Arrow` (callable check), `Enum` (keyword membership),
 `VecSpec` / `SetSpec` / `TupleSpec` (element-wise recursion),
 `Wildcard` / `Var` / `Unit`. User-declared product/sum specs go
-through `SpecValidator.REGISTRY` (populated by `<clinit>` on each
-emitted class).
+through the program's `SpecValidator.Registry` (populated by
+`<clinit>` on each emitted class).
 
 Encoding (`SpecValidator.encode`):
 
@@ -343,7 +363,19 @@ HTML children) instead of loosening to `#[_]`.
 The blame strings are stable so `tests/test-contracts.irj` assertions
 keep passing across releases.
 
-**User-declared product/sum specs** (`SpecValidator.REGISTRY`):
+**User-declared product/sum specs** (`SpecValidator.Registry`):
+
+One registry per classloader — every program run has its own loader,
+and a session's evals share one — reached from code through a
+`ClassValue` on the calling class (`SpecValidator.registryOf`). Every
+emitted call that may resolve a spec name passes its class
+(`LDC <program class>`): `validateEncoded`, `certifyProduct`,
+`validate` / `validate!`, and the registrations. The registry used to
+be one process-wide map by name, so two Playground visitors who both
+declared `spec Person` validated against each other's (and test files
+run in one JVM saw each other's specs). Name resolution during a
+validation reads the registry from a `ScopedValue` bound by the entry
+point, so the recursive validators don't each take it as a parameter.
 
 Populated by a generated `<clinit>` on every emitted class. For
 each `Decl.SpecDecl` the emitter records the variant arities (sum)
@@ -351,10 +383,10 @@ or the field names *and their encoded specs* (product) and emits
 `clinit` calls:
 
 ```
-SpecValidator.registerProduct("Point",
+SpecValidator.registerProduct(Program.class, "Point",
         new String[]{"x","y"},
         new String[]{"Int","Int"});
-SpecValidator.registerSum("Shape",
+SpecValidator.registerSum(Program.class, "Shape",
         new Object[]{"Circle", 1, "Rect", 2});
 ```
 

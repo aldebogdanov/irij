@@ -17,6 +17,13 @@ class LspDiagnosticsTest {
                 () -> "expected no diagnostics, got: " + diags);
     }
 
+    @Test void absurdNesting_isADiagnosticNotACrash() {
+        String src = "x := " + "(".repeat(20_000) + "1" + ")".repeat(20_000) + "\n";
+        List<Diagnostic> diags = assertDoesNotThrow(() -> LspDiagnostics.all(src));
+        assertEquals(1, diags.size());
+        assertTrue(diags.get(0).getMessage().contains("nested too deeply"), diags.get(0).getMessage());
+    }
+
     @Test void parseError_surfacedAsErrorDiagnostic() {
         // Intentional syntax error — extra ')'.
         String src = "fn greet :: Str Str\n  (n -> ))\n";

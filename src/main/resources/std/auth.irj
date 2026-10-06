@@ -3,14 +3,17 @@ mod std.auth
 ;; Password hashing + session-token helpers.
 ;;
 ;; Two surfaces:
-;;   1. Salted SHA-256 password hashing (for stored credentials).
-;;      Format: "<hex-salt>$<hex-hash>" where hash = sha256(salt ++ password).
-;;   2. URL-safe session tokens via `new-session-token`.
+;;   1. Password hashing for stored credentials: salted PBKDF2-HMAC-SHA256.
+;;      Format: "pbkdf2-sha256$<iterations>$<salt>$<hex-key>".
+;;      `verify-password` also accepts the pre-v0.9 "<salt>$<sha256>"
+;;      format, and `password-needs-rehash?` flags it (or a too-low
+;;      iteration count) so an app can re-hash at the next login.
+;;   2. URL-safe session tokens via `new-session-token`, and HMAC-signed
+;;      tokens for stateless cookies.
 ;;
-;; This is a deliberately minimal API. For production-grade password
-;; storage prefer Argon2 / bcrypt / scrypt (memory-hard KDFs) once
-;; they reach the runtime; until then a per-credential salt + SHA-256
-;; covers a low-bar credentials use case.
+;; Secrets are compared with `constant-time-eq?`, never `==`: `==` stops
+;; at the first differing character, so its timing tells an attacker how
+;; much of a forged signature was already right.
 ;;
 ;; Usage:
 ;;
@@ -24,6 +27,8 @@ mod std.auth
 ;;
 ;;   ;; login check
 ;;   valid? := verify-password stored "hunter2"     ;; true
+;;   ;; on success, upgrade old hashes in place
+;;   if (password-needs-rehash? stored) ...         ;; store a fresh hash-password
 ;;
 ;;   ;; session
 ;;   with default-random
@@ -51,24 +56,64 @@ pub fn new-salt :: Str ::: Random
 
 ;; ── Password hashing ─────────────────────────────────────────────────
 
-;; `hash-password salt password` → "<salt>$<sha256(salt ++ password)>".
+;; PBKDF2 work factor. 600 000 is OWASP's (2023) floor for
+;; PBKDF2-HMAC-SHA256; raise it as hardware gets faster —
+;; `password-needs-rehash?` then flags every hash made with fewer.
+pub fn pbkdf2-iterations :: Int
+  (-> 600000)
+
+;; `hash-password salt password` →
+;; "pbkdf2-sha256$<iterations>$<salt>$<pbkdf2(password, salt)>".
 ;; The returned string is opaque; pass it to `verify-password` as-is.
 pub fn hash-password :: Str Str Str
-  (salt password -> salt ++ "$" ++ (sha256-hex (salt ++ password)))
+  (salt password -> hash-password-with salt password (pbkdf2-iterations ()))
 
-;; Re-hash `password` under the stored salt and compare. Returns false
-;; if `stored` has the wrong shape (missing or extra `$` separator).
+fn hash-password-with :: Str Str Int Str
+  (salt password iters ->
+    "pbkdf2-sha256$" ++ (to-str iters) ++ "$" ++ salt ++ "$" ++ (pbkdf2-sha256-hex password salt iters))
+
+;; Re-derive `password` under the stored salt and parameters and compare.
+;; Returns false for any `stored` that isn't a hash this module made.
 pub fn verify-password :: Str Str Bool
   => stored password
   parts := split stored "$"
-  if ((length parts) /= 2)
-    false
+  n := length parts
+  if n == 4
+    verify-pbkdf2 (nth 0 parts) (parse-iterations (nth 1 parts)) (nth 2 parts) (nth 3 parts) password
+  else if n == 2
+    verify-legacy (nth 0 parts) (nth 1 parts) password
   else
-    verify-password-parts (nth 0 parts) (nth 1 parts) password
+    false
 
-fn verify-password-parts :: Str Str Str Bool
+;; True when `stored` should be replaced by a fresh `hash-password` of the
+;; (just verified) password: a pre-PBKDF2 hash, or fewer iterations than
+;; `pbkdf2-iterations` now asks for.
+pub fn password-needs-rehash? :: Str Bool
+  => stored
+  parts := split stored "$"
+  if (length parts) /= 4
+    true
+  else
+    (parse-iterations (nth 1 parts)) < (pbkdf2-iterations ())
+
+fn verify-pbkdf2 :: Str Int Str Str Str Bool
+  (scheme iters salt digest password ->
+    if ((scheme /= "pbkdf2-sha256") || (iters < 1) || (salt == ""))
+      false
+    else
+      (constant-time-eq? digest (pbkdf2-sha256-hex password salt iters)))
+
+;; Pre-v0.9 hashes: "<salt>$<sha256(salt ++ password)>".
+fn verify-legacy :: Str Str Str Bool
   (salt digest password ->
-    digest == (sha256-hex (salt ++ password)))
+    constant-time-eq? digest (sha256-hex (salt ++ password)))
+
+;; The iteration field, or 0 when it isn't a number.
+fn parse-iterations :: Str Int
+  => s
+  match (try (-> parse-int s))
+    (Ok n) => n
+    _ => 0
 
 ;; ── Sessions ─────────────────────────────────────────────────────────
 
@@ -95,5 +140,5 @@ pub fn verify-signed-token :: Str Str Str
 
 fn verify-signed-token-parts :: Str Str Str Str
   (secret token sig ->
-    if (sig == (hmac-sha256-hex secret token)) (token)
+    if (constant-time-eq? sig (hmac-sha256-hex secret token)) (token)
     else (""))

@@ -35,17 +35,22 @@ public final class ServeCapability {
 
     private ServeCapability() {}
 
+    /** Gap between liveness probes on a held SSE stream. A dead client
+     *  is noticed within one gap; proxies idle out far later than this. */
+    private static final long SSE_HEARTBEAT_MS =
+            Long.getLong("irij.sse.heartbeat.ms", 5_000L);
+
     // ── HTTP server ─────────────────────────────────────────────────
 
     /** {@code server.serve port handler} — bind a port + dispatch on
      *  each request through the user-supplied handler IrijFn. Static
-     *  asset serving (classpath {@code __irij_resources/} +
-     *  {@code __irij_app/}, plus script-relative {@code resources/})
-     *  runs before the handler so user code never sees those paths. */
+     *  asset serving (classpath {@code __irij_resources/}, else
+     *  {@code resources/} under the working directory) runs before the
+     *  handler so user code never sees those paths. */
     public static Object serve(Object portArg, Object handler) {
         long port = asLong(portArg, "server.serve");
         try {
-            Path scriptDir = Path.of("").toAbsolutePath();
+            Path workDir = Path.of("").toAbsolutePath();
             // `isBundled` always-on rationale: shadow JARs emit file
             // entries without directory entries, so the historic probe
             // via getResource("__irij_resources/") returned null even
@@ -65,7 +70,7 @@ public final class ServeCapability {
 
             IrijHttpServer.serve((int) port, exchange -> {
                 {
-                    if (httpServeStatic(exchange, scriptDir, isBundled)) return;
+                    if (httpServeStatic(exchange, workDir, isBundled)) return;
 
                     IrijMap req = buildRequestMap(exchange);
                     Object resp = RtEffects.runWithEffectSnapshot(
@@ -76,13 +81,14 @@ public final class ServeCapability {
                         // Handler returned the writer → long-lived stream
                         // (e.g. Playground session output). Hold this
                         // connection's virtual thread open until the writer
-                        // closes, probing liveness with a periodic heartbeat:
-                        // when the client disconnects the write throws, so we
-                        // close and return — promptly freeing the vthread and
-                        // socket instead of sleeping forever on a dead peer.
+                        // closes (waking at once when it does), probing
+                        // liveness with a periodic heartbeat: when the client
+                        // disconnects the write throws, so we close and
+                        // return — freeing the vthread and socket instead of
+                        // sleeping forever on a dead peer.
                         while (!sse.isClosed()) {
                             try {
-                                Thread.sleep(500);
+                                if (sse.awaitClosed(SSE_HEARTBEAT_MS)) break;
                                 sse.heartbeat();
                             } catch (InterruptedException ie) {
                                 sse.close();
@@ -308,25 +314,43 @@ public final class ServeCapability {
         throw new IrijRuntimeError(op + ": first arg must be SseWriter");
     }
 
-    private static boolean httpServeStatic(IrijExchange exchange,
-                                           Path scriptDir,
-                                           boolean isBundled) throws IOException {
+    /**
+     * Serve a static file, if the request names one. Only the app's
+     * {@code resources/} directory is public: bundled under
+     * {@code __irij_resources/} on the classpath, or {@code resources/}
+     * under the working directory when run from source. Nothing else
+     * is reachable — not the app's own source, not its data files, not
+     * the rest of the working directory (which for a system service
+     * is {@code /}).
+     */
+    static boolean httpServeStatic(IrijExchange exchange,
+                                   Path workDir,
+                                   boolean isBundled) throws IOException {
         String reqPath = exchange.getRequestURI().getPath();
-        if (reqPath.length() <= 1 || reqPath.contains("..")) return false;
-
-        if (isBundled) {
-            if (serveClasspathResource(exchange, "__irij_resources/" + reqPath.substring(1), reqPath)) return true;
-            if (serveClasspathResource(exchange, "__irij_app/" + reqPath.substring(1), reqPath)) return true;
+        if (reqPath == null || reqPath.length() <= 1) return false;
+        String rel = reqPath.substring(1);
+        // `..` as a path segment never names a resource; refuse it before
+        // it reaches a classloader, whose resolution we don't control.
+        for (String seg : rel.split("/", -1)) {
+            if (seg.equals("..") || seg.equals(".") || seg.indexOf('\\') >= 0
+                    || seg.indexOf('\0') >= 0) return false;
         }
-        Path resourcesPath = scriptDir.resolve("resources").resolve(reqPath.substring(1)).normalize();
-        Path resourcesRoot = scriptDir.resolve("resources").normalize();
+
+        if (isBundled
+                && serveClasspathResource(exchange, "__irij_resources/" + rel, reqPath)) {
+            return true;
+        }
+        Path resourcesRoot = workDir.resolve("resources").normalize();
+        final Path resourcesPath;
+        try {
+            resourcesPath = resourcesRoot.resolve(rel).normalize();
+        } catch (java.nio.file.InvalidPathException e) {
+            return false;
+        }
         if (resourcesPath.startsWith(resourcesRoot)
+                && !resourcesPath.equals(resourcesRoot)
                 && Files.isRegularFile(resourcesPath)) {
             return sendFile(exchange, resourcesPath, reqPath);
-        }
-        Path filePath = scriptDir.resolve(reqPath.substring(1)).normalize();
-        if (filePath.startsWith(scriptDir) && Files.isRegularFile(filePath)) {
-            return sendFile(exchange, filePath, reqPath);
         }
         return false;
     }
@@ -360,12 +384,14 @@ public final class ServeCapability {
         reqMap.put("method", exchange.getRequestMethod());
         var uri = exchange.getRequestURI();
         reqMap.put("path", uri.getPath());
-        String rawQuery = uri.getQuery() != null ? uri.getQuery() : "";
-        reqMap.put("query", rawQuery);
-        reqMap.put("params", new IrijMap(parseQueryParams(rawQuery)));
+        reqMap.put("query", uri.getQuery() != null ? uri.getQuery() : "");
+        // Params split the *raw* query: getQuery() has already decoded
+        // %26 and %2B, so splitting it would cut a value at an escaped
+        // `&` and turn an escaped `+` into a space.
+        reqMap.put("params", new IrijMap(parseQueryParams(uri.getRawQuery())));
         LinkedHashMap<String, Object> headers = new LinkedHashMap<>();
         exchange.getRequestHeaders().forEach((k, v) ->
-                headers.put(k.toLowerCase(),
+                headers.put(k.toLowerCase(java.util.Locale.ROOT),
                         v.size() == 1 ? v.get(0) : String.join(", ", v)));
         reqMap.put("headers", new IrijMap(headers));
         byte[] bodyBytes = exchange.getRequestBody().readAllBytes();
@@ -375,16 +401,26 @@ public final class ServeCapability {
         return new IrijMap(reqMap);
     }
 
-    private static java.util.Map<String, Object> parseQueryParams(String query) {
+    static java.util.Map<String, Object> parseQueryParams(String query) {
         LinkedHashMap<String, Object> out = new LinkedHashMap<>();
         if (query == null || query.isEmpty()) return out;
         for (String pair : query.split("&")) {
+            if (pair.isEmpty()) continue;
             int eq = pair.indexOf('=');
-            if (eq < 0) out.put(pair, "");
-            else out.put(pair.substring(0, eq),
-                    java.net.URLDecoder.decode(pair.substring(eq + 1), StandardCharsets.UTF_8));
+            if (eq < 0) out.put(formDecode(pair), "");
+            else out.put(formDecode(pair.substring(0, eq)), formDecode(pair.substring(eq + 1)));
         }
         return out;
+    }
+
+    /** Form-decode one query component; a malformed escape (a stray
+     *  {@code %}) is kept literally rather than failing the request. */
+    private static String formDecode(String s) {
+        try {
+            return java.net.URLDecoder.decode(s, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            return s;
+        }
     }
 
     private static void writeResponse(IrijExchange exchange, Object resp) throws IOException {

@@ -70,8 +70,10 @@ public final class IrijMcpServer {
                 if (response != null) {
                     sendResponse(response);
                 }
-            } catch (Exception e) {
-                log("Error processing message: " + e.getMessage());
+            } catch (Throwable e) {
+                // Throwable, not Exception: a StackOverflowError from the
+                // code under evaluation must not end the server's loop.
+                log("Error processing message: " + e);
                 // If we can extract an ID, send an error response
                 try {
                     var msg = JsonParser.parseString(line).getAsJsonObject();
@@ -148,11 +150,44 @@ public final class IrijMcpServer {
         var args = params.has("arguments") ? params.getAsJsonObject("arguments") : new JsonObject();
 
         return switch (toolName) {
-            case "irij_eval" -> callEval(id, args);
-            case "irij_run" -> callRun(id, args);
+            case "irij_eval" -> withTimeout(id, () -> callEval(id, args));
+            case "irij_run" -> withTimeout(id, () -> callRun(id, args));
             case "irij_test" -> callTest(id, args);
             default -> toolErrorResult(id, "Unknown tool: " + toolName);
         };
+    }
+
+    /** How long an eval/run may take before it is interrupted. */
+    private static final long EVAL_TIMEOUT_MS = Long.getLong("irij.mcp.timeout.ms", 120_000L);
+
+    /** Run a tool call on its own thread with a deadline. The server reads
+     *  one message at a time, so an eval that never returned (an infinite
+     *  loop) used to wedge it for good; now it is interrupted — compiled
+     *  loops stop at their next back-edge — and reported. */
+    private JsonObject withTimeout(JsonElement id, java.util.function.Supplier<JsonObject> call) {
+        var result = new java.util.concurrent.CompletableFuture<JsonObject>();
+        Thread worker = Thread.ofPlatform().daemon().name("irij-mcp-eval").start(() -> {
+            try {
+                result.complete(call.get());
+            } catch (StackOverflowError e) {
+                result.complete(toolErrorResult(id, "Runtime error: stack overflow (recursion too deep)"));
+            } catch (Throwable t) {
+                result.complete(toolErrorResult(id, "Error: " + t));
+            }
+        });
+        try {
+            return result.get(EVAL_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS);
+        } catch (java.util.concurrent.TimeoutException e) {
+            worker.interrupt();
+            return toolErrorResult(id, "Evaluation timed out after " + EVAL_TIMEOUT_MS
+                    + " ms (interrupted)");
+        } catch (InterruptedException e) {
+            worker.interrupt();
+            Thread.currentThread().interrupt();
+            return toolErrorResult(id, "Evaluation interrupted");
+        } catch (java.util.concurrent.ExecutionException e) {
+            return toolErrorResult(id, "Error: " + e.getCause());
+        }
     }
 
     // ── Tool: irij_eval ──────────────────────────────────────────────────

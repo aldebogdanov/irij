@@ -32,6 +32,23 @@ final class ExprEmitter implements Opcodes {
      * {@code ARETURN}. Recurses into tail-propagating shapes (if/else) so a
      * deeply-nested self call still gets the optimisation.
      */
+    /** A literal that can never be called (`false`, `0`, `"x"`, …). */
+    private static boolean isNonFnLiteral(Expr e) {
+        return switch (e) {
+            case Expr.IntLit l -> true;
+            case Expr.BigIntLit l -> true;
+            case Expr.FloatLit l -> true;
+            case Expr.RationalLit l -> true;
+            case Expr.HexLit l -> true;
+            case Expr.StrLit l -> true;
+            case Expr.BoolLit l -> true;
+            case Expr.KeywordLit l -> true;
+            case Expr.UnitLit l -> true;
+            case Expr.Var v -> v.name().equals("true") || v.name().equals("false");
+            default -> false;
+        };
+    }
+
     void emitTailExpr(Expr e, MethodVisitor mv, Locals locals) {
         // 1. Direct self-tail-call: `App(Var(currentFn), args)` with matching arity.
         if (e instanceof Expr.App app
@@ -47,6 +64,10 @@ final class ExprEmitter implements Opcodes {
             for (int i = ce.currentFnArity - 1; i >= 0; i--) {
                 mv.visitVarInsn(ASTORE, i);
             }
+            // Cancellation poll on the back-edge (see RtConcurrency.checkCancelled):
+            // without it an interrupted loop never stops.
+            mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtConcurrency",
+                    "checkCancelled", "()V", false);
             mv.visitJumpInsn(GOTO, ce.currentFnEntry);
             return;
         }
@@ -323,6 +344,17 @@ final class ExprEmitter implements Opcodes {
                 mv.visitMethodInsn(INVOKESTATIC, "java/lang/Long", "valueOf",
                         "(J)Ljava/lang/Long;", false);
             }
+            case Expr.BigIntLit b -> {
+                mv.visitLdcInsn(b.value().toString());
+                mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtNum", "parseInt",
+                        "(Ljava/lang/String;)Ljava/lang/Object;", false);
+            }
+            case Expr.RationalLit r -> {
+                mv.visitLdcInsn(r.num().toString());
+                mv.visitLdcInsn(r.den().toString());
+                mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtNum", "ratioLiteral",
+                        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;", false);
+            }
             case Expr.FloatLit f -> {
                 mv.visitLdcInsn(f.value());
                 mv.visitMethodInsn(INVOKESTATIC, "java/lang/Double", "valueOf",
@@ -408,7 +440,8 @@ final class ExprEmitter implements Opcodes {
             }
             case Expr.SeqOp so -> emitSeqOp(so, mv, locals);
             default -> throw new IrijCompiler.CompileException(
-                    "MVP: unsupported expression: " + e.getClass().getSimpleName());
+                    (e.loc() != null ? e.loc() + ": " : "")
+                    + "unsupported expression: " + e.getClass().getSimpleName());
         }
     }
 
@@ -941,8 +974,9 @@ final class ExprEmitter implements Opcodes {
                 // straight through every later check: `R "str" 2` would
                 // satisfy `x :: Int` forever after.
                 mv.visitLdcInsn(specName);
+                mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
                 mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "certifyProduct",
-                        "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
+                        "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;", false);
             } else {
                 mv.visitMethodInsn(INVOKESPECIAL, ClassEmitter.VALUES + "$Tagged", "<init>",
                         "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;)V", false);
@@ -1133,6 +1167,18 @@ final class ExprEmitter implements Opcodes {
                 return;
             }
         } else {
+            // `(if c false else g) x` (or `… ~ x`) applies the result of
+            // an `if` one of whose branches is a literal — never a function,
+            // so that call can only fail. Say so now, not as "Not callable:
+            // false" at run time. (A bare `if c a else f x` is a parse error.)
+            if (app.fn() instanceof Expr.IfExpr ie
+                    && (isNonFnLiteral(ie.thenBranch()) || isNonFnLiteral(ie.elseBranch()))) {
+                throw new IrijCompiler.CompileException(
+                        (app.loc() != null ? app.loc() + ": " : "")
+                        + "this applies the result of an inline `if`, but one branch is a "
+                        + "literal, not a function. Did you mean to apply inside the branch: "
+                        + "`if c a else (f x)`?");
+            }
             // Non-Var callee (Lambda expr, App result, etc.): call as IrijFn.
             emitIrijFnCall(app.fn(), app.args(), mv, locals);
             return;

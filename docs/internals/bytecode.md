@@ -211,7 +211,7 @@ fn shape?
 ├── TypeRef Foo                → Tagged-value constructor
 ├── Var v
 │   ├── v is in emitBuiltinApp's table       → INVOKESTATIC RT.builtin
-│   ├── v is an effect op                    → emitPerform (throws PerformSignal in SM body emit, fireOp elsewhere)
+│   ├── v is an effect op                    → emitPerform (throws PerformSignal in SM body emit, `RtEffects.perform` elsewhere)
 │   ├── v starts with uppercase              → constructor application
 │   ├── v is a JVM local                     → emit as IrijFn invocation
 │   ├── v is in currentLiftedLocals          → emit as IrijFn invocation
@@ -254,7 +254,8 @@ binds works; cross-eval fn defs do not yet (see `nrepl.md`).
 See `tco.md`. Short version: at a tail-position call to the
 currently-being-emitted fn, the emitter rebinds param slots and emits
 `GOTO methodEntry` instead of `INVOKESTATIC`. Recursion stays in one
-JVM frame.
+JVM frame. Each back-edge first calls `RtConcurrency.checkCancelled()`
+so interrupted loops stop (`concurrency.md` § Cancellation).
 
 ## Remaining shortcuts (not user-visible)
 

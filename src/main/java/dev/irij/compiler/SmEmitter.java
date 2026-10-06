@@ -613,24 +613,19 @@ final class SmEmitter implements Opcodes {
     }
 
 
-    /** Push a {@code String[]} constant onto the operand stack. Used to
-     *  pass a fn's declared effect row to {@code RT.enterFn}. */
-    void emitStringArrayConst(MethodVisitor mv, java.util.List<String> row) {
-        int n = row == null ? 0 : row.size();
-        ce.exprEm.pushIconst(mv, n);
-        mv.visitTypeInsn(ANEWARRAY, "java/lang/String");
-        if (row != null) {
-            for (int i = 0; i < row.size(); i++) {
-                mv.visitInsn(DUP);
-                ce.exprEm.pushIconst(mv, i);
-                mv.visitLdcInsn(row.get(i));
-                mv.visitInsn(AASTORE);
-            }
-        }
+    /** Push the immutable {@code Set<String>} of {@code row} (null = empty),
+     *  as a {@code ConstantDynamic} the JVM resolves once per site via
+     *  {@link RtEffects#effectRow}. */
+    void emitEffectRowConst(MethodVisitor mv, java.util.List<String> row) {
+        Object[] args = row == null ? new Object[0] : row.toArray();
+        mv.visitLdcInsn(new org.objectweb.asm.ConstantDynamic("row", "Ljava/util/Set;",
+                new org.objectweb.asm.Handle(H_INVOKESTATIC, "dev/irij/compiler/RtEffects", "effectRow",
+                        "(Ljava/lang/invoke/MethodHandles$Lookup;Ljava/lang/String;Ljava/lang/Class;"
+                                + "[Ljava/lang/String;)Ljava/util/Set;", false),
+                args));
     }
 
 
-    /** Emit a lambda literal: synthesize a static method + invokedynamic creating an IrijFn. */
     /**
      * Tier-c clause emit: clause body compiled as an SM step function so its
      * own performs throw {@link RuntimeSupport#PerformSignal} (resumable),

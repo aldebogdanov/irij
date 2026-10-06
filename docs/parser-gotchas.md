@@ -33,7 +33,7 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 - **Lambda body is an `exprSeq`:** `(x -> body)` accepts only expressions — no `:=`, no statements. For anything with local bindings or control flow, use `fn name => args` imperative form.
 - **Chained lambdas must nest:** `(a -> b -> body)` fails. Write `(a -> (b -> body))`.
 - **`fn name (x -> ...)` on one line** fails — body must start on the next indented line.
-- **Inline `if`:** `if cond-atom then-atom else else-atom` — each part must be an atomic expression. For complex branches use the block-form (now usable as an expression: `x := if cond\n  a\nelse\n  b`).
+- **Inline `if`:** `if cond then else other` — each part is a single postfix expression (an atom plus any `.field`s). A bare inline `if` can't be applied (`if c a else f x`) or be an operator's operand (`if c 1 else n + 1`) — that's a compile error, because it would mean `(if …) x` / `(if …) + 1`. Write `if c a else (f x)`, `(if c f else g) x`, `if c f else g ~ x`, or `(if c 1 else n) + 1`. For complex branches use the block-form (usable as an expression: `x := if cond\n  a\nelse\n  b`).
 - **Block-form `with`, `scope`, `if`, `match`** are all valid in expression position (wrapped by the AST builder into an `Expr.Block`). E.g. `n := with default-fs\n  fs-read path` works.
 
 ## Handlers
@@ -236,3 +236,4 @@ Previously listed gotchas that no longer apply:
 - ~~String keys in map literals~~ — `{"content-type"= val}` parses.
 - ~~`with` / `scope` only at statement position~~ — now usable in expression position.
 - ~~`else if` chain requires nesting~~ — `else if cond` chains are supported natively (0.2.11+).
+- **`10/2` without spaces is a Rational literal**, not a division: it evaluates to the exact value (`10/2` is the Int `5`, `7/2` is the Rational `7/2`). `7 / 2` with spaces is Int division and truncates to `3`.

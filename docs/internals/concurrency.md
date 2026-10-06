@@ -59,13 +59,14 @@ at fork time. Two thread-local stacks need to be propagated:
 | Stack | Purpose |
 |---|---|
 | `RuntimeSupport.SM_STACK` (dispatch machinery itself lives in `RtEffects`) | State-machine handler frames (the only effect dispatch path since v0.6.13) |
-| `EffectSystem.STACK` | Legacy handler-context stack; still walked as a fallback by `fireOp` for fibers spawned outside any SM `with` |
+| `RtEffects.EFFECT_ROW` | Declared effect-row frames (the runtime backstop, `effects.md`) |
 
-`RtConcurrency.snapParent()` snapshots both stacks (via
-`ParentSnapshot` record). Spawn / forkOne / par / race / timeout /
-scope-fork all use it. The fiber installs both with
-`inheritEffectStack(...)` and `inheritSMStack(...)` at the top of its
-run.
+`RtConcurrency.snapParent()` snapshots both (via the `ParentSnapshot`
+record, along with the session `NS` / `SESSION_OUT`). Spawn / forkOne /
+par / race / timeout / scope-fork all use it. The fiber installs them
+with `inheritSMStack(...)` and `inheritEffectRow(...)` at the top of its
+run. A perform outside any SM body (`RtEffects.perform`) dispatches
+synchronously to the innermost matching `SM_STACK` frame.
 
 ## Capability callbacks on foreign executor threads
 
@@ -73,9 +74,8 @@ Same inheritance need shows up outside `spawn`: any Java capability
 that hands user-supplied IrijFn control to a thread it didn't create
 (typically an executor inside the JDK or a third-party lib) sees the
 same empty-thread-local trap. Concrete case: `ServeCapability.serve`
-registers a callback against `com.sun.net.httpserver.HttpServer`,
-whose `newVirtualThreadPerTaskExecutor` dispatches each request on a
-fresh virtual thread. Empty `EFFECT_ROW` / `SM_STACK` on that thread
+hands each request to `IrijHttpServer`, which runs it on a fresh
+virtual thread per connection. Empty `EFFECT_ROW` / `SM_STACK` on that thread
 means any `perform` in the user's handler body dies with "Unhandled
 effect: X.op (no handler on stack)".
 
@@ -89,8 +89,8 @@ Object result = RtEffects.runWithEffectSnapshot(snap,
 ```
 
 `snapshotEffects()` is `snapParent` exposed as an opaque token.
-`runWithEffectSnapshot` installs `SM_STACK`, `EFFECT_ROW`, the legacy
-`EffectSystem.STACK`, `NS`, and `SESSION_OUT` from the snapshot, then
+`runWithEffectSnapshot` installs `SM_STACK`, `EFFECT_ROW`, `NS`, and
+`SESSION_OUT` from the snapshot, then
 runs the supplied body. No restore step — the worker thread is
 assumed to be one-shot (a request handler that dies after the
 response, a scheduled callback that fires once).
@@ -128,11 +128,30 @@ non-tail clauses might surprise.
 
 ## Cancellation
 
-`Thread.interrupt()` is the primary signal. Effect ops that block in
-`SynchronousQueue.put/take` propagate `InterruptedException` →
-translated to `IrijRuntimeError("Effect operation interrupted: ...")`.
-The interrupting code (race, timeout, scope.race) collects winners and
-errors via `CompletableFuture`.
+`Thread.interrupt()` is the primary signal. The interrupting code
+(race, timeout, scope.race, a cancelled scope, the playground's eval
+timeout) collects winners and errors via `CompletableFuture`. The
+interrupted fiber stops at its next **cancellation point**, which
+throws `IrijRuntimeError("cancelled: the computation was interrupted")`:
+
+- **Loop back-edges.** Every self-tail-call `GOTO` (the only loop
+  compiled Irij code has — see `tco.md`) is preceded by
+  `RtConcurrency.checkCancelled()`, a `Thread.isInterrupted()` poll.
+  Without it a CPU-bound fiber ignored its interrupt and ran on after
+  `timeout` had already returned; `scope`'s `cancelAll` (interrupt,
+  then join) hung on it outright.
+- **`sleep`.** An interrupted sleep throws instead of returning early.
+  Returning early turned a cancelled sleep loop into a busy loop: the
+  flag was re-set, so every later sleep returned at once.
+- **Blocking ops** — effect ops blocked in `SynchronousQueue.put/take`
+  (`"Effect operation interrupted: ..."`), `proc` waits, the HTTP
+  client.
+
+The check reads the flag without clearing it, so cancellation is
+sticky: a `try` that swallows the error is stopped again at the next
+poll. Non-tail recursion has no poll; it ends at `StackOverflowError`.
+Java-side loops inside builtins (a `fold` over a huge collection) are
+not cancellation points.
 
 ## Why not channels / actors
 
