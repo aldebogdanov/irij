@@ -819,6 +819,36 @@ Full design and the recorded Quint behaviour it rests on:
 
 ## Known Issues / Bugs
 
+- [x] **Adversarial audit (2026-10)** — security, correctness and performance
+      pass over the whole engine. Fixed: `serve` handed out every file under
+      the working directory (`.env`, source, the DB; a system service's CWD is
+      `/`); reflected XSS in std.serve's default 404; HTTP slowloris, header
+      CRLF injection, error-text leaks, dropped chunked bodies; SSE event
+      injection; one infinite loop killed the playground (common-pool
+      starvation, no cancellation, global `System.out` swap); git argument
+      injection and path traversal in seed resolution; unauthenticated nREPL on
+      all interfaces; single-SHA-256 password hashes and non-constant-time MAC
+      checks in std.auth; module privacy didn't exist (a program's `helper`
+      replaced a library's private one); spec registry shared across programs;
+      lost spec-lint; metaspace leak per eval (hot-redef registry); Int `==`
+      through double; JSON big-number wrap; locale-dependent case; quadratic
+      `conj`/`assoc`/`tail` (now persistent PVec/PMap/PSet, hash-flood
+      resistant); ~3× faster spec'd calls; ~1.4k lines of dead
+      interpreter-era runtime removed. See git history from 695d749.
+- [ ] **Open from the audit** —
+  - Int arithmetic wraps silently on overflow (`9223372036854775807 + 1`);
+    the spec doesn't say whether it should — a language decision.
+  - `10/2` lexes as a rational literal, which nothing compiles (a clear
+    error now). Rationals aren't in the spec: drop the `RATIONAL` token so
+    `10/2` is division, or spec and implement rationals.
+  - Inline `if` branches are single terms (`if c a else f x` =
+    `(if c a else f) x`); only a literal branch is caught at compile time.
+  - Pub names stay one program-wide namespace (last definition wins).
+  - Composite set elements (vectors, maps) with colliding hashCodes share
+    a flat bucket in PSet; scalars are SipHash-protected.
+  - EffectRowChecker / SM lowering / AstBuilder were reviewed only through
+    their tests and the downstream suites, not line by line.
+
 - [x] **`op ()` on a one-parameter effect op never resumed** — Fixed
       (2026-08). `op ()` is written for two different things:
       performing a zero-parameter op, and performing a one-parameter op
