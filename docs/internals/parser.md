@@ -127,12 +127,24 @@ parse at all. Each part is now a `postfixExpr`, so a field access
 belongs to the part it is written in. A parenthesised `if` is still an
 atom, so `(if c a else b).p` reads the field of the result as before.
 
-Application is not part of a branch: `if c a else f x` is
-`(if c a else f) x` — the whole `if` applied to `x`. When either branch
-is a literal (`false`, `0`, `"n"`, `()`), that call can never succeed, so
-`ExprEmitter.emitApp` rejects it at compile time with a hint to write
-`if c a else (f x)`, instead of the run-time "Not callable: false" it
-used to produce.
+Application and operators are not part of a branch: `if c a else f x`
+is `(if c a else f) x`, and `if c 1 else n + 1` is `(if c 1 else n) + 1`
+— the opposite of how both read. So a **bare** inline `if` (one not in
+parentheses) may not head a juxtaposition application nor be an operand
+of an operator (`|| && == /= < > <= >= ++ .. ..< + - * / % ** |> <| >>
+<<` and the choreography arrows). `IrijParseDriver.checkInlineIfs` walks
+the parse tree after a clean parse and reports either as a parse error
+with the two fixes — `if c a else (f x)` / `(if c a else f) x` — so the
+CLI, the compiler and the LSP all show it at the `if`. `~` stays
+allowed: it explicitly applies everything on its left, so
+`if c f else g ~ x` is unambiguous. Before the rule, all 285 bare inline
+`if`s across the engine, irij.online, butterfly, uzor, vrata and invar
+were checked: none was applied or an operand, so nothing broke.
+
+A parenthesized `(if c false else g) x` is explicit, but a branch that
+is a literal (`false`, `0`, `"n"`, `()`) can never be called, so
+`ExprEmitter.emitApp` still rejects it at compile time rather than fail
+with "Not callable: false" at run time.
 
 ## The `model` declaration desugars in the builder (2026-08)
 

@@ -835,14 +835,15 @@ Full design and the recorded Quint behaviour it rests on:
       `conj`/`assoc`/`tail` (now persistent PVec/PMap/PSet, hash-flood
       resistant); ~3× faster spec'd calls; ~1.4k lines of dead
       interpreter-era runtime removed. See git history from 695d749.
+- [x] **Numeric tower (2026-10)** — Int is arbitrary precision (64-bit
+      fast path, widens on overflow, never wraps); rationals (`2/3`, spec
+      §1.3.1) implemented over BigIntegers; `7 / 2` still truncates, exact
+      with a Rational operand; exact `**`, `floor`/`ceil`/`round`. See
+      docs/internals/stdlib.md § Numbers.
+- [x] **Inline `if` rule (2026-10)** — a bare inline `if` may not be
+      applied by juxtaposition or be an operator operand (compile error
+      with fixes); parens or `~` disambiguate. Spec §1.3.2.
 - [ ] **Open from the audit** —
-  - Int arithmetic wraps silently on overflow (`9223372036854775807 + 1`);
-    the spec doesn't say whether it should — a language decision.
-  - `10/2` lexes as a rational literal, which nothing compiles (a clear
-    error now). Rationals aren't in the spec: drop the `RATIONAL` token so
-    `10/2` is division, or spec and implement rationals.
-  - Inline `if` branches are single terms (`if c a else f x` =
-    `(if c a else f) x`); only a literal branch is caught at compile time.
   - Pub names stay one program-wide namespace (last definition wins).
   - Composite set elements (vectors, maps) with colliding hashCodes share
     a flat bucket in PSet; scalars are SipHash-protected.

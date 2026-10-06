@@ -25,11 +25,13 @@ Terms used throughout the internals docs.
 | **IrijContinuation** | Concrete struct (`int state, Object[] fields, IrijFn step`) used by SM-mode bodies. Holds machine state across perform throws. |
 | **IrijFn** | SAM interface `(Object[]) -> Object` representing a first-class function value. `invokeBuiltin` + `LambdaMetafactory` produce these. |
 | **Lifted local** | A local variable that must survive a SM perform. Stored in `k.fields[idx]` instead of a JVM local slot. |
+| **Int** | Irij's integer: arbitrary precision, never wraps. A `Long` while it fits in 64 bits, a `BigInteger` only beyond (canonical). See `stdlib.md` § Numbers. |
 | **Module privacy** | A module's non-`pub` top-level fns, bindings, handlers and caps are renamed `name$module$path` before inlining (`ModulePrivacy`), so no other module or the program can see or replace them. See `modules.md`. |
 | **MutableCallSite** | JSR-292 (`java.lang.invoke`) call site whose target can be swapped at runtime. Used for hot-redef. |
 | **nREPL** | Network REPL — Clojure-flavoured protocol. Irij hosts an nREPL server with bytecode-backed sessions (`BytecodeSession`); each connection gets a per-session classloader + namespace. |
 | **OpSection** | `(+)` etc. as a first-class fn value. Lowered to `GETSTATIC RuntimeSupport.OP_ADD` etc. |
 | **PMap / PVec / PSet** | The persistent structures behind Irij Maps, Vectors and Sets: an insertion-ordered HAMT (flat array up to 8 entries), a 32-way trie vector, and a HAMT set. Share structure across versions; `assoc` / `conj` / `tail` don't copy. See `stdlib.md`. |
+| **Rational** | An exact fraction, `2/3` (no spaces), `Values.Rational` over BigIntegers in lowest terms; a whole value is an Int. See `stdlib.md` § Numbers. |
 | **Perform** | An effect-op invocation. SM mode (the only execution path): throw `PerformSignal`. |
 | **PerformSignal** | Pooled `RuntimeException` (stack-trace-free) carrying `(effectName, opName, args, continuation)`. Thrown by SM bodies at perform sites. |
 | **runWithSM** | SM-mode entry. Allocates `IrijContinuation`, enters `dispatchLoopSM`. |

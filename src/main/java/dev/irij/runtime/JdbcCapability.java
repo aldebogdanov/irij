@@ -173,6 +173,8 @@ public final class JdbcCapability {
             if (p == null || p == Values.UNIT) ps.setNull(idx, Types.NULL);
             else if (p instanceof Boolean b) ps.setBoolean(idx, b);
             else if (p instanceof Long l) ps.setLong(idx, l);
+            else if (p instanceof java.math.BigInteger b) ps.setBigDecimal(idx, new java.math.BigDecimal(b));
+            else if (p instanceof Values.Rational r) ps.setDouble(idx, r.toDouble());
             else if (p instanceof Integer in) ps.setInt(idx, in);
             else if (p instanceof Double d) ps.setDouble(idx, d);
             else if (p instanceof Float f) ps.setFloat(idx, f);

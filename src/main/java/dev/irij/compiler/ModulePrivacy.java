@@ -209,6 +209,7 @@ final class ModulePrivacy {
                 case Expr.Block bl -> new Expr.Block(stmts(bl.stmts()), bl.loc());
                 case Expr.ChoreoExpr ce -> new Expr.ChoreoExpr(ce.op(), expr(ce.left()), expr(ce.right()), ce.loc());
                 case Expr.IntLit x -> x;
+                case Expr.BigIntLit x -> x;
                 case Expr.FloatLit x -> x;
                 case Expr.RationalLit x -> x;
                 case Expr.HexLit x -> x;

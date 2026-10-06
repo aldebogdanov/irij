@@ -316,7 +316,10 @@ public final class Builtins {
                 // 1e30 came back as 5076944270305263616.)
                 try {
                     var bd = p.getAsBigDecimal();
-                    if (bd.stripTrailingZeros().scale() <= 0) return bd.longValueExact();
+                    // Integral → an Int, however large (Ints don't overflow).
+                    if (bd.stripTrailingZeros().scale() <= 0) {
+                        return dev.irij.compiler.RtNum.norm(bd.toBigIntegerExact());
+                    }
                 } catch (NumberFormatException | ArithmeticException ignored) {}
                 return p.getAsDouble();
             }
@@ -340,6 +343,7 @@ public final class Builtins {
         if (value == null || value == Values.UNIT) return JsonNull.INSTANCE;
         if (value instanceof String s) return new JsonPrimitive(s);
         if (value instanceof Long l) return new JsonPrimitive(l);
+        if (value instanceof java.math.BigInteger b) return new JsonPrimitive(b);
         if (value instanceof Double d) return new JsonPrimitive(d);
         if (value instanceof Boolean b) return new JsonPrimitive(b);
         if (value instanceof Keyword kw) return new JsonPrimitive(":" + kw.name());
@@ -390,9 +394,7 @@ public final class Builtins {
     }
 
     static double asDouble(Object value, String context) {
-        if (value instanceof Double d) return d;
-        if (value instanceof Long l) return l.doubleValue();
-        throw new IrijRuntimeError(context + " expects a number, got " + Values.typeName(value));
+        return dev.irij.compiler.RtNum.toDouble(value, context);
     }
 
     static String asString(Object value, String context) {
@@ -402,9 +404,8 @@ public final class Builtins {
 
     public static int compare(Object a, Object b) {
         if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
-        if (a instanceof Double da && b instanceof Double db) return Double.compare(da, db);
-        if (a instanceof Long la && b instanceof Double db) return Double.compare(la, db);
-        if (a instanceof Double da && b instanceof Long lb) return Double.compare(da, lb);
+        Integer numeric = dev.irij.compiler.RtNum.compare(a, b);
+        if (numeric != null) return numeric;
         if (a instanceof String sa && b instanceof String sb) return sa.compareTo(sb);
         if (a instanceof Keyword ka && b instanceof Keyword kb) return ka.name().compareTo(kb.name());
         // Tuple comparison: lexicographic

@@ -2,6 +2,7 @@ package dev.irij.parser;
 
 import org.antlr.v4.runtime.*;
 import org.antlr.v4.runtime.tree.ParseTree;
+import org.antlr.v4.runtime.tree.TerminalNode;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -103,7 +104,67 @@ public class IrijParseDriver {
             tree = null;
         }
 
+        if (tree != null && errors.isEmpty()) checkInlineIfs(tree, errors);
         return new ParseResult(tree, errors, tokens);
+    }
+
+    // ── Inline `if` must stand alone ──────────────────────────────────
+    //
+    // An inline `if` takes one term per branch, so `if c a else f x`
+    // parses as `(if c a else f) x` and `if c 1 else n + 1` as
+    // `(if c 1 else n) + 1` — the opposite of how they read. A bare
+    // inline `if` (not in parentheses) may therefore not be applied to
+    // arguments by juxtaposition, nor be an operand of an operator. The
+    // fixes say which reading was meant: parenthesize the branch, or the
+    // whole `if`. `~` stays allowed: it explicitly applies everything on
+    // its left, so `if c f else g ~ x` is unambiguous.
+
+    private static void checkInlineIfs(ParseTree t, List<String> errors) {
+        if (t instanceof IrijParser.AppExprContext app && app.getChildCount() > 1
+                && isBareIf(app.getChild(0))) {
+            Token at = app.getStart();
+            errors.add(at.getLine() + ":" + at.getCharPositionInLine()
+                    + " an inline `if` can't be applied to arguments directly: `if c a else f x`"
+                    + " would apply the whole `if` to x. Write `if c a else (f x)` to apply f in"
+                    + " the branch, or `(if c a else f) x` / `if c a else f ~ x` to apply the"
+                    + " result");
+        }
+        if (isOperatorChain(t) && t.getChildCount() >= 3) {
+            for (int i = 0; i < t.getChildCount(); i++) {
+                ParseTree side = t.getChild(i);
+                if (side instanceof TerminalNode) continue;
+                while (side.getChildCount() == 1 && !(side instanceof IrijParser.PostfixExprContext)) {
+                    side = side.getChild(0);
+                }
+                if (isBareIf(side)) {
+                    String op = (i + 1 < t.getChildCount() ? t.getChild(i + 1) : t.getChild(i - 1)).getText();
+                    Token at = ((ParserRuleContext) side).getStart();
+                    errors.add(at.getLine() + ":" + at.getCharPositionInLine()
+                            + " an inline `if` can't be an operand of `" + op + "`: `if c a else b "
+                            + op + " x` would mean `(if c a else b) " + op + " x`. Parenthesize the"
+                            + " part you mean: `if c a else (b " + op + " x)` or `(if c a else b) "
+                            + op + " x`");
+                }
+            }
+        }
+        for (int i = 0; i < t.getChildCount(); i++) checkInlineIfs(t.getChild(i), errors);
+    }
+
+    /** A postfix expression that is exactly an unparenthesized inline `if`. */
+    private static boolean isBareIf(ParseTree pf) {
+        if (!(pf instanceof IrijParser.PostfixExprContext pc) || pc.getChildCount() != 1) return false;
+        ParseTree atom = pc.getChild(0);
+        return atom.getChildCount() == 1 && atom.getChild(0) instanceof IrijParser.IfExprContext;
+    }
+
+    private static boolean isOperatorChain(ParseTree t) {
+        return t instanceof IrijParser.OrExprContext || t instanceof IrijParser.AndExprContext
+                || t instanceof IrijParser.EqExprContext || t instanceof IrijParser.CompExprContext
+                || t instanceof IrijParser.ConcatExprContext || t instanceof IrijParser.RangeExprContext
+                || t instanceof IrijParser.AddExprContext || t instanceof IrijParser.MulExprContext
+                || t instanceof IrijParser.PowExprContext || t instanceof IrijParser.PipeExprContext
+                || t instanceof IrijParser.ComposeExprContext
+                || t instanceof IrijParser.ChoreographyExprContext;
     }
 
     /**

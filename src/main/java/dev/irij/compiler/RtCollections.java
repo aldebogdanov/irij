@@ -282,10 +282,7 @@ public final class RtCollections {
 
 
     public static long asLongArg(Object v, String op) {
-        if (v instanceof Long l) return l;
-        if (v instanceof Number n) return n.longValue();
-        throw new dev.irij.IrijRuntimeError(
-                op + " expects an Int, got " + RuntimeSupport.typeTag(v));
+        return RtNum.longArg(v, op);
     }
 
 

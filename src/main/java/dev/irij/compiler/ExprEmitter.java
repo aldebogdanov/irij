@@ -36,6 +36,7 @@ final class ExprEmitter implements Opcodes {
     private static boolean isNonFnLiteral(Expr e) {
         return switch (e) {
             case Expr.IntLit l -> true;
+            case Expr.BigIntLit l -> true;
             case Expr.FloatLit l -> true;
             case Expr.RationalLit l -> true;
             case Expr.HexLit l -> true;
@@ -343,6 +344,17 @@ final class ExprEmitter implements Opcodes {
                 mv.visitMethodInsn(INVOKESTATIC, "java/lang/Long", "valueOf",
                         "(J)Ljava/lang/Long;", false);
             }
+            case Expr.BigIntLit b -> {
+                mv.visitLdcInsn(b.value().toString());
+                mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtNum", "parseInt",
+                        "(Ljava/lang/String;)Ljava/lang/Object;", false);
+            }
+            case Expr.RationalLit r -> {
+                mv.visitLdcInsn(r.num().toString());
+                mv.visitLdcInsn(r.den().toString());
+                mv.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtNum", "ratioLiteral",
+                        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/Object;", false);
+            }
             case Expr.FloatLit f -> {
                 mv.visitLdcInsn(f.value());
                 mv.visitMethodInsn(INVOKESTATIC, "java/lang/Double", "valueOf",
@@ -427,12 +439,6 @@ final class ExprEmitter implements Opcodes {
                 }
             }
             case Expr.SeqOp so -> emitSeqOp(so, mv, locals);
-            // The lexer reads `10/2` (no spaces) as a rational literal,
-            // which nothing compiles; say what to write instead.
-            case Expr.RationalLit r -> throw new IrijCompiler.CompileException(
-                    (r.loc() != null ? r.loc() + ": " : "") + "`" + r.num() + "/" + r.den()
-                    + "` reads as a rational literal, which isn't supported; for division "
-                    + "put spaces around the operator: `" + r.num() + " / " + r.den() + "`");
             default -> throw new IrijCompiler.CompileException(
                     (e.loc() != null ? e.loc() + ": " : "")
                     + "unsupported expression: " + e.getClass().getSimpleName());
@@ -1161,18 +1167,17 @@ final class ExprEmitter implements Opcodes {
                 return;
             }
         } else {
-            // An inline `if` takes one postfix expression per branch, so
-            // `if c false else f x` parses as `(if c false else f) x`. With a
-            // literal branch that can never be a function, the call is
-            // always a misparse — say so here rather than fail at run time
-            // with "Not callable: false".
+            // `(if c false else g) x` (or `… ~ x`) applies the result of
+            // an `if` one of whose branches is a literal — never a function,
+            // so that call can only fail. Say so now, not as "Not callable:
+            // false" at run time. (A bare `if c a else f x` is a parse error.)
             if (app.fn() instanceof Expr.IfExpr ie
                     && (isNonFnLiteral(ie.thenBranch()) || isNonFnLiteral(ie.elseBranch()))) {
                 throw new IrijCompiler.CompileException(
                         (app.loc() != null ? app.loc() + ": " : "")
-                        + "this applies a whole inline `if` to the arguments after it: an "
-                        + "inline `if` branch is a single term, so `if c a else f x` means "
-                        + "`(if c a else f) x`. Parenthesize the branch: `if c a else (f x)`.");
+                        + "this applies the result of an inline `if`, but one branch is a "
+                        + "literal, not a function. Did you mean to apply inside the branch: "
+                        + "`if c a else (f x)`?");
             }
             // Non-Var callee (Lambda expr, App result, etc.): call as IrijFn.
             emitIrijFnCall(app.fn(), app.args(), mv, locals);

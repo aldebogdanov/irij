@@ -34,6 +34,36 @@ Registered as `BuiltinFn` objects in the global environment:
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)
 
+### Numbers — `RtNum`
+
+The numeric tower (spec §1.3.1) lives in `RtNum`; `RtOps` keeps only
+the 64-bit fast paths inline.
+
+- **Int never wraps.** An Int is a `Long` while it fits and a
+  `BigInteger` only when it doesn't — canonically, so a `BigInteger` Int
+  is always outside the `long` range and `equals`/`hashCode` need no
+  cross-representation cases (`RtNum.norm`). `RtOps.add`/`sub`/`mul`
+  test for overflow with two or three ALU ops (`((x ^ r) & (y ^ r)) < 0`,
+  `Math.multiplyHigh`) and only then call `RtNum`. Measured: fib +6%,
+  a bare add/sub loop +13–20% (≈0.4 ns/iteration), multiply/modulo
+  loops within noise; the alternatives were ~0% for "error on
+  overflow" and ~2× slower adds for "BigInteger always".
+- **Rational** — `Values.Rational(BigInteger num, BigInteger den)`,
+  lowest terms, positive denominator, never `n/1` (`RtNum.ratio` returns
+  an Int for a whole value). Int ⊕ Rational → Rational; anything ⊕
+  Float → Float. `/` on two Ints truncates (as always); with a Rational
+  operand it is exact. `**` is exact for an Int/Rational base and a
+  non-negative Int exponent (refused past ~16 M result bits); `floor`,
+  `ceil`, `round` return Ints and are exact on Ints (they used to go
+  through a double, losing every Int past 2^53).
+- Everything that reads numbers follows: `compare` / `==` (exact
+  between Ints and Rationals), `parse-int` and Int literals of any size
+  (`Expr.BigIntLit`), `json-parse` (an integral number of any size is an
+  Int) and `json-encode`, the `Int` spec, `type-of`, JDBC binding, Java
+  interop (a `BigInteger` result becomes an Int). An index or count
+  argument past 64 bits is an error ("too large here"), not a silent
+  truncation.
+
 ### Persistent Vectors, Maps and Sets
 
 `IrijVector`'s elements are a `PVec` and `IrijMap`'s entries a `PMap`

@@ -429,8 +429,9 @@ public final class RuntimeSupport {
     /** Runtime type tag used for protocol dispatch. */
     public static String typeTag(Object v) {
         if (v == null || v == dev.irij.runtime.Values.UNIT) return "Unit";
-        if (v instanceof Long) return "Int";
+        if (v instanceof Long || v instanceof java.math.BigInteger) return "Int";
         if (v instanceof Double) return "Float";
+        if (v instanceof dev.irij.runtime.Values.Rational) return "Rational";
         if (v instanceof Boolean) return "Bool";
         if (v instanceof String) return "Str";
         if (v instanceof dev.irij.runtime.Values.Keyword) return "Keyword";

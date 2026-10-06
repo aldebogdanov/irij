@@ -122,11 +122,16 @@ public final class IrijCompiler {
         return compileDeclsMulti(buildAst(parsed), className, sourceRoot, opts, seedRoots, sourceFile);
     }
 
-    private static List<Decl> buildAst(IrijParseDriver.ParseResult parsed) {
+    /** Build the AST of a parsed program, reporting the builder's own
+     *  errors (a bad `use` modifier, a `1/0` literal, absurd nesting) as
+     *  compile errors rather than raw Java exceptions. */
+    public static List<Decl> buildAst(IrijParseDriver.ParseResult parsed) {
         try {
             return new AstBuilder().build(parsed.tree());
         } catch (StackOverflowError e) {
             throw new CompileException("program is nested too deeply to compile");
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            throw new CompileException(e.getMessage(), e);
         }
     }
 

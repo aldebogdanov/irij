@@ -455,7 +455,10 @@ public final class SpecValidator {
 
     private static Object validateNamed(Object value, String name) {
         return switch (name) {
-            case "Int" -> requireType(value, Long.class, "Int");
+            case "Int" -> {
+                if (RtNum.isInt(value)) yield value;
+                throw fail("expected Int, got " + typeName(value));
+            }
             case "Float" -> requireType(value, Double.class, "Float");
             case "Bool" -> requireType(value, Boolean.class, "Bool");
             case "Str" -> requireType(value, String.class, "Str");
@@ -591,7 +594,7 @@ public final class SpecValidator {
     private static boolean primitiveMatches(String name, Object value) {
         return switch (name) {
             case "Str" -> value instanceof String;
-            case "Int" -> value instanceof Long;
+            case "Int" -> RtNum.isInt(value);
             case "Float" -> value instanceof Double;
             case "Bool" -> value instanceof Boolean;
             case "Keyword" -> value instanceof Values.Keyword;

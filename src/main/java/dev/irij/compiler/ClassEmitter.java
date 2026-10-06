@@ -304,6 +304,7 @@ final class ClassEmitter implements Opcodes {
     static Node.SourceLoc locOf(Object node) {
         return switch (node) {
             case Expr.IntLit n -> n.loc();
+            case Expr.BigIntLit n -> n.loc();
             case Expr.FloatLit n -> n.loc();
             case Expr.BoolLit n -> n.loc();
             case Expr.StrLit n -> n.loc();

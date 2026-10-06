@@ -39,16 +39,48 @@ class PrimitivesTest {
         return buf.toString().trim();
     }
 
-    @Test void applying_an_inline_if_with_a_literal_branch_is_a_compile_error() {
-        var e = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+    @Test void a_bare_inline_if_cannot_be_applied_or_an_operand() {
+        var applied = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
                 () -> run("fn g\n  (a b -> a == b)\nfn f\n  (x -> if (x < 1) false else g x 2)\nprintln (f 0)"));
-        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("Parenthesize the branch"), e.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(applied.getMessage().contains("if c a else (f x)"), applied.getMessage());
+        var operand = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+                () -> run("n := 4\nprintln (if (n > 9) 1 else n + 1)"));
+        org.junit.jupiter.api.Assertions.assertTrue(operand.getMessage().contains("operand of `+`"), operand.getMessage());
+        var piped = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+                () -> run("fn f\n  (x -> x)\nprintln (3 |> if true f else f)"));
+        org.junit.jupiter.api.Assertions.assertTrue(piped.getMessage().contains("operand of `|>`"), piped.getMessage());
     }
 
-    @Test void unspaced_division_explains_itself() {
+    @Test void parens_and_tilde_disambiguate_an_inline_if() throws Exception {
+        String fns = "fn f\n  (x -> x * 10)\nfn g\n  (x -> x + 1)\nc := false\n";
+        assertEquals("20", run(fns + "println (if c g else f ~ 2)"));
+        assertEquals("30", run(fns + "println ((if c g else f) 3)"));
+        assertEquals("40", run(fns + "println (if c 1 else (f 4))"));
+        assertEquals("6", run(fns + "println ((if c 1 else 5) + 1)"));
+    }
+
+    @Test void applying_an_if_whose_branch_is_a_literal_is_a_compile_error() {
         var e = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
-                () -> run("println (10/2)"));
-        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("`10 / 2`"), e.getMessage());
+                () -> run("fn g\n  (a -> a)\nprintln ((if true false else g) 2)"));
+        org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("one branch is a literal"), e.getMessage());
+    }
+
+    @Test void rational_literals_are_exact_values() throws Exception {
+        assertEquals("5", run("println (10/2)"));       // whole → Int
+        assertEquals("7/2", run("println (7/2)"));
+        assertEquals("3", run("println (7 / 2)"));     // Int / Int truncates
+        assertEquals("1", run("println (2/3 + 1/3)"));
+        assertEquals("7", run("println (7/2 * 2)"));
+    }
+
+    @Test void ints_never_wrap() throws Exception {
+        assertEquals("9223372036854775808", run("println (9223372036854775807 + 1)"));
+        assertEquals("-9223372036854775809", run("println (0 - 9223372036854775807 - 2)"));
+        assertEquals("9223372037000250000", run("println (3037000500 * 3037000500)"));
+        assertEquals("1267650600228229401496703205376", run("println (2 ** 100)"));
+        assertEquals("9223372036854775807", run("println (9223372036854775807 + 1 - 1)"));
+        assertEquals("true", run("println ((9223372036854775807 + 1 - 1) == 9223372036854775807)"));
+        assertEquals("123456789012345678901234567890", run("println 123456789012345678901234567890"));
     }
 
     @Test void int_equality_is_exact_past_2_pow_53() throws Exception {

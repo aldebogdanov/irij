@@ -20,33 +20,21 @@ public final class RtMath {
 
     public static Object exp(Object x)  { return Math.exp(RtOps.asDoubleArg(x, "exp")); }
 
-    public static Object floor(Object x) { return (long) Math.floor(RtOps.asDoubleArg(x, "floor")); }
+    // floor / ceil / round return an Int: an Int argument as is (going
+    // through a double lost every Int past 2^53), a Rational exactly, a
+    // Float rounded — as a big Int when it is past 64 bits.
+    public static Object floor(Object x) { return RtNum.floor(x); }
 
-    public static Object ceil(Object x)  { return (long) Math.ceil(RtOps.asDoubleArg(x, "ceil")); }
+    public static Object ceil(Object x)  { return RtNum.ceil(x); }
 
-    public static Object round(Object x) { return Math.round(RtOps.asDoubleArg(x, "round")); }
+    public static Object round(Object x) { return RtNum.round(x); }
 
-    public static Object pow(Object a, Object b) {
-        double da = RtOps.asDoubleArg(a, "pow");
-        double db = RtOps.asDoubleArg(b, "pow");
-        double result = Math.pow(da, db);
-        // If both operands were Long and result fits a long without loss,
-        // return Long (matches interp's powOp narrowing).
-        if (a instanceof Long && b instanceof Long
-                && result == Math.floor(result)
-                && !Double.isInfinite(result)
-                && result >= Long.MIN_VALUE && result <= Long.MAX_VALUE) {
-            return (long) result;
-        }
-        return result;
-    }
+    /** {@code **}: exact for an Int or Rational base and a non-negative Int
+     *  exponent (`2 ** 100` is an Int, not 1.2676506002282294E30); a Float
+     *  otherwise. */
+    public static Object pow(Object a, Object b) { return RtNum.pow(a, b); }
 
-    public static Object abs(Object v) {
-        if (v instanceof Long l) return Math.abs(l);
-        if (v instanceof Double d) return Math.abs(d);
-        throw new dev.irij.IrijRuntimeError(
-                "abs expects a number, got " + RuntimeSupport.typeTag(v));
-    }
+    public static Object abs(Object v) { return RtNum.abs(v); }
 
 
     // ── Random ────────────────────────────────────────────────────────
@@ -175,7 +163,7 @@ public final class RtMath {
 
     public static Object parseInt(Object strArg) {
         String s = RtStrings.asStr(strArg, "parse-int");
-        try { return Long.parseLong(s.strip()); }
+        try { return RtNum.parseInt(s.strip()); }
         catch (NumberFormatException e) {
             throw new dev.irij.IrijRuntimeError(
                     "parse-int: cannot parse '" + s + "' as Int");

@@ -26,28 +26,26 @@ public final class Values {
 
     // ── Rational number ─────────────────────────────────────────────────
 
-    public record Rational(long num, long den) {
+    /** An exact fraction: lowest terms, positive denominator, never an
+     *  integer (build with {@code RtNum.ratio}, which yields an Int for a
+     *  whole number). Prints as {@code 2/3}. */
+    public record Rational(java.math.BigInteger num, java.math.BigInteger den) {
         public Rational {
-            if (den == 0) throw new ArithmeticException("Rational with zero denominator");
-            // Normalize: keep denominator positive
-            if (den < 0) { num = -num; den = -den; }
-            long g = gcd(Math.abs(num), den);
-            num = num / g;
-            den = den / g;
+            if (den.signum() == 0) throw new ArithmeticException("Rational with zero denominator");
+            if (den.signum() < 0) { num = num.negate(); den = den.negate(); }
+            var g = num.gcd(den);
+            if (g.signum() != 0 && !g.equals(java.math.BigInteger.ONE)) { num = num.divide(g); den = den.divide(g); }
         }
 
         public double toDouble() {
-            return (double) num / den;
+            if (num.bitLength() < 53 && den.bitLength() < 53) return num.doubleValue() / den.doubleValue();
+            return new java.math.BigDecimal(num)
+                    .divide(new java.math.BigDecimal(den), java.math.MathContext.DECIMAL64).doubleValue();
         }
 
         @Override
         public String toString() {
             return num + "/" + den;
-        }
-
-        private static long gcd(long a, long b) {
-            while (b != 0) { long t = b; b = a % b; a = t; }
-            return a;
         }
     }
 
@@ -356,7 +354,7 @@ public final class Values {
     /** Get a human-readable type name for error messages. */
     public static String typeName(Object value) {
         if (value == null || value == UNIT) return "Unit";
-        if (value instanceof Long) return "Int";
+        if (value instanceof Long || value instanceof java.math.BigInteger) return "Int";
         if (value instanceof Double) return "Float";
         if (value instanceof Rational) return "Rational";
         if (value instanceof Boolean) return "Bool";

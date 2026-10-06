@@ -434,6 +434,8 @@ public final class JavaInterop {
         if (v instanceof String || v instanceof Boolean) return v;
         if (v instanceof Integer i) return (long) i;
         if (v instanceof Long l)    return l;
+        // An Int is a Long when it fits, a BigInteger only when it doesn't.
+        if (v instanceof java.math.BigInteger b) return dev.irij.compiler.RtNum.norm(b);
         if (v instanceof Short s)   return (long) s;
         if (v instanceof Byte b)    return (long) b;
         if (v instanceof Character c) return String.valueOf(c);

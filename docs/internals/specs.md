@@ -275,7 +275,8 @@ ASTORE param_i;
 
 When the spec is a primitive whose whole check is one type test
 (`Int Float Bool Str Keyword Vec Set Tuple`, and `Map` for the common
-case), `FnEmitter.primitiveSpecClass` lets the emitter put an inline
+case — `Int`'s inline test is for a `Long`; a big Int takes the slow
+path, which accepts it), `FnEmitter.primitiveSpecClass` lets the emitter put an inline
 `INSTANCEOF` in front: the validator call above runs only on a
 mismatch, to raise the blame error. That made a spec'd `fib` ~3× faster
 — the decode-and-dispatch per argument had been ~45% of a call. `Any`,

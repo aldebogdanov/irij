@@ -198,7 +198,7 @@ final class ModuleInliner {
                                 + String.join("\n", parsed.errors()));
             }
             List<Decl> modDecls = ModulePrivacy.privatize(
-                    new AstBuilder().build(parsed.tree()), qualifiedName);
+                    IrijCompiler.buildAst(parsed), qualifiedName);
             expand(modDecls, out, moduleFile(qualifiedName));
         } finally {
             loading.remove(qualifiedName);

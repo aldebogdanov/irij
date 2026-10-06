@@ -66,41 +66,48 @@ public final class RtOps {
 
     // ── Arithmetic ──────────────────────────────────────────────────────
 
+    // The 64-bit fast paths stay inline; an overflow, or any operand that
+    // isn't a Long (a big Int, a Rational, a Float), goes to RtNum. Int
+    // never wraps: past 64 bits it continues as a BigInteger.
+
     public static Object add(Object a, Object b) {
-        if (a instanceof Long la && b instanceof Long lb) return la + lb;
-        return asDouble(a) + asDouble(b);
+        if (a instanceof Long la && b instanceof Long lb) {
+            long x = la, y = lb, r = x + y;
+            if (((x ^ r) & (y ^ r)) >= 0) return r;
+        }
+        return RtNum.add(a, b);
     }
 
 
     public static Object sub(Object a, Object b) {
-        if (a instanceof Long la && b instanceof Long lb) return la - lb;
-        return asDouble(a) - asDouble(b);
+        if (a instanceof Long la && b instanceof Long lb) {
+            long x = la, y = lb, r = x - y;
+            if (((x ^ y) & (x ^ r)) >= 0) return r;
+        }
+        return RtNum.sub(a, b);
     }
 
 
     public static Object mul(Object a, Object b) {
-        if (a instanceof Long la && b instanceof Long lb) return la * lb;
-        return asDouble(a) * asDouble(b);
+        if (a instanceof Long la && b instanceof Long lb) {
+            long x = la, y = lb, r = x * y;
+            if (Math.multiplyHigh(x, y) == (r >> 63)) return r;
+        }
+        return RtNum.mul(a, b);
     }
 
 
     public static Object div(Object a, Object b) {
-        if (a instanceof Long la && b instanceof Long lb) {
-            if (lb == 0) throw new ArithmeticException("division by zero");
+        if (a instanceof Long la && b instanceof Long lb && lb != 0 && !(la == Long.MIN_VALUE && lb == -1)) {
             return la / lb;
         }
-        double db = asDouble(b);
-        if (db == 0.0) throw new ArithmeticException("division by zero");
-        return asDouble(a) / db;
+        return RtNum.div(a, b);
     }
 
 
     public static Object mod(Object a, Object b) {
-        if (a instanceof Long la && b instanceof Long lb) {
-            if (lb == 0) throw new ArithmeticException("division by zero");
-            return la % lb;
-        }
-        return asDouble(a) % asDouble(b);
+        if (a instanceof Long la && b instanceof Long lb && lb != 0) return la % lb;
+        return RtNum.mod(a, b);
     }
 
 
@@ -121,6 +128,7 @@ public final class RtOps {
         // Int == Int compares exactly: through double, every pair of Ints
         // past 2^53 that round to the same double compared equal.
         if (a instanceof Long la && b instanceof Long lb) return la.longValue() == lb.longValue();
+        if (RtNum.isNumber(a) && RtNum.isNumber(b)) return RtNum.numEq(a, b);
         if (a instanceof Number na && b instanceof Number nb) {
             return na.doubleValue() == nb.doubleValue();
         }
@@ -135,12 +143,6 @@ public final class RtOps {
         // Delegate to the canonical comparator in Builtins — handles
         // Long/Double/String/Keyword/Tuple/Vector recursively.
         return dev.irij.runtime.Builtins.compare(a, b);
-    }
-
-
-    private static double asDouble(Object v) {
-        if (v instanceof Number n) return n.doubleValue();
-        throw new IllegalArgumentException("Not a number: " + v);
     }
 
 
@@ -169,17 +171,11 @@ public final class RtOps {
     }
 
     public static Object divInt(Object a, Object b) {
-        long la = RtCollections.asLongArg(a, "div");
-        long lb = RtCollections.asLongArg(b, "div");
-        if (lb == 0) throw new dev.irij.IrijRuntimeError("Division by zero");
-        return la / lb;
+        return RtNum.quo(a, b);
     }
 
     public static Object modInt(Object a, Object b) {
-        long la = RtCollections.asLongArg(a, "mod");
-        long lb = RtCollections.asLongArg(b, "mod");
-        if (lb == 0) throw new dev.irij.IrijRuntimeError("Division by zero");
-        return la % lb;
+        return RtNum.rem(a, b);
     }
 
     public static Object concatTwo(Object a, Object b) {
@@ -195,8 +191,6 @@ public final class RtOps {
 
 
     public static double asDoubleArg(Object v, String op) {
-        if (v instanceof Number n) return n.doubleValue();
-        throw new dev.irij.IrijRuntimeError(
-                op + " expects a number, got " + RuntimeSupport.typeTag(v));
+        return RtNum.toDouble(v, op);
     }
 }

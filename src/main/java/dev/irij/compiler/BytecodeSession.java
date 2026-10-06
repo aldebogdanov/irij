@@ -106,7 +106,7 @@ public final class BytecodeSession {
             throw new IrijCompiler.CompileException(
                     "Parse errors:\n" + String.join("\n", parsed.errors()));
         }
-        List<Decl> decls = new AstBuilder().build(parsed.tree());
+        List<Decl> decls = IrijCompiler.buildAst(parsed);
         decls = captureLastExpression(decls);
 
         CompileOptions opts = CompileOptions.defaults().withNamespaceMode(true);

@@ -45,3 +45,39 @@ r30 := test "sum-of" (-> assert-eq 15 (sum-of #[1 2 3 4 5]))
 r31 := test "product-of" (-> assert-eq 120 (product-of #[1 2 3 4 5]))
 
 summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26 r27 r28 r29 r30 r31]
+
+;; ── Ints never wrap ───────────────────────────────────
+
+max-long := 9223372036854775807
+rn1 := test "Int grows past 64 bits" (-> assert-eq 9223372036854775808 (max-long + 1))
+rn2 := test "and comes back down" (-> assert-eq max-long ((max-long + 1) - 1))
+rn3 := test "big products are exact" (-> assert-eq 9223372037000250000 (3037000500 * 3037000500))
+rn4 := test "** is exact on Ints" (-> assert-eq 1267650600228229401496703205376 (2 ** 100))
+rn5 := test "big Ints compare exactly" (-> assert-true ((max-long + 2) > (max-long + 1)))
+rn6 := test "parse-int reads big Ints" (-> assert-eq 99999999999999999999 (parse-int "99999999999999999999"))
+rn7 := test "a big Int satisfies Int" (-> assert-eq "Int" (type-of (max-long * 4)))
+rn8 := test "Int / Int still truncates" (-> assert-eq 3 (7 / 2))
+
+fn twice-int :: Int Int
+  (n -> n * 2)
+
+rn9 := test "Int specs accept big Ints" (-> assert-eq 36893488147419103230 (twice-int 18446744073709551615))
+
+;; ── Rationals ─────────────────────────────────────────
+
+rq1 := test "a rational literal" (-> assert-eq "2/3" (to-str 2/3))
+rq2 := test "lowest terms" (-> assert-eq 1/2 2/4)
+rq3 := test "a whole rational is an Int" (-> assert-eq 5 10/2)
+rq4 := test "exact sums" (-> assert-eq 1 (1/3 + 2/3))
+rq5 := test "Int and Rational mix exactly" (-> assert-eq 3/2 (1/2 + 1))
+rq6 := test "exact division by a Rational" (-> assert-eq 7 (7/2 / 1/2))
+rq7 := test "a Float makes it a Float" (-> assert-eq 0.75 (1/4 + 0.5))
+rq8 := test "rationals order exactly" (-> assert-true ((3/4 < 4/5) && (1/3 > 0.33)))
+rq9 := test "floor / ceil / round of a Rational" (-> assert-eq #[3 4 4] #[(floor 7/2) (ceil 7/2) (round 7/2)])
+rq10 := test "negative rationals" (-> assert-eq (0 - 7/2) (1/2 - 4))
+rq11 := test "type-of a Rational" (-> assert-eq "Rational" (type-of 1/3))
+
+fn halve :: Rational Rational
+  (q -> q / 2)
+
+rq12 := test "Rational specs" (-> assert-eq 1/6 (halve 1/3))
