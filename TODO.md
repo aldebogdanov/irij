@@ -834,7 +834,7 @@ Full design and the recorded Quint behaviour it rests on:
       through double; JSON big-number wrap; locale-dependent case; quadratic
       `conj`/`assoc`/`tail` (now persistent PVec/PMap/PSet, hash-flood
       resistant); ~3× faster spec'd calls; ~1.4k lines of dead
-      interpreter-era runtime removed. See git history from 695d749.
+      interpreter-era runtime removed. See PR aldebogdanov/irij#30.
 - [x] **Numeric tower (2026-10)** — Int is arbitrary precision (64-bit
       fast path, widens on overflow, never wraps); rationals (`2/3`, spec
       §1.3.1) implemented over BigIntegers; `7 / 2` still truncates, exact
