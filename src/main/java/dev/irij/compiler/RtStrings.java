@@ -106,8 +106,12 @@ public final class RtStrings {
 
 
     public static Object urlDecode(Object s) {
-        return java.net.URLDecoder.decode(asStr(s, "url-decode"),
-                java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            return java.net.URLDecoder.decode(asStr(s, "url-decode"),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw new dev.irij.IrijRuntimeError("url-decode: malformed %-escape in '" + s + "'");
+        }
     }
 
     public static Object charAt(Object strArg, Object idxArg) {
