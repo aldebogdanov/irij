@@ -42,7 +42,10 @@ public final class IrijHttpServer {
 
     private static final int MAX_LINE = 16 * 1024;          // request line / header line
     private static final int MAX_HEADER_BYTES = 64 * 1024;  // total header section
-    private static final long MAX_BODY = 256L * 1024 * 1024; // body cap (tarball uploads)
+    /** Request body cap (tarball uploads). Bodies are buffered whole, so
+     *  this times the number of concurrent uploads bounds their memory;
+     *  {@code -Dirij.http.max.body=<bytes>} lowers it for a small heap. */
+    private static final long MAX_BODY = Long.getLong("irij.http.max.body", 256L * 1024 * 1024);
     /** How long a client may take to send its whole request. Without a
      *  read timeout a client that connects and never sends (slowloris)
      *  holds a socket forever; enough of them exhaust file descriptors. */

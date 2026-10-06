@@ -63,7 +63,8 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
     `irij.http.read.timeout.ms` (30 s) — without a read timeout a client
     that connects and never sends holds its socket forever. Bodies come
     as `Content-Length` or `Transfer-Encoding: chunked` (what a proxy
-    sends when the client's length is unknown), capped at 256 MiB;
+    sends when the client's length is unknown), buffered whole and capped
+    at `irij.http.max.body` (256 MiB — concurrent uploads multiply it);
     `Expect: 100-continue` gets its interim response. A request the
     server refuses gets a bare 400 / 413 / 431 / 501. Unescaped `{ } | [ ]`
     in the target are escaped, not refused (browsers send them).
