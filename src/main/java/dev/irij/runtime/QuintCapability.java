@@ -213,12 +213,21 @@ public final class QuintCapability {
         // Both streams are pipes and a pipe that fills blocks the
         // writer, so draining one after the other deadlocks as soon as
         // the second fills while the first is still being read.
-        CompletableFuture<String> err =
-                CompletableFuture.supplyAsync(() -> drain(p.getErrorStream()));
-        String out = drain(p.getInputStream());
+        // Both on their own threads, so this one waits in waitFor — which
+        // an interrupt (a timeout, a cancelled fork) can wake — rather than
+        // in a pipe read, which it can't.
+        CompletableFuture<String> err = CompletableFuture.supplyAsync(
+                () -> drain(p.getErrorStream()), Thread::startVirtualThread);
+        CompletableFuture<String> out = CompletableFuture.supplyAsync(
+                () -> drain(p.getInputStream()), Thread::startVirtualThread);
         try {
-            return new Exec(p.waitFor(), out, err.join());
+            int exit = p.waitFor();
+            return new Exec(exit, out.join(), err.join());
         } catch (InterruptedException e) {
+            // Cancelled (a timeout, a losing race): don't leave quint — and
+            // the model checker it may have started — running on.
+            p.descendants().forEach(ProcessHandle::destroyForcibly);
+            p.destroyForcibly();
             Thread.currentThread().interrupt();
             throw new IrijRuntimeError("interrupted waiting for quint");
         }
@@ -282,7 +291,9 @@ public final class QuintCapability {
         File[] kids = root.listFiles();
         if (kids != null) {
             for (File f : kids) {
-                if (f.isDirectory()) deleteTree(f.toPath()); else f.delete();
+                // Never descend through a symlink: that would empty its target.
+                if (f.isDirectory() && !Files.isSymbolicLink(f.toPath())) deleteTree(f.toPath());
+                else f.delete();
             }
         }
         root.delete();
