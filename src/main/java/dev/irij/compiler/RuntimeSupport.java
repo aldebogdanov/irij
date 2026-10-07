@@ -394,9 +394,23 @@ public final class RuntimeSupport {
     // `cap http-client :: Http = "dev.irij.runtime.HttpClientCapability"`
     // in std/http.irj.
 
-    public static Object readLine() {
+    /** One reader over stdin for every read-line. A reader per call reads
+     *  ahead into its own buffer and drops whatever it read past its line,
+     *  so piped input lost every line after the first. Re-made only when
+     *  System.in itself is replaced (tests do). */
+    private static java.io.BufferedReader stdinReader;
+    private static java.io.InputStream stdinSource;
+
+    /** `read-line ()` — the next line of stdin, or () at end of input (it
+     *  returned Java null, which printed as () but was not equal to it). */
+    public static synchronized Object readLine() {
         try {
-            return new java.io.BufferedReader(new java.io.InputStreamReader(System.in)).readLine();
+            if (stdinReader == null || stdinSource != System.in) {
+                stdinSource = System.in;
+                stdinReader = new java.io.BufferedReader(new java.io.InputStreamReader(System.in));
+            }
+            String line = stdinReader.readLine();
+            return line == null ? dev.irij.runtime.Values.UNIT : line;
         } catch (java.io.IOException e) {
             throw new dev.irij.IrijRuntimeError("read-line: " + e.getMessage());
         }
