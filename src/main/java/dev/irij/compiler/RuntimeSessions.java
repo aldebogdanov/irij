@@ -42,12 +42,16 @@ public final class RuntimeSessions {
 
     public static final class Session {
         public final BytecodeSession bytecode;
-        public final ByteArrayOutputStream stdoutBuf;
+        public final CappedBuffer stdoutBuf;
         public final PrintStream stdout;
         public volatile long lastAccessMs;
         public volatile Values.SseWriter sse;
+        /** One eval at a time: a session's namespace and classloader are
+         *  not built for concurrent evals (a double-click, two tabs). */
+        final java.util.concurrent.locks.ReentrantLock evalLock =
+                new java.util.concurrent.locks.ReentrantLock();
 
-        Session(BytecodeSession bytecode, ByteArrayOutputStream stdoutBuf,
+        Session(BytecodeSession bytecode, CappedBuffer stdoutBuf,
                 PrintStream stdout) {
             this.bytecode = bytecode;
             this.stdoutBuf = stdoutBuf;
@@ -61,6 +65,19 @@ public final class RuntimeSessions {
             Long.getLong("irij.session.ttl.ms", 30L * 60_000L);
     private static final long SESSION_SWEEP_MS =
             Long.getLong("irij.session.sweep.ms", 60_000L);
+    /** Live sessions at most; creating one more evicts the idlest. Each
+     *  holds a classloader and namespace, so an unbounded map lets anyone
+     *  who can create sessions exhaust the heap within one TTL. */
+    private static final int MAX_SESSIONS =
+            Integer.getInteger("irij.session.max", 500);
+    /** Output kept per eval; past it the rest is dropped with a notice. A
+     *  print loop would otherwise fill the heap before the timeout. */
+    static final int MAX_OUTPUT_BYTES =
+            Integer.getInteger("irij.session.output.max", 1 << 20);
+    /** After a timeout, how long to wait for the interrupted eval to
+     *  reach a cancellation point before reporting anyway. */
+    private static final long CANCEL_GRACE_MS = 1_000;
+    private static final AtomicLong EVAL_THREADS = new AtomicLong();
 
     private static volatile boolean sweeperStarted = false;
 
@@ -85,16 +102,18 @@ public final class RuntimeSessions {
 
     public static Object rawSessionCreate() {
         ensureSweeper();
+        evictIdlestBeyond(MAX_SESSIONS - 1);
         String id = UUID.randomUUID().toString();
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        CappedBuffer baos = new CappedBuffer(MAX_OUTPUT_BYTES);
         Session[] holder = new Session[1];
 
         PrintStream sessionOut = new PrintStream(new java.io.OutputStream() {
             @Override public void write(int b) {
-                baos.write(b);
+                write(new byte[]{(byte) b}, 0, 1);
             }
             @Override public void write(byte[] buf, int off, int len) {
-                baos.write(buf, off, len);
+                // Past the cap nothing is kept, and nothing is streamed.
+                if (!baos.append(buf, off, len)) return;
                 // Forward to SSE if subscribed.
                 Session s = holder[0];
                 if (s == null) return;
@@ -130,8 +149,35 @@ public final class RuntimeSessions {
             throw new IrijRuntimeError("raw-session-eval: no session with id " + id);
         }
         s.lastAccessMs = System.currentTimeMillis();
-        s.stdoutBuf.reset();
-        return runEval(s.bytecode, s.stdoutBuf, s.stdout, code, timeoutMs);
+        boolean locked = false;
+        try {
+            locked = s.evalLock.tryLock(Math.max(0, timeoutMs), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        if (!locked) return failure("", "Session is busy with an earlier evaluation");
+        try {
+            s.stdoutBuf.reset();
+            return runEval(s.bytecode, s.stdoutBuf, s.stdout, code, timeoutMs);
+        } finally {
+            s.evalLock.unlock();
+        }
+    }
+
+    /** Drop the least recently used sessions until at most {@code keep} remain. */
+    private static void evictIdlestBeyond(int keep) {
+        while (SESSIONS.size() > keep) {
+            String idlest = null;
+            long oldest = Long.MAX_VALUE;
+            for (var e : SESSIONS.entrySet()) {
+                if (e.getValue().lastAccessMs < oldest) {
+                    oldest = e.getValue().lastAccessMs;
+                    idlest = e.getKey();
+                }
+            }
+            if (idlest == null) return;
+            SESSIONS.remove(idlest);
+        }
     }
 
     // ── raw-session-destroy ─────────────────────────────────────────
@@ -191,8 +237,8 @@ public final class RuntimeSessions {
     public static Object rawNreplEvalSandboxed(Object codeArg, Object timeoutArg) {
         String code = asStr(codeArg, "raw-nrepl-eval-sandboxed");
         long timeoutMs = asLong(timeoutArg, "raw-nrepl-eval-sandboxed");
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        PrintStream evalOut = new PrintStream(baos);
+        CappedBuffer baos = new CappedBuffer(MAX_OUTPUT_BYTES);
+        PrintStream evalOut = new PrintStream(baos, true);
         BytecodeSession bs = new BytecodeSession("irij.NReplSandbox");
         return runEval(bs, baos, evalOut, code, timeoutMs);
     }
@@ -200,48 +246,105 @@ public final class RuntimeSessions {
     // ── Shared eval driver ──────────────────────────────────────────
 
     private static Object runEval(BytecodeSession bs,
-                                   ByteArrayOutputStream baos,
+                                   CappedBuffer baos,
                                    PrintStream captureOut,
                                    String code,
                                    long timeoutMs) {
-        LinkedHashMap<String, Object> result = new LinkedHashMap<>();
         // Mark with a fresh sentinel; if the eval doesn't overwrite it,
         // we know the program had no trailing expression.
         Object sentinel = new Object();
         bs.namespace().put(BytecodeSession.LAST_VALUE_KEY, sentinel);
-        CompletableFuture<Object> future = CompletableFuture.supplyAsync(() -> {
-            bs.eval(code, "sandbox", captureOut);
-            return Values.UNIT;
-        });
+        CompletableFuture<Object> future = new CompletableFuture<>();
+        // Each eval gets its own platform thread. A shared pool (the
+        // common ForkJoinPool, as before) is held for good by one
+        // runaway eval — on a 2-CPU host its single worker — so every
+        // later eval just times out. A virtual thread would be no
+        // better: one that spins never yields its carrier.
+        Thread worker = Thread.ofPlatform().daemon()
+                .name("irij-eval-" + EVAL_THREADS.incrementAndGet())
+                .unstarted(() -> {
+                    try {
+                        bs.eval(code, "sandbox", captureOut);
+                        future.complete(Values.UNIT);
+                    } catch (Throwable t) {
+                        future.completeExceptionally(t);
+                    }
+                });
+        worker.start();
         try {
             future.get(timeoutMs, TimeUnit.MILLISECONDS);
             Object last = bs.namespace().get(BytecodeSession.LAST_VALUE_KEY);
             Object surfaced = (last == sentinel) ? Values.UNIT : last;
+            LinkedHashMap<String, Object> result = new LinkedHashMap<>();
             result.put("value", Values.toIrijString(surfaced));
             result.put("stdout", baos.toString());
             result.put("error", Values.UNIT);
             result.put("ok", Boolean.TRUE);
+            return new Values.IrijMap(result);
         } catch (TimeoutException e) {
-            future.cancel(true);
-            result.put("value", Values.UNIT);
-            result.put("stdout", baos.toString());
-            result.put("error", "Evaluation timed out (" + timeoutMs + "ms)");
-            result.put("ok", Boolean.FALSE);
+            // Interrupt it: compiled loops poll for this
+            // (RtConcurrency.checkCancelled), as do sleep and blocking IO.
+            worker.interrupt();
+            try { worker.join(CANCEL_GRACE_MS); }
+            catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            return failure(baos.toString(), "Evaluation timed out (" + timeoutMs + "ms)");
         } catch (java.util.concurrent.ExecutionException e) {
             Throwable cause = e.getCause();
             String msg = cause != null ? cause.getMessage() : e.getMessage();
-            result.put("value", Values.UNIT);
-            result.put("stdout", baos.toString());
-            result.put("error", msg != null ? msg : "Unknown error");
-            result.put("ok", Boolean.FALSE);
+            if (cause instanceof StackOverflowError) msg = "Stack overflow (recursion too deep)";
+            return failure(baos.toString(), msg != null ? msg : "Unknown error");
         } catch (InterruptedException e) {
+            worker.interrupt();
             Thread.currentThread().interrupt();
-            result.put("value", Values.UNIT);
-            result.put("stdout", baos.toString());
-            result.put("error", "Evaluation interrupted");
-            result.put("ok", Boolean.FALSE);
+            return failure(baos.toString(), "Evaluation interrupted");
         }
+    }
+
+    private static Values.IrijMap failure(String stdout, String error) {
+        LinkedHashMap<String, Object> result = new LinkedHashMap<>();
+        result.put("value", Values.UNIT);
+        result.put("stdout", stdout);
+        result.put("error", error);
+        result.put("ok", Boolean.FALSE);
         return new Values.IrijMap(result);
+    }
+
+    /** An eval's output buffer: keeps the first {@code max} bytes, then a
+     *  one-line notice, then nothing. */
+    public static final class CappedBuffer extends java.io.OutputStream {
+        private final int max;
+        private final ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        private boolean truncated;
+
+        CappedBuffer(int max) { this.max = max; }
+
+        /** Append; false once the cap has been reached (bytes dropped). */
+        public synchronized boolean append(byte[] b, int off, int len) {
+            if (truncated) return false;
+            int room = max - buf.size();
+            if (len <= room) {
+                buf.write(b, off, len);
+                return true;
+            }
+            buf.write(b, off, Math.max(0, room));
+            byte[] note = ("\n[output truncated at " + max + " bytes]\n")
+                    .getBytes(StandardCharsets.UTF_8);
+            buf.write(note, 0, note.length);
+            truncated = true;
+            return false;
+        }
+
+        @Override public void write(int b) { append(new byte[]{(byte) b}, 0, 1); }
+        @Override public void write(byte[] b, int off, int len) { append(b, off, len); }
+
+        public synchronized void reset() {
+            buf.reset();
+            truncated = false;
+        }
+
+        @Override public synchronized String toString() {
+            return buf.toString(StandardCharsets.UTF_8);
+        }
     }
 
     // ── Helpers ─────────────────────────────────────────────────────

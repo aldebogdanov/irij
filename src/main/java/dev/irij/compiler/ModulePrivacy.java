@@ -1,0 +1,422 @@
+package dev.irij.compiler;
+
+import dev.irij.ast.Decl;
+import dev.irij.ast.Expr;
+import dev.irij.ast.Node;
+import dev.irij.ast.Pattern;
+import dev.irij.ast.Stmt;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+/**
+ * Keeps a module's private names private once {@link ModuleInliner} has
+ * flattened every module into one program.
+ *
+ * <p>The emitter resolves top-level names program-wide, so without this a
+ * module's private {@code fn helper} and the program's own {@code helper}
+ * were one name: whichever was emitted last replaced the other everywhere.
+ * A program that happened to define {@code find-route} silently rewired
+ * {@code std.serve}'s router; two seeds with the same private helper name
+ * called each other's.
+ *
+ * <p>Each private top-level fn, binding, handler and cap of a module is renamed
+ * to {@code name$module$path} — {@code $} can't occur in an Irij
+ * identifier, so the new name is fresh. The rename is applied to <em>every</em>
+ * occurrence of the identifier in the module (uses, binders, parameters,
+ * patterns): renaming one identifier consistently throughout is
+ * meaning-preserving whatever the local scoping, so no scope analysis is
+ * needed. Field names, map keys and effect-op names are not identifiers
+ * and are left alone. The switches below are exhaustive over the sealed AST
+ * types, so a new node kind is a compile error here rather than a missed
+ * rename.
+ *
+ * <p><b>Pub names get the same treatment, plus a forwarder.</b> A module's
+ * own references to its {@code pub fn shout} must mean that fn even when
+ * the program (or another module) also defines {@code shout} — before,
+ * the last definition replaced the module's everywhere, including inside
+ * the module. So a pub fn is renamed like a private one, and a public
+ * forwarder {@code fn shout} — same spec annotations and effect row, a
+ * body that just calls {@code shout$module} — is added for importers.
+ * A program that defines its own {@code shout} now replaces only that
+ * forwarder: its own code sees its {@code shout}, the module keeps its
+ * own. The forwarder skips spec validation (the target validates); see
+ * {@link Privatized#forwarders}. Plain {@code pub x := …} bindings are
+ * forwarded the same way ({@code x := x$module}). Left as program-wide
+ * names: pub handlers and caps (a {@code with} must resolve them
+ * statically), mutable pub bindings, pub fns with a rest parameter, and a
+ * binding that mentions its own name (`pub sqrt := sqrt` re-exports the
+ * builtin — renaming would make it refer to itself).
+ */
+final class ModulePrivacy {
+
+    private ModulePrivacy() {}
+
+    /** The private-name spelling for {@code name} in module {@code module}. */
+    static String privateName(String name, String module) {
+        return name + "$" + module.replace('.', '$');
+    }
+
+    /**
+     * A module after privatizing.
+     *
+     * @param decls      the module's decls, renamed, with forwarders added
+     * @param exports    pub name → the module-qualified name its definition
+     *                   now has (for `alias.name` references)
+     * @param forwarders the forwarder decls, by identity — the emitter emits
+     *                   no spec checks for these
+     */
+    record Privatized(List<Decl> decls, Map<String, String> exports,
+                      Set<Decl.FnDecl> forwarders) {}
+
+    /** {@code modDecls} with the module's top-level names made its own. */
+    static Privatized privatize(List<Decl> modDecls, String module) {
+        Set<String> pub = new HashSet<>();
+        Set<String> privateNames = new HashSet<>();
+        Set<String> forwardable = new HashSet<>();
+        Set<String> notForwardable = new HashSet<>();
+        Set<String> selfReferential = new HashSet<>();
+        for (Decl d : modDecls) {
+            boolean isPub = d instanceof Decl.PubDecl;
+            Node inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
+            String name = null;
+            boolean canForward = false;
+            switch (inner) {
+                case Decl.FnDecl fn -> {
+                    if (fn.isPub()) isPub = true;
+                    name = fn.name();
+                    canForward = forwarderArity(fn) >= 0;
+                }
+                case Decl.BindingDecl bd -> {
+                    name = simpleTarget(bd.stmt());
+                    if (name != null && mentions(bindValue(bd.stmt()), name)) selfReferential.add(name);
+                    canForward = bd.stmt() instanceof Stmt.Bind;
+                }
+                case Decl.HandlerDecl hd -> name = hd.name();
+                case Decl.CapDecl cd -> {
+                    if (cd.isPub()) isPub = true;
+                    name = cd.name();
+                }
+                default -> { }
+            }
+            if (name == null) continue;
+            if (isPub) {
+                pub.add(name);
+                (canForward ? forwardable : notForwardable).add(name);
+            } else {
+                privateNames.add(name);
+            }
+        }
+        Map<String, String> renames = new HashMap<>();
+        for (String n : privateNames) {
+            if (!pub.contains(n)) renames.put(n, privateName(n, module)); // pub anywhere: public
+        }
+        Map<String, String> exports = new HashMap<>();
+        for (String n : forwardable) {
+            if (!notForwardable.contains(n)) exports.put(n, privateName(n, module));
+        }
+        renames.putAll(exports);
+        renames.keySet().removeAll(selfReferential);
+        exports.keySet().removeAll(selfReferential);
+        if (renames.isEmpty()) return new Privatized(modDecls, Map.of(), Set.of());
+
+        Renamer r = new Renamer(renames);
+        List<Decl> out = new ArrayList<>(modDecls.size() + exports.size());
+        Set<Decl.FnDecl> forwarders = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        Set<String> forwarded = new HashSet<>();
+        for (Decl d : modDecls) {
+            out.add(r.decl(d));
+            Node inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
+            switch (inner) {
+                case Decl.FnDecl fn when exports.containsKey(fn.name()) && forwarded.add(fn.name()) -> {
+                    Decl.FnDecl fwd = forwarder(fn, exports.get(fn.name()));
+                    forwarders.add(fwd);
+                    out.add(fwd);
+                }
+                case Decl.BindingDecl bd when simpleTarget(bd.stmt()) instanceof String n
+                        && exports.containsKey(n) && forwarded.add(n) -> {
+                    Node.SourceLoc loc = bd.loc();
+                    out.add(new Decl.BindingDecl(new Stmt.Bind(new Stmt.BindTarget.Simple(n),
+                            new Expr.Var(exports.get(n), loc), loc), loc));
+                }
+                default -> { }
+            }
+        }
+        return new Privatized(out, exports, forwarders);
+    }
+
+    /** Parameters a forwarder for {@code fn} takes, or -1 when it can't
+     *  have one (no body, or a rest parameter it couldn't pass on). */
+    private static int forwarderArity(Decl.FnDecl fn) {
+        return switch (fn.body()) {
+            case Decl.FnBody.LambdaBody lb -> lb.restParam() == null ? lb.params().size() : -1;
+            case Decl.FnBody.ImperativeBody ib -> ib.restParam() == null ? ib.params().size() : -1;
+            case Decl.FnBody.MatchArmsBody mab -> 1;
+            case Decl.FnBody.NoBody nb -> -1;
+        };
+    }
+
+    /** {@code fn name :: <same specs> ::: <same row>  (a b -> target a b)}. */
+    private static Decl.FnDecl forwarder(Decl.FnDecl fn, String target) {
+        Node.SourceLoc loc = fn.loc();
+        int n = forwarderArity(fn);
+        List<Pattern> params = new ArrayList<>(n);
+        List<Expr> args = new ArrayList<>(Math.max(n, 1));
+        for (int i = 0; i < n; i++) {
+            params.add(new Pattern.VarPat("$fwd" + i, loc));
+            args.add(new Expr.Var("$fwd" + i, loc));
+        }
+        if (n == 0) args.add(new Expr.UnitLit(loc));
+        Expr call = new Expr.App(new Expr.Var(target, loc), args, loc);
+        return new Decl.FnDecl(fn.name(), true, fn.effectRow(), fn.specAnnotations(),
+                new Decl.FnBody.LambdaBody(params, null, call),
+                List.of(), List.of(), List.of(), List.of(), loc);
+    }
+
+    private static Expr bindValue(Stmt s) {
+        return switch (s) {
+            case Stmt.Bind b -> b.value();
+            case Stmt.MutBind mb -> mb.value();
+            default -> null;
+        };
+    }
+
+    /** Whether {@code e} mentions the identifier {@code name}. */
+    private static boolean mentions(Expr e, String name) {
+        if (e == null) return false;
+        return !new Renamer(Map.of(name, name + "$mentioned")).expr(e).equals(e);
+    }
+
+    /** Rewrite {@code alias.name} references to the module-qualified names
+     *  in {@code qualified} (alias → (pub name → qualified name)), so a
+     *  qualified call reaches the module's definition even when the
+     *  importer has its own {@code name}. */
+    static List<Decl> qualify(List<Decl> decls, Map<String, Map<String, String>> qualified) {
+        if (qualified.isEmpty()) return decls;
+        Renamer r = new Renamer(Map.of(), qualified);
+        List<Decl> out = new ArrayList<>(decls.size());
+        for (Decl d : decls) out.add(r.decl(d));
+        return out;
+    }
+
+    private static String simpleTarget(Stmt s) {
+        Stmt.BindTarget t = switch (s) {
+            case Stmt.Bind b -> b.target();
+            case Stmt.MutBind mb -> mb.target();
+            default -> null;
+        };
+        return t instanceof Stmt.BindTarget.Simple sm ? sm.name() : null;
+    }
+
+    /** Consistent renaming of a fixed set of identifiers, and (when
+     *  {@code qualified} is non-empty) of {@code alias.name} accesses. */
+    private record Renamer(Map<String, String> renames, Map<String, Map<String, String>> qualified) {
+
+        Renamer(Map<String, String> renames) { this(renames, Map.of()); }
+
+        String id(String name) {
+            if (name == null) return null;
+            String r = renames.get(name);
+            return r != null ? r : name;
+        }
+
+        Node node(Node n) {
+            return switch (n) {
+                case Decl d -> decl(d);
+                case Expr e -> expr(e);
+                case Stmt s -> stmt(s);
+                case Pattern p -> pat(p);
+                default -> n;
+            };
+        }
+
+        Decl decl(Decl d) {
+            return switch (d) {
+                case Decl.FnDecl fn -> new Decl.FnDecl(id(fn.name()), fn.isPub(), fn.effectRow(),
+                        fn.specAnnotations(), body(fn.body()), exprs(fn.preConditions()),
+                        exprs(fn.postConditions()), exprs(fn.inContracts()),
+                        exprs(fn.outContracts()), fn.loc());
+                case Decl.PubDecl pd -> new Decl.PubDecl(node(pd.inner()), pd.loc());
+                case Decl.HandlerDecl hd -> new Decl.HandlerDecl(id(hd.name()), hd.effectName(),
+                        hd.requiredEffects(), clauses(hd.clauses()), stmts(hd.stateBindings()),
+                        hd.loc());
+                case Decl.ImplDecl im -> new Decl.ImplDecl(im.protoName(), im.forType(),
+                        im.bindings().stream()
+                                .map(b -> new Decl.ImplBinding(b.name(), expr(b.value())))
+                                .toList(),
+                        im.loc());
+                case Decl.CapDecl cd -> new Decl.CapDecl(cd.isPub(), id(cd.name()), cd.effectName(),
+                        cd.providerClass(), expr(cd.recordExpr()), cd.loc());
+                case Decl.BindingDecl bd -> new Decl.BindingDecl(stmt(bd.stmt()), bd.loc());
+                case Decl.ExprDecl ed -> new Decl.ExprDecl(expr(ed.expr()), ed.loc());
+                case Decl.MatchDecl md -> new Decl.MatchDecl((Stmt.MatchStmt) stmt(md.match()), md.loc());
+                case Decl.IfDecl id -> new Decl.IfDecl((Stmt.IfStmt) stmt(id.ifStmt()), id.loc());
+                case Decl.WithDecl wd -> new Decl.WithDecl((Stmt.With) stmt(wd.with()), wd.loc());
+                case Decl.ScopeDecl sd -> new Decl.ScopeDecl((Stmt.Scope) stmt(sd.scope()), sd.loc());
+                case Decl.SpecDecl sd -> sd;
+                case Decl.NewtypeDecl nd -> nd;
+                case Decl.ModDecl md -> md;
+                case Decl.UseDecl ud -> ud;
+                case Decl.EffectDecl ed -> ed;
+                case Decl.PartyDecl pd -> pd;
+                case Decl.ProtoDecl pd -> pd;
+                case Decl.StubDecl sd -> sd;
+            };
+        }
+
+        Decl.FnBody body(Decl.FnBody b) {
+            return switch (b) {
+                case Decl.FnBody.LambdaBody lb ->
+                        new Decl.FnBody.LambdaBody(pats(lb.params()), id(lb.restParam()), expr(lb.body()));
+                case Decl.FnBody.MatchArmsBody mab -> new Decl.FnBody.MatchArmsBody(arms(mab.arms()));
+                case Decl.FnBody.ImperativeBody ib ->
+                        new Decl.FnBody.ImperativeBody(pats(ib.params()), id(ib.restParam()), stmts(ib.stmts()));
+                case Decl.FnBody.NoBody nb -> nb;
+            };
+        }
+
+        List<Decl.HandlerClause> clauses(List<Decl.HandlerClause> cs) {
+            List<Decl.HandlerClause> out = new ArrayList<>(cs.size());
+            for (var c : cs) out.add(new Decl.HandlerClause(c.opName(), pats(c.params()), expr(c.body())));
+            return out;
+        }
+
+        Stmt stmt(Stmt s) {
+            return switch (s) {
+                case Stmt.ExprStmt es -> new Stmt.ExprStmt(expr(es.expr()), es.loc());
+                case Stmt.Bind b -> new Stmt.Bind(target(b.target()), expr(b.value()),
+                        b.specAnnotation(), b.loc());
+                case Stmt.MutBind mb -> new Stmt.MutBind(target(mb.target()), expr(mb.value()), mb.loc());
+                case Stmt.Assign a -> new Stmt.Assign(target(a.target()), expr(a.value()), a.loc());
+                case Stmt.With w -> new Stmt.With(expr(w.handler()), stmts(w.body()),
+                        w.onFailure() == null ? null : stmts(w.onFailure()), w.loc());
+                case Stmt.Scope sc -> new Stmt.Scope(sc.modifier(), id(sc.name()), stmts(sc.body()), sc.loc());
+                case Stmt.MatchStmt ms -> new Stmt.MatchStmt(expr(ms.scrutinee()), arms(ms.arms()), ms.loc());
+                case Stmt.IfStmt is -> new Stmt.IfStmt(expr(is.cond()), stmts(is.thenBranch()),
+                        is.elseBranch() == null ? null : stmts(is.elseBranch()), is.loc());
+            };
+        }
+
+        Stmt.BindTarget target(Stmt.BindTarget t) {
+            return switch (t) {
+                case Stmt.BindTarget.Simple sm -> new Stmt.BindTarget.Simple(id(sm.name()));
+                case Stmt.BindTarget.Destructure ds -> new Stmt.BindTarget.Destructure(pat(ds.pattern()));
+            };
+        }
+
+        Expr expr(Expr e) {
+            if (e == null) return null;
+            return switch (e) {
+                case Expr.Var v -> renames.containsKey(v.name()) ? new Expr.Var(id(v.name()), v.loc()) : v;
+                case Expr.App a -> new Expr.App(expr(a.fn()), exprs(a.args()), a.loc());
+                case Expr.Lambda l -> new Expr.Lambda(pats(l.params()), id(l.restParam()), expr(l.body()), l.loc());
+                case Expr.BinaryOp b -> new Expr.BinaryOp(b.op(), expr(b.left()), expr(b.right()), b.loc());
+                case Expr.UnaryOp u -> new Expr.UnaryOp(u.op(), expr(u.operand()), u.loc());
+                case Expr.Pipe p -> new Expr.Pipe(expr(p.left()), expr(p.right()), p.forward(), p.loc());
+                case Expr.Compose c -> new Expr.Compose(expr(c.left()), expr(c.right()), c.forward(), c.loc());
+                case Expr.SeqOp so -> new Expr.SeqOp(so.op(), expr(so.arg()), so.loc());
+                case Expr.IfExpr ie -> new Expr.IfExpr(expr(ie.cond()), expr(ie.thenBranch()),
+                        expr(ie.elseBranch()), ie.loc());
+                case Expr.MatchExpr me -> new Expr.MatchExpr(expr(me.scrutinee()), arms(me.arms()), me.loc());
+                case Expr.VectorLit vl -> new Expr.VectorLit(exprs(vl.elements()), vl.loc());
+                case Expr.SetLit sl -> new Expr.SetLit(exprs(sl.elements()), sl.loc());
+                case Expr.TupleLit tl -> new Expr.TupleLit(exprs(tl.elements()), tl.loc());
+                case Expr.MapLit ml -> new Expr.MapLit(entries(ml.entries()), ml.loc());
+                case Expr.RecordUpdate ru -> new Expr.RecordUpdate(id(ru.base()), entries(ru.updates()), ru.loc());
+                case Expr.Range r -> new Expr.Range(expr(r.from()), expr(r.to()), r.exclusive(), r.loc());
+                case Expr.StringInterp si -> new Expr.StringInterp(si.parts().stream()
+                        .map(p -> switch (p) {
+                            case Expr.StringPart.Literal lit -> (Expr.StringPart) lit;
+                            case Expr.StringPart.Interpolation in ->
+                                    new Expr.StringPart.Interpolation(expr(in.expr()));
+                        }).toList(), si.loc());
+                case Expr.DotAccess da -> {
+                    if (da.target() instanceof Expr.Var v && qualified.containsKey(v.name())
+                            && qualified.get(v.name()).get(da.field()) instanceof String q) {
+                        yield new Expr.Var(q, da.loc());
+                    }
+                    yield new Expr.DotAccess(expr(da.target()), da.field(), da.loc());
+                }
+                case Expr.DoExpr de -> new Expr.DoExpr(exprs(de.exprs()), de.loc());
+                case Expr.Block bl -> new Expr.Block(stmts(bl.stmts()), bl.loc());
+                case Expr.ChoreoExpr ce -> new Expr.ChoreoExpr(ce.op(), expr(ce.left()), expr(ce.right()), ce.loc());
+                case Expr.IntLit x -> x;
+                case Expr.BigIntLit x -> x;
+                case Expr.FloatLit x -> x;
+                case Expr.RationalLit x -> x;
+                case Expr.HexLit x -> x;
+                case Expr.StrLit x -> x;
+                case Expr.BoolLit x -> x;
+                case Expr.KeywordLit x -> x;
+                case Expr.UnitLit x -> x;
+                case Expr.TypeRef x -> x;
+                case Expr.PartyRef x -> x;
+                case Expr.JavaRef x -> x;
+                case Expr.OpSection x -> x;
+                case Expr.Wildcard x -> x;
+            };
+        }
+
+        List<Expr.MapEntry> entries(List<Expr.MapEntry> es) {
+            List<Expr.MapEntry> out = new ArrayList<>(es.size());
+            for (var me : es) {
+                out.add(switch (me) {
+                    case Expr.MapEntry.Field f -> new Expr.MapEntry.Field(f.key(), expr(f.value()));
+                    case Expr.MapEntry.DynField df -> new Expr.MapEntry.DynField(expr(df.keyExpr()), expr(df.value()));
+                    case Expr.MapEntry.Spread sp -> new Expr.MapEntry.Spread(id(sp.name()));
+                });
+            }
+            return out;
+        }
+
+        List<Expr.MatchArm> arms(List<Expr.MatchArm> as) {
+            List<Expr.MatchArm> out = new ArrayList<>(as.size());
+            for (var a : as) out.add(new Expr.MatchArm(pat(a.pattern()), expr(a.guard()), expr(a.body())));
+            return out;
+        }
+
+        Pattern pat(Pattern p) {
+            if (p == null) return null;
+            return switch (p) {
+                case Pattern.VarPat vp -> new Pattern.VarPat(id(vp.name()), vp.loc());
+                case Pattern.ConstructorPat cp -> new Pattern.ConstructorPat(cp.name(), pats(cp.args()), cp.loc());
+                case Pattern.KeywordPat kp -> new Pattern.KeywordPat(kp.name(), pat(kp.arg()), kp.loc());
+                case Pattern.GroupedPat gp -> new Pattern.GroupedPat(pat(gp.inner()), gp.loc());
+                case Pattern.VectorPat vp -> new Pattern.VectorPat(pats(vp.elements()),
+                        (Pattern.SpreadPat) pat(vp.spread()), vp.loc());
+                case Pattern.TuplePat tp -> new Pattern.TuplePat(pats(tp.elements()), tp.loc());
+                case Pattern.DestructurePat dp -> new Pattern.DestructurePat(dp.fields().stream()
+                        .map(f -> new Pattern.DestructureField(f.key(), pat(f.value()))).toList(), dp.loc());
+                case Pattern.SpreadPat sp -> new Pattern.SpreadPat(id(sp.name()), sp.loc());
+                case Pattern.LitPat lp -> lp;
+                case Pattern.WildcardPat wp -> wp;
+                case Pattern.UnitPat up -> up;
+            };
+        }
+
+        List<Expr> exprs(List<Expr> es) {
+            if (es == null) return null;
+            List<Expr> out = new ArrayList<>(es.size());
+            for (Expr e : es) out.add(expr(e));
+            return out;
+        }
+
+        List<Stmt> stmts(List<Stmt> ss) {
+            if (ss == null) return null;
+            List<Stmt> out = new ArrayList<>(ss.size());
+            for (Stmt s : ss) out.add(stmt(s));
+            return out;
+        }
+
+        List<Pattern> pats(List<Pattern> ps) {
+            if (ps == null) return null;
+            List<Pattern> out = new ArrayList<>(ps.size());
+            for (Pattern p : ps) out.add(pat(p));
+            return out;
+        }
+    }
+}

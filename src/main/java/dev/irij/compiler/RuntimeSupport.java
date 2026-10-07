@@ -75,11 +75,6 @@ public final class RuntimeSupport {
         }
     }
 
-    /** Helper for App sites when callee is an expression of unknown type. */
-    public static Object callFn(Object fn, Object[] args) {
-        return callAny(fn, args);
-    }
-
     // ── Namespace mode (nREPL eval-bytecode cross-eval state) ────────
     //
     // The nREPL session sets `NS` to a per-session map before invoking
@@ -113,6 +108,38 @@ public final class RuntimeSupport {
     /** Current session PrintStream, or null when no session is bound. */
     public static java.io.PrintStream sessionOut() {
         return SESSION_OUT.isBound() ? SESSION_OUT.get() : null;
+    }
+
+    /**
+     * Route {@code System.out} through {@link #SESSION_OUT}: a thread with
+     * a session bound (a session eval and every fiber it forks) writes
+     * into its session, any other thread to the real stdout. Installed
+     * once, by the first capturing eval. This replaces swapping
+     * {@code System.out} around each eval, which — being process-global —
+     * captured every other thread's output for the duration, and, when an
+     * eval outlived its timeout, never gave stdout back.
+     */
+    public static synchronized void routeSystemOutThroughSessions() {
+        if (!(System.out instanceof SessionRoutedOut)) {
+            System.setOut(new SessionRoutedOut(System.out));
+        }
+    }
+
+    private static final class SessionRoutedOut extends java.io.PrintStream {
+        SessionRoutedOut(java.io.PrintStream process) {
+            super(new java.io.OutputStream() {
+                @Override public void write(int b) { target(process).write(b); }
+                @Override public void write(byte[] b, int off, int len) {
+                    target(process).write(b, off, len);
+                }
+                @Override public void flush() { target(process).flush(); }
+            }, true);
+        }
+
+        private static java.io.PrintStream target(java.io.PrintStream process) {
+            java.io.PrintStream s = sessionOut();
+            return s != null ? s : process;
+        }
     }
 
     /** Fallback namespace for nsGet/nsPut outside any session binding
@@ -231,9 +258,13 @@ public final class RuntimeSupport {
     /** `validate spec-name value` — returns Ok(v) on pass, Err(msg)
      *  on failure. Mirrors the interpreter's `validate` builtin. */
     public static Object validate(Object specNameArg, Object value) {
+        return validate(specNameArg, value, null);
+    }
+
+    public static Object validate(Object specNameArg, Object value, Class<?> owner) {
         String name = RtStrings.asStr(specNameArg, "validate");
         try {
-            Object result = dev.irij.compiler.SpecValidator.validate(
+            Object result = SpecValidator.validateIn(SpecValidator.registryOf(owner),
                     value, new dev.irij.ast.SpecExpr.Name(name));
             return new dev.irij.runtime.Values.Tagged(
                     "Ok", java.util.List.of(result));
@@ -256,8 +287,12 @@ public final class RuntimeSupport {
     }
 
     public static Object validateBang(Object specNameArg, Object value) {
+        return validateBang(specNameArg, value, null);
+    }
+
+    public static Object validateBang(Object specNameArg, Object value, Class<?> owner) {
         String name = RtStrings.asStr(specNameArg, "validate!");
-        return dev.irij.compiler.SpecValidator.validate(
+        return SpecValidator.validateIn(SpecValidator.registryOf(owner),
                 value, new dev.irij.ast.SpecExpr.Name(name));
     }
 
@@ -337,14 +372,11 @@ public final class RuntimeSupport {
 
     private static java.util.Map<String, IrijFn> initBuiltinRegistry() {
         java.util.Map<String, IrijFn> out = new java.util.HashMap<>();
-        dev.irij.runtime.Environment env =
-                new dev.irij.runtime.Environment(null);
-        dev.irij.runtime.Builtins.install(env, System.out, null);
+        dev.irij.runtime.Environment env = new dev.irij.runtime.Environment();
+        dev.irij.runtime.Builtins.install(env);
         for (var entry : env.getBindings().entrySet()) {
             String name = entry.getKey();
-            var cell = entry.getValue();
-            Object value = unwrapCell(cell);
-            if (value instanceof dev.irij.runtime.Values.BuiltinFn bf) {
+            if (entry.getValue() instanceof dev.irij.runtime.Values.BuiltinFn bf) {
                 out.put(name, args ->
                         bf.apply(java.util.Arrays.asList(args)));
             }
@@ -352,25 +384,10 @@ public final class RuntimeSupport {
         return out;
     }
 
-    private static Object unwrapCell(dev.irij.runtime.Environment.Cell c) {
-        if (c instanceof dev.irij.runtime.Environment.ImmutableCell ic) {
-            return ic.value();
-        }
-        if (c instanceof dev.irij.runtime.Environment.MutableCell mc) {
-            return mc.get();
-        }
-        return null;
-    }
-
     // ── Misc ─────────────────────────────────────────────────────────
 
     public static void dbg(Object v) {
         System.err.println("[dbg] " + display(v));
-    }
-
-    public static Object printlnVal(Object v) {
-        println(v);
-        return dev.irij.runtime.Values.UNIT;
     }
 
     // rawHttpRequest removed phase 3b — Http effect now routes through
@@ -426,8 +443,9 @@ public final class RuntimeSupport {
     /** Runtime type tag used for protocol dispatch. */
     public static String typeTag(Object v) {
         if (v == null || v == dev.irij.runtime.Values.UNIT) return "Unit";
-        if (v instanceof Long) return "Int";
+        if (v instanceof Long || v instanceof java.math.BigInteger) return "Int";
         if (v instanceof Double) return "Float";
+        if (v instanceof dev.irij.runtime.Values.Rational) return "Rational";
         if (v instanceof Boolean) return "Bool";
         if (v instanceof String) return "Str";
         if (v instanceof dev.irij.runtime.Values.Keyword) return "Keyword";
@@ -469,9 +487,8 @@ public final class RuntimeSupport {
 
     /**
      * Sentinel returned by {@link #fireOpToSM} when no SM handler matches
-     * — distinct from any legal Irij value so {@link
-     * dev.irij.runtime.EffectSystem#fireOp} can fall through to
-     * "Unhandled effect" without ambiguity.
+     * — distinct from any legal Irij value so {@link RtEffects#perform}
+     * can fall through to "Unhandled effect" without ambiguity.
      */
     public static final Object SM_NO_MATCH = new Object();
 
@@ -485,11 +502,6 @@ public final class RuntimeSupport {
      * the synthesised {@code resumeFn} unwinds the clause via
      * {@link TailResume} so the loop re-enters with the resume value rather
      * than via a recursive JVM call.
-     *
-     * <p>Bridges to threaded outer {@code with}: if no SM handler matches,
-     * walk {@link dev.irij.runtime.EffectSystem#STACK}; if a threaded
-     * outer handles this effect, route via {@code fireOp} and continue the
-     * loop with the result.
      */
     /** Per-thread stack of active SM dispatch frames — innermost on top.
      *  Lets a clause body's `perform` (tier-c) find a matching handler in
@@ -545,15 +557,25 @@ public final class RuntimeSupport {
     // skips indy and uses plain {@code invokestatic} for max JIT
     // inlinability — same trade-off Clojure exposes.
 
-    /** Registry of mutable call sites keyed by "owner.method:descriptor". */
+    /** Mutable call sites per owner class, keyed "method:descriptor".
+     *  Held in a {@link ClassValue}, so the sites go away with their
+     *  class: a static map from key to site kept every class (and its
+     *  classloader) that ever ran alive — every Playground, nREPL and
+     *  MCP eval, forever. */
+    private static final ClassValue<java.util.concurrent.ConcurrentHashMap<String,
+            java.util.List<java.lang.invoke.MutableCallSite>>> REDEF_SITES = new ClassValue<>() {
+        @Override protected java.util.concurrent.ConcurrentHashMap<String,
+                java.util.List<java.lang.invoke.MutableCallSite>> computeValue(Class<?> type) {
+            return new java.util.concurrent.ConcurrentHashMap<>();
+        }
+    };
+
+    /** Owner-class name → the class, weakly, for {@link #redefine}'s
+     *  string keys. */
     private static final java.util.concurrent.ConcurrentHashMap<String,
-            java.lang.invoke.MutableCallSite> REDEF_SITES =
+            java.lang.ref.WeakReference<Class<?>>> REDEF_OWNERS =
             new java.util.concurrent.ConcurrentHashMap<>();
 
-    private static String redefKey(Class<?> owner, String name,
-                                    java.lang.invoke.MethodType mt) {
-        return owner.getName() + "." + name + ":" + mt.toMethodDescriptorString();
-    }
 
     /**
      * Bootstrap method for the hot-redef invokedynamic. The {@code name}
@@ -561,10 +583,9 @@ public final class RuntimeSupport {
      * is the method type. The bootstrap looks up the static impl on the
      * caller's class, registers a MutableCallSite for it, and returns it.
      *
-     * <p>If the same call site is requested twice (e.g. two source files
-     * each calling the same fn), each gets its own MutableCallSite — they
-     * happen to share the impl. {@link #redefine} updates them all via the
-     * registry's collision list.
+     * <p>If the same fn is called from several sites, each gets its own
+     * MutableCallSite sharing the impl; the registry keeps them all, and
+     * {@link #redefine} swaps them together.
      */
     public static java.lang.invoke.CallSite redefBootstrap(
             java.lang.invoke.MethodHandles.Lookup lookup,
@@ -603,7 +624,11 @@ public final class RuntimeSupport {
         }
         java.lang.invoke.MethodHandle target = lookup.findStatic(owner, name, mt);
         java.lang.invoke.MutableCallSite cs = new java.lang.invoke.MutableCallSite(target);
-        REDEF_SITES.put(redefKey(owner, name, mt), cs);
+        REDEF_SITES.get(owner).computeIfAbsent(name + ":" + mt.toMethodDescriptorString(),
+                k -> new java.util.concurrent.CopyOnWriteArrayList<>()).add(cs);
+        if (REDEF_OWNERS.put(owner.getName(), new java.lang.ref.WeakReference<>(owner)) == null) {
+            REDEF_OWNERS.values().removeIf(r -> r.get() == null); // forget unloaded classes
+        }
         return cs;
     }
 
@@ -617,15 +642,26 @@ public final class RuntimeSupport {
      * was found and updated, {@code false} otherwise.
      */
     public static boolean redefine(String key, java.lang.invoke.MethodHandle newImpl) {
-        java.lang.invoke.MutableCallSite cs = REDEF_SITES.get(key);
-        if (cs == null) return false;
-        cs.setTarget(newImpl);
-        java.lang.invoke.MutableCallSite.syncAll(new java.lang.invoke.MutableCallSite[]{cs});
+        int colon = key.indexOf(':');
+        int dot = colon < 0 ? -1 : key.lastIndexOf('.', colon);
+        if (dot < 0) return false;
+        var ref = REDEF_OWNERS.get(key.substring(0, dot));
+        Class<?> owner = ref == null ? null : ref.get();
+        if (owner == null) return false;
+        var sites = REDEF_SITES.get(owner).get(key.substring(dot + 1));
+        if (sites == null || sites.isEmpty()) return false;
+        for (var cs : sites) cs.setTarget(newImpl);
+        java.lang.invoke.MutableCallSite.syncAll(sites.toArray(new java.lang.invoke.MutableCallSite[0]));
         return true;
     }
 
     /** Test/inspection helper — number of registered redef sites. */
     public static int redefSiteCount() {
-        return REDEF_SITES.size();
+        int n = 0;
+        for (var ref : REDEF_OWNERS.values()) {
+            Class<?> c = ref.get();
+            if (c != null) for (var l : REDEF_SITES.get(c).values()) n += l.size();
+        }
+        return n;
     }
 }

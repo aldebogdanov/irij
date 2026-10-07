@@ -20,33 +20,21 @@ public final class RtMath {
 
     public static Object exp(Object x)  { return Math.exp(RtOps.asDoubleArg(x, "exp")); }
 
-    public static Object floor(Object x) { return (long) Math.floor(RtOps.asDoubleArg(x, "floor")); }
+    // floor / ceil / round return an Int: an Int argument as is (going
+    // through a double lost every Int past 2^53), a Rational exactly, a
+    // Float rounded — as a big Int when it is past 64 bits.
+    public static Object floor(Object x) { return RtNum.floor(x); }
 
-    public static Object ceil(Object x)  { return (long) Math.ceil(RtOps.asDoubleArg(x, "ceil")); }
+    public static Object ceil(Object x)  { return RtNum.ceil(x); }
 
-    public static Object round(Object x) { return Math.round(RtOps.asDoubleArg(x, "round")); }
+    public static Object round(Object x) { return RtNum.round(x); }
 
-    public static Object pow(Object a, Object b) {
-        double da = RtOps.asDoubleArg(a, "pow");
-        double db = RtOps.asDoubleArg(b, "pow");
-        double result = Math.pow(da, db);
-        // If both operands were Long and result fits a long without loss,
-        // return Long (matches interp's powOp narrowing).
-        if (a instanceof Long && b instanceof Long
-                && result == Math.floor(result)
-                && !Double.isInfinite(result)
-                && result >= Long.MIN_VALUE && result <= Long.MAX_VALUE) {
-            return (long) result;
-        }
-        return result;
-    }
+    /** {@code **}: exact for an Int or Rational base and a non-negative Int
+     *  exponent (`2 ** 100` is an Int, not 1.2676506002282294E30); a Float
+     *  otherwise. */
+    public static Object pow(Object a, Object b) { return RtNum.pow(a, b); }
 
-    public static Object abs(Object v) {
-        if (v instanceof Long l) return Math.abs(l);
-        if (v instanceof Double d) return Math.abs(d);
-        throw new dev.irij.IrijRuntimeError(
-                "abs expects a number, got " + RuntimeSupport.typeTag(v));
-    }
+    public static Object abs(Object v) { return RtNum.abs(v); }
 
 
     // ── Random ────────────────────────────────────────────────────────
@@ -105,6 +93,48 @@ public final class RtMath {
     }
 
 
+    /** {@code pbkdf2-sha256-hex password salt iterations}: PBKDF2-HMAC-SHA256
+     *  (RFC 8018) of the UTF-8 password under the UTF-8 salt, 32-byte key,
+     *  lower-case hex. A deliberately slow, salted key derivation — the
+     *  right shape for storing passwords, unlike a single fast hash. */
+    public static Object pbkdf2Sha256Hex(Object pwArg, Object saltArg, Object itersArg) {
+        String pw = RtStrings.asStr(pwArg, "pbkdf2-sha256-hex");
+        String salt = RtStrings.asStr(saltArg, "pbkdf2-sha256-hex");
+        long iters = RtCollections.asLongArg(itersArg, "pbkdf2-sha256-hex");
+        if (iters < 1 || iters > 100_000_000L) {
+            throw new dev.irij.IrijRuntimeError(
+                    "pbkdf2-sha256-hex: iterations must be in [1, 100000000], got " + iters);
+        }
+        if (salt.isEmpty()) {
+            throw new dev.irij.IrijRuntimeError("pbkdf2-sha256-hex: salt must not be empty");
+        }
+        var spec = new javax.crypto.spec.PBEKeySpec(pw.toCharArray(),
+                salt.getBytes(java.nio.charset.StandardCharsets.UTF_8), (int) iters, 256);
+        try {
+            byte[] dk = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
+                    .generateSecret(spec).getEncoded();
+            return bytesToHex(dk);
+        } catch (java.security.GeneralSecurityException e) {
+            throw new dev.irij.IrijRuntimeError("pbkdf2-sha256-hex: " + e.getMessage());
+        } finally {
+            spec.clearPassword();
+        }
+    }
+
+
+    /** {@code constant-time-eq? a b}: string equality whose running time
+     *  doesn't depend on where the strings first differ — for comparing a
+     *  secret (a MAC, a password hash) against an attacker's guess, where
+     *  {@code ==} would leak how long a prefix was right. */
+    public static Object constantTimeEq(Object aArg, Object bArg) {
+        String a = RtStrings.asStr(aArg, "constant-time-eq?");
+        String b = RtStrings.asStr(bArg, "constant-time-eq?");
+        return java.security.MessageDigest.isEqual(
+                a.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                b.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+
     /** {@code random-token n}: n bytes from {@link java.security.SecureRandom},
      *  URL-safe base64-encoded (no padding). Suitable for session IDs. */
     public static Object randomToken(Object lenArg) {
@@ -133,7 +163,7 @@ public final class RtMath {
 
     public static Object parseInt(Object strArg) {
         String s = RtStrings.asStr(strArg, "parse-int");
-        try { return Long.parseLong(s.strip()); }
+        try { return RtNum.parseInt(s.strip()); }
         catch (NumberFormatException e) {
             throw new dev.irij.IrijRuntimeError(
                     "parse-int: cannot parse '" + s + "' as Int");

@@ -104,7 +104,7 @@ class UserSpecTest {
             """, "irij.SpecReg");
         Class<?> cls = new BytesLoader().define("irij.SpecReg", bytes);
         cls.getMethod("main", String[].class).invoke(null, (Object) new String[0]);
-        var d = SpecValidator.lookup("Color");
+        var d = SpecValidator.lookup(cls, "Color");
         assertTrue(d instanceof SpecValidator.Descriptor.Sum,
                 () -> "expected Sum descriptor, got " + d);
     }

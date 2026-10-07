@@ -10,24 +10,29 @@ Terms used throughout the internals docs.
 | **Aardvark-DNS / Netavark** | Podman's networking stack — not relevant to Irij internals; mentioned only in deploy docs. |
 | **Blame** | In the spec system, the source location attributed for a spec or contract violation. Caller-side for input failures, callee-side for output failures (Findler/Felleisen 2002). |
 | **BuiltinFn** | Java-implemented function value (lives in `dev.irij.runtime`, referenced from the bytecode runtime). Effect-transparent — callback runs in caller's row. |
+| **Cancellation point** | Where an interrupted thread stops with `IrijRuntimeError("cancelled: ...")`: every self-tail-call back-edge (`RtConcurrency.checkCancelled`), `sleep`, and blocking effect / proc / HTTP waits. The interrupt flag stays set, so cancellation is sticky. See `concurrency.md`. |
 | **Capability (cap)** | `cap <name> :: <Effect> = "<provider-class>"` top-level decl. Binds a lower-case name to a JVM provider class; the name resolves only as a dot-access target inside clauses of handlers for the matching effect. See `capabilities.md`. |
 | **CompiledHandler** | Bytecode-side handler value: `(name, effectName, clauses: Map<String, IrijFn>)`. Static fields hold handler state. |
 | **CompiledComposedHandler** | `(handlers: List<CompiledHandler>)` flattened from `>>` operator. |
 | **CompiledScopeHandle** | Runtime handle for `scope { fork ... }` blocks. Tracks spawned fibers + parent effect snapshots. |
 | **Deep handler** | Handler whose clauses resume into the same dynamic extent as the body. Irij's only kind of handler. |
 | **Direct linking** | Build mode (`--direct-linking`) where top-level fn calls compile to plain `invokestatic`. Disables hot-redef. Mirrors Clojure deploy mode. |
-| **EffectSystem.STACK** | Thread-local stack of `HandlerContext` records. Walked by `dispatchLoopSMImpl` as a bridging fallback when no SM handler matches a `PerformSignal` and no SM_STACK frame matches either — relevant for fibers spawned outside any SM `with`. |
 | **EffIR** | SM body shape for bodies with branching that contain effect ops. CFG of blocks with `Return`/`Perform`/`Branch`/`Jump` terminators. |
-| **fireOp** | `EffectSystem.fireOp(eff, op, args)` — legacy synchronous effect-op entry kept for fibers spawned outside any SM `with`. Walks `EffectSystem.STACK`, falls through to `fireOpToSM`. |
-| **fireOpToSM** | Synchronous SM-dispatch from `fireOp` — lets a fiber (running outside any SM dispatch loop) reach an inherited SM handler via `SM_STACK`. |
+| **perform (runtime)** | `RtEffects.perform(eff, op, args)` — synchronous effect-op entry for a perform outside any SM body (a fiber, a plain fn reached from a `with`): `fireOpToSM` against the innermost matching `SM_STACK` frame, else "Unhandled effect". |
+| **fireOpToSM** | Synchronous SM-dispatch from `RtEffects.perform` — lets a fiber (running outside any SM dispatch loop) reach an inherited SM handler via `SM_STACK`. |
 | **Hot redef** | Swap a fn's implementation at runtime via `MutableCallSite.setTarget`. |
 | **IndentRewriter** | ANTLR4 token-stream filter that emits `INDENT`/`DEDENT` tokens around lines based on indentation. Pre-parse pass. |
 | **IrijContinuation** | Concrete struct (`int state, Object[] fields, IrijFn step`) used by SM-mode bodies. Holds machine state across perform throws. |
 | **IrijFn** | SAM interface `(Object[]) -> Object` representing a first-class function value. `invokeBuiltin` + `LambdaMetafactory` produce these. |
 | **Lifted local** | A local variable that must survive a SM perform. Stored in `k.fields[idx]` instead of a JVM local slot. |
+| **Int** | Irij's integer: arbitrary precision, never wraps. A `Long` while it fits in 64 bits, a `BigInteger` only beyond (canonical). See `stdlib.md` § Numbers. |
+| **Forwarder** | The public `fn name` ModulePrivacy adds for a module's pub fn `name`, whose body calls the module-qualified `name$module$path`. Importers call the forwarder; the module calls its own fn directly, so a same-named definition elsewhere can't rewire it. Emits no spec checks. See `modules.md`. |
+| **Module privacy** | A module's non-`pub` top-level fns, bindings, handlers and caps are renamed `name$module$path` before inlining (`ModulePrivacy`), so no other module or the program can see or replace them; its pub fns and bindings are renamed too and reached through forwarders. See `modules.md`. |
 | **MutableCallSite** | JSR-292 (`java.lang.invoke`) call site whose target can be swapped at runtime. Used for hot-redef. |
 | **nREPL** | Network REPL — Clojure-flavoured protocol. Irij hosts an nREPL server with bytecode-backed sessions (`BytecodeSession`); each connection gets a per-session classloader + namespace. |
 | **OpSection** | `(+)` etc. as a first-class fn value. Lowered to `GETSTATIC RuntimeSupport.OP_ADD` etc. |
+| **PMap / PVec / PSet** | The persistent structures behind Irij Maps, Vectors and Sets: an insertion-ordered HAMT (flat array up to 8 entries), a 32-way trie vector, and a HAMT set. Share structure across versions; `assoc` / `conj` / `tail` don't copy. See `stdlib.md`. |
+| **Rational** | An exact fraction, `2/3` (no spaces), `Values.Rational` over BigIntegers in lowest terms; a whole value is an Int. See `stdlib.md` § Numbers. |
 | **Perform** | An effect-op invocation. SM mode (the only execution path): throw `PerformSignal`. |
 | **PerformSignal** | Pooled `RuntimeException` (stack-trace-free) carrying `(effectName, opName, args, continuation)`. Thrown by SM bodies at perform sites. |
 | **runWithSM** | SM-mode entry. Allocates `IrijContinuation`, enters `dispatchLoopSM`. |
@@ -47,7 +52,7 @@ Terms used throughout the internals docs.
 | **Tier (b)** | Bodies that perform tier-a effects only. |
 | **Tier (c)** | Clauses that themselves perform foreign effects (have `::: Other` rows). Compile clause body as its own SM. |
 | **Trampoline** | The dispatch loop pattern: catch a control-flow exception, update state, iterate. Used by SM-mode resume to avoid stack growth. |
-| **Vector** | Irij's primary sequential collection. `#[1 2 3]`. Backed by `Values.IrijVector` (wraps `List<Object>`). |
+| **Vector** | Irij's primary sequential collection. `#[1 2 3]`. Backed by `Values.IrijVector`, whose elements are a persistent `PVec` (see `stdlib.md`). |
 | **vthread** | JVM virtual thread (`Thread.startVirtualThread`). Cheap (~1 KB), block-friendly. Underlies all Irij concurrency. |
 | **ITF** | Informal Trace Format (Apalache ADR-015) — the JSON Quint writes with `--out-itf`, decoded by `std.quint.itf`. |
 | **Model (Quint)** | A record mapping a Quint spec's actions and state onto Irij code, replayed by `std.quint`. Not to be confused with a `spec` declaration. |

@@ -1,14 +1,11 @@
 package dev.irij.runtime;
 
-import dev.irij.ast.Expr;
-import dev.irij.ast.Pattern;
-import dev.irij.ast.SpecExpr;
 
 import java.util.*;
 import java.util.function.Function;
 
 /**
- * Runtime value types for the Irij interpreter.
+ * Runtime value types shared by compiled Irij programs.
  *
  * Primitive values use Java boxed types:
  *   Int → Long, Float → Double, Bool → Boolean, Str → String
@@ -29,28 +26,26 @@ public final class Values {
 
     // ── Rational number ─────────────────────────────────────────────────
 
-    public record Rational(long num, long den) {
+    /** An exact fraction: lowest terms, positive denominator, never an
+     *  integer (build with {@code RtNum.ratio}, which yields an Int for a
+     *  whole number). Prints as {@code 2/3}. */
+    public record Rational(java.math.BigInteger num, java.math.BigInteger den) {
         public Rational {
-            if (den == 0) throw new ArithmeticException("Rational with zero denominator");
-            // Normalize: keep denominator positive
-            if (den < 0) { num = -num; den = -den; }
-            long g = gcd(Math.abs(num), den);
-            num = num / g;
-            den = den / g;
+            if (den.signum() == 0) throw new ArithmeticException("Rational with zero denominator");
+            if (den.signum() < 0) { num = num.negate(); den = den.negate(); }
+            var g = num.gcd(den);
+            if (g.signum() != 0 && !g.equals(java.math.BigInteger.ONE)) { num = num.divide(g); den = den.divide(g); }
         }
 
         public double toDouble() {
-            return (double) num / den;
+            if (num.bitLength() < 53 && den.bitLength() < 53) return num.doubleValue() / den.doubleValue();
+            return new java.math.BigDecimal(num)
+                    .divide(new java.math.BigDecimal(den), java.math.MathContext.DECIMAL64).doubleValue();
         }
 
         @Override
         public String toString() {
             return num + "/" + den;
-        }
-
-        private static long gcd(long a, long b) {
-            while (b != 0) { long t = b; b = a % b; a = t; }
-            return a;
         }
     }
 
@@ -117,9 +112,11 @@ public final class Values {
 
     // ── Collections ─────────────────────────────────────────────────────
 
+    /** A Vector. Its elements are a {@link PVec} — persistent, so
+     *  {@code conj} / {@code tail} share structure instead of copying. */
     public record IrijVector(List<Object> elements) {
         public IrijVector {
-            elements = List.copyOf(elements);
+            elements = PVec.from(elements);
         }
 
         @Override
@@ -134,9 +131,11 @@ public final class Values {
         }
     }
 
+    /** A Set. Its elements are a {@link PSet} — persistent, so
+     *  {@code conj} shares structure instead of copying. */
     public record IrijSet(Set<Object> elements) {
         public IrijSet {
-            elements = Set.copyOf(elements);
+            elements = PSet.from(elements);
         }
 
         @Override
@@ -153,9 +152,12 @@ public final class Values {
         }
     }
 
+    /** A Map with Str keys, in insertion order. Its entries are a
+     *  {@link PMap} — persistent, so {@code assoc} / {@code dissoc} share
+     *  structure instead of copying. */
     public record IrijMap(Map<String, Object> entries) {
         public IrijMap {
-            entries = Collections.unmodifiableMap(new LinkedHashMap<>(entries));
+            entries = PMap.from(entries);
         }
 
         @Override
@@ -191,10 +193,16 @@ public final class Values {
             if (closed) throw new java.io.IOException("SSE stream closed");
             var sb = new StringBuilder();
             if (eventType != null && !eventType.isEmpty()) {
+                if (eventType.indexOf('\n') >= 0 || eventType.indexOf('\r') >= 0) {
+                    throw new java.io.IOException("SSE event type contains a line break");
+                }
                 sb.append("event: ").append(eventType).append('\n');
             }
-            // Each line of data gets its own "data: " prefix
-            for (var line : data.split("\n", -1)) {
+            // Each line of data gets its own "data: " prefix. SSE ends a
+            // line at CR, LF or CRLF alike, so all three must split here —
+            // a bare CR left inside a data line would let the payload end
+            // the event early and start one of its own.
+            for (var line : data.split("\r\n|\r|\n", -1)) {
                 sb.append("data: ").append(line).append('\n');
             }
             sb.append('\n'); // blank line terminates event
@@ -215,12 +223,26 @@ public final class Values {
         public synchronized void close() {
             if (!closed) {
                 closed = true;
+                notifyAll();
                 try { outputStream.flush(); } catch (Exception ignored) {}
                 try { outputStream.close(); } catch (Exception ignored) {}
             }
         }
 
         public boolean isClosed() { return closed; }
+
+        /** Block until the writer is closed or {@code ms} elapse; true
+         *  once closed. Lets the stream's owner sleep between heartbeats
+         *  yet wake the moment anyone closes the stream. */
+        public synchronized boolean awaitClosed(long ms) throws InterruptedException {
+            long deadline = System.nanoTime() + ms * 1_000_000L;
+            while (!closed) {
+                long left = (deadline - System.nanoTime()) / 1_000_000L;
+                if (left <= 0) return false;
+                wait(left);
+            }
+            return true;
+        }
 
         @Override
         public String toString() { return "<SseWriter>"; }
@@ -282,44 +304,6 @@ public final class Values {
         }
     }
 
-    // ── Lambda (closure) ────────────────────────────────────────────────
-
-    public record Lambda(List<Pattern> params, String restParam, Expr body,
-                         Environment closure, String name, List<String> effectRow,
-                         List<SpecExpr> specAnnotations) {
-        /** Anonymous lambda without rest param, effects, or specs. */
-        public Lambda(List<Pattern> params, Expr body, Environment closure) {
-            this(params, null, body, closure, null, null, null);
-        }
-        /** Named lambda without rest param, effects, or specs. */
-        public Lambda(List<Pattern> params, Expr body, Environment closure, String name) {
-            this(params, null, body, closure, name, null, null);
-        }
-        /** Named lambda with rest param but no effects or specs. */
-        public Lambda(List<Pattern> params, String restParam, Expr body, Environment closure, String name) {
-            this(params, restParam, body, closure, name, null, null);
-        }
-        /** Named lambda with effects but no specs. */
-        public Lambda(List<Pattern> params, String restParam, Expr body,
-                      Environment closure, String name, List<String> effectRow) {
-            this(params, restParam, body, closure, name, effectRow, null);
-        }
-
-        public int arity() {
-            return params.size();
-        }
-
-        /** Whether this lambda accepts extra args via ...rest. */
-        public boolean isVariadic() {
-            return restParam != null;
-        }
-
-        @Override
-        public String toString() {
-            return name != null ? "<fn " + name + ">" : "<lambda>";
-        }
-    }
-
     // ── Builtin function ────────────────────────────────────────────────
 
     public record BuiltinFn(String name, int arity, List<String> requiredEffects,
@@ -336,202 +320,6 @@ public final class Values {
         @Override
         public String toString() {
             return "<builtin " + name + ">";
-        }
-    }
-
-    // ── Partial application ─────────────────────────────────────────────
-
-    public record PartialApp(Object fn, List<Object> appliedArgs) {
-        @Override
-        public String toString() {
-            return "<partial>";
-        }
-    }
-
-    // ── Composed function ───────────────────────────────────────────────
-
-    public record ComposedFn(Object first, Object second) {
-        @Override
-        public String toString() {
-            return "<composed>";
-        }
-    }
-
-    // ── Type constructor function ───────────────────────────────────────
-
-    /**
-     * Constructor function for ADT variants and product specs.
-     * Sum spec variants: fieldNames is null (positional).
-     * Product specs: fieldNames maps positional args to named fields.
-     * specName: certification tag set on created Tagged values.
-     */
-    public record Constructor(String tag, int arity, List<String> fieldNames, String specName) {
-        /** Convenience constructor for sum spec variants (positional only, no certification). */
-        public Constructor(String tag, int arity) {
-            this(tag, arity, null, null);
-        }
-
-        /** Convenience constructor for sum spec variants with certification. */
-        public Constructor(String tag, int arity, String specName) {
-            this(tag, arity, null, specName);
-        }
-
-        public Tagged apply(List<Object> args) {
-            if (fieldNames != null) {
-                // Product spec: build named field map
-                var named = new java.util.LinkedHashMap<String, Object>();
-                for (int i = 0; i < fieldNames.size() && i < args.size(); i++) {
-                    named.put(fieldNames.get(i), args.get(i));
-                }
-                return new Tagged(tag, List.copyOf(args), named, specName);
-            }
-            return new Tagged(tag, List.copyOf(args), specName);
-        }
-
-        @Override
-        public String toString() {
-            return "<constructor " + tag + "/" + arity + ">";
-        }
-    }
-
-    // ── Spec system values ──────────────────────────────────────────────
-
-    /**
-     * Descriptor for a declared spec (e.g., {@code spec Person}).
-     * Stored in the spec registry for validation lookups.
-     * Hot-reloadable: re-evaluating a spec declaration updates the registry.
-     */
-    public record SpecDescriptor(String name, List<String> typeParams,
-                                   dev.irij.ast.Decl.SpecBody body) {
-        @Override
-        public String toString() {
-            return "<spec " + name + ">";
-        }
-    }
-
-    // ── Effect system values ─────────────────────────────────────────────
-
-    /**
-     * Descriptor for a declared effect (e.g., {@code effect Console}).
-     * Stored in the environment so handlers can validate against it.
-     */
-    public record EffectDescriptor(String name, List<String> ops) {
-        @Override
-        public String toString() {
-            return "<effect " + name + ">";
-        }
-    }
-
-    /**
-     * A first-class handler value created by {@code handler h :: E}.
-     *
-     * @param name             handler name (e.g., "console-to-stdout")
-     * @param effectName       the effect this handler handles (e.g., "Console")
-     * @param requiredEffects  effects the handler's clause bodies need (e.g., ["Console"])
-     * @param clauses          map from op name → HandlerClause AST node
-     * @param closureEnv       environment capturing handler-local state
-     */
-    public record HandlerValue(String name, String effectName, List<String> requiredEffects,
-                               Map<String, dev.irij.ast.Decl.HandlerClause> clauses,
-                               Environment closureEnv) {
-        @Override
-        public String toString() {
-            return "<handler " + name + " :: " + effectName + ">";
-        }
-    }
-
-    /**
-     * Two or more handlers composed via {@code >>}.
-     * When used with {@code with}, decomposes into nested {@code with} blocks:
-     * {@code with (h1 >> h2)} ≡ {@code with h1 (with h2 body)}.
-     */
-    public record ComposedHandler(List<Object> handlers) {
-        @Override
-        public String toString() {
-            return "<composed-handler " + handlers.size() + ">";
-        }
-    }
-
-    // ── Protocol system values ───────────────────────────────────────────
-
-    /**
-     * Descriptor for a declared protocol (e.g., {@code proto Monoid a}).
-     * Holds method names and a dispatch table mapping type names to impl bindings.
-     *
-     * <p>When a protocol method is called, the dispatch function checks
-     * {@code Values.typeName(firstArg)} against this table to find the
-     * correct implementation.</p>
-     *
-     * @param name        protocol name (e.g., "Monoid")
-     * @param methodNames list of method names declared by this protocol
-     * @param impls       map from type name → (method name → value)
-     */
-    public record ProtocolDescriptor(String name, List<String> methodNames,
-                                     Map<String, Map<String, Object>> impls) {
-        public ProtocolDescriptor(String name, List<String> methodNames) {
-            this(name, methodNames, new java.util.concurrent.ConcurrentHashMap<>());
-        }
-
-        /** Register an implementation for a given type (thread-safe). */
-        public void registerImpl(String typeName, Map<String, Object> bindings) {
-            impls.put(typeName, bindings);
-        }
-
-        /** Look up a method for a given runtime type (thread-safe). */
-        public Object dispatch(String methodName, String typeName) {
-            var typeImpls = impls.get(typeName);
-            if (typeImpls == null) return null;
-            return typeImpls.get(methodName);
-        }
-
-        @Override
-        public String toString() {
-            return "<proto " + name + ">";
-        }
-    }
-
-    // ── Module system values ────────────────────────────────────────────
-
-    /**
-     * A loaded module value, created by {@code use} declarations.
-     * The {@code exports} environment contains only public bindings.
-     * Dot-access on a ModuleValue looks up names in the exports environment.
-     */
-    public record ModuleValue(String qualifiedName, Environment exports) {
-        @Override
-        public String toString() {
-            return "<module " + qualifiedName + ">";
-        }
-    }
-
-    // ── Structured concurrency values ──────────────────────────────────
-
-    /**
-     * A fiber: a virtual thread with a {@link java.util.concurrent.CompletableFuture}
-     * for result delivery. Created by {@code scope.fork}.
-     *
-     * @param result  future that completes when the fiber finishes
-     * @param thread  the virtual thread running the fiber body
-     */
-    public record Fiber(java.util.concurrent.CompletableFuture<Object> result, Thread thread) {
-        @Override
-        public String toString() {
-            return "<fiber " + thread.threadId() + ">";
-        }
-    }
-
-    /**
-     * A scope handle: provides {@code fork} method via dot-access.
-     * Created by {@code scope s} blocks.
-     *
-     * @param modifier  null, "race", or "supervised"
-     * @param fibers    thread-safe list of forked fibers (shared with scope execution)
-     * @param forkFn    BuiltinFn for {@code s.fork(thunk)} — captures scope context
-     */
-    public record ScopeHandle(String modifier, java.util.List<Fiber> fibers, Object forkFn) {
-        @Override
-        public String toString() {
-            return "<scope" + (modifier != null ? "." + modifier : "") + ">";
         }
     }
 
@@ -566,7 +354,7 @@ public final class Values {
     /** Get a human-readable type name for error messages. */
     public static String typeName(Object value) {
         if (value == null || value == UNIT) return "Unit";
-        if (value instanceof Long) return "Int";
+        if (value instanceof Long || value instanceof java.math.BigInteger) return "Int";
         if (value instanceof Double) return "Float";
         if (value instanceof Rational) return "Rational";
         if (value instanceof Boolean) return "Bool";
@@ -578,24 +366,8 @@ public final class Values {
         if (value instanceof IrijTuple) return "Tuple";
         if (value instanceof IrijRange) return "Range";
         if (value instanceof Tagged t) return t.tag();
-        if (value instanceof Lambda) return "Lambda";
         if (value instanceof BuiltinFn) return "BuiltinFn";
-        if (value instanceof PartialApp) return "PartialApp";
-        if (value instanceof ComposedFn) return "ComposedFn";
-        if (value instanceof Constructor) return "Constructor";
-        if (value instanceof EffectDescriptor ed) return "Effect(" + ed.name() + ")";
-        if (value instanceof HandlerValue hv) return "Handler(" + hv.name() + ")";
-        if (value instanceof ComposedHandler) return "ComposedHandler";
-        if (value instanceof ProtocolDescriptor pd) return "Proto(" + pd.name() + ")";
-        if (value instanceof ModuleValue mv) return "Module(" + mv.qualifiedName() + ")";
-        if (value instanceof Fiber) return "Fiber";
-        if (value instanceof ScopeHandle) return "Scope";
         if (value instanceof Thread) return "Thread";
         return value.getClass().getSimpleName();
-    }
-
-    /** Check if a value is numeric (Int, Float, or Rational). */
-    public static boolean isNumeric(Object value) {
-        return value instanceof Long || value instanceof Double || value instanceof Rational;
     }
 }

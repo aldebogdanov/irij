@@ -87,8 +87,8 @@ final class LambdaEmitter implements Opcodes {
         ce.pendingClauseEffects = null;
         Label clauseTryStart = null, clauseTryEnd = null, clauseHandler = null;
         if (clauseEffects != null) {
-            ce.smEm.emitStringArrayConst(lm, clauseEffects);
-            lm.visitMethodInsn(INVOKESTATIC, RtOwners.of("enterFn"), "enterFn", "([Ljava/lang/String;)V", false);
+            ce.smEm.emitEffectRowConst(lm, clauseEffects);
+            lm.visitMethodInsn(INVOKESTATIC, "dev/irij/compiler/RtEffects", "enterFnRow", "(Ljava/util/Set;)V", false);
             clauseTryStart = new Label();
             clauseTryEnd = new Label();
             clauseHandler = new Label();

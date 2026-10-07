@@ -33,7 +33,11 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   surface entirely; tests rewritten to use only effect ops.
 - **3b — Http client (shipped)**: `HttpClientCapability`,
   `std.http` rewritten to route through `http-client.request`,
-  `raw-http-request` delisted from all three registries.
+  `raw-http-request` delisted from all three registries. One shared
+  `HttpClient` (30 s connect timeout) serves every request — each client
+  owns a selector thread and a connection pool, so one per call leaked
+  threads and never reused a connection. `http-request` takes an
+  optional `timeout-ms` whole-request deadline.
 - **3c — Serve / SSE (shipped)**: single `ServeCapability` holds
   both the server loop and the SSE writer ops (they share one
   exchange object, splitting would force shared plumbing back into
@@ -55,6 +59,37 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
     helpers were a near-mechanical port. Regression guard:
     `IrijHttpServerTest.sseDisconnectDoesNotWedgeOtherConnections` (hangs
     on the old model under JDK 25). See `versioning.md` for the JDK pin.
+  - **Request handling.** The whole request must arrive within
+    `irij.http.read.timeout.ms` (30 s) — without a read timeout a client
+    that connects and never sends holds its socket forever. Bodies come
+    as `Content-Length` or `Transfer-Encoding: chunked` (what a proxy
+    sends when the client's length is unknown), buffered whole and capped
+    at `irij.http.max.body` (256 MiB — concurrent uploads multiply it);
+    `Expect: 100-continue` gets its interim response. A request the
+    server refuses gets a bare 400 / 413 / 431 / 501. Unescaped `{ } | [ ]`
+    in the target are escaped, not refused (browsers send them).
+  - **Response safety.** A header name or value holding CR, LF or NUL is
+    refused (500) — handlers copy request data into headers, and a line
+    break there would let the client write its own headers or a second
+    response. A handler error becomes a bare `500 Internal Server Error`;
+    the message goes to the server log only. SSE `data` is split at CR,
+    LF and CRLF alike (SSE ends a line at each), and an event name with a
+    line break is refused, so a payload can't end its event early and
+    start one of its own.
+  - **Static files.** Before the handler, `serve` answers requests that
+    name a file in the app's `resources/` directory — `__irij_resources/`
+    on the classpath in a built JAR, `resources/` under the working
+    directory when run from source — and nothing else. A path with a
+    `..` or `.` segment is never static. (Until v0.9 it also served any
+    file under the working directory and the bundled app source, so
+    `GET /.env` or `GET /data/app.db` returned the file; a system
+    service's working directory is `/`.)
+  - **Query params** are split from the *raw* query, then form-decoded,
+    keys included; `URI.getQuery()` has already decoded `%26` / `%2B`, so
+    splitting it cut values at escaped `&`s. A stray `%` stays literal.
+  - **SSE streams** a handler returns are held open until the writer
+    closes; a heartbeat comment every `irij.sse.heartbeat.ms` (5 s)
+    detects a vanished client, and `close` wakes the holder at once.
 - **3d — FS / Multipart (shipped)**: `FsCapability` for the
   FileIO surface (read/write/append/exists?/list-dir/delete/mkdir);
   multipart parsing folded into `ServeCapability` (request-shaped,
@@ -70,6 +105,27 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   6-op Session effect; raw-session-* names + their emit fast-paths
   delisted. `raw-nrepl-eval-sandboxed` kept as a plain builtin —
   it's the CLI entry path with no handler scope.
+  - **The sandbox is not a security boundary.** A session eval is an
+    ordinary top-level program: ambient effects, Java interop, files,
+    processes. Untrusted code needs an OS-level jail around the whole
+    JVM (irij.online runs the playground as its own confined systemd
+    unit). What `RuntimeSessions` does guarantee is that one eval can't
+    break the evaluator for the next:
+    - each eval runs on its **own platform thread**, interrupted at its
+      timeout and stopped at its next cancellation point
+      (`concurrency.md`). It used to run on the common ForkJoinPool,
+      whose `cancel(true)` interrupts nothing — one infinite loop held
+      the pool's only worker on a 2-CPU host, and every later eval
+      timed out. (A virtual thread would be no better: one that spins
+      never yields its carrier, starving the HTTP server's.)
+    - **stdout** is routed per thread: `System.out` is replaced once by
+      a router that writes to the thread's bound `SESSION_OUT`, else to
+      the real stdout. Evals used to swap `System.out` process-wide,
+      capturing every other thread's output and — when an eval outlived
+      its timeout — never restoring it.
+    - output is capped at `irij.session.output.max` (1 MiB) per eval;
+      sessions at `irij.session.max` (500, idlest evicted); evals on
+      one session run one at a time.
 - **3f — Term (shipped)**: `TermCapability` + the new `std.term`
   module, for full-screen terminal apps. Unlike 3a–3e this one
   isn't a migration — there was no `raw-term-*` surface to delist.
@@ -152,10 +208,13 @@ otherwise be a member-access chain or a classpath). A dedicated
 want prettier syntax; nothing about the design forces strings
 specifically.
 
-`pub cap` re-exports the binding through `use mod :open`. Phase 1
-makes every cap (pub or not) visible to the effect-row checker
-across the whole module-inlined program — sufficient for stdlib +
-seed scenarios. Per-module private caps are tracked as future work.
+`pub cap` re-exports the binding through `use mod :open`. A cap
+without `pub` is private to its module: `ModulePrivacy` renames it
+(with every use in the module) to `name$module$path` before inlining,
+like any private top-level name (`modules.md`). Before that, every
+cap was visible program-wide, so `std.serve`'s private `cap server`
+made a program's own parameter called `server` a compile error
+("Capability 'server' is bound to effect 'Serve'…").
 
 Example:
 
@@ -279,9 +338,6 @@ of static dispatchers around the underlying JDK API.
 - **Multi-language caps**: same RHS form, different scheme — `cap
   db-rs :: Db = "rust://crate@version"` once Irij grows JNI / Panama
   bindings.
-- **Per-module private caps**: filter non-`pub` cap decls from the
-  re-export pass in `ModuleInliner` so a library can keep a cap
-  internal to itself.
 - **Tech-debt: option (b) — caps as opaque-typed unstoreable
   values**: revisit once linear / affine types land. Would let caps
   be values without losing the safety property option (a) gives via

@@ -28,8 +28,12 @@ public final class RtIo {
         try {
             return dev.irij.runtime.Builtins.jsonToIrij(
                     com.google.gson.JsonParser.parseString(str));
-        } catch (com.google.gson.JsonSyntaxException e) {
-            throw new dev.irij.IrijRuntimeError("json-parse: " + e.getMessage());
+        } catch (com.google.gson.JsonParseException e) {
+            // Gson prefixes the cause's class name ("java.io.EOFException: …").
+            String msg = e.getMessage() == null ? "malformed JSON" : e.getMessage();
+            int colon = msg.indexOf(": ");
+            if (msg.startsWith("java.") && colon > 0) msg = msg.substring(colon + 2);
+            throw new dev.irij.IrijRuntimeError("json-parse: " + msg);
         }
     }
 

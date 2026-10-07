@@ -819,6 +819,40 @@ Full design and the recorded Quint behaviour it rests on:
 
 ## Known Issues / Bugs
 
+- [x] **Adversarial audit (2026-10)** — security, correctness and performance
+      pass over the whole engine. Fixed: `serve` handed out every file under
+      the working directory (`.env`, source, the DB; a system service's CWD is
+      `/`); reflected XSS in std.serve's default 404; HTTP slowloris, header
+      CRLF injection, error-text leaks, dropped chunked bodies; SSE event
+      injection; one infinite loop killed the playground (common-pool
+      starvation, no cancellation, global `System.out` swap); git argument
+      injection and path traversal in seed resolution; unauthenticated nREPL on
+      all interfaces; single-SHA-256 password hashes and non-constant-time MAC
+      checks in std.auth; module privacy didn't exist (a program's `helper`
+      replaced a library's private one); spec registry shared across programs;
+      lost spec-lint; metaspace leak per eval (hot-redef registry); Int `==`
+      through double; JSON big-number wrap; locale-dependent case; quadratic
+      `conj`/`assoc`/`tail` (now persistent PVec/PMap/PSet, hash-flood
+      resistant); ~3× faster spec'd calls; ~1.4k lines of dead
+      interpreter-era runtime removed. See PR aldebogdanov/irij#30.
+- [x] **Numeric tower (2026-10)** — Int is arbitrary precision (64-bit
+      fast path, widens on overflow, never wraps); rationals (`2/3`, spec
+      §1.3.1) implemented over BigIntegers; `7 / 2` still truncates, exact
+      with a Rational operand; exact `**`, `floor`/`ceil`/`round`. See
+      docs/internals/stdlib.md § Numbers.
+- [x] **Inline `if` rule (2026-10)** — a bare inline `if` may not be
+      applied by juxtaposition or be an operator operand (compile error
+      with fixes); parens or `~` disambiguate. Spec §1.3.2.
+- [x] **Pub names are module-scoped (2026-10)** — a module's own calls to
+      its pub fns/bindings always reach its own definitions (renamed +
+      public forwarder); `alias.name` is exact. Pub handlers/caps, mutable
+      pub bindings and rest-param pub fns stay program-wide.
+- [ ] **Open from the audit** —
+  - Composite set elements (vectors, maps) with colliding hashCodes share
+    a flat bucket in PSet; scalars are SipHash-protected.
+  - EffectRowChecker / SM lowering / AstBuilder were reviewed only through
+    their tests and the downstream suites, not line by line.
+
 - [x] **`op ()` on a one-parameter effect op never resumed** — Fixed
       (2026-08). `op ()` is written for two different things:
       performing a zero-parameter op, and performing a one-parameter op

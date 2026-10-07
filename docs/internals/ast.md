@@ -19,7 +19,7 @@ implementations are `record`s. This gives:
 |---|---|---|
 | `Decl` | `Decl.java` | Top-level declarations: `fn`, `effect`, `handler`, `mod`, `use`, `impl`, `proto`, `cap`, `party`, `spec`, bindings, pubs |
 | `Stmt` | `Stmt.java` | Statements: `:= bind`, `:! mut-bind`, `<- assign`, `with`, `scope`, expression-as-statement, block-level `if`, block-level `match` |
-| `Expr` | `Expr.java` | Expressions: literals, vars, App, Lambda, If, Match, Block, JavaRef, OpSection, Compose, DotAccess, ... |
+| `Expr` | `Expr.java` | Expressions: literals, vars, App, Lambda, If, Match, Block, JavaRef, OpSection, Compose, DotAccess, ... Number literals: `IntLit(long)`; `BigIntLit(BigInteger)` for an integer literal past 64 bits; `RationalLit(BigInteger num, BigInteger den)` for `2/3` (emitted as `RtNum.ratioLiteral`, which reduces it — `4/2` is the Int 2); `FloatLit`, `HexLit`. |
 | `Pattern` | `Pattern.java` | Patterns: VarPat, WildcardPat, UnitPat, LiteralPat, ConstructorPat, VectorPat, TuplePat, DestructurePat, SpreadPat |
 | `SpecExpr` | `SpecExpr.java` | Spec annotations: primitives, composites, arrows, enums |
 

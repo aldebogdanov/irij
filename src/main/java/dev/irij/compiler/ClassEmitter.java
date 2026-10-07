@@ -134,6 +134,26 @@ final class ClassEmitter implements Opcodes {
      *  their own methods) don't inherit the outer fn's output spec. */
     String currentOutputSpec = null;
 
+    /** Pub-fn forwarders added by ModulePrivacy (by identity). Their only
+     *  job is to call the module's real fn, which checks the specs, so
+     *  they emit no spec checks of their own. */
+    java.util.Set<Decl.FnDecl> forwarders = java.util.Set.of();
+
+    ClassEmitter withForwarders(java.util.Set<Decl.FnDecl> fwd) {
+        this.forwarders = fwd;
+        return this;
+    }
+
+    /** A fn's name as the user wrote it: module-qualified names
+     *  ({@code shout$lib$p}, see ModulePrivacy) lose their suffix. */
+    static String displayName(String name) {
+        int i = name.indexOf('$');
+        return i > 0 ? name.substring(0, i) : name;
+    }
+    /** JVM class for an inlined output-spec type test, when the output
+     *  spec is primitive ({@link FnEmitter#primitiveSpecClass}). */
+    String currentOutputSpecClass = null;
+
     /** Post-condition slots (each holds a compiled post-lambda
      *  IrijFn) for the surrounding fn. Each {@link #emitTailReturn}
      *  applies them to the about-to-return value before output-spec
@@ -301,6 +321,7 @@ final class ClassEmitter implements Opcodes {
     static Node.SourceLoc locOf(Object node) {
         return switch (node) {
             case Expr.IntLit n -> n.loc();
+            case Expr.BigIntLit n -> n.loc();
             case Expr.FloatLit n -> n.loc();
             case Expr.BoolLit n -> n.loc();
             case Expr.StrLit n -> n.loc();
@@ -557,13 +578,15 @@ final class ClassEmitter implements Opcodes {
             }
         }
         for (var e : productFields.entrySet()) {
+            cl.visitLdcInsn(org.objectweb.asm.Type.getObjectType(internalName));
             cl.visitLdcInsn(e.getKey());
             pushStringArray(cl, e.getValue());
             pushStringArray(cl, productFieldSpecs.getOrDefault(e.getKey(), List.of()));
             cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerProduct",
-                    "(Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
+                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
         }
         for (var e : sumVariants.entrySet()) {
+            cl.visitLdcInsn(org.objectweb.asm.Type.getObjectType(internalName));
             cl.visitLdcInsn(e.getKey());
             // Object[] {name, arity, name, arity, ...}
             exprEm.pushIconst(cl, e.getValue().size() * 2);
@@ -583,7 +606,7 @@ final class ClassEmitter implements Opcodes {
                 cl.visitInsn(AASTORE);
             }
             cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerSum",
-                    "(Ljava/lang/String;[Ljava/lang/Object;)V", false);
+                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Object;)V", false);
         }
         // Phase 3 — materialise every Irij-record cap once at class-load
         // time. Each cap's recordExpr (a map-literal Expr) is evaluated

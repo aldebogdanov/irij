@@ -23,32 +23,8 @@ public final class Builtins {
 
     private Builtins() {}
 
-    /** Forbidden builtins in sandbox mode. After phase 3d the raw FS
-     *  + multipart entries are gone too (FileIO + Serve effects route
-     *  through cap providers that aren't on the sandbox classpath; the
-     *  sandbox handlers reject those effect ops directly). */
-    private static final List<String> SANDBOX_FORBIDDEN = List.of();
-
-    /**
-     * Install sandboxed builtins — all standard builtins, but I/O, file, DB,
-     * and HTTP operations are replaced with error stubs.
-     */
-    public static void installSandboxed(Environment env, PrintStream out) {
-        install(env, out, null);
-        for (var name : SANDBOX_FORBIDDEN) {
-            String msg = name + ": not available in sandbox mode";
-            int arity = env.isDefined(name)
-                ? (env.lookup(name) instanceof BuiltinFn fn ? fn.arity() : 1)
-                : 1;
-            env.define(name, new BuiltinFn(name, arity, args -> {
-                throw new IrijRuntimeError(msg);
-            }));
-        }
-    }
-
-    /** Install all builtins into the given environment.
-     *  @param pathResolver resolves relative file paths (null = use CWD) */
-    public static void install(Environment env, PrintStream out, java.util.function.Function<String, Path> pathResolver) {
+    /** Install all builtins into the given registry. */
+    public static void install(Environment env) {
         // Boolean constants
         env.define("true", Boolean.TRUE);
         env.define("false", Boolean.FALSE);
@@ -219,6 +195,10 @@ public final class Builtins {
 
         env.define("hmac-sha256-hex", new BuiltinFn("hmac-sha256-hex", 2, args -> dev.irij.compiler.RtMath.hmacSha256Hex(args.get(0), args.get(1))));
 
+        env.define("pbkdf2-sha256-hex", new BuiltinFn("pbkdf2-sha256-hex", 3, args -> dev.irij.compiler.RtMath.pbkdf2Sha256Hex(args.get(0), args.get(1), args.get(2))));
+
+        env.define("constant-time-eq?", new BuiltinFn("constant-time-eq?", 2, args -> dev.irij.compiler.RtMath.constantTimeEq(args.get(0), args.get(1))));
+
         env.define("random-token", new BuiltinFn("random-token", 1, List.of("Random"), args -> dev.irij.compiler.RtMath.randomToken(args.get(0))));
 
         // ── Conversion primitives ──────────────────────────────────────
@@ -291,14 +271,6 @@ public final class Builtins {
     // Utilities
     // ═══════════════════════════════════════════════════════════════════
 
-    /** Convert a duration argument to milliseconds (Int=ms, Float=seconds). */
-    static long toMillis(Object value) {
-        if (value instanceof Long l) return l;
-        if (value instanceof Double d) return (long)(d * 1000);
-        throw new IrijRuntimeError(
-            "Duration expects Int (milliseconds) or Float (seconds), got " + Values.typeName(value));
-    }
-
     // ── JSON conversion helpers ────────────────────────────────────────
 
     @SuppressWarnings("unchecked")
@@ -334,14 +306,16 @@ public final class Builtins {
             if (p.isBoolean()) return p.getAsBoolean();
             if (p.isString()) return p.getAsString();
             if (p.isNumber()) {
-                // Try long first (exact integers)
+                // An integral value that fits an Int is an Int; anything
+                // else is a Float. (getAsLong wraps out-of-range values —
+                // 1e30 came back as 5076944270305263616.)
                 try {
-                    long l = p.getAsLong();
-                    if (String.valueOf(l).equals(p.getAsString())
-                        || p.getAsBigDecimal().stripTrailingZeros().scale() <= 0) {
-                        return l;
+                    var bd = p.getAsBigDecimal();
+                    // Integral → an Int, however large (Ints don't overflow).
+                    if (bd.stripTrailingZeros().scale() <= 0) {
+                        return dev.irij.compiler.RtNum.norm(bd.toBigIntegerExact());
                     }
-                } catch (NumberFormatException ignored) {}
+                } catch (NumberFormatException | ArithmeticException ignored) {}
                 return p.getAsDouble();
             }
         }
@@ -364,6 +338,7 @@ public final class Builtins {
         if (value == null || value == Values.UNIT) return JsonNull.INSTANCE;
         if (value instanceof String s) return new JsonPrimitive(s);
         if (value instanceof Long l) return new JsonPrimitive(l);
+        if (value instanceof java.math.BigInteger b) return new JsonPrimitive(b);
         if (value instanceof Double d) return new JsonPrimitive(d);
         if (value instanceof Boolean b) return new JsonPrimitive(b);
         if (value instanceof Keyword kw) return new JsonPrimitive(":" + kw.name());
@@ -414,9 +389,7 @@ public final class Builtins {
     }
 
     static double asDouble(Object value, String context) {
-        if (value instanceof Double d) return d;
-        if (value instanceof Long l) return l.doubleValue();
-        throw new IrijRuntimeError(context + " expects a number, got " + Values.typeName(value));
+        return dev.irij.compiler.RtNum.toDouble(value, context);
     }
 
     static String asString(Object value, String context) {
@@ -424,20 +397,10 @@ public final class Builtins {
         throw new IrijRuntimeError(context + " expects Str, got " + Values.typeName(value));
     }
 
-    /**
-     * Resolve a file path using the given resolver function.
-     * If no resolver is provided, paths resolve against CWD (Path.of behavior).
-     */
-    static Path resolvePath(String path, java.util.function.Function<String, Path> resolver) {
-        if (resolver != null) return resolver.apply(path);
-        return Path.of(path);
-    }
-
     public static int compare(Object a, Object b) {
         if (a instanceof Long la && b instanceof Long lb) return Long.compare(la, lb);
-        if (a instanceof Double da && b instanceof Double db) return Double.compare(da, db);
-        if (a instanceof Long la && b instanceof Double db) return Double.compare(la, db);
-        if (a instanceof Double da && b instanceof Long lb) return Double.compare(da, lb);
+        Integer numeric = dev.irij.compiler.RtNum.compare(a, b);
+        if (numeric != null) return numeric;
         if (a instanceof String sa && b instanceof String sb) return sa.compareTo(sb);
         if (a instanceof Keyword ka && b instanceof Keyword kb) return ka.name().compareTo(kb.name());
         // Tuple comparison: lexicographic
@@ -487,111 +450,6 @@ public final class Builtins {
             for (var e : range) list.add(e);
             return list;
         }
-        if (value instanceof LazyIterable li) {
-            var list = new ArrayList<Object>();
-            for (var e : li) list.add(e);
-            return list;
-        }
         throw new IrijRuntimeError("Cannot iterate over " + Values.typeName(value));
-    }
-
-    /** Get an iterable view of any collection-like value. */
-    static Iterable<Object> toIterable(Object value) {
-        if (value instanceof IrijVector vec) return vec.elements();
-        if (value instanceof IrijSet set) return set.elements();
-        if (value instanceof IrijRange range) return range;
-        if (value instanceof LazyIterable li) return li;
-        throw new IrijRuntimeError("Cannot iterate over " + Values.typeName(value));
-    }
-
-    // ── Rational arithmetic ───────────────────────────────────────────────
-
-    static Rational addRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.den() + b.num() * a.den(), a.den() * b.den());
-    }
-
-    static Rational subRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.den() - b.num() * a.den(), a.den() * b.den());
-    }
-
-    static Rational mulRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.num(), a.den() * b.den());
-    }
-
-    static Rational divRational(Rational a, Rational b) {
-        return new Rational(a.num() * b.den(), a.den() * b.num());
-    }
-
-    // ── Lazy iterable wrappers ──────────────────────────────────────────
-
-    /** A lazy mapped iterable. */
-    public record LazyIterable(Iterable<Object> source, java.util.function.Function<Object, Object> transform,
-                               java.util.function.Predicate<Object> filter) implements Iterable<Object> {
-        /** Map-only constructor. */
-        public LazyIterable(Iterable<Object> source, java.util.function.Function<Object, Object> transform) {
-            this(source, transform, null);
-        }
-
-        /** Filter-only constructor. */
-        public LazyIterable(Iterable<Object> source, java.util.function.Predicate<Object> filter, boolean dummy) {
-            this(source, null, filter);
-        }
-
-        @Override
-        public Iterator<Object> iterator() {
-            if (transform != null && filter == null) {
-                return new Iterator<>() {
-                    final Iterator<Object> it = source.iterator();
-                    @Override public boolean hasNext() { return it.hasNext(); }
-                    @Override public Object next() { return transform.apply(it.next()); }
-                };
-            }
-            if (filter != null && transform == null) {
-                return new Iterator<>() {
-                    final Iterator<Object> it = source.iterator();
-                    Object nextVal;
-                    boolean hasNext;
-                    { advance(); }
-                    private void advance() {
-                        while (it.hasNext()) {
-                            nextVal = it.next();
-                            if (filter.test(nextVal)) { hasNext = true; return; }
-                        }
-                        hasNext = false;
-                    }
-                    @Override public boolean hasNext() { return hasNext; }
-                    @Override public Object next() {
-                        var v = nextVal;
-                        advance();
-                        return v;
-                    }
-                };
-            }
-            // Both map and filter
-            return new Iterator<>() {
-                final Iterator<Object> it = source.iterator();
-                Object nextVal;
-                boolean hasNext;
-                { advance(); }
-                private void advance() {
-                    while (it.hasNext()) {
-                        var raw = it.next();
-                        var mapped = transform != null ? transform.apply(raw) : raw;
-                        if (filter == null || filter.test(mapped)) {
-                            nextVal = mapped;
-                            hasNext = true;
-                            return;
-                        }
-                    }
-                    hasNext = false;
-                }
-                @Override public boolean hasNext() { return hasNext; }
-                @Override public Object next() {
-                    var v = nextVal;
-                    advance();
-                    return v;
-                }
-            };
-        }
     }
 }

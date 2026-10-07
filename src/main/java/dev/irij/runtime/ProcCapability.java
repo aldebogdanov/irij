@@ -55,8 +55,14 @@ public final class ProcCapability {
     private static final AtomicLong NEXT_ID = new AtomicLong();
     private static final Map<Long, Running> RUNNING = new ConcurrentHashMap<>();
 
-    /** A started process: its stdout as lines, its stderr as a tail. */
-    private record Running(Process process, BlockingQueue<Object> lines, Tail stderr) {}
+    /** A started process: its stdout as lines, its stderr as a tail
+     *  (complete once {@code stderrDone} is). */
+    private record Running(Process process, BlockingQueue<Object> lines, Tail stderr,
+                           CompletableFuture<Void> stderrDone) {}
+
+    /** After exit, how long to wait for the stderr reader to reach EOF.
+     *  A grandchild that inherited the pipe can hold it open forever. */
+    private static final long DRAIN_GRACE_MS = 2_000;
 
     /** End of stdout, queued after the last line. */
     private static final Object EOF = new Object();
@@ -69,12 +75,18 @@ public final class ProcCapability {
         CompletableFuture<String> out = drain(p.getInputStream());
         Tail err = new Tail();
         CompletableFuture<Void> errDone = CompletableFuture.runAsync(() -> err.fill(p.getErrorStream()), Thread::startVirtualThread);
+        // Feed stdin on its own thread: a child that never reads it would
+        // otherwise block this write once the pipe fills, before the
+        // timeout below has even started.
         String stdin = str(opts, "stdin");
-        try (OutputStream in = p.getOutputStream()) {
-            if (stdin != null) in.write(stdin.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException ignored) {
-            // The child closed stdin early; what it wrote is still read below.
-        }
+        Thread.startVirtualThread(() -> {
+            try (OutputStream in = p.getOutputStream()) {
+                if (stdin != null) in.write(stdin.getBytes(StandardCharsets.UTF_8));
+            } catch (IOException ignored) {
+                // The child closed stdin early (or was killed); what it
+                // wrote is still read below.
+            }
+        });
         long timeout = num(opts, "timeout-ms", 0);
         boolean timedOut = !waitFor(p, timeout);
         if (timedOut) kill(p);
@@ -104,9 +116,9 @@ public final class ProcCapability {
                 lines.add(EOF);
             }
         });
-        Thread.startVirtualThread(() -> err.fill(p.getErrorStream()));
+        CompletableFuture<Void> errDone = CompletableFuture.runAsync(() -> err.fill(p.getErrorStream()), Thread::startVirtualThread);
         long id = NEXT_ID.incrementAndGet();
-        RUNNING.put(id, new Running(p, lines, err));
+        RUNNING.put(id, new Running(p, lines, err, errDone));
         Map<String, Object> h = new LinkedHashMap<>();
         h.put("id", id);
         h.put("pid", p.pid());
@@ -172,6 +184,9 @@ public final class ProcCapability {
         Running r = running(handle, "proc-wait");
         long ms = asLong(timeoutArg, "proc-wait");
         boolean done = waitFor(r.process(), ms < 0 ? 0 : ms);
+        // The exit can beat the stderr reader to the last bytes; let it
+        // reach EOF before reporting, as `run` does.
+        if (done) awaitDrain(r.stderrDone());
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("exit", done ? (long) r.process().exitValue() : -1L);
         m.put("stderr", r.stderr().text());
@@ -233,6 +248,16 @@ public final class ProcCapability {
         }
     }
 
+    private static void awaitDrain(CompletableFuture<Void> drained) {
+        try {
+            drained.get(DRAIN_GRACE_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException ignored) {
+            // Report what has arrived so far.
+        }
+    }
+
     private static CompletableFuture<String> drain(InputStream in) {
         return CompletableFuture.supplyAsync(() -> {
             try (in) {
@@ -255,7 +280,9 @@ public final class ProcCapability {
                 while ((n = in.read(chunk)) > 0) {
                     synchronized (this) {
                         buf.write(chunk, 0, n);
-                        if (buf.size() > STDERR_LIMIT) {
+                        // Trim only at twice the limit, so a chatty child
+                        // costs one copy per LIMIT bytes, not one per chunk.
+                        if (buf.size() > 2 * STDERR_LIMIT) {
                             byte[] all = buf.toByteArray();
                             buf.reset();
                             buf.write(all, all.length - STDERR_LIMIT, STDERR_LIMIT);
@@ -269,8 +296,10 @@ public final class ProcCapability {
         }
 
         synchronized String text() {
-            String s = buf.toString(StandardCharsets.UTF_8);
-            return truncated ? "…" + s : s;
+            byte[] all = buf.toByteArray();
+            int from = Math.max(0, all.length - STDERR_LIMIT);
+            String s = new String(all, from, all.length - from, StandardCharsets.UTF_8);
+            return (truncated || from > 0) ? "…" + s : s;
         }
     }
 

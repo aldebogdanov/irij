@@ -139,8 +139,9 @@ final class LspDiagnostics {
             }
             d.setMessage(msg);
             out.add(d);
-        } catch (Exception ignored) {
-            // Defensive: AST/checker bugs shouldn't break the LSP.
+        } catch (Exception | StackOverflowError ignored) {
+            // Defensive: AST/checker bugs (or absurd nesting) shouldn't
+            // break the LSP.
         }
         return out;
     }

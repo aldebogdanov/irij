@@ -37,7 +37,6 @@ public final class RtCollections {
 
     public static boolean isTuple(Object v)  { return v instanceof dev.irij.runtime.Values.IrijTuple; }
 
-    public static boolean isMap(Object v)    { return v instanceof dev.irij.runtime.Values.IrijMap; }
 
 
     public static int vecSize(Object v) {
@@ -51,8 +50,8 @@ public final class RtCollections {
 
 
     public static Object vecSlice(Object v, int from, int to) {
-        var es = ((dev.irij.runtime.Values.IrijVector) v).elements();
-        return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<>(es.subList(from, to)));
+        var es = (dev.irij.runtime.PVec) ((dev.irij.runtime.Values.IrijVector) v).elements();
+        return new dev.irij.runtime.Values.IrijVector(es.slice(from, to));
     }
 
 
@@ -135,14 +134,12 @@ public final class RtCollections {
     /** `conj coll x` — a Vector with x appended, or a Set with x added. */
     public static Object conj(Object v, Object x) {
         if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
-            var out = new java.util.ArrayList<>(vec.elements());
-            out.add(x);
-            return new dev.irij.runtime.Values.IrijVector(out);
+            return new dev.irij.runtime.Values.IrijVector(
+                    ((dev.irij.runtime.PVec) vec.elements()).cons(x));
         }
         if (v instanceof dev.irij.runtime.Values.IrijSet set) {
-            var out = new java.util.HashSet<>(set.elements());
-            out.add(x);
-            return new dev.irij.runtime.Values.IrijSet(out);
+            return new dev.irij.runtime.Values.IrijSet(
+                    ((dev.irij.runtime.PSet) set.elements()).cons(x));
         }
         throw new dev.irij.IrijRuntimeError(
                 "conj: expected Vector or Set, got " + RuntimeSupport.typeTag(v));
@@ -229,12 +226,8 @@ public final class RtCollections {
      *  on Vector and IrijRange. */
     public static Object tail(Object v) {
         if (v instanceof dev.irij.runtime.Values.IrijVector vec) {
-            var es = vec.elements();
-            if (es.isEmpty()) {
-                return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<>());
-            }
             return new dev.irij.runtime.Values.IrijVector(
-                    new java.util.ArrayList<>(es.subList(1, es.size())));
+                    ((dev.irij.runtime.PVec) vec.elements()).dropFirst());
         }
         if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             long upper = r.exclusive() ? r.to() : r.to() + 1;
@@ -265,16 +258,6 @@ public final class RtCollections {
     }
 
 
-    public static Object mapGet(Object v, String k) {
-        return ((dev.irij.runtime.Values.IrijMap) v).entries().get(k);
-    }
-
-
-    public static boolean mapHas(Object v, String k) {
-        return ((dev.irij.runtime.Values.IrijMap) v).entries().containsKey(k);
-    }
-
-
     /** Field lookup across IrijMap and Tagged-with-named-fields. */
     public static boolean recordHas(Object v, String k) {
         if (v instanceof dev.irij.runtime.Values.IrijMap m) return m.entries().containsKey(k);
@@ -299,10 +282,7 @@ public final class RtCollections {
 
 
     public static long asLongArg(Object v, String op) {
-        if (v instanceof Long l) return l;
-        if (v instanceof Number n) return n.longValue();
-        throw new dev.irij.IrijRuntimeError(
-                op + " expects an Int, got " + RuntimeSupport.typeTag(v));
+        return RtNum.longArg(v, op);
     }
 
 
@@ -320,11 +300,6 @@ public final class RtCollections {
         if (v instanceof dev.irij.runtime.Values.IrijRange r) {
             java.util.List<Object> out = new java.util.ArrayList<>(r.size());
             for (Object x : r) out.add(x);
-            return out;
-        }
-        if (v instanceof dev.irij.runtime.Builtins.LazyIterable li) {
-            java.util.List<Object> out = new java.util.ArrayList<>();
-            for (Object x : li) out.add(x);
             return out;
         }
         if (v instanceof java.util.List<?> raw) {
@@ -361,10 +336,8 @@ public final class RtCollections {
 
     public static Object assoc(Object m, Object key, Object val) {
         if (m instanceof dev.irij.runtime.Values.IrijMap map) {
-            java.util.LinkedHashMap<String, Object> entries =
-                    new java.util.LinkedHashMap<>(map.entries());
-            entries.put(dev.irij.runtime.Values.toIrijString(key), val);
-            return new dev.irij.runtime.Values.IrijMap(entries);
+            return new dev.irij.runtime.Values.IrijMap(((dev.irij.runtime.PMap) map.entries())
+                    .assoc(dev.irij.runtime.Values.toIrijString(key), val));
         }
         throw new dev.irij.IrijRuntimeError(
                 "assoc expects a Map as first argument, got " + RuntimeSupport.typeTag(m));
@@ -373,10 +346,8 @@ public final class RtCollections {
 
     public static Object dissoc(Object m, Object key) {
         if (m instanceof dev.irij.runtime.Values.IrijMap map) {
-            java.util.LinkedHashMap<String, Object> entries =
-                    new java.util.LinkedHashMap<>(map.entries());
-            entries.remove(dev.irij.runtime.Values.toIrijString(key));
-            return new dev.irij.runtime.Values.IrijMap(entries);
+            return new dev.irij.runtime.Values.IrijMap(((dev.irij.runtime.PMap) map.entries())
+                    .without(dev.irij.runtime.Values.toIrijString(key)));
         }
         throw new dev.irij.IrijRuntimeError(
                 "dissoc expects a Map as first argument, got " + RuntimeSupport.typeTag(m));
@@ -386,10 +357,9 @@ public final class RtCollections {
     public static Object merge(Object a, Object b) {
         if (a instanceof dev.irij.runtime.Values.IrijMap m1
                 && b instanceof dev.irij.runtime.Values.IrijMap m2) {
-            java.util.LinkedHashMap<String, Object> entries =
-                    new java.util.LinkedHashMap<>(m1.entries());
-            entries.putAll(m2.entries());
-            return new dev.irij.runtime.Values.IrijMap(entries);
+            var out = (dev.irij.runtime.PMap) m1.entries();
+            for (var e : m2.entries().entrySet()) out = out.assoc(e.getKey(), e.getValue());
+            return new dev.irij.runtime.Values.IrijMap(out);
         }
         throw new dev.irij.IrijRuntimeError(
                 "merge expects two Maps, got " + RuntimeSupport.typeTag(a) + " and " + RuntimeSupport.typeTag(b));
@@ -501,18 +471,25 @@ public final class RtCollections {
         return new dev.irij.runtime.Values.IrijVector(out);
     }
 
+    /** `take n coll` — the first n elements (all of them if fewer; none
+     *  for n ≤ 0). */
     public static Object takeVal(Object nArg, Object collArg) {
         long n = asLongArg(nArg, "take");
         java.util.List<Object> list = asListAny(collArg);
-        return new dev.irij.runtime.Values.IrijVector(
-                new java.util.ArrayList<>(list.subList(0, (int) Math.min(n, list.size()))));
+        int k = (int) Math.max(0, Math.min(n, list.size()));
+        return new dev.irij.runtime.Values.IrijVector(list.subList(0, k));
     }
 
+    /** `drop n coll` — all but the first n elements (all for n ≤ 0). */
     public static Object dropVal(Object nArg, Object collArg) {
         long n = asLongArg(nArg, "drop");
         java.util.List<Object> list = asListAny(collArg);
-        return new dev.irij.runtime.Values.IrijVector(
-                new java.util.ArrayList<>(list.subList((int) Math.min(n, list.size()), list.size())));
+        int k = (int) Math.max(0, Math.min(n, list.size()));
+        if (list instanceof dev.irij.runtime.PVec pv && k <= 32) {
+            for (int i = 0; i < k; i++) pv = pv.dropFirst();
+            return new dev.irij.runtime.Values.IrijVector(pv);
+        }
+        return new dev.irij.runtime.Values.IrijVector(list.subList(k, list.size()));
     }
 
 

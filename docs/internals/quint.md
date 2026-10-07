@@ -109,9 +109,9 @@ nothing overflows on the way to a value that would have fit.
 `--backend=typescript` gets both right but is much slower, so this
 decodes the broken form rather than pushing users off the default.
 
-**Irij `Int` is 64-bit and Quint's is unbounded.** An integer past
-2^63 is the one place a legitimate trace cannot be decoded. It raises
-and says exactly that, rather than truncating.
+**Irij and Quint integers are both unbounded** (an Irij `Int` grows
+past 64 bits instead of wrapping — `stdlib.md` § Numbers), so every
+`#bigint` decodes exactly, however large.
 
 ### Traces that carry no action
 

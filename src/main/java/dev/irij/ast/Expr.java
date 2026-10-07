@@ -10,8 +10,11 @@ public sealed interface Expr extends Node {
     // ── Literals ────────────────────────────────────────────────────────
 
     record IntLit(long value, SourceLoc loc) implements Expr {}
+    /** An Int literal too large for 64 bits (Ints are arbitrary precision). */
+    record BigIntLit(java.math.BigInteger value, SourceLoc loc) implements Expr {}
     record FloatLit(double value, SourceLoc loc) implements Expr {}
-    record RationalLit(long num, long den, SourceLoc loc) implements Expr {}
+    /** A rational literal {@code 2/3} — no spaces around the slash. */
+    record RationalLit(java.math.BigInteger num, java.math.BigInteger den, SourceLoc loc) implements Expr {}
     record HexLit(long value, SourceLoc loc) implements Expr {}
     record StrLit(String value, SourceLoc loc) implements Expr {}
     record BoolLit(boolean value, SourceLoc loc) implements Expr {}

@@ -31,14 +31,14 @@ public final class RtStrings {
 
     public static Object substring(Object str, Object startArg, Object endArg) {
         String s = asStr(str, "substring");
-        int start = (int) RtCollections.asLongArg(startArg, "substring");
-        int end = (int) RtCollections.asLongArg(endArg, "substring");
+        long start = RtCollections.asLongArg(startArg, "substring");
+        long end = RtCollections.asLongArg(endArg, "substring");
         if (start < 0 || end > s.length() || start > end) {
             throw new dev.irij.IrijRuntimeError(
                     "substring: index out of bounds (start=" + start
                             + ", end=" + end + ", length=" + s.length() + ")");
         }
-        return s.substring(start, end);
+        return s.substring((int) start, (int) end);
     }
 
 
@@ -47,7 +47,9 @@ public final class RtStrings {
         String sp = asStr(sep, "split");
         java.util.List<Object> parts = new java.util.ArrayList<>();
         if (sp.isEmpty()) {
-            for (int i = 0; i < s.length(); i++) parts.add(String.valueOf(s.charAt(i)));
+            // One part per code point: per UTF-16 char would cut every
+            // emoji and other non-BMP character into two broken halves.
+            s.codePoints().forEach(cp -> parts.add(new String(Character.toChars(cp))));
         } else {
             for (String p : s.split(java.util.regex.Pattern.quote(sp), -1)) parts.add(p);
         }
@@ -73,12 +75,12 @@ public final class RtStrings {
 
 
     public static Object upperCase(Object v) {
-        return asStr(v, "upper-case").toUpperCase();
+        return asStr(v, "upper-case").toUpperCase(java.util.Locale.ROOT);
     }
 
 
     public static Object lowerCase(Object v) {
-        return asStr(v, "lower-case").toLowerCase();
+        return asStr(v, "lower-case").toLowerCase(java.util.Locale.ROOT);
     }
 
 
@@ -104,18 +106,22 @@ public final class RtStrings {
 
 
     public static Object urlDecode(Object s) {
-        return java.net.URLDecoder.decode(asStr(s, "url-decode"),
-                java.nio.charset.StandardCharsets.UTF_8);
+        try {
+            return java.net.URLDecoder.decode(asStr(s, "url-decode"),
+                    java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw new dev.irij.IrijRuntimeError("url-decode: malformed %-escape in '" + s + "'");
+        }
     }
 
     public static Object charAt(Object strArg, Object idxArg) {
         String s = asStr(strArg, "char-at");
-        int i = (int) RtCollections.asLongArg(idxArg, "char-at");
+        long i = RtCollections.asLongArg(idxArg, "char-at");
         if (i < 0 || i >= s.length()) {
             throw new dev.irij.IrijRuntimeError(
                     "char-at: index " + i + " out of bounds (length " + s.length() + ")");
         }
-        return String.valueOf(s.charAt(i));
+        return String.valueOf(s.charAt((int) i));
     }
 
     public static Object charCode(Object strArg) {
@@ -127,7 +133,10 @@ public final class RtStrings {
     }
 
     public static Object fromCharCode(Object cpArg) {
-        int cp = (int) RtCollections.asLongArg(cpArg, "from-char-code");
-        return String.valueOf(Character.toChars(cp));
+        long cp = RtCollections.asLongArg(cpArg, "from-char-code");
+        if (!Character.isValidCodePoint((int) cp) || cp != (int) cp) {
+            throw new dev.irij.IrijRuntimeError("from-char-code: " + cp + " is not a Unicode code point");
+        }
+        return String.valueOf(Character.toChars((int) cp));
     }
 }

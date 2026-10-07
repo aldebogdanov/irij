@@ -97,5 +97,10 @@ pub fn redirect :: Str Map
 pub fn not-found :: Str Map
   (body -> {status= 404 body= body headers= {}})
 
-fn default-404
-  (path -> "<!DOCTYPE html><html><head><title>404</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f0;color:#2d3748}h1{color:#e67e22}</style></head><body><div><h1>404</h1><p>Not found: " ++ path ++ "</p></div></body></html>")
+fn default-404 :: Str Str
+  (path -> "<!DOCTYPE html><html><head><title>404</title><style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f5f5f0;color:#2d3748}h1{color:#e67e22}</style></head><body><div><h1>404</h1><p>Not found: " ++ (escape-html path) ++ "</p></div></body></html>")
+
+;; The request path is the client's text, percent-decoded — it can hold
+;; markup (`/%3Cscript%3E…`), so it is escaped before it reaches the page.
+fn escape-html :: Str Str
+  (s -> replace (replace (replace (replace (replace s "&" "&amp;") "<" "&lt;") ">" "&gt;") "\"" "&quot;") "'" "&#39;")

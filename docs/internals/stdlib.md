@@ -35,11 +35,84 @@ Registered as `BuiltinFn` objects in the global environment:
 - Collection raw ops (`length`, `head`, `tail`, `nth`, `last`,
   `reverse`, `sort`, `concat`, `take`, `drop`, `keys`, `vals`, `get`,
   `assoc`, `contains?`, `range`, `empty?`, `conj`)
+
+### Numbers — `RtNum`
+
+The numeric tower (spec §1.3.1) lives in `RtNum`; `RtOps` keeps only
+the 64-bit fast paths inline.
+
+- **Int never wraps.** An Int is a `Long` while it fits and a
+  `BigInteger` only when it doesn't — canonically, so a `BigInteger` Int
+  is always outside the `long` range and `equals`/`hashCode` need no
+  cross-representation cases (`RtNum.norm`). `RtOps.add`/`sub`/`mul`
+  test for overflow with two or three ALU ops (`((x ^ r) & (y ^ r)) < 0`,
+  `Math.multiplyHigh`) and only then call `RtNum`. Measured: fib +6%,
+  a bare add/sub loop +13–20% (≈0.4 ns/iteration), multiply/modulo
+  loops within noise; the alternatives were ~0% for "error on
+  overflow" and ~2× slower adds for "BigInteger always".
+- **Rational** — `Values.Rational(BigInteger num, BigInteger den)`,
+  lowest terms, positive denominator, never `n/1` (`RtNum.ratio` returns
+  an Int for a whole value). Int ⊕ Rational → Rational; anything ⊕
+  Float → Float. `/` on two Ints truncates (as always); with a Rational
+  operand it is exact. `**` is exact for an Int/Rational base and a
+  non-negative Int exponent (refused past ~16 M result bits); `floor`,
+  `ceil`, `round` return Ints and are exact on Ints (they used to go
+  through a double, losing every Int past 2^53).
+- Everything that reads numbers follows: `compare` / `==` (exact
+  between Ints and Rationals), `parse-int` and Int literals of any size
+  (`Expr.BigIntLit`), `json-parse` (an integral number of any size is an
+  Int) and `json-encode`, the `Int` spec, `type-of`, JDBC binding, Java
+  interop (a `BigInteger` result becomes an Int). An index or count
+  argument past 64 bits is an error ("too large here"), not a silent
+  truncation.
+
+### Persistent Vectors, Maps and Sets
+
+`IrijVector`'s elements are a `PVec` and `IrijMap`'s entries a `PMap`
+(`dev.irij.runtime`), each implementing the plain `java.util` interface
+so code reading `.elements()` / `.entries()` is unchanged.
+
+- `PVec` — Clojure's persistent vector: a 32-way trie plus a tail.
+  `conj` and `++` append in amortised O(1) per element, `get` /
+  replace are O(log₃₂ n). `tail` (and a `#[x ...rest]` pattern's rest)
+  is an O(1) view that skips a prefix, compacted once the skipped part
+  outweighs the live one.
+- `PMap` — insertion-ordered, String keys. Up to 8 entries it is a flat
+  `[k0 v0 k1 v1 …]` array scanned linearly (record-sized maps — request
+  maps, JSON objects, `{status= … body= …}` — are the common case and
+  build fastest this way); past 8, a hash array mapped trie for lookup
+  plus a `PVec` of keys for order, with tombstones for removed keys
+  until they outnumber live ones. Replacing a value keeps its place;
+  removing and re-adding moves the key to the end — `LinkedHashMap`'s
+  order, which it replaces. Keys whose `String.hashCode`s collide
+  (trivial to craft: `"Aa"` and `"BB"`, and every concatenation of
+  them) go into a second trie keyed by a per-JVM-seeded SipHash, so a
+  request full of crafted JSON keys stays O(n log n) to parse —
+  `LinkedHashMap` defended by treeifying; a flat collision list would
+  have made it quadratic.
+
+Each version shares structure with the one it came from. Before, every
+`conj` / `assoc` / `tail` copied the whole collection (`List.copyOf`,
+two `LinkedHashMap` copies), so building one element at a time was
+quadratic: a 30 000-element `conj` loop took ~0.7 s and a 20 000-key
+`assoc` loop ~6 s (now ~2 ms and ~7 ms); `head`/`tail` recursion over
+20 000 elements went from ~0.7 s to ~2 ms.
+
+`IrijSet`'s elements are a `PSet` — a HAMT over the elements'
+`hashCode`s, no order. Fully colliding strings, numbers, keywords and
+booleans go into a second trie keyed by the same seeded SipHash; other
+colliding values share a flat list. A 20 000-element `conj` loop went
+from ~6 s to ~6 ms.
 - Math (`abs`, `min`, `max`, `pi`, `e`)
 - Higher-order (`fold`)
 - Concurrency (`spawn`, `await`, `sleep`, `par`, `race`, `timeout`,
   `try`)
-- Crypto + auth (`sha256-hex`, `hmac-sha256-hex`, `random-token`)
+- Crypto + auth (`sha256-hex`, `hmac-sha256-hex`, `pbkdf2-sha256-hex`,
+  `constant-time-eq?`, `random-token`). `std.auth` stores passwords as
+  `pbkdf2-sha256$<iterations>$<salt>$<hex>` (600 000 iterations) and
+  compares secrets with `constant-time-eq?`; the pre-v0.9 single-SHA-256
+  `<salt>$<hex>` format still verifies, and `password-needs-rehash?`
+  flags it.
 - Effect / handler internals (`raw-*` calls for HTTP, DB, SSE, session)
 
 The capability providers in `dev.irij.runtime` are the other half of
@@ -71,9 +144,9 @@ Real Irij code, parsed + compiled like user code:
 | `std.env` | `Env` effect + handler: `env-var`, and `env-args` (the arguments after the program, from the `program-args` builtin) |
 | `std.log` | `Log` effect — leveled logging; `default-log`/`silent-log` handlers |
 | `std.fs` | `FileIO` effect + handlers |
-| `std.http` | HTTP client (`http-get`, `http-post`) + server |
+| `std.http` | HTTP client (`http-get`, `http-post`, `http-request` — the latter takes an optional `timeout-ms`) |
 | `std.db` | `Db` effect + SQLite handler |
-| `std.serve` | Web server framework (routes, middleware, request/response) |
+| `std.serve` | Web server framework (routes, middleware, request/response); serves the app's `resources/` directory as static files, nothing else |
 | `std.session` | nREPL session effects |
 | `std.proc` | `Proc` effect — child processes: `proc-run` (to completion, with stdin and a timeout) and `proc-start`/`proc-line`/`proc-send`/`proc-close`/`proc-wait`/`proc-kill` (streaming); `default-proc` handler |
 | `std.term` | `Term` effect — raw-mode terminal I/O for TUI apps; `default-term` handler + `esc`/`csi`/`with-term` helpers |

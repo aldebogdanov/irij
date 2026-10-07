@@ -1,0 +1,52 @@
+use std.test :open
+use std.serve :open
+use std.text :open
+
+;; std.serve's router is plain functions over request maps, so it is
+;; testable without binding a port.
+
+fn req :: Str Str Map
+  (method path -> {method= method path= path headers= {}})
+
+fn hello :: _ Map
+  (r -> text-response "hello")
+
+fn api :: _ Map
+  (r -> text-response ("api:" ++ r.path))
+
+routes := #[(route "GET" "/" hello) (route-prefix "GET" "/api/" api)]
+app := router routes
+
+r1 := test "router exact match" (-> assert-eq (app (req "GET" "/")).body "hello")
+r2 := test "router prefix match" (-> assert-eq (app (req "GET" "/api/x")).body "api:/api/x")
+r3 := test "router method must match" (-> assert-eq (app (req "POST" "/")).status 404)
+r4 := test "router unknown path is 404" (-> assert-eq (app (req "GET" "/nope")).status 404)
+
+;; The default 404 page names the path; a path is client text and must
+;; not become markup in the page.
+r5 := test "404 page escapes the path" (->
+  assert-true (! (contains-substr? (app (req "GET" "/<script>alert(1)</script>")).body "<script>")))
+r6 := test "404 page shows the escaped path" (->
+  assert-true (contains-substr? (app (req "GET" "/<b>")).body "/&lt;b&gt;"))
+
+r7 := test "path-segments" (-> assert-eq (path-segments "/api/seeds/vrata/0.1.1" "/api/seeds") #["vrata" "0.1.1"])
+r8 := test "redirect sets location" (-> assert-eq (get "location" (redirect "/x").headers) "/x")
+
+;; A program's own names don't reach std.serve's private helpers: this
+;; program defines `find-route` and `match-route` (both private in
+;; std.serve), and the router above must still route.
+fn find-route :: _ _ _
+  (a b -> "user find-route")
+
+fn match-route :: _ _ _
+  (a b -> false)
+
+r9 := test "module-private names stay private" (-> assert-eq (app (req "GET" "/")).body "hello")
+r10 := test "the program's own same-named fn still works" (-> assert-eq (find-route 1 2) "user find-route")
+
+;; std.serve's private `cap server` doesn't claim the name `server` for
+;; the program: a parameter called `server` is an ordinary value.
+fn port-of :: Map Int
+  (server -> server.port)
+
+r11 := test "a private cap name is free for the program" (-> assert-eq (port-of {port= 8080}) 8080)

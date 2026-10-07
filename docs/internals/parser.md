@@ -98,6 +98,21 @@ map literals and `{...base (k)= v}` record updates. Dynamic keys are
 skipped by row-var inference over record specs (key unknowable at
 compile time).
 
+## Nesting limit (2026-10)
+
+ANTLR's adaptive prediction recurses — and allocates — once per nesting
+level. A couple of thousand nested brackets overflowed the parser
+thread's stack, and ~20 000 (a 40 KB file) exhausted a 256 MB heap
+before that; from the CLI that was a JVM stack trace, in the LSP an
+`Error` its `catch (Exception)` didn't stop. `IrijParseDriver.parse`
+now fills the token stream first and counts bracket depth (`(`, `[`,
+`{`, `#[`, `#{`, `#(` against their closers; strings and comments
+don't count): past `irij.parse.max.nesting` (512) it returns a parse
+error — "expression nested too deeply to parse" — without running the
+parser. A `StackOverflowError` that still escapes ANTLR, or the AST
+builder and compiler passes (`IrijCompiler`), becomes the same kind of
+error.
+
 ## Inline `if` parts are postfix expressions (2026-10)
 
 ```
@@ -111,6 +126,25 @@ silently returned the wrong value; and `if c.ok "y" else "n"` did not
 parse at all. Each part is now a `postfixExpr`, so a field access
 belongs to the part it is written in. A parenthesised `if` is still an
 atom, so `(if c a else b).p` reads the field of the result as before.
+
+Application and operators are not part of a branch: `if c a else f x`
+is `(if c a else f) x`, and `if c 1 else n + 1` is `(if c 1 else n) + 1`
+— the opposite of how both read. So a **bare** inline `if` (one not in
+parentheses) may not head a juxtaposition application nor be an operand
+of an operator (`|| && == /= < > <= >= ++ .. ..< + - * / % ** |> <| >>
+<<` and the choreography arrows). `IrijParseDriver.checkInlineIfs` walks
+the parse tree after a clean parse and reports either as a parse error
+with the two fixes — `if c a else (f x)` / `(if c a else f) x` — so the
+CLI, the compiler and the LSP all show it at the `if`. `~` stays
+allowed: it explicitly applies everything on its left, so
+`if c f else g ~ x` is unambiguous. Before the rule, all 285 bare inline
+`if`s across the engine, irij.online, butterfly, uzor, vrata and invar
+were checked: none was applied or an operand, so nothing broke.
+
+A parenthesized `(if c false else g) x` is explicit, but a branch that
+is a literal (`false`, `0`, `"n"`, `()`) can never be called, so
+`ExprEmitter.emitApp` still rejects it at compile time rather than fail
+with "Not callable: false" at run time.
 
 ## The `model` declaration desugars in the builder (2026-08)
 
