@@ -6,8 +6,9 @@ This page lists everything that can change how **your** code behaves,
 what you must check, and what you can now do. Read it once before
 continuing; the checklist at the end is the short version.
 
-The changes are on the `audit-2026-10` branch of the Irij repo (version
-0.9.x once merged). Rebuild the CLI from it: `./gradlew install`.
+All of it is released as **Irij v0.9.270**. Update your CLI before
+continuing: download `irij.jar` from the v0.9.270 GitHub release, or build
+from `main` with `./gradlew install`. Check with `irij --version`.
 
 ---
 
@@ -163,6 +164,14 @@ also a compile error, since `false` can never be called.
   `json-parse: <what's wrong>`. `url-decode` of a malformed `%` escape
   is an Irij error.
 - `from-char-code` of a non-code-point is an Irij error.
+
+### Input and test output
+- `read-line` reads piped stdin line by line (it used to lose everything
+  after the first line) and returns `()` at the end of input — a real
+  `()`, so `if (line == ())` now ends a read loop (before, it never did,
+  and such a loop ran forever).
+- `irij test` prints the whole message of a failing test, every line
+  (std.quint's divergence report used to be cut to its first line).
 
 ### Tooling
 - `irij --nrepl-server` listens on localhost only
