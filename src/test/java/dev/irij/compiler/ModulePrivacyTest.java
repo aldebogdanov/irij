@@ -116,6 +116,27 @@ class ModulePrivacyTest {
         assertTrue(t.getMessage().contains("of shout:"), t.getMessage());
     }
 
+    /** The message of the compile error a program raises. */
+    private String compileError(String main) {
+        var e = assertThrows(IrijCompiler.CompileException.class, () -> run(main));
+        return e.getMessage();
+    }
+
+    @Test void effectErrorsNameTheFnAsWrittenAndItsFile() throws Exception {
+        module("lib.eff", "mod lib.eff\n\nfn helper :: Int Int\n  (x -> println x)\n\npub fn g :: Int Int\n  (x -> helper x)\n");
+        String m = compileError("use lib.eff :open\nprintln (g 1)\n");
+        assertTrue(m.startsWith("Effect 'Console' not declared in fn helper: 'println' requires") && m.contains(" at lib/eff.irj:4:"), m);
+        module("lib.eff2", "mod lib.eff2\n\npub fn g :: Int Int\n  (x -> println x)\n");
+        m = compileError("use lib.eff2 :open\nprintln (g 1)\n");
+        assertTrue(m.contains("in fn g:") && m.contains(" at lib/eff2.irj:4:"), m);
+    }
+
+    @Test void rowVariableErrorsNameTheFnAsWrittenAndItsFile() throws Exception {
+        module("lib.row", "mod lib.row\n\nuse std.collection :open\n\npub fn total :: Vec Int\n  (xs -> fold (acc x -> println x) 0 xs)\n");
+        String m = compileError("use lib.row :open\nprintln (total #[1])\n");
+        assertTrue(m.contains("in fn total\n  at lib/row.irj:6:") && m.contains("call 'fold'") && !m.contains("$"), m);
+    }
+
     @Test void pubNamesStayReachable() throws Exception {
         module("lib.e", "mod lib.e\n\npub fn shared :: Int Int\n  (x -> x + 7)\n\nfn inner :: Int Int\n  (x -> shared x)\n\npub fn outer :: Int Int\n  (x -> inner x)\n");
         assertEquals("8 9", run("use lib.e :open\nprintln ((to-str (shared 1)) ++ \" \" ++ (to-str (outer 2)))\n"));

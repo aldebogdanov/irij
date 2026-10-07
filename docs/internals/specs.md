@@ -93,9 +93,14 @@ Console in its effect row (or be top-level ambient, or carry a row
 variable and inherit). Otherwise the call is rejected with:
 
 ```
-Effect 'Console' not declared: 'call to f' requires ::: Console
-  in enclosing function's effect row
+Effect 'Console' not declared in fn g: call to 'f' requires ::: Console
+  in enclosing function's effect row at app/core.irj:12:5
 ```
+
+The fn is named as written (`g`, not ModulePrivacy's `g$app$core`) and
+the position carries the fn's source file when the inliner knows it
+(`IrijCompiler` passes `ModuleInliner.fnFile()`; the LSP's single-file
+check doesn't, and prints `at 12:5`). Handlers have no recorded file.
 
 Checked statically by `EffectRowChecker` (callee row ⊆ available
 set at every call site), with a runtime backstop: the emitter calls
@@ -239,7 +244,8 @@ proof).
 While inlining modules (`ModuleInliner.expand`), every `pub fn` without
 `:: ...` — in the program, its modules and its seeds — is reported on
 stderr as `warning: pub fn 'f' in mod/file.irj has no spec annotation
-(line:col)`. It is on for `irij <file>` and `irij build`
+(line:col)`, with `f` as written (ModulePrivacy has already renamed it
+`f$mod$file` by then; `ClassEmitter.displayName` drops the suffix). It is on for `irij <file>` and `irij build`
 (`CompileOptions.specLint`), off for interactive evals
 (`withNamespaceMode` turns it off), the test runner and the MCP server;
 `--no-spec-lint` turns it off for a run. The stdlib is lint-clean
