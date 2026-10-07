@@ -57,8 +57,14 @@ pub fn test :: Str Fn Tuple ::: Console Time Random Env FileIO Http Db Serve Ses
       println ~ "  [ok] " ++ name
       #(:pass name)
     Err msg =>
-      println ~ "  [FAIL] " ++ name ++ " -- " ++ (to-str msg)
+      println ~ "  [FAIL] " ++ name ++ " -- " ++ (continued (to-str msg))
       #(:fail name)
+
+;; A failure's message may run over several lines (std.quint's report does).
+;; Its later lines are indented under the [FAIL] line, which is how `irij
+;; test` tells them from the file's other output and keeps them.
+fn continued :: Str Str
+  (msg -> join "\n      " (split msg "\n"))
 
 ;; Summarize test results. Takes a vector of test results from `test`.
 ;; Returns the number of failures (0 = success).

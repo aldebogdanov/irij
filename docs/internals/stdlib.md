@@ -151,7 +151,7 @@ Real Irij code, parsed + compiled like user code:
 | `std.datastar` | Datastar SSE protocol |
 | `std.json` | JSON parser + serialiser |
 | `std.convert` | Type coercions (`to-int`, `to-float`, `to-bool`) |
-| `std.test` | Test runner (`test`, `assert-eq`, `assert-throws`, ...) |
+| `std.test` | Test runner (`test`, `assert-eq`, `assert-throws`, ...). A failure's message keeps all its lines: the later ones are indented six spaces under `[FAIL]`, and `irij test` prints them (std.quint's divergence report runs over several) |
 | `std.jvm` | `JVM` effect + `unsafe-jvm` handler |
 | `std.quint` | `Quint` effect + model-based testing against a Quint spec — see [quint.md](quint.md) |
 | `std.quint.itf` | ITF trace decoding, pure |

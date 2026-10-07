@@ -120,12 +120,7 @@ final class TestCommand {
                     System.out.println("\u2713 " + fileName + " (" + okCount + "/" + total + ")");
                 } else {
                     System.out.println("\u2717 " + fileName + " (" + okCount + "/" + total + ", " + failCount + " FAILED)");
-                    // Print captured [FAIL] lines for context
-                    for (String line : output.split("\n")) {
-                        if (line.trim().startsWith("[FAIL]")) {
-                            System.out.println("    " + line.trim());
-                        }
-                    }
+                    for (String line : failureLines(output)) System.out.println(line);
                     failedFiles.add(fileName);
                 }
 
@@ -153,6 +148,27 @@ final class TestCommand {
         }
 
         System.exit((grandFail == 0 && crashCount == 0) ? 0 : 1);
+    }
+
+    /** The captured [FAIL] lines of a test file's output, each with the
+     *  indented lines that continue its message: std.test indents a
+     *  multi-line message's later lines by six spaces (std.quint's report
+     *  runs over several), and they used to be dropped. */
+    static List<String> failureLines(String output) {
+        List<String> out = new ArrayList<>();
+        boolean inFailure = false;
+        for (String line : output.split("\n")) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("[FAIL]")) {
+                out.add("    " + trimmed);
+                inFailure = true;
+            } else if (inFailure && line.startsWith("      ") && !trimmed.isEmpty()) {
+                out.add("        " + trimmed);
+            } else {
+                inFailure = false;
+            }
+        }
+        return out;
     }
 
     private TestCommand() {}
