@@ -134,7 +134,9 @@ surfaces as `Symbol(name=foo, kind=FN, …)` rather than a wrapper.
 `LspDiagnostics.all(source)` runs parse + a single-file
 `EffectRowChecker.check(decls)` pass. The checker throws
 `IrijCompiler.CompileException`s with an `at L:C` suffix in the
-message; the regex `\bat (\d+):(\d+)` recovers the location into
+message (`at file:L:C` when the checker is given the inliner's fn → file
+map, which the single-file LSP pass doesn't); the regex
+`\bat (?:\S+:)?(\d+):(\d+)` recovers the location into
 an LSP range. If no location matches, the diagnostic anchors at
 (1,1).
 

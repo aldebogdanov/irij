@@ -149,6 +149,23 @@ public final class EffectRowChecker {
 
     private Map<String, String> fnFileOrigin = java.util.Map.of();
 
+    /** The source file of the fn being checked, when the inliner said
+     *  (null for handlers, and under LSP/tests): errors name it. */
+    private String currentFile;
+
+    /** {@code at file:line:col} for an error, or {@code at line:col}
+     *  when the file isn't known. */
+    private String at(SourceLoc loc) {
+        if (loc == null) return "";
+        return " at " + (currentFile != null ? currentFile + ":" : "") + loc.line() + ":" + loc.col();
+    }
+
+    /** A name as the user wrote it (ModulePrivacy's {@code name$module}
+     *  suffix dropped). */
+    private static String shown(String name) {
+        return ClassEmitter.displayName(name);
+    }
+
     private boolean isStdOrigin(String fnName) {
         String f = fnFileOrigin.get(fnName);
         if (f != null) return f.startsWith("std/");
@@ -297,7 +314,8 @@ public final class EffectRowChecker {
 
     private void checkFn(Decl.FnDecl fn) {
         Set<String> avail = available(fn.effectRow());
-        String ctx = "fn " + fn.name();
+        String ctx = "fn " + shown(fn.name());
+        currentFile = fnFileOrigin.get(fn.name());
         // Reset per-fn local-var-capability map. Each fn has its own
         // scope; bindings don't leak between fns.
         varCap = new java.util.HashMap<>();
@@ -402,7 +420,8 @@ public final class EffectRowChecker {
         // Add the handler's own effect (resume etc. operate within it).
         Set<String> inner = avail == AMBIENT ? AMBIENT : new HashSet<>(avail);
         if (inner != AMBIENT) inner.add(hd.effectName());
-        String ctx = "handler " + hd.name();
+        String ctx = "handler " + shown(hd.name());
+        currentFile = null;
         for (var s : hd.stateBindings()) walkStmt(s, inner, ctx);
         // Surface the handler's effect to the walker so any cap references
         // inside clause bodies are checked against it.
@@ -546,7 +565,7 @@ public final class EffectRowChecker {
                         checkParametricCall(v.name(), calleeRow, app.args(),
                                 ctx, avail, app.loc());
                     } else {
-                        requireRow(calleeRow, "call to " + v.name(),
+                        requireRow(calleeRow, "call to '" + shown(v.name()) + "'",
                                 ctx, avail, app.loc());
                     }
                 }
@@ -567,17 +586,14 @@ public final class EffectRowChecker {
                     if (currentClauseEffect == null
                             || !currentClauseEffect.equals(capEff)) {
                         throw new IrijCompiler.CompileException(
-                                "Capability '" + v.name() + "' is bound to effect '"
+                                "Capability '" + shown(v.name()) + "' is bound to effect '"
                                         + capEff + "' and may only be used inside "
                                         + "clauses of handlers for '" + capEff + "'"
                                         + (currentClauseEffect != null
                                                 ? "; here we are inside a '"
                                                   + currentClauseEffect + "' clause"
                                                 : "")
-                                        + (da.loc() != null
-                                                ? " at " + da.loc().line() + ":"
-                                                  + da.loc().col()
-                                                : ""));
+                                        + at(da.loc()));
                     }
                     // Legal cap use — short-circuit. Don't descend into the
                     // target (would re-trigger the bare-Var cap check) and
@@ -592,7 +608,7 @@ public final class EffectRowChecker {
                 // declared resource the call touches.
                 if (da.target() instanceof Expr.Var v && varCap.containsKey(v.name())) {
                     String eff = varCap.get(v.name());
-                    requireEffect(eff, "method '" + da.field() + "' on " + v.name(),
+                    requireEffect(eff, "method '" + da.field() + "' on " + shown(v.name()),
                             ctx, avail, da.loc());
                 }
                 walkExpr(da.target(), avail, ctx);
@@ -665,9 +681,8 @@ public final class EffectRowChecker {
         if (!avail.contains(effect)) {
             throw new IrijCompiler.CompileException(
                     "Effect '" + effect + "' not declared in " + inCtx
-                            + ": '" + opName + "' requires ::: " + effect
-                            + " in enclosing function's effect row"
-                            + (loc != null ? " at " + loc.line() + ":" + loc.col() : ""));
+                            + ": " + opName + " requires ::: " + effect
+                            + " in enclosing function's effect row" + at(loc));
         }
     }
 
@@ -737,7 +752,7 @@ public final class EffectRowChecker {
         for (String eff : effective) {
             if (callerAvail.contains(eff)) continue;
             throw new IrijCompiler.CompileException(
-                    formatChainError(eff, fnName, ctx, bindings, bindingArgIdx, loc));
+                    formatChainError(eff, shown(fnName), ctx, bindings, bindingArgIdx, at(loc)));
         }
     }
 
@@ -909,7 +924,7 @@ public final class EffectRowChecker {
      *
      *  <pre>
      *  Effect 'Console' not declared in fn `process`
-     *    at 4:9
+     *    at main.irj:4:9
      *    propagated to call 'fold' via row-variable `eff`,
      *    bound from arg 0 (the callback's effect row = {Console})
      *  Fix: add ::: Console to fn `process`, or pass a callback
@@ -920,7 +935,7 @@ public final class EffectRowChecker {
     private static String formatChainError(String eff, String fnName, String ctx,
                                             Map<String, Set<String>> bindings,
                                             Map<String, Integer> argIdx,
-                                            SourceLoc loc) {
+                                            String at) {
         // Find which row-var contributed `eff`, and which arg bound it.
         String rowVar = null;
         Integer idx = null;
@@ -936,9 +951,7 @@ public final class EffectRowChecker {
         StringBuilder sb = new StringBuilder();
         sb.append("Effect '").append(eff).append("' not declared in ")
                 .append(ctx).append('\n');
-        if (loc != null) {
-            sb.append("  at ").append(loc.line()).append(':').append(loc.col()).append('\n');
-        }
+        if (!at.isEmpty()) sb.append(' ').append(at).append('\n');
         if (rowVar != null) {
             sb.append("  propagated to call '").append(fnName)
                     .append("' via row-variable `").append(rowVar).append("`,\n");

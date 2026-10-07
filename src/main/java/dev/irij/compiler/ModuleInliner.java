@@ -149,7 +149,7 @@ final class ModuleInliner {
                 if (specLint != null && d instanceof Decl.PubDecl
                         && !(fn.body() instanceof Decl.FnBody.NoBody)
                         && (fn.specAnnotations() == null || fn.specAnnotations().isEmpty())) {
-                    specLint.accept("warning: pub fn '" + fn.name() + "' in " + currentFile
+                    specLint.accept("warning: pub fn '" + ClassEmitter.displayName(fn.name()) + "' in " + currentFile
                             + " has no spec annotation"
                             + (fn.loc() != null ? " (" + fn.loc() + ")" : ""));
                 }

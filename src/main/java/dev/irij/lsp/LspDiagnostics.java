@@ -98,7 +98,7 @@ final class LspDiagnostics {
     /** {@code "  at 12:5"} appearing somewhere in a CompileException
      *  message — the EffectRowChecker appends locations in this
      *  shape (1-based line, 0-based column). */
-    private static final Pattern AT_LOC = Pattern.compile("\\bat (\\d+):(\\d+)");
+    private static final Pattern AT_LOC = Pattern.compile("\\bat (?:\\S+:)?(\\d+):(\\d+)");
 
     /** Build the AST from {@code source} and run the single-file
      *  EffectRowChecker pass. Catches the first

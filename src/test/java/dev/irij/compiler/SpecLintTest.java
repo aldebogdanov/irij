@@ -4,6 +4,10 @@ import dev.irij.ast.AstBuilder;
 import dev.irij.ast.Decl;
 import dev.irij.parser.IrijParseDriver;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -24,6 +28,15 @@ class SpecLintTest {
         var w = lint("pub fn twice\n  (x -> x * 2)\n");
         assertEquals(1, w.size(), w.toString());
         assertTrue(w.get(0).contains("'twice'") && w.get(0).contains("lib.irj"), w.get(0));
+    }
+
+    @Test void aModulesPubFnIsNamedAsWritten(@TempDir Path root) throws Exception {
+        Files.createDirectories(root.resolve("lib"));
+        Files.writeString(root.resolve("lib/d.irj"), "mod lib.d\n\npub fn double\n  (x -> x * 2)\n");
+        List<Decl> decls = new AstBuilder().build(IrijParseDriver.parse("use lib.d :open\n").tree());
+        List<String> warnings = new ArrayList<>();
+        new ModuleInliner(root, List.of(), warnings::add).inline(decls, "main.irj");
+        assertEquals(List.of("warning: pub fn 'double' in lib/d.irj has no spec annotation (3:5)"), warnings);
     }
 
     @Test void specdPrivateAndWildcardFnsAreNot() {

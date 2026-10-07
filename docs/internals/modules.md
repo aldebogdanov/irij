@@ -104,7 +104,8 @@ path dep, `…/uzor`) or the one above it (an installed seed,
      effect row, whose body calls `shout$mod$path` (a binding gets
      `x := x$mod$path`). The forwarder emits no spec checks — the real
      fn checks them, and error messages show `shout`, not the qualified
-     name (`ClassEmitter.displayName`). Before this, last-definition-wins
+     name (`ClassEmitter.displayName`) — runtime spec failures, compile-time
+     effect-row errors and spec-lint warnings alike. Before this, last-definition-wins
      reached *inside* modules: a program defining `shout` rewired a
      library's own calls to its pub `shout`, and two modules exporting
      one name called each other's.
