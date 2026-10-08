@@ -147,7 +147,9 @@ elimination at hot sites.
 `emitVarLoad(name)` follows a priority list:
 
 1. `true`/`false` literals → `GETSTATIC Boolean.TRUE/FALSE`.
-2. JVM local slot (function param, `:=` bind) → `ALOAD slot`.
+2. JVM local slot (function param, `:=` bind) → `ALOAD slot`, except
+   a top-level binding's own slot in `main`, which reads the binding's
+   static field (see *Top-level bindings vs locals*).
 3. Lifted-locals map (SM mode) → `ALOAD kSlot` + `GETFIELD fields` +
    `ICONST idx` + `AALOAD`. Used when a local must survive an SM
    perform-throw.
@@ -176,31 +178,37 @@ quietly alter existing programs. `RtOps.and`/`or` remain for the
 operator-section path (`(&&)` as a value), which cannot be lazy in
 arguments it has already been handed.
 
-### Lambda capture vs top-level bindings
+### Top-level bindings vs locals
 
-`LambdaEmitter.collectFreeVars` decides what a lambda closes over.
-Two rules meet here, and the order matters:
+A **top-level binding** (`x := …` / `x :! …` at file scope) lives in a
+static field. Its initializer also stores into a local slot in `main`,
+the *dual slot*, which the hoist copies into the field; nothing else
+uses that slot. Fns, lambdas and other threads write the binding
+through the field, so any copy of it goes stale. Three emit sites
+apply one rule:
 
-- A **top-level binding** (`x := …` / `x :! …` at file scope) lives in
-  a static field and is *not* captured. Reads and writes inside a
-  lambda hit `GETSTATIC` / `PUTSTATIC`, so a write made after the
-  lambda was built — including one from another thread — is visible.
-- A **parameter or local** shadows a same-named top-level binding and
-  *is* captured, exactly as it shadows one outside a lambda
-  (`emitVarLoad` checks the local slot first).
+- **Reads** (`emitVarLoad`) and **writes** (`emitAssign`) of a
+  top-level binding are `GETSTATIC` / `PUTSTATIC` — in fns, in
+  lambdas, and in `main` itself, its branches, blocks and match arms
+  included.
+- **Lambda capture** (`LambdaEmitter.collectFreeVars`) skips a
+  top-level binding, so a write made after the lambda was built —
+  including one from another thread — is visible to it.
+- A **parameter or local** shadows a same-named top-level binding: it
+  is read and written in its own slot, captured by lambdas, and
+  assigning it leaves the binding alone.
 
-Distinguishing them can't be done by name alone. A top-level binding
-also gets a dual local slot in `main`, so the test is slot identity:
-the name is treated as top-level only when the enclosing scope's
-`Locals` **is** `ClassEmitter.topLevelLocals`. Testing only
-`topLevelFields.containsKey(name)` skipped capture for any parameter
-whose name happened to collide with some global, and the lambda then
-read that global instead. Because modules inline into one namespace,
-a program's top-level binding could break a library fn's internals
-this way — silently, with a plausible wrong value rather than an
-error. Regression tests: `LambdaCaptureTest.parameterShadowsSameNamedTopLevelBinding`
-and `topLevelLambdaStillSeesLaterWrites` (the two rules, pinned
-against each other).
+Name alone can't tell them apart: modules inline into one namespace,
+so a library fn's parameter may share any program's global's name,
+and the lambda would read that global — silently, with a plausible
+wrong value. Scope alone can't either: `main`'s nested blocks and arms
+are child scopes that still see the dual slot. So
+`ClassEmitter.isTopLevelSlot` tests slot identity: the name resolves
+to the slot `topLevelSlots` recorded for the binding, in a scope whose
+root is `topLevelLocals` (slots are numbered per method). Regression
+tests: `LambdaCaptureTest.parameterShadowsSameNamedTopLevelBinding`
+and `topLevelLambdaStillSeesLaterWrites` (the capture rules, pinned
+against each other), and `TopLevelMutTest`.
 
 ## Function calls
 

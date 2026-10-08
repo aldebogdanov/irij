@@ -52,6 +52,9 @@ final class Locals {
 
     Locals childScope() { return new Locals(this); }
 
+    /** The method's outermost scope; its child scopes share its slots. */
+    Locals root() { return parent == null ? this : parent.root(); }
+
     Integer lookup(String name) {
         Integer s = slots.get(name);
         if (s != null) return s;
