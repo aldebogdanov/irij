@@ -111,7 +111,10 @@ also a compile error, since `false` can never be called.
   imports both export is an error where you use it: import one `:as`. A
   local now shadows an alias (`(m -> m.x)` is the parameter's field).
   `pub use m {names}` re-exports. In a REPL, an eval keeps the imports of
-  the evals before it.
+  the evals before it. While you add imports, write them qualified:
+  `use m :as m` and `m.name` (also `with m.handler`), by name only for
+  specs, effects, protos and newtypes, and no `:open`: the spec's §2.4,
+  *Style: qualify*.
 - **Spec-lint is back.** `irij <file>` and `irij build` print a warning
   on stderr for every `pub fn` without a `::` spec annotation, including
   in your own modules and seeds. Add the specs (use `_` where the shape
