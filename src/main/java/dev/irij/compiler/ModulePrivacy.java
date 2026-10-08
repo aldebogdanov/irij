@@ -65,8 +65,11 @@ final class ModulePrivacy {
      * A module after privatizing.
      *
      * @param decls      the module's decls, renamed, with forwarders added
-     * @param exports    pub name → the module-qualified name its definition
-     *                   now has (for `alias.name` references)
+     * @param exports    pub name → the name {@code alias.name} means: the
+     *                   module-qualified name of a forwarded fn or binding,
+     *                   the name itself for one that stays program-wide (a
+     *                   pub handler or cap, …), so {@code with alias.h} is
+     *                   {@code with h}
      * @param forwarders the forwarder decls, by identity — the emitter emits
      *                   no spec checks for these
      */
@@ -122,7 +125,9 @@ final class ModulePrivacy {
         renames.putAll(exports);
         renames.keySet().removeAll(selfReferential);
         exports.keySet().removeAll(selfReferential);
-        if (renames.isEmpty()) return new Privatized(modDecls, Map.of(), Set.of());
+        Map<String, String> reachable = new HashMap<>(exports);
+        for (String n : pub) reachable.putIfAbsent(n, n);
+        if (renames.isEmpty()) return new Privatized(modDecls, reachable, Set.of());
 
         Renamer r = new Renamer(renames);
         List<Decl> out = new ArrayList<>(modDecls.size() + exports.size());
@@ -146,7 +151,7 @@ final class ModulePrivacy {
                 default -> { }
             }
         }
-        return new Privatized(out, exports, forwarders);
+        return new Privatized(out, reachable, forwarders);
     }
 
     /** Parameters a forwarder for {@code fn} takes, or -1 when it can't

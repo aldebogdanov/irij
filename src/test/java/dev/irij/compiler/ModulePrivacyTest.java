@@ -137,6 +137,43 @@ class ModulePrivacyTest {
         assertTrue(m.contains("in fn total\n  at lib/row.irj:6:") && m.contains("call 'fold'") && !m.contains("$"), m);
     }
 
+    @Test void aliasQualifiedHandlersAreTheHandlers() throws Exception {
+        // A nested `with` of a qualified handler failed state-machine
+        // lowering: `m.tock-one` stayed a dot access, which the lowering
+        // can't classify; it is the program-wide handler `tock-one`.
+        module("lib.h", """
+                mod lib.h
+
+                pub effect Tick
+                  tick :: () Int
+
+                pub effect Tock
+                  tock :: () Int
+
+                pub handler tick-forty :: Tick
+                  tick => resume 40
+
+                pub handler tock-one :: Tock
+                  tock => resume 1
+
+                pub fn both :: () Int ::: Tick Tock
+                  (_ -> (tick ()) + (tock ()))
+                """);
+        assertEquals("41", run("""
+                use lib.h :as h
+
+                fn run :: () Int
+                  => _
+                  with h.tick-forty
+                    with h.tock-one
+                      h.both ()
+
+                println (run ())
+                """));
+        module("lib.only", "mod lib.only\n\npub effect Beep\n  beep :: () Int\n\npub handler beep-seven :: Beep\n  beep => resume 7\n");
+        assertEquals("7", run("use lib.only :as o\n\nfn go :: () Int\n  => _\n  with o.beep-seven\n    with o.beep-seven\n      beep ()\n\nprintln (go ())\n"));
+    }
+
     @Test void pubNamesStayReachable() throws Exception {
         module("lib.e", "mod lib.e\n\npub fn shared :: Int Int\n  (x -> x + 7)\n\nfn inner :: Int Int\n  (x -> shared x)\n\npub fn outer :: Int Int\n  (x -> inner x)\n");
         assertEquals("8 9", run("use lib.e :open\nprintln ((to-str (shared 1)) ++ \" \" ++ (to-str (outer 2)))\n"));

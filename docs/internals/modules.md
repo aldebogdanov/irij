@@ -122,6 +122,11 @@ path dep, `…/uzor`) or the one above it (an installed seed,
      parameter, and a binding that mentions its own name — `pub sqrt :=
      sqrt` re-exports the builtin, and renaming would make it refer to
      itself.
+     `alias.name` for one of these is rewritten to the bare name
+     (`ModulePrivacy.Privatized.exports` maps it to itself), so
+     `with m.handler` is `with handler` everywhere. Before, it stayed a dot
+     access: one `with` evaluated it at runtime, but a `with` nested in
+     another failed state-machine lowering ("body shape not supported").
 4. Open / qualified resolution:
    - `:open` rewrites every Var reference to the unqualified name.
    - Default (qualified) rewrites `text.trim x` to `trim x` and adds
