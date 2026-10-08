@@ -559,8 +559,14 @@
    *Scoping.* A module's own code always refers to its own top-level
    definitions, exported or not: nothing an importer defines can replace
    them. An importer's own top-level definition of a name shadows an
-   imported one for the importer's code only. When two modules imported
-   with =:open= export a name the file uses, that use is a compile error:
+   imported one, or a builtin, for the importer's code only: a program's
+   =fn length= is not the =length= a library calls. In a top-level
+   binding's initializer, the binding's own name means the binding only
+   inside a lambda, which runs once the binding exists (=fact := (n -> …
+   fact (n - 1))= recurses); anywhere else it means what the name meant
+   before the binding (=pub sqrt := sqrt= re-exports the builtin). When
+   two modules imported with =:open= export a name the file uses, that
+   use is a compile error:
    import one of them with =:as= to choose. =pub use m :open= and =pub use
    m {names}= pass those names on to the module's importers; a re-export
    names what it passes, so =pub use m :as alias= is an error.

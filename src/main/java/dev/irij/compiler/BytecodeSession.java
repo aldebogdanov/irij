@@ -65,6 +65,11 @@ public final class BytecodeSession {
     /** Top-level names earlier evals defined, which later evals reach as
      *  their own. */
     private final java.util.Set<String> priorNames = new java.util.HashSet<>();
+    /** Earlier evals' top-level values named like a builtin, each defined
+     *  under its {@link ModulePrivacy#programName}: a later eval's use of the
+     *  name is renamed to match, so it reaches that definition and not the
+     *  builtin. */
+    private final Map<String, String> priorBuiltinShadows = new java.util.HashMap<>();
 
     public BytecodeSession() {
         this("irij.Session");
@@ -122,6 +127,7 @@ public final class BytecodeSession {
         for (Decl d : own) if (d instanceof Decl.UseDecl ud) uses.putIfAbsent(useKey(ud), ud);
         List<Decl> decls = new ArrayList<>(uses.values());
         for (Decl d : captureLastExpression(own)) if (!(d instanceof Decl.UseDecl)) decls.add(d);
+        decls = ModulePrivacy.renameIdentifiers(decls, priorBuiltinShadows);
 
         CompileOptions opts = CompileOptions.defaults().withNamespaceMode(true);
         String className = classPrefix + "$" + COUNTER.incrementAndGet();
@@ -132,6 +138,13 @@ public final class BytecodeSession {
                 java.util.Set.copyOf(priorNames));
         priorUses.putAll(uses);
         priorNames.addAll(ModuleScope.ownNames(own));
+        for (Decl d : own) {
+            for (String n : ModuleScope.valueNames(d instanceof Decl.PubDecl pd ? pd.inner() : d)) {
+                if (ModuleScope.builtinValues().contains(n)) {
+                    priorBuiltinShadows.put(n, ModulePrivacy.programName(n));
+                }
+            }
+        }
         Class<?> cls = loader.defineAll(classes, className);
 
         // Bind the session's namespace + (optional) session

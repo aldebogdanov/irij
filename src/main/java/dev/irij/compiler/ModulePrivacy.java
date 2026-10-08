@@ -36,13 +36,19 @@ import java.util.Set;
  * types, so a new node kind is a compile error here rather than a missed
  * rename.
  *
+ * <p>One place is not uniform: a top-level binding's initializer, where the
+ * binding's own name means the binding only inside a lambda and elsewhere
+ * what it meant before ({@code pub sqrt := sqrt} re-exports the builtin; see
+ * {@link #renameTopLevel}).
+ *
  * <p>Nothing outside the module can reach a private name by accident:
  * importers reach a pub one only through {@link ModuleScope}, which rewrites
- * each name a file imports to the private name it stands for. One exception
- * stays program-wide: a binding that mentions its own name — {@code pub sqrt
- * := sqrt} re-exports the builtin, and renaming would make it refer to
- * itself. Specs, effects, protos and newtypes are type-level and keep their
- * names; {@link ModuleScope} checks those against each file's imports.
+ * each name a file imports to the private name it stands for. The program's
+ * own names stay as written, except one named like a builtin
+ * ({@link #privatizeProgram}): with it, no definition anywhere is spelled
+ * like a builtin, so a module's {@code length} is always the builtin. Specs,
+ * effects, protos and newtypes are type-level and keep their names;
+ * {@link ModuleScope} checks those against each file's imports.
  */
 final class ModulePrivacy {
 
@@ -53,84 +59,105 @@ final class ModulePrivacy {
         return name + "$" + module.replace('.', '$');
     }
 
+    /** The spelling of a program's own top-level {@code name} that shares a
+     *  builtin's name: a module path can't be empty, so no module's private
+     *  name is spelled the same. */
+    static String programName(String name) {
+        return name + "$";
+    }
+
     /**
      * A module after privatizing.
      *
      * @param decls   the module's decls, renamed
-     * @param exports pub value name → the name it has in the flat program:
-     *                its private name, or the name itself for a
-     *                self-referential re-export ({@code pub sqrt := sqrt})
+     * @param exports pub value name → its private name
      */
     record Privatized(List<Decl> decls, Map<String, String> exports) {}
 
     /** {@code modDecls} with the module's top-level names made its own. */
     static Privatized privatize(List<Decl> modDecls, String module) {
         Set<String> pub = new HashSet<>();
-        Set<String> names = new HashSet<>();
-        Set<String> selfReferential = new HashSet<>();
+        Map<String, String> renames = new HashMap<>();
         for (Decl d : modDecls) {
             boolean isPub = d instanceof Decl.PubDecl;
             Node inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
-            String name = switch (inner) {
-                case Decl.FnDecl fn -> {
-                    if (fn.isPub()) isPub = true;
-                    yield fn.name();
-                }
-                case Decl.BindingDecl bd -> {
-                    String n = simpleTarget(bd.stmt());
-                    if (n != null && mentions(bindValue(bd.stmt()), n)) selfReferential.add(n);
-                    yield n;
-                }
-                case Decl.HandlerDecl hd -> hd.name();
-                case Decl.CapDecl cd -> {
-                    if (cd.isPub()) isPub = true;
-                    yield cd.name();
-                }
-                default -> null;
-            };
-            if (name == null) continue;
-            names.add(name);
-            if (isPub) pub.add(name);
-        }
-        Map<String, String> renames = new HashMap<>();
-        for (String n : names) {
-            if (!selfReferential.contains(n)) renames.put(n, privateName(n, module));
+            if (inner instanceof Decl.FnDecl fn && fn.isPub()) isPub = true;
+            if (inner instanceof Decl.CapDecl cd && cd.isPub()) isPub = true;
+            for (String n : ModuleScope.valueNames(inner)) {
+                renames.put(n, privateName(n, module));
+                if (isPub) pub.add(n);
+            }
         }
         Map<String, String> exports = new HashMap<>();
-        for (String n : pub) exports.put(n, renames.getOrDefault(n, n));
-        if (renames.isEmpty()) return new Privatized(modDecls, exports);
+        for (String n : pub) exports.put(n, renames.get(n));
+        return new Privatized(renameTopLevel(modDecls, renames), exports);
+    }
 
+    /** The program's {@code decls} with each top-level value named like a
+     *  builtin renamed to its {@link #programName}. The program's own code
+     *  still reaches it as written; a module, and the emitter's builtin
+     *  cases, can no longer mistake it for the builtin. */
+    static List<Decl> privatizeProgram(List<Decl> decls) {
+        Map<String, String> renames = new HashMap<>();
+        for (Decl d : decls) {
+            Node inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
+            for (String n : ModuleScope.valueNames(inner)) {
+                if (ModuleScope.builtinValues().contains(n)) renames.put(n, programName(n));
+            }
+        }
+        return renameTopLevel(decls, renames);
+    }
+
+    /**
+     * {@code decls} with {@code renames} applied to every identifier, but
+     * one: in a top-level binding's initializer, a name the binding is the
+     * first to bind means the binding only inside a lambda, which runs once
+     * the binding exists — {@code fact := (n -> … fact (n - 1))} recurses —
+     * and anywhere else what it meant before the binding: {@code pub sqrt :=
+     * sqrt} re-exports the builtin rather than reading itself.
+     */
+    static List<Decl> renameTopLevel(List<Decl> decls, Map<String, String> renames) {
+        if (renames.isEmpty()) return decls;
+        Renamer all = new Renamer(renames);
+        Set<String> bound = new HashSet<>();
+        List<Decl> out = new ArrayList<>(decls.size());
+        for (Decl d : decls) {
+            Node inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
+            if (!(inner instanceof Decl.BindingDecl bd)) {
+                out.add(all.decl(d));
+                continue;
+            }
+            Map<String, String> before = new HashMap<>(renames);
+            for (String n : ModuleScope.valueNames(bd)) if (bound.add(n)) before.remove(n);
+            Renamer init = new Renamer(before, renames);
+            Stmt s = switch (bd.stmt()) {
+                case Stmt.Bind b -> new Stmt.Bind(all.target(b.target()), init.expr(b.value()),
+                        b.specAnnotation(), b.loc());
+                case Stmt.MutBind mb -> new Stmt.MutBind(all.target(mb.target()), init.expr(mb.value()),
+                        mb.loc());
+                default -> all.stmt(bd.stmt());
+            };
+            Decl renamed = new Decl.BindingDecl(s, bd.loc());
+            out.add(d instanceof Decl.PubDecl pd ? new Decl.PubDecl(renamed, pd.loc()) : renamed);
+        }
+        return out;
+    }
+
+    /** {@code decls} with {@code renames} applied to every identifier. */
+    static List<Decl> renameIdentifiers(List<Decl> decls, Map<String, String> renames) {
+        if (renames.isEmpty()) return decls;
         Renamer r = new Renamer(renames);
-        List<Decl> out = new ArrayList<>(modDecls.size());
-        for (Decl d : modDecls) out.add(r.decl(d));
-        return new Privatized(out, exports);
+        List<Decl> out = new ArrayList<>(decls.size());
+        for (Decl d : decls) out.add(r.decl(d));
+        return out;
     }
 
-    private static Expr bindValue(Stmt s) {
-        return switch (s) {
-            case Stmt.Bind b -> b.value();
-            case Stmt.MutBind mb -> mb.value();
-            default -> null;
-        };
-    }
+    /** Consistent renaming of a fixed set of identifiers: {@code renames}
+     *  outside lambdas, {@code inLambda} inside them (see
+     *  {@link #renameTopLevel}). */
+    private record Renamer(Map<String, String> renames, Map<String, String> inLambda) {
 
-    /** Whether {@code e} mentions the identifier {@code name}. */
-    private static boolean mentions(Expr e, String name) {
-        if (e == null) return false;
-        return !new Renamer(Map.of(name, name + "$mentioned")).expr(e).equals(e);
-    }
-
-    private static String simpleTarget(Stmt s) {
-        Stmt.BindTarget t = switch (s) {
-            case Stmt.Bind b -> b.target();
-            case Stmt.MutBind mb -> mb.target();
-            default -> null;
-        };
-        return t instanceof Stmt.BindTarget.Simple sm ? sm.name() : null;
-    }
-
-    /** Consistent renaming of a fixed set of identifiers. */
-    private record Renamer(Map<String, String> renames) {
+        Renamer(Map<String, String> renames) { this(renames, renames); }
 
         String id(String name) {
             if (name == null) return null;
@@ -227,7 +254,10 @@ final class ModulePrivacy {
             return switch (e) {
                 case Expr.Var v -> renames.containsKey(v.name()) ? new Expr.Var(id(v.name()), v.loc()) : v;
                 case Expr.App a -> new Expr.App(expr(a.fn()), exprs(a.args()), a.loc());
-                case Expr.Lambda l -> new Expr.Lambda(pats(l.params()), id(l.restParam()), expr(l.body()), l.loc());
+                case Expr.Lambda l -> {
+                    Renamer r = inLambda == renames ? this : new Renamer(inLambda);
+                    yield new Expr.Lambda(r.pats(l.params()), r.id(l.restParam()), r.expr(l.body()), l.loc());
+                }
                 case Expr.BinaryOp b -> new Expr.BinaryOp(b.op(), expr(b.left()), expr(b.right()), b.loc());
                 case Expr.UnaryOp u -> new Expr.UnaryOp(u.op(), expr(u.operand()), u.loc());
                 case Expr.Pipe p -> new Expr.Pipe(expr(p.left()), expr(p.right()), p.forward(), p.loc());

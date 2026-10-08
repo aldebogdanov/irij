@@ -467,6 +467,16 @@ final class ExprEmitter implements Opcodes {
         // updates (e.g. assignments inside a forked fiber) are visible.
         if (ce.topLevelFields.containsKey(name)
                 && !ClassEmitter.BUILTIN_CONST_NAMES.contains(name)) {
+            // In a REPL eval, top-level code reaching here comes before the
+            // eval's own binding of the name (after it, the dual slot
+            // answers): the name still means what earlier evals bound, as
+            // in `x := x + 1`, not this eval's field, which is unset.
+            if (ce.options.namespaceMode() && locals.root() == ce.topLevelLocals) {
+                mv.visitLdcInsn(name);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nsGet"), "nsGet",
+                        "(Ljava/lang/String;)Ljava/lang/Object;", false);
+                return;
+            }
             mv.visitFieldInsn(GETSTATIC, ce.internalName,
                     ce.topLevelFields.get(name), ClassEmitter.OBJ_DESC);
             return;
