@@ -512,7 +512,7 @@
 
    ;; imports: every `use` names how its names are reached
    use std.text :as str        ;; qualified: str.words, str.lines
-   use std.collection :open    ;; every pub name, bare: zip, distinct, …
+   use std.collection :open    ;; every pub name, bare: zip, … (avoid: see Style)
    use std.http {Http default-http}  ;; just these, bare
 
    ;; re-export: importers of this module get these names too
@@ -543,6 +543,18 @@
    all the same. The effects builtins perform (=Console=, =Time=, =Env=,
    =Random=, =JVM=) and the builtin specs (=Int=, =Str=, …, with =Ok= and
    =Err=) need no import.
+
+   *Style: qualify.* Import a module's functions, values and handlers
+   with =:as= and name them through the alias: =str.words=, =with
+   db.default-db=. A qualified name says where it comes from, so a
+   reader needs no search to find it, and two modules' names never meet.
+   Import by name what an alias cannot reach (specs, effects, protos,
+   newtypes), and otherwise only a few names a file uses so often that
+   the alias is noise, such as =std.test='s assertions in a test file.
+   One module may be imported both ways (=use m :as m= and =use m
+   {Mode}=). Avoid =:open=: it makes every =pub= name bare, including
+   those the module adds later, and leaves the reader to guess which
+   module each one is from.
 
    *Scoping.* A module's own code always refers to its own top-level
    definitions, exported or not: nothing an importer defines can replace

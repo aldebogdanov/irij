@@ -7,10 +7,10 @@ linkage.
 
 ```
 mod my.app                       ;; first non-comment line declares the module
-use std.list :open               ;; flatten every pub into the current scope
-use std.text :as text            ;; alias: text.trim, text.split, …
-use std.math :as math            ;; alias: math.sqrt, math.div, …
+use std.text :as text            ;; alias: text.words, text.lines, …
+use std.math :as math            ;; alias: math.sqrt, math.quo, …
 use mymod.helpers {inc twice}    ;; selective: just `inc` and `twice`
+use std.list :open               ;; flatten every pub into the current scope
 
 pub fn greet
   (name -> "Hi, " ++ name)
@@ -18,6 +18,10 @@ pub fn greet
 fn helper
   (x -> x * 2)            ;; not pub — invisible to importers
 ```
+
+Write imports qualified (`:as`), by name only for what an alias can't
+reach (specs, effects, protos, newtypes) or a few names used
+constantly, and avoid `:open`: spec §2.4, *Style: qualify*.
 
 **Modifier required** (v0.6.4+). `use mod.path` without a
 modifier is rejected at compile time:
