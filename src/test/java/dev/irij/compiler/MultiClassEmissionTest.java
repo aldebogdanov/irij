@@ -96,7 +96,7 @@ class MultiClassEmissionTest {
         // and a main frame at main.irj.
         boolean moduleFrame = false, rootFrame = false;
         for (StackTraceElement f : cause.getStackTrace()) {
-            if ("boom".equals(f.getMethodName())
+            if ("boom".equals(ClassEmitter.displayName(f.getMethodName()))
                     && "greeter.irj".equals(f.getFileName())) moduleFrame = true;
             if ("main".equals(f.getMethodName())
                     && "main.irj".equals(f.getFileName())) rootFrame = true;

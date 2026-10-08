@@ -21,8 +21,9 @@ import java.util.Set;
  * inlining its declarations ahead of the current program's. ModDecl and
  * UseDecl are stripped; PubDecl is unwrapped. Each module is loaded once.
  *
- * <p>Also collects short-name aliases (last segment of each qualified name)
- * so the emitter can resolve {@code mod.fn x} to {@code fn x}.
+ * <p>Each file's names are resolved against its own {@code use} lines
+ * ({@link ModuleScope}) before its decls join the flat program, so a file
+ * reaches exactly what it declares, imports, or has as a builtin.
  */
 final class ModuleInliner {
 
@@ -37,7 +38,6 @@ final class ModuleInliner {
     private final java.util.Map<Path, String> seedNames = new HashMap<>();
     private final Set<String> loaded = new HashSet<>();
     private final Set<String> loading = new HashSet<>();
-    private final Set<String> aliases = new HashSet<>();
 
     /** Receives spec-lint warnings; null = lint off. */
     private final java.util.function.Consumer<String> specLint;
@@ -50,10 +50,20 @@ final class ModuleInliner {
 
     ModuleInliner(Path sourceRoot, List<Path> extraRoots,
                   java.util.function.Consumer<String> specLint) {
+        this(sourceRoot, extraRoots, specLint, Set.of());
+    }
+
+    /** @param sessionNames top-level names earlier evals of a REPL session
+     *                     defined: the program's own, though not in its decls */
+    ModuleInliner(Path sourceRoot, List<Path> extraRoots,
+                  java.util.function.Consumer<String> specLint, Set<String> sessionNames) {
         this.sourceRoot = sourceRoot;
         this.extraRoots = extraRoots == null ? List.of() : extraRoots;
         this.specLint = specLint;
+        this.sessionNames = sessionNames == null ? Set.of() : sessionNames;
     }
+
+    private final Set<String> sessionNames;
 
     /**
      * Which seed a resolved root provides.
@@ -92,9 +102,6 @@ final class ModuleInliner {
                 && name.equals(parent.getFileName().toString());
     }
 
-    /** Short-name aliases registered via `use` (e.g. "json" for "std.json"). */
-    Set<String> aliases() { return aliases; }
-
     /** fn name → source file it came from. Built during inlining so
      *  the emitter can group functions into per-source-file classes
      *  (multi-class emission → correct {@code SourceFile} in stack
@@ -105,22 +112,29 @@ final class ModuleInliner {
 
     java.util.Map<String, String> fnFile() { return fnFile; }
 
-    /** Module → its exports (pub name → module-qualified name). */
-    private final java.util.Map<String, java.util.Map<String, String>> exportsByModule = new HashMap<>();
+    /** Each loaded module's exports, in load order. */
+    private final java.util.Map<String, ModuleScope.Exports> exportsByModule = new java.util.LinkedHashMap<>();
 
-    /** The pub-fn forwarders ModulePrivacy added, by identity. */
-    private final Set<Decl.FnDecl> forwarders =
-            java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-
-    Set<Decl.FnDecl> forwarders() { return forwarders; }
+    /** The program's own top-level names: no module may reach them. */
+    private Set<String> programNames = Set.of();
 
     /** @param rootFile source filename of the top-level program (used
      *  as the origin for its own fns; module fns get their module's
      *  derived file). */
     List<Decl> inline(List<Decl> decls, String rootFile) {
         List<Decl> out = new ArrayList<>();
-        expand(decls, out, rootFile != null ? rootFile : "Program.irj");
+        programNames = ModuleScope.ownNames(decls);
+        Set<String> own = new HashSet<>(programNames);
+        own.addAll(sessionNames);
+        expand(decls, out, rootFile != null ? rootFile : "Program.irj", null, own, null);
         return out;
+    }
+
+    /** What a module passes on with {@code pub use}. */
+    private record ReExports(java.util.Map<String, String> values,
+                             java.util.Map<String, List<String>> types,
+                             java.util.Map<String, String> kinds) {
+        ReExports() { this(new HashMap<>(), new java.util.LinkedHashMap<>(), new HashMap<>()); }
     }
 
     /** Back-compat: inline without origin tracking. */
@@ -134,13 +148,49 @@ final class ModuleInliner {
         return qualifiedName.replace('.', '/') + ".irj";
     }
 
-    private void expand(List<Decl> decls, List<Decl> out, String currentFile) {
-        // `use m :as a` in this file: a.name → m's own definition of name.
-        java.util.Map<String, java.util.Map<String, String>> qualified = new HashMap<>();
-        for (Decl d0 : decls) {
-            Decl d = qualified.isEmpty() || d0 instanceof Decl.UseDecl
-                    || (d0 instanceof Decl.FnDecl f0 && forwarders.contains(f0))
-                    ? d0 : ModulePrivacy.qualify(List.of(d0), qualified).get(0);
+    /** Inlines one file: the modules it uses first, then its own decls with
+     *  every name resolved against its imports. {@code module} is null for
+     *  the program; {@code reexports} collects a module's {@code pub use}s. */
+    private void expand(List<Decl> decls, List<Decl> out, String currentFile, String module,
+                        Set<String> own, ReExports reexports) {
+        ModuleScope.Imports imports = new ModuleScope.Imports();
+        List<Decl> body = new ArrayList<>(decls.size());
+        for (Decl d : decls) {
+            boolean isPub = d instanceof Decl.PubDecl;
+            Decl inner = d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di ? di : d;
+            if (!(inner instanceof Decl.UseDecl ud)) {
+                body.add(d);
+                continue;
+            }
+            //   use mod.path :open    → every pub name, bare
+            //   use mod.path :as foo  → foo.name
+            //   use mod.path {names}  → those names, bare
+            //   use mod.path          → REJECTED: the implicit last-segment
+            //     alias collided across modules ending in the same name.
+            Decl.UseModifier um = ud.modifier();
+            if (um == null) {
+                throw new IrijCompiler.CompileException(
+                        "`use " + ud.qualifiedName() + "` requires an "
+                                + "explicit modifier: `:open` (flatten), "
+                                + "`:as <alias>` (rename), or "
+                                + "`{ name name ... }` (selective)");
+            }
+            loadAndInline(ud.qualifiedName(), out);
+            ModuleScope.Exports ex = exportsByModule.get(ud.qualifiedName());
+            imports.add(um, ex, currentFile, ud.loc());
+            if (isPub) {
+                if (reexports == null) {
+                    throw new IrijCompiler.CompileException("`pub use " + ud.qualifiedName()
+                            + "` re-exports from a module; the program has no importers"
+                            + ModuleScope.at(currentFile, ud.loc()));
+                }
+                ModuleScope.Imports.reexport(um, ex, reexports.values(), reexports.types(),
+                        reexports.kinds(), currentFile, ud.loc());
+            }
+        }
+        var cx = new ModuleScope.Context(currentFile, module, imports, own,
+                exportsByModule.values(), programNames);
+        for (Decl d : ModuleScope.resolve(body, cx)) {
             Decl inner = d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di ? di : d;
             if (inner instanceof Decl.FnDecl fn) {
                 fnFile.put(fn.name(), currentFile);
@@ -157,45 +207,9 @@ final class ModuleInliner {
             // ModDecls are preserved so downstream passes (notably
             // EffectRowChecker) can determine which module each fn
             // came from — needed for stdlib-only escape hatches like
-            // `::: Any`. The emitter skips them.
-            if (inner instanceof Decl.ModDecl) {
-                out.add(inner);
-                continue;
-            }
-            if (inner instanceof Decl.UseDecl ud) {
-                // Register alias based on the use modifier.
-                //
-                //   use mod.path :open       → no alias; flatten exports
-                //   use mod.path :as foo     → alias `foo`
-                //   use mod.path {names}     → no alias; selective
-                //   use mod.path             → REJECTED — was the
-                //     implicit last-segment alias; ambiguous when
-                //     two modules end in the same name. v0.6.4+
-                //     requires an explicit modifier.
-                Decl.UseModifier um = ud.modifier();
-                if (um == null) {
-                    throw new IrijCompiler.CompileException(
-                            "`use " + ud.qualifiedName() + "` requires an "
-                                    + "explicit modifier: `:open` (flatten), "
-                                    + "`:as <alias>` (rename), or "
-                                    + "`{ name name ... }` (selective)");
-                }
-                // `:open` and `:selective` paths don't register an alias.
-                loadAndInline(ud.qualifiedName(), out);
-                if (um instanceof Decl.UseModifier.As asMod) {
-                    aliases.add(asMod.alias());
-                    qualified.put(asMod.alias(),
-                            exportsByModule.getOrDefault(ud.qualifiedName(), java.util.Map.of()));
-                }
-                continue;
-            }
-            // (FnDecl origin already recorded above.)
-            // Unwrap PubDecl for the emitter's benefit (treat pub fn as fn).
-            if (d instanceof Decl.PubDecl pd && pd.inner() instanceof Decl di) {
-                out.add(di);
-            } else {
-                out.add(d);
-            }
+            // `::: Any`. The emitter skips them. The PubDecl wrapper goes:
+            // the emitter treats a pub fn as a fn.
+            out.add(inner);
         }
     }
 
@@ -215,9 +229,18 @@ final class ModuleInliner {
             }
             ModulePrivacy.Privatized p = ModulePrivacy.privatize(
                     IrijCompiler.buildAst(parsed), qualifiedName);
-            exportsByModule.put(qualifiedName, p.exports());
-            forwarders.addAll(p.forwarders());
-            expand(p.decls(), out, moduleFile(qualifiedName));
+            ReExports re = new ReExports();
+            expand(p.decls(), out, moduleFile(qualifiedName), qualifiedName,
+                    ModuleScope.ownNames(p.decls()), re);
+            ModuleScope.Exports own = ModuleScope.exportsOf(qualifiedName, p.decls(), p.exports());
+            var values = new HashMap<>(re.values());
+            values.putAll(own.values());
+            var types = new java.util.LinkedHashMap<>(re.types());
+            types.putAll(own.types());
+            var kinds = new HashMap<>(re.kinds());
+            kinds.putAll(own.kinds());
+            exportsByModule.put(qualifiedName, new ModuleScope.Exports(qualifiedName,
+                    java.util.Map.copyOf(values), types, kinds, own.privates()));
         } finally {
             loading.remove(qualifiedName);
         }

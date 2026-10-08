@@ -81,59 +81,61 @@ path dep, `…/uzor`) or the one above it (an installed seed,
      resolved like local.
 2. Recursively inline the imported module's AST.
 3. Stripping rules:
-   - `mod` declaration removed.
-   - `pub` prefix removed from each pub decl (kept as a marker for
-     blame envelopes).
-   - Private top-level fns, bindings, handlers and caps are renamed to
-     `name$module$path` (`helper` in `mymod.helpers` →
-     `helper$mymod$helpers`) by `ModulePrivacy.privatize` before the
+   - `mod` declaration kept (EffectRowChecker reads which module a fn
+     came from); the emitter skips it.
+   - `pub` prefix removed from each pub decl once the file's names are
+     resolved.
+   - Every top-level fn, binding, handler and cap of a module, pub or
+     not, is renamed to `name$module$path` (`helper` in `mymod.helpers`
+     → `helper$mymod$helpers`) by `ModulePrivacy.privatize` before the
      module is flattened in. `$` can't occur in an Irij identifier, so
      the name is fresh, and every occurrence of the identifier in the
      module is renamed (uses, binders, parameters, patterns) — renaming
      one identifier consistently is meaning-preserving whatever the
      scoping, so no scope analysis is needed. Without this the emitter's
      program-wide names made privacy fictional: a program defining
-     `find-route` replaced `std.serve`'s router internals, and two seeds
-     with the same private helper name called each other's. (The
-     interpreter had per-module environments; the flattening bytecode
-     pipeline lost privacy until v0.9.)
-   - **Pub fns and plain pub bindings** are renamed the same way, so a
-     module's own references to its pub names always mean its own
-     definitions. Each gets a public **forwarder** under the original
-     name for importers: `fn shout` with the same spec annotations and
-     effect row, whose body calls `shout$mod$path` (a binding gets
-     `x := x$mod$path`). The forwarder emits no spec checks — the real
-     fn checks them, and error messages show `shout`, not the qualified
-     name (`ClassEmitter.displayName`) — runtime spec failures, compile-time
-     effect-row errors and spec-lint warnings alike. Before this, last-definition-wins
-     reached *inside* modules: a program defining `shout` rewired a
-     library's own calls to its pub `shout`, and two modules exporting
-     one name called each other's.
-   - What an importer sees: a program's own top-level `shout` replaces
-     only the forwarder, so the program's code gets its own and the
-     module keeps its own. With `use m :as a`, `a.shout` is rewritten to
-     `shout$m` (`ModulePrivacy.qualify`) and reaches the module's
-     definition even when the importer has a `shout` of its own. Two
-     `:open`-imported modules exporting one name still collide for the
-     importer (the later `use` wins; std.collection and std.list both
-     export `sum`) — import one `:as` to pick explicitly.
-   - Still program-wide names: pub handlers and caps (a `with` must
-     resolve them statically), mutable pub bindings, pub fns with a rest
-     parameter, and a binding that mentions its own name — `pub sqrt :=
-     sqrt` re-exports the builtin, and renaming would make it refer to
-     itself.
-     `alias.name` for one of these is rewritten to the bare name
-     (`ModulePrivacy.Privatized.exports` maps it to itself), so
-     `with m.handler` is `with handler` everywhere. Before, it stayed a dot
-     access: one `with` evaluated it at runtime, but a `with` nested in
-     another failed state-machine lowering ("body shape not supported").
-4. Open / qualified resolution:
-   - `:open` rewrites every Var reference to the unqualified name.
-   - Default (qualified) rewrites `text.trim x` to `trim x` and adds
-     `text` to the module alias set so subsequent `text.foo` calls
-     resolve.
-5. Selective imports (`:fn1 :fn2`) bring only those names into the
-   open scope.
+     `find-route` replaced `std.serve`'s router internals, two seeds with
+     the same helper name called each other's, and a module's
+     `pub fn length` replaced the builtin `length` in every file. The one
+     name left as written is a binding that mentions its own name —
+     `pub sqrt := sqrt` re-exports the builtin, and renaming would make it
+     refer to itself. Error messages, spec failures and spec-lint show
+     names as written (`ClassEmitter.displayName`); a JVM stack frame
+     carries the private name (`boom$greeter`).
+4. Name resolution (`ModuleScope`), per file, before the file's decls
+   join the program: each file's names are resolved against its own
+   `use` lines, with a scope-aware walk (locals shadow everything).
+   - A bare name is, in order: a local, the file's own top-level
+     definition, a name the file imports (`:open` brings every pub name,
+     `{a b}` just those), or a builtin. An imported value is rewritten
+     to the private name it stands for; a module's value is unreachable
+     any other way, so nothing leaks from one file's imports into
+     another, or from a module loaded for someone else.
+   - `alias.name` after `use m :as alias` is rewritten to `m`'s private
+     `name` — unless a local called `alias` is in scope, which shadows
+     it (then it is the local's field).
+   - Specs (with variants), effects (with ops), protos (with methods) and
+     newtypes keep their names program-wide, so for them the check is
+     the enforcement: a file names one only if it declares or imports it
+     (`use m {Mode}` brings `Mode` and its variants). They are not
+     reached through an alias. Effects that builtins perform (`Console`,
+     `Time`, `Env`, `Random`, `JVM`) and builtin specs (`Int`, `Str`, …,
+     `Ok`, `Err`) need no import.
+   - Errors, each naming the file and position: a module's pub name the
+     file does not import (with the `use` line to add); a module's private
+     name; a module naming something only the program defines; a name two
+     `:open` imports both export, when the file uses it; `use m {nope}`
+     and `alias.nope` for a name `m` does not export; `pub use m :as a`.
+     Any other unknown name is left to the emitter to report.
+   - `pub use m :open` / `pub use m {names}` add those names to the
+     module's own exports.
+   - Builtins are `Builtins.install`'s names, `ClassEmitter`'s constant
+     names and `IntrinsicsEmitter.NAMES` (kept equal to
+     `emitBuiltinApp`'s labels by `IntrinsicsNamesTest`).
+5. REPL sessions (`BytecodeSession`): each eval imports what earlier
+   evals imported and reaches the names they defined as its own. Their
+   `use` lines are prepended, so each eval inlines the modules again: a
+   module's top-level state starts afresh in every eval.
 
 The output of `ModuleInliner` is a single flat `List<Decl>` — both
 back-ends consume that.
@@ -209,8 +211,9 @@ yet emit the envelope (specs aren't runtime-checked in bytecode) — gap.
 
 ## What modules don't do
 
-- **Re-export.** `use std.list :open` doesn't re-export those names
-  from your module. Importers see your pubs only.
+- **Re-export by accident.** `use std.list :open` doesn't re-export
+  those names from your module: importers see your pubs, plus what you
+  pass on with `pub use`.
 - **Versioned imports.** All `use std.list` in one program resolve to
   the same `std/list.irj`. No multiple-version mixing.
 - **Late binding.** A `pub` change requires a rebuild. (Hot-redef

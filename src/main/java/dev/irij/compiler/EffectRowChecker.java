@@ -125,6 +125,12 @@ public final class EffectRowChecker {
         BUILTIN_EFFECTS = java.util.Map.copyOf(m);
     }
 
+    /** The effects {@link #BUILTIN_EFFECTS} requires: named in effect rows
+     *  without an import ({@link ModuleScope}). */
+    static java.util.Set<String> builtinEffectNames() {
+        return java.util.Set.copyOf(BUILTIN_EFFECTS.values());
+    }
+
     /** Local-var-name → capability-effect map for the fn body currently
      *  being walked. Populated by walking Stmt.Bind with an effect-name
      *  spec annotation. Consulted at DotAccess sites to require the

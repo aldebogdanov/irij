@@ -1,5 +1,6 @@
 use std.test :open
 use std.collection :open
+use std.list {map filter}
 
 ;; ── zip / zip-with / enumerate ───────────────────────
 

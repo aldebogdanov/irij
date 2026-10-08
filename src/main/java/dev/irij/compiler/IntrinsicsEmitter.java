@@ -36,6 +36,24 @@ final class IntrinsicsEmitter implements Opcodes {
     }
 
 
+    /** Every name {@link #emitBuiltinApp} handles: builtins a file reaches
+     *  without an import ({@link ModuleScope}). IntrinsicsNamesTest keeps it
+     *  equal to the switch's labels. */
+    static final java.util.Set<String> NAMES = java.util.Set.of(
+            "abs", "assoc", "await", "ceil", "char-at", "char-code", "concat", "conj", "const",
+            "constant-time-eq?", "contains?", "cos", "dbg", "dissoc", "drop", "empty?",
+            "ends-with?", "env", "error", "exp", "flip", "floor", "fold", "from-char-code",
+            "get", "get-env", "head", "hmac-sha256-hex", "identity", "index-of", "join",
+            "json-encode", "json-encode-pretty", "json-parse", "keys", "last", "length", "log",
+            "lower-case", "max", "merge", "min", "not", "now-ms", "nth", "par", "parse-float",
+            "parse-int", "pbkdf2-sha256-hex", "pow", "print", "println", "program-args", "quo",
+            "race", "random-float", "random-int", "random-token", "raw-nrepl-eval-sandboxed",
+            "read-line", "rem", "replace", "reverse", "round", "sha256-hex", "sin", "sleep",
+            "sort", "spawn", "split", "sqrt", "starts-with?", "substring", "tail", "take",
+            "tan", "timeout", "to-set", "to-str", "to-tuple", "to-vec", "toml-parse", "trim",
+            "try", "type-of", "upper-case", "url-decode", "url-encode", "validate", "validate!",
+            "vals");
+
     boolean emitBuiltinApp(String name, List<Expr> args, MethodVisitor mv, Locals locals) {
         emitBuiltinEffectCheck(name, mv);
         switch (name) {

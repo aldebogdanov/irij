@@ -26,8 +26,8 @@ Terms used throughout the internals docs.
 | **IrijFn** | SAM interface `(Object[]) -> Object` representing a first-class function value. `invokeBuiltin` + `LambdaMetafactory` produce these. |
 | **Lifted local** | A local variable that must survive a SM perform. Stored in `k.fields[idx]` instead of a JVM local slot. |
 | **Int** | Irij's integer: arbitrary precision, never wraps. A `Long` while it fits in 64 bits, a `BigInteger` only beyond (canonical). See `stdlib.md` § Numbers. |
-| **Forwarder** | The public `fn name` ModulePrivacy adds for a module's pub fn `name`, whose body calls the module-qualified `name$module$path`. Importers call the forwarder; the module calls its own fn directly, so a same-named definition elsewhere can't rewire it. Emits no spec checks. See `modules.md`. |
-| **Module privacy** | A module's non-`pub` top-level fns, bindings, handlers and caps are renamed `name$module$path` before inlining (`ModulePrivacy`), so no other module or the program can see or replace them; its pub fns and bindings are renamed too and reached through forwarders. See `modules.md`. |
+| **Module privacy** | Every top-level fn, binding, handler and cap of a module is renamed `name$module$path` before inlining (`ModulePrivacy`), so nothing outside it can see or replace them; importers reach its pub names only through name resolution. See `modules.md`. |
+| **Name resolution** | `ModuleScope`: per file, a bare name is a local, the file's own, an import, or a builtin; an import is rewritten to the module's private name, and a module's name the file doesn't import is a compile error. Specs, effects, protos and newtypes are imported by name. See `modules.md`. |
 | **MutableCallSite** | JSR-292 (`java.lang.invoke`) call site whose target can be swapped at runtime. Used for hot-redef. |
 | **nREPL** | Network REPL — Clojure-flavoured protocol. Irij hosts an nREPL server with bytecode-backed sessions (`BytecodeSession`); each connection gets a per-session classloader + namespace. |
 | **OpSection** | `(+)` etc. as a first-class fn value. Lowered to `GETSTATIC RuntimeSupport.OP_ADD` etc. |

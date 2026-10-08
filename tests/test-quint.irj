@@ -1,6 +1,8 @@
 use std.test :open
 use std.fs :open
 use std.quint :open
+use std.text {contains-substr?}
+use std.collection {map-vals}
 
 ;; Model-based testing, replayed against the traces recorded from
 ;; Quint 0.32.0 into tests/quint/. Nothing here starts a process:

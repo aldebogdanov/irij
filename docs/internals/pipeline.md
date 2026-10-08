@@ -20,7 +20,7 @@ How a `.irj` source file becomes a running program.
                          ▼
                   ┌─────────────┐
                   │  Inliner    │   `ModuleInliner` resolves `use mod.X`,
-                  │             │   inlines pub decls, rewrites alias refs
+                  │             │   resolves each file's names (ModuleScope)
                   └─────────────┘
                          │ Combined module tree
                          ▼

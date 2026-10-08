@@ -6,9 +6,10 @@ This page lists everything that can change how **your** code behaves,
 what you must check, and what you can now do. Read it once before
 continuing; the checklist at the end is the short version.
 
-All of it is released as **Irij v0.9.270**. Update your CLI before
-continuing: download `irij.jar` from the v0.9.270 GitHub release, or build
-from `main` with `./gradlew install`. Check with `irij --version`.
+All of it is released as **Irij v0.9.270**, except the import rules
+(§2, *Imports are enforced*), released as **v0.9.277**. Update your CLI
+before continuing: download `irij.jar` from the latest GitHub release, or
+build from `main` with `./gradlew install`. Check with `irij --version`.
 
 ---
 
@@ -90,10 +91,27 @@ also a compile error, since `false` can never be called.
   module's code always calls its own `pub` fns (and plain `pub` bindings).
   Your own top-level `shout` shadows the imported one *for your code
   only*. With `use m :as a`, `a.shout` always means the module's
-  `shout`, even if you have one too. Two modules you import `:open` that
-  both export a name still collide in *your* code (the later `use`
-  wins) — import one of them `:as` to choose explicitly. Pub handlers
-  and caps remain program-wide names: don't reuse them.
+  `shout`, even if you have one too.
+- **Imports are enforced (v0.9.277).** A file reaches only what it
+  declares, what its own `use` lines import, and builtins. Before, every
+  `pub` name of every loaded module resolved bare everywhere: `use m :as
+  m` or `use m {a}` still let you write `b`, a name another file imported
+  worked in yours, and a module's `pub fn length` replaced the builtin
+  `length` in every file. Now each of those is a compile error that names
+  the module and the `use` line to add:
+  `` `twice` is not imported here: it is lib.m's; import it with `use lib.m {twice}`, or write `m.twice` after `use lib.m :as m` at main.irj:2:10 ``.
+  Specs, effects, protos and newtypes are imported by name and bring
+  their members: `use m {Mode}` brings the spec and its variants, `use m
+  {Tick}` the effect and its ops — also when you only name it in a row
+  (`::: FileIO` needs `use std.fs {FileIO}`). They aren't reached through
+  an alias (`m.Calm` is an error). Builtin effects (`Console`, `Time`,
+  `Env`, `Random`, `JVM`) and specs (`Int`, `Str`, `Ok`, `Err`, …) need no
+  import. `use m {nope}` and `m.nope` for a name `m` doesn't export are
+  errors too (they used to be silently ignored). A name two `:open`
+  imports both export is an error where you use it: import one `:as`. A
+  local now shadows an alias (`(m -> m.x)` is the parameter's field).
+  `pub use m {names}` re-exports. In a REPL, an eval keeps the imports of
+  the evals before it.
 - **Spec-lint is back.** `irij <file>` and `irij build` print a warning
   on stderr for every `pub fn` without a `::` spec annotation, including
   in your own modules and seeds. Add the specs (use `_` where the shape
@@ -242,15 +260,21 @@ So:
 5. Your own fn names that collide with `pub` fns of modules you use are
    now harmless to the modules, but your code sees *yours* — make sure
    that's what you mean; use `alias.name` (`use m :as alias`) to call
-   the module's. Don't reuse the names of pub *handlers*.
-6. Static assets: everything the browser fetches directly must be under
+   the module's.
+6. Imports (v0.9.277): compile and run everything once; each "is not
+   imported here" error names the `use` line to add. Expect them for
+   variants used after `use m :as m` (add `use m {Spec}`), for effects
+   named in rows (`use std.fs {FileIO}`, `use std.proc {Proc}`), for
+   names a module got through another module's `:open`, and for
+   `use m {names}` lists naming something `m` doesn't export.
+7. Static assets: everything the browser fetches directly must be under
    `resources/`.
-7. Response headers built from request data: validate (no CR/LF).
-8. Stored password hashes: keep `verify-password`; add
+8. Response headers built from request data: validate (no CR/LF).
+9. Stored password hashes: keep `verify-password`; add
    `password-needs-rehash?` + re-hash on successful login. Don't call
    `hash-password` per request.
-9. Secrets compared with `==`: switch to `constant-time-eq?`.
-10. Fibers that catch errors around `sleep` or loops to keep going after
+10. Secrets compared with `==`: switch to `constant-time-eq?`.
+11. Fibers that catch errors around `sleep` or loops to keep going after
     cancellation: let cancellation end them.
-11. `pub fn`s without specs: the build now warns — add specs.
-12. Remove any workaround for slow `conj`/`assoc`/`tail`.
+12. `pub fn`s without specs: the build now warns — add specs.
+13. Remove any workaround for slow `conj`/`assoc`/`tail`.

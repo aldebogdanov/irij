@@ -45,7 +45,7 @@ final class FnEmitter implements Opcodes {
     void emitInputSpecChecks(Decl.FnDecl fn, MethodVisitor mv,
                                       List<Pattern> params) {
         List<dev.irij.ast.SpecExpr> specs = fn.specAnnotations();
-        if (specs == null || specs.size() < 2 || ce.forwarders.contains(fn)) return;
+        if (specs == null || specs.size() < 2) return;
         int inputCount = specs.size() - 1; // last is output
         for (int i = 0; i < inputCount && i < params.size(); i++) {
             dev.irij.ast.SpecExpr spec = specs.get(i);
@@ -377,9 +377,8 @@ final class FnEmitter implements Opcodes {
         // Capture the output spec (last entry in specAnnotations) so
         // every tail-return validates against it. Non-validatable specs
         // (wildcard / lowercase var) → null, no per-return overhead.
-        boolean fwd = ce.forwarders.contains(fn);
-        ce.currentOutputSpec = fwd ? null : outputSpecEncoded(fn);
-        ce.currentOutputSpecClass = fwd ? null : primitiveSpecClass(outputSpec(fn));
+        ce.currentOutputSpec = outputSpecEncoded(fn);
+        ce.currentOutputSpecClass = primitiveSpecClass(outputSpec(fn));
         installPostSlots(fn, mv, locals);
 
         // Runtime effect-row tracking. Push this fn's declared row onto

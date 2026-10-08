@@ -1,5 +1,7 @@
 mod std.datastar
 
+use std.serve {Serve}
+
 ;; Datastar SDK for Irij
 ;; Server-side helpers for the Datastar hypermedia framework.
 ;; Datastar uses Server-Sent Events (SSE) with two event types:

@@ -91,6 +91,16 @@ public final class IrijCompiler {
     public static Map<String, byte[]> compileDeclsMulti(List<Decl> decls, String className,
                                        Path sourceRoot, CompileOptions opts,
                                        List<Path> seedRoots, String sourceFile) {
+        return compileDeclsMulti(decls, className, sourceRoot, opts, seedRoots, sourceFile, java.util.Set.of());
+    }
+
+    /** {@link #compileDeclsMulti} for one eval of a REPL session:
+     *  {@code sessionNames} are the top-level names earlier evals defined,
+     *  which this one may use as its own. */
+    public static Map<String, byte[]> compileDeclsMulti(List<Decl> decls, String className,
+                                       Path sourceRoot, CompileOptions opts,
+                                       List<Path> seedRoots, String sourceFile,
+                                       java.util.Set<String> sessionNames) {
         // Resolve the root source-file name ONCE so the inliner (which
         // stamps each root fn's origin) and the emitter (which derives
         // the root class's SourceFile) agree. A mismatch would split
@@ -98,12 +108,11 @@ public final class IrijCompiler {
         String rootFile = sourceFile != null ? sourceFile
                 : (className.substring(className.lastIndexOf('.') + 1) + ".irj");
         var inliner = new ModuleInliner(sourceRoot, seedRoots,
-                opts.specLint() ? System.err::println : null);
+                opts.specLint() ? System.err::println : null, sessionNames);
         try {
             List<Decl> inlined = inliner.inline(decls, rootFile);
             EffectRowChecker.check(inlined, inliner.fnFile());
-            return new ClassEmitter(className, inliner.aliases(), opts, rootFile, inliner.fnFile())
-                    .withForwarders(inliner.forwarders())
+            return new ClassEmitter(className, opts, rootFile, inliner.fnFile())
                     .emitProgram(inlined);
         } catch (StackOverflowError e) {
             // Every pass recurses over the AST; past a few thousand levels

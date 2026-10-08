@@ -367,9 +367,10 @@ runtime row stack for dynamic dispatch through fn values.</li>
 <h2 id="modules"><span class="no">10</span>Modules, seeds &amp; versioning</h2>
 
 <p><code>use vrata.html</code> is resolved by <code>ModuleInliner</code> at
-compile time: the module's source is parsed, its <code>pub</code> decls are
-unwrapped, short-name aliases are rewritten at call and dot-access positions,
-and everything lands in one decl list (per-file classes keep stack traces
+compile time: the module's source is parsed, its top-level names are renamed
+to private ones, each file's names are resolved against that file's own
+<code>use</code> lines (a module's names reach only the files that import
+them), and everything lands in one decl list (per-file classes keep stack traces
 honest, §4). Lookup order: stdlib classpath (<code>std/*.irj</code>) →
 project source roots → installed seeds.</p>
 

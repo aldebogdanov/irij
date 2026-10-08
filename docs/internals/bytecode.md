@@ -287,12 +287,11 @@ R5a groundwork closed three gaps that previously blocked flipping
   `Range` into a `List<Object>` on demand. Stdlib HOFs that take a
   range (`zip`, `zip-with`, `enumerate`, `partition`, `interleave`,
   `window`) work in bytecode without a `to-vec` coercion.
-- **Module-export dedupe on emit** — `ClassEmitter` collects
-  top-level `FnDecl`s into a `LinkedHashMap` keyed by name before
-  emitting JVM methods. When `:open` brings in a name the opener
-  also defines (e.g. `std.collection` re-exporting `sum` from
-  `std.list`), the last definition wins and only one method is
-  emitted, avoiding `ClassFormatError: Duplicate method name`.
+- **Fn dedupe on emit** — `ClassEmitter` collects top-level `FnDecl`s
+  into a `LinkedHashMap` keyed by name before emitting JVM methods, so a
+  fn defined twice in one program emits one method, the last, avoiding `ClassFormatError: Duplicate method name`. A module's
+  names are private (`name$module$path`), so two modules never share
+  one.
 
 Already at parity: input + output spec validation, user-declared
 product/sum specs (clinit-registered), pre/post + in/out contracts,
