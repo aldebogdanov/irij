@@ -180,10 +180,14 @@ in place), as its bindings of other names always were. A lifted name
 lives in the continuation only so it survives a perform; the classifier
 lowers a branch that performs into blocks of the step's root scope, so
 code in a nested scope never needs that. Writing the field would rebind
-the step's own name for the code after the block. Those lowered
-branches still share the lifted fields by name, so a binding in a
-branch that performs does leak (see TODO.md). `IfBranchScopeTest` pins
-the rest.
+the step's own name for the code after the block. A branch that
+performs is lowered into the step's root scope itself, where lifted
+fields are keyed by name, so `SmClassifier`'s `EffIRBuilder.scoped`
+gives each of its bindings a fresh name (`x$if$N`) first: the binder
+and every later use in the branch, not the binding's own initializer.
+The rename is module privacy's (`ModulePrivacy.renamed`), binders and
+uses alike, so an inner binder of the same name stays consistent.
+`IfBranchScopeTest` pins all of this.
 
 ### `&&` / `||` are branches, not calls
 
