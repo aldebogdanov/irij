@@ -61,6 +61,7 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 
 - **Infix operators inside `#[...]`:** `#[a ++ b]` fails. Wrap: `#[(a ++ b)]`.
 - **Function calls inside `#[...]`:** `#[route "GET" "/" h]` parses as 4 elements. Wrap: `#[(route "GET" "/" h)]`.
+- **A negative element needs parentheses.** `#[-1 2]` is `#[-(1 2)]`: unary minus takes the whole juxtaposition, as `-f x` is `-(f x)`, and it fails at run time with "Not callable: 1". After the first element, a minus is subtraction: `#[1 -2]` is `#[(1 - 2)]`, i.e. `#[-1]`. Write `#[(-1) 2]` and `#[1 (-2)]`. The same holds for sets and tuples.
 
 ## Maps
 
@@ -79,8 +80,8 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 
 ## Blocks and `if`
 
-- **Inline `if` always needs `else`.** `(if c a b)` does not parse; write `(if c a else b)`. The block form needs it too. The error surfaces at the *next* declaration, not at the `if`.
-- **A branch cannot introduce a binding.** `if c ... else` with `x := …` inside the else block fails; compute the value before the `if` and choose between the two results.
+- **Inline `if` always needs `else`.** `(if c a b)` does not parse; write `(if c a else b)`. The error surfaces at the *next* declaration, not at the `if`. The block form doesn't: without `else`, a branch not taken gives `()`.
+- **A branch's bindings end with the branch.** `x := …` inside a block-form `if` branch is visible to the rest of that branch only, as in a match arm; to use a value after the `if`, bind the `if` itself (`x := if c` / `  a` / `else` / `  b`). `x <- …` in a branch still assigns an enclosing `x :! …`.
 - **Multi-line call arguments must line up on a multiple of two.** Continuation lines under a call (`fold f\n     acc\n     v`) are an indentation error at 5 or 7 spaces. Bind the intermediates instead.
 - **A record spread wants a bare name.** `{...r.failure k= v}` does not parse; bind `f := r.failure` first.
 
