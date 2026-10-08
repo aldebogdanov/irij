@@ -156,4 +156,64 @@ class LambdaCaptureTest {
                 println (call-it (-> counter + 1))
                 """));
     }
+
+    private static final String TICK = """
+            effect Counter
+              tick :: () -> Int
+
+            handler acc :: Counter
+              tick () => resume 7
+
+            fn call-it :: Fn _
+              => f
+              f ()
+
+            """;
+
+    /**
+     * In a `with` body, a name that must survive a perform lives in the
+     * continuation, not a JVM slot. A lambda didn't capture it, and its
+     * body read it through the continuation slot of the enclosing step —
+     * which isn't there in the lambda's own method (VerifyError).
+     */
+    @Test void lambdaInBranchThatPerformsCapturesTheLiftedName() throws Exception {
+        assertEquals("8\n0", run(TICK + """
+                with acc
+                  if true
+                    t := tick ()
+                    println (call-it (_ -> t + 1))
+                  println 0
+                """));
+    }
+
+    @Test void lambdaSeesTheBranchsOwnBindingNotTheBodys() throws Exception {
+        assertEquals("8\n1", run(TICK + """
+                with acc
+                  x := 1
+                  if true
+                    x := tick ()
+                    println (call-it (_ -> x + 1))
+                  println x
+                """));
+    }
+
+    @Test void nestedLambdasCaptureTheLiftedName() throws Exception {
+        assertEquals("9\n0", run(TICK + """
+                with acc
+                  if true
+                    t := tick ()
+                    println (call-it (_ -> (call-it (_ -> t + 2))))
+                  println 0
+                """));
+    }
+
+    /** A nested `with` is a step of its own, with its own continuation. */
+    @Test void nestedWithReadsTheOuterLiftedName() throws Exception {
+        assertEquals("8", run(TICK + """
+                with acc
+                  t := tick ()
+                  with acc
+                    println (t + 1)
+                """));
+    }
 }

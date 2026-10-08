@@ -39,7 +39,8 @@ final class LambdaEmitter implements Opcodes {
         }
         String restName = lam.restParam();
 
-        // 2. Determine free vars (any Var referring to an outer local slot).
+        // 2. Determine free vars (any Var referring to an outer local slot
+        //    or a lifted local of the enclosing state-machine step).
         Set<String> bound = new HashSet<>(paramNames);
         if (restName != null) bound.add(restName);
         List<String> captures = new ArrayList<>();
@@ -94,7 +95,19 @@ final class LambdaEmitter implements Opcodes {
             clauseHandler = new Label();
             lm.visitLabel(clauseTryStart);
         }
-        ce.exprEm.emitExpr(lam.body(), lm, inner);
+        // The body is a method of its own: an enclosing state-machine
+        // step's continuation (its lifted locals) isn't reachable here.
+        // What the body reads of it was captured above.
+        java.util.Map<String, Integer> savedLifted = ce.currentLiftedLocals;
+        int savedKSlot = ce.currentKSlot;
+        ce.currentLiftedLocals = java.util.Map.of();
+        ce.currentKSlot = -1;
+        try {
+            ce.exprEm.emitExpr(lam.body(), lm, inner);
+        } finally {
+            ce.currentLiftedLocals = savedLifted;
+            ce.currentKSlot = savedKSlot;
+        }
         if (clauseEffects != null) {
             // Normal exit: pop, then return the value left on stack.
             lm.visitMethodInsn(INVOKESTATIC, RtOwners.of("exitFn"), "exitFn", "()V", false);
@@ -111,9 +124,7 @@ final class LambdaEmitter implements Opcodes {
         lm.visitEnd();
 
         // 4. At the call site: push captures, then invokedynamic → IrijFn.
-        for (String cap : captures) {
-            mv.visitVarInsn(ALOAD, outerLocals.lookup(cap));
-        }
+        for (String cap : captures) ce.exprEm.emitVarLoad(cap, mv, outerLocals);
         StringBuilder indyDesc = new StringBuilder("(");
         for (int i = 0; i < captures.size(); i++) indyDesc.append(ClassEmitter.OBJ_DESC);
         indyDesc.append(")").append(ClassEmitter.IRIJ_FN_DESC);
@@ -142,7 +153,8 @@ final class LambdaEmitter implements Opcodes {
     }
 
 
-    /** Walk Expr, collecting names referenced but not bound, that resolve to outer locals. */
+    /** Walk Expr, collecting names referenced but not bound, that resolve to outer locals
+     *  (slots, or lifted locals of the enclosing state-machine step). */
     void collectFreeVars(Expr e, Set<String> bound, Locals outer,
                                   List<String> out, Set<String> seen) {
         if (e == null) return;
@@ -167,7 +179,11 @@ final class LambdaEmitter implements Opcodes {
                 // inside any library fn it called — silently, with a
                 // wrong value.
                 if (ce.isTopLevelSlot(n, outer)) break;
-                if (!bound.contains(n) && outer.lookup(n) != null && !seen.contains(n)) {
+                // A state-machine step's lifted local lives in its
+                // continuation, which the lambda's own method can't reach:
+                // capture it like a slot.
+                boolean lifted = ce.currentLiftedLocals.containsKey(n) && ce.currentKSlot >= 0;
+                if (!bound.contains(n) && (outer.lookup(n) != null || lifted) && !seen.contains(n)) {
                     seen.add(n);
                     out.add(n);
                 }

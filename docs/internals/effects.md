@@ -107,7 +107,14 @@ work first.
   `StateMachineWithTest.java` (op-call in if-condition, composed
   handler bound to a local, tier-c clauses crossing composed chains,
   tier-c resume-value flow-through) are all closed as of v0.7.0 —
-  zero `@Disabled` SM tests remain.
+  zero `@Disabled` SM tests remain. Still unsupported: an op performed
+  directly in a `match` arm, and a `with` inside a branch that performs
+  (TODO.md); a call to a fn that performs is fine anywhere.
+
+A lambda or nested `with` built inside a step is a method of its own:
+it captures the lifted locals it reads (`LambdaEmitter.collectFreeVars`
+treats them like slots), and its body is emitted with the lifted-locals
+context cleared, since the step's continuation isn't reachable there.
 
 ### Tail-position value of a `with` body
 
