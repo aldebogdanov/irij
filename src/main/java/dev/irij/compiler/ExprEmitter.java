@@ -632,11 +632,6 @@ final class ExprEmitter implements Opcodes {
                     return;
                 }
             }
-            // `mod.name` where mod is a `use` alias: resolve as unqualified name.
-            if (ce.moduleAliases.contains(v.name())) {
-                emitVarLoad(da.field(), mv, locals);
-                return;
-            }
         }
         // Interop fallthrough: evaluate target, delegate to JavaInterop.
         emitExpr(da.target(), mv, locals);
@@ -1076,14 +1071,6 @@ final class ExprEmitter implements Opcodes {
     void emitApp(Expr.App app, MethodVisitor mv, Locals locals) {
         if (app.fn() instanceof Expr.TypeRef tr) {
             emitConstructorApp(tr.name(), app.args(), mv, locals);
-            return;
-        }
-        // `mod.fn x` where mod is a `use` alias → call unqualified fn.
-        if (app.fn() instanceof Expr.DotAccess da
-                && da.target() instanceof Expr.Var modVar
-                && ce.moduleAliases.contains(modVar.name())) {
-            emitApp(new Expr.App(new Expr.Var(da.field(), null), app.args(), null),
-                    mv, locals);
             return;
         }
         // `cap-name.method args` where cap-name is registered → dispatch

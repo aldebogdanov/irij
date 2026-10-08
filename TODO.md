@@ -844,9 +844,17 @@ Full design and the recorded Quint behaviour it rests on:
       applied by juxtaposition or be an operator operand (compile error
       with fixes); parens or `~` disambiguate. Spec §1.3.2.
 - [x] **Pub names are module-scoped (2026-10)** — a module's own calls to
-      its pub fns/bindings always reach its own definitions (renamed +
-      public forwarder); `alias.name` is exact. Pub handlers/caps, mutable
-      pub bindings and rest-param pub fns stay program-wide.
+      its pub fns/bindings always reach its own definitions.
+- [x] **Imports are enforced (2026-10, v0.9.277)** — each file reaches only
+      what it declares, imports or has as a builtin (`ModuleScope`); every
+      module value is private-named, forwarders are gone, a module's pub
+      name the file doesn't import is a compile error naming the import.
+      Specs/effects/protos/newtypes are imported by name with their
+      members. A local shadows an alias. `pub use m :open|{names}`
+      re-exports. REPL evals carry earlier imports.
+- [ ] **Qualified type-level names** — `m.Variant` in patterns, `::: m.Tick`
+      and `:: Int m.Mode` don't parse; specs, variants and effects are
+      imported by name meanwhile.
 - [ ] **Open from the audit** —
   - Composite set elements (vectors, maps) with colliding hashCodes share
     a flat bucket in PSet; scalars are SipHash-protected.

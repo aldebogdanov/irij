@@ -167,6 +167,19 @@ class NReplSessionTest {
         assertEquals("Hi, World", resp.get("value"));
     }
 
+    /** Each eval imports what earlier evals imported, and reaches the names
+     *  they defined as its own — but nothing they didn't import. */
+    @Test void importsAndNamesCarryAcrossEvals() {
+        var session = new NReplSession();
+        assertNull(eval(session, "use std.text :as str\nfn shout :: Str Str\n  (s -> s ++ \"!\")").get("err"));
+        assertEquals("#[a b]", eval(session, "str.words \"a b\"").get("value"));
+        assertEquals("hi!", eval(session, "shout \"hi\"").get("value"));
+        String err = String.valueOf(eval(session, "words \"a b\"").get("err"));
+        assertTrue(err.contains("`words` is not imported here: it is std.text's"), err);
+        assertNull(eval(session, "fn words :: Str Str\n  (s -> \"mine\")").get("err"));
+        assertEquals("mine", eval(session, "words \"a b\"").get("value"));
+    }
+
     /** A session with no project (null root) still works for seed-free
      *  code — the resolver degrades to no seeds. */
     @Test void evalWithoutProjectRootStillWorks() {

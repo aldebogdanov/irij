@@ -510,26 +510,48 @@
    ;; module declaration (one per file, mirrors path)
    mod myapp.auth.jwt
 
-   ;; imports
-   use std.io          ;; qualified: io.read-file
-   use std.json :open  ;; unqualified: parse, encode
-   use std.http {get post}  ;; selective
+   ;; imports: every `use` names how its names are reached
+   use std.text :as str        ;; qualified: str.words, str.lines
+   use std.collection :open    ;; every pub name, bare: zip, distinct, …
+   use std.http {Http default-http}  ;; just these, bare
 
-   ;; re-export
-   pub use internal.helpers
+   ;; re-export: importers of this module get these names too
+   pub use internal.helpers {parse-claims}
 
    ;; visibility
    pub fn public-api ...       ;; exported
    fn internal-helper ...      ;; module-private
    #+end_example
 
+   *What a file can name.* A bare name means, in order: a local (a
+   parameter, a pattern variable, a local binding), the file's own
+   top-level definition, a name the file imports with =:open= or
+   ={names}=, or a builtin. Nothing else: a module's names reach only the
+   files that import them, so a name another module imported, or a module
+   loaded for some other file, is not in scope. =alias.name= after =use m
+   :as alias= means =m='s =name=, unless a local called =alias= is in
+   scope, which shadows it. Naming a pub name of a module the file does
+   not import, a name a module keeps private, or a name =m= does not
+   export (=use m {nope}=, =alias.nope=) is a compile error that says
+   which module has the name and how to import it.
+
+   Specs, effects, protos and newtypes are imported by name, and bring
+   their members: =use m {Mode}= brings spec =Mode= and its variants,
+   =use m {Tick}= brings effect =Tick= and its ops. They are not reached
+   through an alias (=m.Calm= is an error naming the import to write),
+   and a file that only names an effect in a row (=::: Tick=) imports it
+   all the same. The effects builtins perform (=Console=, =Time=, =Env=,
+   =Random=, =JVM=) and the builtin specs (=Int=, =Str=, …, with =Ok= and
+   =Err=) need no import.
+
    *Scoping.* A module's own code always refers to its own top-level
    definitions, exported or not: nothing an importer defines can replace
    them. An importer's own top-level definition of a name shadows an
-   imported one for the importer's code only, and =alias.name= (after
-   =use m :as alias=) always means =m='s definition. When two modules
-   imported with =:open= export the same name, import one of them with
-   =:as= to choose.
+   imported one for the importer's code only. When two modules imported
+   with =:open= export a name the file uses, that use is a compile error:
+   import one of them with =:as= to choose. =pub use m :open= and =pub use
+   m {names}= pass those names on to the module's importers; a re-export
+   names what it passes, so =pub use m :as alias= is an error.
 
 * Part III: Algebraic Effects — The Universal Joint
 

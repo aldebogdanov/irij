@@ -132,7 +132,7 @@ class ModulePrivacyTest {
     }
 
     @Test void rowVariableErrorsNameTheFnAsWrittenAndItsFile() throws Exception {
-        module("lib.row", "mod lib.row\n\nuse std.collection :open\n\npub fn total :: Vec Int\n  (xs -> fold (acc x -> println x) 0 xs)\n");
+        module("lib.row", "mod lib.row\n\nuse std.list {fold}\n\npub fn total :: Vec Int\n  (xs -> fold (acc x -> println x) 0 xs)\n");
         String m = compileError("use lib.row :open\nprintln (total #[1])\n");
         assertTrue(m.contains("in fn total\n  at lib/row.irj:6:") && m.contains("call 'fold'") && !m.contains("$"), m);
     }
@@ -140,7 +140,7 @@ class ModulePrivacyTest {
     @Test void aliasQualifiedHandlersAreTheHandlers() throws Exception {
         // A nested `with` of a qualified handler failed state-machine
         // lowering: `m.tock-one` stayed a dot access, which the lowering
-        // can't classify; it is the program-wide handler `tock-one`.
+        // can't classify; it is lib.h's handler, under its private name.
         module("lib.h", """
                 mod lib.h
 
@@ -171,7 +171,7 @@ class ModulePrivacyTest {
                 println (run ())
                 """));
         module("lib.only", "mod lib.only\n\npub effect Beep\n  beep :: () Int\n\npub handler beep-seven :: Beep\n  beep => resume 7\n");
-        assertEquals("7", run("use lib.only :as o\n\nfn go :: () Int\n  => _\n  with o.beep-seven\n    with o.beep-seven\n      beep ()\n\nprintln (go ())\n"));
+        assertEquals("7", run("use lib.only :as o\nuse lib.only {Beep}\n\nfn go :: () Int\n  => _\n  with o.beep-seven\n    with o.beep-seven\n      beep ()\n\nprintln (go ())\n"));
     }
 
     @Test void pubNamesStayReachable() throws Exception {

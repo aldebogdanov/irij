@@ -48,8 +48,9 @@ pub fn assert-throws :: Fn ()
 
 ;; ── Test runner ─────────────────────────────────────
 
-;; Run a single test. Returns #(:pass name) or #(:fail name).
-pub fn test :: Str Fn Tuple ::: Console Time Random Env FileIO Http Db Serve Session JVM
+;; Run a single test. Returns #(:pass name) or #(:fail name). The thunk's
+;; effects are the caller's to have (`eff`), as with std.list's `fold`.
+pub fn test :: Str (Fn):eff Tuple ::: Console eff
   => name thunk
   result := try thunk
   match result

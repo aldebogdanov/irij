@@ -134,15 +134,6 @@ final class ClassEmitter implements Opcodes {
      *  their own methods) don't inherit the outer fn's output spec. */
     String currentOutputSpec = null;
 
-    /** Pub-fn forwarders added by ModulePrivacy (by identity). Their only
-     *  job is to call the module's real fn, which checks the specs, so
-     *  they emit no spec checks of their own. */
-    java.util.Set<Decl.FnDecl> forwarders = java.util.Set.of();
-
-    ClassEmitter withForwarders(java.util.Set<Decl.FnDecl> fwd) {
-        this.forwarders = fwd;
-        return this;
-    }
 
     /** A fn's name as the user wrote it: module-qualified names
      *  ({@code shout$lib$p}, see ModulePrivacy) lose their suffix. */
@@ -175,7 +166,6 @@ final class ClassEmitter implements Opcodes {
     // most one wrapper per class.
     final Set<String> emittedFnWrappers = new HashSet<>();
 
-    final Set<String> moduleAliases;
     final CompileOptions options;
 
     // ── Emitter modules (split from this class, PR1 2026-07) ──
@@ -190,28 +180,13 @@ final class ClassEmitter implements Opcodes {
     final ProtoEmitter protoEm = new ProtoEmitter(this);
 
     ClassEmitter(String className) {
-        this(className, Set.of(), CompileOptions.defaults(), null);
+        this(className, CompileOptions.defaults(), null, Map.of());
     }
 
-    ClassEmitter(String className, Set<String> moduleAliases) {
-        this(className, moduleAliases, CompileOptions.defaults(), null);
-    }
-
-    ClassEmitter(String className, Set<String> moduleAliases, CompileOptions options) {
-        this(className, moduleAliases, options, null);
-    }
-
-    ClassEmitter(String className, Set<String> moduleAliases,
-                  CompileOptions options, String sourceFile) {
-        this(className, moduleAliases, options, sourceFile, Map.of());
-    }
-
-    ClassEmitter(String className, Set<String> moduleAliases,
-                  CompileOptions options, String sourceFile,
+    ClassEmitter(String className, CompileOptions options, String sourceFile,
                   Map<String, String> fnFile) {
         this.binaryName = className;
         this.internalName = className.replace('.', '/');
-        this.moduleAliases = moduleAliases;
         this.options = options;
         // Default to a synthesized name so JVM stack traces show
         // "Program.irj" instead of "Unknown Source" when the build

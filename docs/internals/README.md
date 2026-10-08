@@ -20,7 +20,7 @@ links back here for depth.
 6. [Tail-call optimization](tco.md) — self-TCO in bytecode, mutual deferral
 7. [Hot redefinition](hot-redef.md) — `invokedynamic` + `MutableCallSite`
 8. [Spec system](specs.md) — runtime validation, contract layers, blame
-9. [Modules](modules.md) — `mod`/`use`, inlining, alias rewriting
+9. [Modules](modules.md) — `mod`/`use`, inlining, name resolution
 10. [Versioning](versioning.md) — commit-count releases, publish guards, dep resolution
 11. [Packaging](packaging.md) — seeds, `irij.toml` manifest, `irij publish`, registry storage
 12. [Concurrency](concurrency.md) — virtual threads, structured concurrency, SM_STACK

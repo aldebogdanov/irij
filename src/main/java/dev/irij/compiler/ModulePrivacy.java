@@ -14,43 +14,35 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Keeps a module's private names private once {@link ModuleInliner} has
+ * Keeps a module's top-level names its own once {@link ModuleInliner} has
  * flattened every module into one program.
  *
  * <p>The emitter resolves top-level names program-wide, so without this a
- * module's private {@code fn helper} and the program's own {@code helper}
- * were one name: whichever was emitted last replaced the other everywhere.
- * A program that happened to define {@code find-route} silently rewired
- * {@code std.serve}'s router; two seeds with the same private helper name
- * called each other's.
+ * module's {@code fn helper} and the program's own {@code helper} were one
+ * name: whichever was emitted last replaced the other everywhere. A program
+ * that happened to define {@code find-route} silently rewired
+ * {@code std.serve}'s router; two seeds with the same helper name called
+ * each other's; and a module's {@code pub fn length} replaced the builtin
+ * {@code length} even in files that never imported it.
  *
- * <p>Each private top-level fn, binding, handler and cap of a module is renamed
- * to {@code name$module$path} — {@code $} can't occur in an Irij
- * identifier, so the new name is fresh. The rename is applied to <em>every</em>
- * occurrence of the identifier in the module (uses, binders, parameters,
- * patterns): renaming one identifier consistently throughout is
+ * <p>Each top-level fn, binding, handler and cap of a module, pub or not, is
+ * renamed to {@code name$module$path} — {@code $} can't occur in an Irij
+ * identifier, so the new name is fresh. The rename is applied to
+ * <em>every</em> occurrence of the identifier in the module (uses, binders,
+ * parameters, patterns): renaming one identifier consistently throughout is
  * meaning-preserving whatever the local scoping, so no scope analysis is
- * needed. Field names, map keys and effect-op names are not identifiers
- * and are left alone. The switches below are exhaustive over the sealed AST
+ * needed. Field names, map keys and effect-op names are not identifiers and
+ * are left alone. The switches below are exhaustive over the sealed AST
  * types, so a new node kind is a compile error here rather than a missed
  * rename.
  *
- * <p><b>Pub names get the same treatment, plus a forwarder.</b> A module's
- * own references to its {@code pub fn shout} must mean that fn even when
- * the program (or another module) also defines {@code shout} — before,
- * the last definition replaced the module's everywhere, including inside
- * the module. So a pub fn is renamed like a private one, and a public
- * forwarder {@code fn shout} — same spec annotations and effect row, a
- * body that just calls {@code shout$module} — is added for importers.
- * A program that defines its own {@code shout} now replaces only that
- * forwarder: its own code sees its {@code shout}, the module keeps its
- * own. The forwarder skips spec validation (the target validates); see
- * {@link Privatized#forwarders}. Plain {@code pub x := …} bindings are
- * forwarded the same way ({@code x := x$module}). Left as program-wide
- * names: pub handlers and caps (a {@code with} must resolve them
- * statically), mutable pub bindings, pub fns with a rest parameter, and a
- * binding that mentions its own name (`pub sqrt := sqrt` re-exports the
- * builtin — renaming would make it refer to itself).
+ * <p>Nothing outside the module can reach a private name by accident:
+ * importers reach a pub one only through {@link ModuleScope}, which rewrites
+ * each name a file imports to the private name it stands for. One exception
+ * stays program-wide: a binding that mentions its own name — {@code pub sqrt
+ * := sqrt} re-exports the builtin, and renaming would make it refer to
+ * itself. Specs, effects, protos and newtypes are type-level and keep their
+ * names; {@link ModuleScope} checks those against each file's imports.
  */
 final class ModulePrivacy {
 
@@ -64,122 +56,54 @@ final class ModulePrivacy {
     /**
      * A module after privatizing.
      *
-     * @param decls      the module's decls, renamed, with forwarders added
-     * @param exports    pub name → the name {@code alias.name} means: the
-     *                   module-qualified name of a forwarded fn or binding,
-     *                   the name itself for one that stays program-wide (a
-     *                   pub handler or cap, …), so {@code with alias.h} is
-     *                   {@code with h}
-     * @param forwarders the forwarder decls, by identity — the emitter emits
-     *                   no spec checks for these
+     * @param decls   the module's decls, renamed
+     * @param exports pub value name → the name it has in the flat program:
+     *                its private name, or the name itself for a
+     *                self-referential re-export ({@code pub sqrt := sqrt})
      */
-    record Privatized(List<Decl> decls, Map<String, String> exports,
-                      Set<Decl.FnDecl> forwarders) {}
+    record Privatized(List<Decl> decls, Map<String, String> exports) {}
 
     /** {@code modDecls} with the module's top-level names made its own. */
     static Privatized privatize(List<Decl> modDecls, String module) {
         Set<String> pub = new HashSet<>();
-        Set<String> privateNames = new HashSet<>();
-        Set<String> forwardable = new HashSet<>();
-        Set<String> notForwardable = new HashSet<>();
+        Set<String> names = new HashSet<>();
         Set<String> selfReferential = new HashSet<>();
         for (Decl d : modDecls) {
             boolean isPub = d instanceof Decl.PubDecl;
             Node inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
-            String name = null;
-            boolean canForward = false;
-            switch (inner) {
+            String name = switch (inner) {
                 case Decl.FnDecl fn -> {
                     if (fn.isPub()) isPub = true;
-                    name = fn.name();
-                    canForward = forwarderArity(fn) >= 0;
+                    yield fn.name();
                 }
                 case Decl.BindingDecl bd -> {
-                    name = simpleTarget(bd.stmt());
-                    if (name != null && mentions(bindValue(bd.stmt()), name)) selfReferential.add(name);
-                    canForward = bd.stmt() instanceof Stmt.Bind;
+                    String n = simpleTarget(bd.stmt());
+                    if (n != null && mentions(bindValue(bd.stmt()), n)) selfReferential.add(n);
+                    yield n;
                 }
-                case Decl.HandlerDecl hd -> name = hd.name();
+                case Decl.HandlerDecl hd -> hd.name();
                 case Decl.CapDecl cd -> {
                     if (cd.isPub()) isPub = true;
-                    name = cd.name();
+                    yield cd.name();
                 }
-                default -> { }
-            }
+                default -> null;
+            };
             if (name == null) continue;
-            if (isPub) {
-                pub.add(name);
-                (canForward ? forwardable : notForwardable).add(name);
-            } else {
-                privateNames.add(name);
-            }
+            names.add(name);
+            if (isPub) pub.add(name);
         }
         Map<String, String> renames = new HashMap<>();
-        for (String n : privateNames) {
-            if (!pub.contains(n)) renames.put(n, privateName(n, module)); // pub anywhere: public
+        for (String n : names) {
+            if (!selfReferential.contains(n)) renames.put(n, privateName(n, module));
         }
         Map<String, String> exports = new HashMap<>();
-        for (String n : forwardable) {
-            if (!notForwardable.contains(n)) exports.put(n, privateName(n, module));
-        }
-        renames.putAll(exports);
-        renames.keySet().removeAll(selfReferential);
-        exports.keySet().removeAll(selfReferential);
-        Map<String, String> reachable = new HashMap<>(exports);
-        for (String n : pub) reachable.putIfAbsent(n, n);
-        if (renames.isEmpty()) return new Privatized(modDecls, reachable, Set.of());
+        for (String n : pub) exports.put(n, renames.getOrDefault(n, n));
+        if (renames.isEmpty()) return new Privatized(modDecls, exports);
 
         Renamer r = new Renamer(renames);
-        List<Decl> out = new ArrayList<>(modDecls.size() + exports.size());
-        Set<Decl.FnDecl> forwarders = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
-        Set<String> forwarded = new HashSet<>();
-        for (Decl d : modDecls) {
-            out.add(r.decl(d));
-            Node inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
-            switch (inner) {
-                case Decl.FnDecl fn when exports.containsKey(fn.name()) && forwarded.add(fn.name()) -> {
-                    Decl.FnDecl fwd = forwarder(fn, exports.get(fn.name()));
-                    forwarders.add(fwd);
-                    out.add(fwd);
-                }
-                case Decl.BindingDecl bd when simpleTarget(bd.stmt()) instanceof String n
-                        && exports.containsKey(n) && forwarded.add(n) -> {
-                    Node.SourceLoc loc = bd.loc();
-                    out.add(new Decl.BindingDecl(new Stmt.Bind(new Stmt.BindTarget.Simple(n),
-                            new Expr.Var(exports.get(n), loc), loc), loc));
-                }
-                default -> { }
-            }
-        }
-        return new Privatized(out, reachable, forwarders);
-    }
-
-    /** Parameters a forwarder for {@code fn} takes, or -1 when it can't
-     *  have one (no body, or a rest parameter it couldn't pass on). */
-    private static int forwarderArity(Decl.FnDecl fn) {
-        return switch (fn.body()) {
-            case Decl.FnBody.LambdaBody lb -> lb.restParam() == null ? lb.params().size() : -1;
-            case Decl.FnBody.ImperativeBody ib -> ib.restParam() == null ? ib.params().size() : -1;
-            case Decl.FnBody.MatchArmsBody mab -> 1;
-            case Decl.FnBody.NoBody nb -> -1;
-        };
-    }
-
-    /** {@code fn name :: <same specs> ::: <same row>  (a b -> target a b)}. */
-    private static Decl.FnDecl forwarder(Decl.FnDecl fn, String target) {
-        Node.SourceLoc loc = fn.loc();
-        int n = forwarderArity(fn);
-        List<Pattern> params = new ArrayList<>(n);
-        List<Expr> args = new ArrayList<>(Math.max(n, 1));
-        for (int i = 0; i < n; i++) {
-            params.add(new Pattern.VarPat("$fwd" + i, loc));
-            args.add(new Expr.Var("$fwd" + i, loc));
-        }
-        if (n == 0) args.add(new Expr.UnitLit(loc));
-        Expr call = new Expr.App(new Expr.Var(target, loc), args, loc);
-        return new Decl.FnDecl(fn.name(), true, fn.effectRow(), fn.specAnnotations(),
-                new Decl.FnBody.LambdaBody(params, null, call),
-                List.of(), List.of(), List.of(), List.of(), loc);
+        List<Decl> out = new ArrayList<>(modDecls.size());
+        for (Decl d : modDecls) out.add(r.decl(d));
+        return new Privatized(out, exports);
     }
 
     private static Expr bindValue(Stmt s) {
@@ -196,18 +120,6 @@ final class ModulePrivacy {
         return !new Renamer(Map.of(name, name + "$mentioned")).expr(e).equals(e);
     }
 
-    /** Rewrite {@code alias.name} references to the module-qualified names
-     *  in {@code qualified} (alias → (pub name → qualified name)), so a
-     *  qualified call reaches the module's definition even when the
-     *  importer has its own {@code name}. */
-    static List<Decl> qualify(List<Decl> decls, Map<String, Map<String, String>> qualified) {
-        if (qualified.isEmpty()) return decls;
-        Renamer r = new Renamer(Map.of(), qualified);
-        List<Decl> out = new ArrayList<>(decls.size());
-        for (Decl d : decls) out.add(r.decl(d));
-        return out;
-    }
-
     private static String simpleTarget(Stmt s) {
         Stmt.BindTarget t = switch (s) {
             case Stmt.Bind b -> b.target();
@@ -217,11 +129,8 @@ final class ModulePrivacy {
         return t instanceof Stmt.BindTarget.Simple sm ? sm.name() : null;
     }
 
-    /** Consistent renaming of a fixed set of identifiers, and (when
-     *  {@code qualified} is non-empty) of {@code alias.name} accesses. */
-    private record Renamer(Map<String, String> renames, Map<String, Map<String, String>> qualified) {
-
-        Renamer(Map<String, String> renames) { this(renames, Map.of()); }
+    /** Consistent renaming of a fixed set of identifiers. */
+    private record Renamer(Map<String, String> renames) {
 
         String id(String name) {
             if (name == null) return null;
@@ -339,13 +248,7 @@ final class ModulePrivacy {
                             case Expr.StringPart.Interpolation in ->
                                     new Expr.StringPart.Interpolation(expr(in.expr()));
                         }).toList(), si.loc());
-                case Expr.DotAccess da -> {
-                    if (da.target() instanceof Expr.Var v && qualified.containsKey(v.name())
-                            && qualified.get(v.name()).get(da.field()) instanceof String q) {
-                        yield new Expr.Var(q, da.loc());
-                    }
-                    yield new Expr.DotAccess(expr(da.target()), da.field(), da.loc());
-                }
+                case Expr.DotAccess da -> new Expr.DotAccess(expr(da.target()), da.field(), da.loc());
                 case Expr.DoExpr de -> new Expr.DoExpr(exprs(de.exprs()), de.loc());
                 case Expr.Block bl -> new Expr.Block(stmts(bl.stmts()), bl.loc());
                 case Expr.ChoreoExpr ce -> new Expr.ChoreoExpr(ce.op(), expr(ce.left()), expr(ce.right()), ce.loc());

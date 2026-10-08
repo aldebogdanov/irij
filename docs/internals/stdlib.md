@@ -175,8 +175,9 @@ site's row has Console — the callback's row binds `eff` there. The
 Java BuiltinFn fold was removed; the Irij-ported version is the
 single source of truth.
 
-Callers do `use std.list :open` (already imported by std.collection
-and std.func; explicit elsewhere).
+Callers import it themselves (`use std.list {fold map}`, or `:open`):
+std.collection's and std.func's own `use std.list` doesn't reach their
+importers. A bare `fold` without that import is the builtin.
 
 ## Raw primitives wired into bytecode
 

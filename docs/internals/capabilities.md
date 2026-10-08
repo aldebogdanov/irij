@@ -208,11 +208,12 @@ otherwise be a member-access chain or a classpath). A dedicated
 want prettier syntax; nothing about the design forces strings
 specifically.
 
-`pub cap` re-exports the binding through `use mod :open`. A cap
-without `pub` is private to its module: `ModulePrivacy` renames it
-(with every use in the module) to `name$module$path` before inlining,
-like any private top-level name (`modules.md`). Before that, every
-cap was visible program-wide, so `std.serve`'s private `cap server`
+`pub cap` exports the binding to the module's importers (`use mod
+:open`, `use mod {name}`, `alias.name`). `ModulePrivacy` renames every
+cap (with every use in the module) to `name$module$path` before
+inlining, like any top-level name (`modules.md`), so an importer that
+doesn't import it can't name it. Before that, every cap was visible
+program-wide, so `std.serve`'s private `cap server`
 made a program's own parameter called `server` a compile error
 ("Capability 'server' is bound to effect 'Serve'…").
 

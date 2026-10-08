@@ -59,6 +59,13 @@ public final class BytecodeSession {
      *  or the playground sandbox). */
     private final List<Path> seedRoots;
 
+    /** The {@code use} lines earlier evals compiled, by module and modifier:
+     *  every later eval imports what they did. */
+    private final Map<String, Decl> priorUses = new LinkedHashMap<>();
+    /** Top-level names earlier evals defined, which later evals reach as
+     *  their own. */
+    private final java.util.Set<String> priorNames = new java.util.HashSet<>();
+
     public BytecodeSession() {
         this("irij.Session");
     }
@@ -88,6 +95,10 @@ public final class BytecodeSession {
         return namespace.get(LAST_VALUE_KEY);
     }
 
+    private static String useKey(Decl.UseDecl ud) {
+        return ud.qualifiedName() + " " + ud.modifier();
+    }
+
     /**
      * Compile {@code source} with namespace mode + state-machine handler
      * lowering and invoke its {@code main()}.
@@ -106,15 +117,21 @@ public final class BytecodeSession {
             throw new IrijCompiler.CompileException(
                     "Parse errors:\n" + String.join("\n", parsed.errors()));
         }
-        List<Decl> decls = IrijCompiler.buildAst(parsed);
-        decls = captureLastExpression(decls);
+        List<Decl> own = IrijCompiler.buildAst(parsed);
+        Map<String, Decl> uses = new LinkedHashMap<>(priorUses);
+        for (Decl d : own) if (d instanceof Decl.UseDecl ud) uses.putIfAbsent(useKey(ud), ud);
+        List<Decl> decls = new ArrayList<>(uses.values());
+        for (Decl d : captureLastExpression(own)) if (!(d instanceof Decl.UseDecl)) decls.add(d);
 
         CompileOptions opts = CompileOptions.defaults().withNamespaceMode(true);
         String className = classPrefix + "$" + COUNTER.incrementAndGet();
         java.util.Map<String, byte[]> classes = IrijCompiler.compileDeclsMulti(
                 decls, className, null, opts,
                 seedRoots,
-                fileLabel != null ? fileLabel : (className + ".irj"));
+                fileLabel != null ? fileLabel : (className + ".irj"),
+                java.util.Set.copyOf(priorNames));
+        priorUses.putAll(uses);
+        priorNames.addAll(ModuleScope.ownNames(own));
         Class<?> cls = loader.defineAll(classes, className);
 
         // Bind the session's namespace + (optional) session
