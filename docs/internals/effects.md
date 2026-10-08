@@ -71,7 +71,7 @@ spec §3.2 and verified by probes:
 ## Classification coverage (PR7, 2026-07)
 
 `containsOpCallExpr` detects op calls in every expression position:
-App, BinaryOp, UnaryOp, IfExpr, Block, Lambda (conservative), the
+App, BinaryOp, UnaryOp, IfExpr, Block, the
 collection literals, DotAccess, MatchExpr, **and** — since PR7 —
 Pipe, Compose, SeqOp, DoExpr, Range, StringInterp, MapLit (including
 dynamic keys), and RecordUpdate. The A-normalizer has matching
@@ -82,6 +82,16 @@ fallback. `SmLoweringCoverageTest` pins the observable behavior
 (values + handler-state order) across a shapes × positions matrix;
 it passed identically before and after the flip, proving the
 fallback and native paths agree.
+
+A lambda's body is not a position of the body it's built in: it runs
+when called, and performs through the handler in scope then, as a fn
+does. Places an op runs only sometimes can't be lifted ahead: a `match`
+arm, an `if` expression's branch, the right of `&&` / `||`, a value
+block. The A-normalizer turns each into an `if` chain (EffIR's branch),
+its value assigned to a fresh result variable: a `match` becomes a pure
+`match` that picks the arm and collects what its pattern bound, then one
+branch per arm (`ANormalizer.desugarMatch`). `SmBranchLoweringTest`
+pins these.
 
 `exprPerformsForeignEffect` (tier-c gating for handler clauses) was
 deliberately **not** extended — widening it would reroute clause
@@ -107,9 +117,10 @@ work first.
   `StateMachineWithTest.java` (op-call in if-condition, composed
   handler bound to a local, tier-c clauses crossing composed chains,
   tier-c resume-value flow-through) are all closed as of v0.7.0 —
-  zero `@Disabled` SM tests remain. Still unsupported: an op performed
-  directly in a `match` arm, and a `with` inside a branch that performs
-  (TODO.md); a call to a fn that performs is fine anywhere.
+  zero `@Disabled` SM tests remain. Still unsupported: a `match` guard
+  that performs, a `with` inside a branch or arm that performs, and a
+  `scope` in a body that performs (TODO.md). A call to a fn or lambda
+  that performs is fine anywhere.
 
 A lambda or nested `with` built inside a step is a method of its own:
 it captures the lifted locals it reads (`LambdaEmitter.collectFreeVars`
