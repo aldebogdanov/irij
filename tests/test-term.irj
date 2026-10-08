@@ -1,5 +1,6 @@
-use std.test :open
-use std.term :open
+use std.test {assert-eq assert-throws summarize test}
+use std.term :as term
+use std.term {Term}
 
 ;; The Term effect can't exercise its default handler here — that one
 ;; needs a tty, and the test runner may not have one. What IS testable
@@ -70,7 +71,7 @@ handler script-term :: Term
 
 fn draw-header ::: Term
   => title
-  term-write (csi "H" ++ title)
+  term-write (term.csi "H" ++ title)
   term-flush ()
 
 fn read-until-eof ::: Term
@@ -83,8 +84,8 @@ fn read-until-eof ::: Term
 
 ;; ── Escape helpers ────────────────────────────────────────────────
 
-r1 := test "esc prefixes the ESC byte" (-> assert-eq (from-char-code 27 ++ "X") (esc "X"))
-r2 := test "csi is ESC + [" (-> assert-eq (from-char-code 27 ++ "[2J") (csi "2J"))
+r1 := test "esc prefixes the ESC byte" (-> assert-eq (from-char-code 27 ++ "X") (term.esc "X"))
+r2 := test "csi is ESC + [" (-> assert-eq (from-char-code 27 ++ "[2J") (term.csi "2J"))
 
 ;; ── Mock dispatch ─────────────────────────────────────────────────
 
@@ -103,7 +104,7 @@ fn run-draw
     draw-header "hi"
     get "drawn" (term-read 0)
 
-r4 := test "the drawn frame is exactly what was written" (-> assert-eq (csi "H" ++ "hi") (run-draw ()))
+r4 := test "the drawn frame is exactly what was written" (-> assert-eq (term.csi "H" ++ "hi") (run-draw ()))
 
 fn run-width
   =>
@@ -147,14 +148,14 @@ r8 := test "post is accepted" (-> assert-eq "ok" (run-post ()))
 fn run-boom
   =>
   with mock-term
-    with-term {} (-> error "boom")
+    term.with-term {} (-> error "boom")
 
 r9 := test "with-term re-raises the body's error" (-> assert-throws (-> run-boom ()))
 
 fn run-ok
   =>
   with mock-term
-    with-term {} (-> 42)
+    term.with-term {} (-> 42)
 
 r10 := test "with-term returns the body's value" (-> assert-eq 42 (run-ok ()))
 

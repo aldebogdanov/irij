@@ -34,7 +34,6 @@ mod std.auth
 ;;   with default-random
 ;;     token := new-session-token ()
 
-use std.random :open
 
 ;; ── Constants ────────────────────────────────────────────────────────
 

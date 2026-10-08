@@ -3,7 +3,7 @@
 ;; (Str/Int/Float/Bool/Keyword/Rational/Unit). A bare primitive value
 ;; matches by type instead of by tag.
 
-use std.test :open
+use std.test {assert-eq assert-throws summarize test}
 
 spec Node
   Raw Str

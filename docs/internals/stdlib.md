@@ -215,7 +215,7 @@ If a program needs both `Math.log` and a `Log` effect in the same
 module, the math one is reachable via Java interop:
 
 ```
-use std.math :open
+use std.math :as math
 
 effect Log
   log :: Str -> ()
@@ -224,11 +224,11 @@ handler default-log :: Log
   log msg => resume ()
 
 fn entropy :: Vec Float ::: Log
-  (probs ->
-    log "computing entropy"
-    sum-of (@ (p -> p * (java.lang.Math/log p)) probs))
-;;                  ^^^^^^^^^^^^^^^^^^^^ Math.log via interop;
-;;                  the `log` effect op handles the perform above.
+  => probs
+  log "computing entropy"
+  math.sum-of (@ (p -> p * (java.lang.Math/log p)) probs)
+;;                      ^^^^^^^^^^^^^^^^^^^^ Math.log via interop;
+;;                      the `log` effect op handles the perform above.
 ```
 
 `Math/log` (the JVM static-ref form) bypasses the name-resolution

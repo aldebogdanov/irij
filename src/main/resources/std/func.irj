@@ -1,6 +1,6 @@
 mod std.func
 
-use std.list :open
+use std.list :as list
 
 ;; Function combinators.
 
@@ -29,4 +29,4 @@ pub fn constantly :: _ _ _
   (x _ -> x)
 
 pub fn times :: Int Fn ()
-  (n f -> fold (_ i -> f ()) () (0 ..< n))
+  (n f -> list.fold (_ i -> f ()) () (0 ..< n))

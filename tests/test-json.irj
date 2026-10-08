@@ -1,5 +1,5 @@
-use std.test :open
-use std.text :open
+use std.test {assert-eq assert-true summarize test}
+use std.text :as str
 
 ;; Specs for tagged value tests
 spec Option a
@@ -67,4 +67,4 @@ fn bad-json-message :: _ Str
   match (try (-> json-parse "{"))
     (Err msg) => msg
     _ => ""
-rj1 := test "json-parse error is plain" (-> assert-true ((starts-with? (bad-json-message ()) "json-parse: ") && (! (contains-substr? (bad-json-message ()) "java."))))
+rj1 := test "json-parse error is plain" (-> assert-true ((starts-with? (bad-json-message ()) "json-parse: ") && (! (str.contains-substr? (bad-json-message ()) "java."))))

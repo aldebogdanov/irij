@@ -1,6 +1,6 @@
 mod std.collection
 
-use std.list :open
+use std.list :as list
 
 ;; Collection combinators built on existing builtins.
 
@@ -22,10 +22,10 @@ pub fn enumerate :: _ Vec
   to-vec ~ (0 ..< length vec) |> @ (i -> #(i (nth i vec)))
 
 pub fn flatten :: Vec Vec
-  (vec -> fold (acc x -> acc ++ x) #[] vec)
+  (vec -> list.fold (acc x -> acc ++ x) #[] vec)
 
 pub fn distinct :: Vec Vec
-  (vec -> fold (acc x -> if (contains? acc x) acc else (acc ++ #[x])) #[] vec)
+  (vec -> list.fold (acc x -> if (contains? acc x) acc else (acc ++ #[x])) #[] vec)
 
 ;; Helper for frequencies
 fn freq-step
@@ -38,7 +38,7 @@ fn freq-step
     assoc m k (c + 1)
 
 pub fn frequencies :: Vec Map
-  (vec -> fold freq-step {} vec)
+  (vec -> list.fold freq-step {} vec)
 
 pub fn partition :: Int _ Vec
   => n vec
@@ -48,7 +48,7 @@ pub fn partition :: Int _ Vec
 
 pub fn group-by :: Fn Vec Map
   => f vec
-  fold (m x -> if (get (to-str (f x)) m == ()) (assoc m (to-str (f x)) #[x]) else (assoc m (to-str (f x)) ((get (to-str (f x)) m) ++ #[x]))) {} vec
+  list.fold (m x -> if (get (to-str (f x)) m == ()) (assoc m (to-str (f x)) #[x]) else (assoc m (to-str (f x)) ((get (to-str (f x)) m) ++ #[x]))) {} vec
 
 ;; The position breaks ties, so the sort is stable and never compares
 ;; the elements themselves, which may have no order (records, sum values).
@@ -60,31 +60,31 @@ pub fn sort-by :: Fn Vec Vec
 
 pub fn map-vals :: Fn Map Map
   => f m
-  fold (acc k -> assoc acc k (f (get k m))) {} (keys m)
+  list.fold (acc k -> assoc acc k (f (get k m))) {} (keys m)
 
 pub fn filter-vals :: Fn Map Map
   => pred m
-  fold (acc k -> if (pred (get k m)) (assoc acc k (get k m)) else acc) {} (keys m)
+  list.fold (acc k -> if (pred (get k m)) (assoc acc k (get k m)) else acc) {} (keys m)
 
 pub fn map-keys :: Fn Map Map
   => f m
-  fold (acc k -> assoc acc (to-str (f k)) (get k m)) {} (keys m)
+  list.fold (acc k -> assoc acc (to-str (f k)) (get k m)) {} (keys m)
 
 pub fn each :: Fn Vec ()
   => f vec
-  fold (_ x -> f x) () vec
+  list.fold (_ x -> f x) () vec
   ()
 
 pub fn find-index :: Fn Vec Int
   => pred vec
   n := length vec
-  fold (acc i -> if (acc /= (0 - 1)) acc else (if (pred (nth i vec)) i else (0 - 1))) (0 - 1) (0 ..< n)
+  list.fold (acc i -> if (acc /= (0 - 1)) acc else (if (pred (nth i vec)) i else (0 - 1))) (0 - 1) (0 ..< n)
 
 pub fn all? :: Fn Vec Bool
-  (pred vec -> fold (acc x -> acc && (pred x)) true vec)
+  (pred vec -> list.fold (acc x -> acc && (pred x)) true vec)
 
 pub fn any? :: Fn Vec Bool
-  (pred vec -> fold (acc x -> acc || (pred x)) false vec)
+  (pred vec -> list.fold (acc x -> acc || (pred x)) false vec)
 
 pub fn none? :: Fn Vec Bool
   (pred vec -> not ~ any? pred vec)

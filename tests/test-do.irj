@@ -1,6 +1,6 @@
 ;; ── do expression: sequencing with a value ─────────────────────────
 
-use std.test :open
+use std.test {assert-eq summarize test}
 
 r1 := test "do value is last expr" (-> assert-eq (do (1) (2) (3)) 3)
 

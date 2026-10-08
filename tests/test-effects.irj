@@ -1,4 +1,4 @@
-use std.test :open
+use std.test {assert-eq assert-true summarize test}
 
 ;; ── Effect declaration & ops ───────────────────────────
 

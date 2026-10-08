@@ -1,4 +1,4 @@
-use std.test :open
+use std.test {assert-eq assert-true summarize test}
 
 ;; `error v` raises v, and `try` and `on-failure` hand v back unchanged: a
 ;; map stays a map, so a caller can act on what went wrong instead of

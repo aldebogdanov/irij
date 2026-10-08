@@ -1,4 +1,4 @@
-use std.test :open
+use std.test {assert-eq summarize test}
 
 ;; Keywords are field names wherever a field is named: after `.`, before
 ;; `=` in a map or a destructuring pattern, and as a product spec's field.

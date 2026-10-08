@@ -1,9 +1,8 @@
 mod std.quint
 
-use std.list :open
-use std.collection :open
-use std.text :open
-use std.fs :open
+use std.list :as list
+use std.text :as str
+use std.fs {FileIO}
 use std.quint.itf :as itf
 
 ;; ── Model-based testing against a Quint specification ──────────
@@ -121,7 +120,7 @@ fn decode-opts :: Map Map
   => driver
   wanted := #["key-fn" "action-path" "nondet-path"]
   present := /? (k -> (get k driver) /= ())
-  fold (acc k -> assoc acc k (get k driver)) {} (present wanted)
+  list.fold (acc k -> assoc acc k (get k driver)) {} (present wanted)
 
 fn handler-for :: Map Str _
   => driver action
@@ -193,7 +192,7 @@ fn mismatch :: Map Map Map _
     ({expected= (pick-keys bad expected) actual= (pick-keys bad actual)})
 
 fn pick-keys :: Vec Map Map
-  (ks m -> fold (acc k -> assoc acc k (get k m)) {} ks)
+  (ks m -> list.fold (acc k -> assoc acc k (get k m)) {} ks)
 
 ;; ── Replaying a trace ──────────────────────────────────────────
 
@@ -304,7 +303,7 @@ fn with-trace :: Map Int Map Map
   {...f trace= i trace-name= trace.name trace-json= trace.json}
 
 fn merge-counts :: Map Map Map
-  (a b -> fold (acc k -> assoc acc k ((if ((get k acc) == ()) 0 else (get k acc)) + (get k b))) a (keys b))
+  (a b -> list.fold (acc k -> assoc acc k ((if ((get k acc) == ()) 0 else (get k acc)) + (get k b))) a (keys b))
 
 ;; ── Generating ─────────────────────────────────────────────────
 
@@ -320,7 +319,7 @@ fn generated! :: Map Str Map
 fn cli-failure :: Map Str Str
   => raw what
   said := raw.stdout ++ raw.stderr
-  spec-broke := (what == "test") && (contains-substr? said "Tests failed")
+  spec-broke := (what == "test") && (str.contains-substr? said "Tests failed")
   if spec-broke
     ("the spec's own scripted run failed its own .expect — that is a"
      ++ " problem in the spec, before any implementation is involved."
@@ -345,14 +344,14 @@ fn nonempty-tail :: Map Str
 
 fn cli-opts :: Map Map Map
   => driver overrides
-  fold (acc k -> assoc acc k (get k overrides)) (spec-keys driver) (keys overrides)
+  list.fold (acc k -> assoc acc k (get k overrides)) (spec-keys driver) (keys overrides)
 
 fn spec-keys :: Map Map
   => driver
   wanted := #["spec-file" "main" "init-action" "step-action" "seed" "traces"
               "max-steps" "max-samples" "test" "invariant"]
   present := /? (k -> (get k driver) /= ())
-  fold (acc k -> assoc acc k (get k driver)) {} (present wanted)
+  list.fold (acc k -> assoc acc k (get k driver)) {} (present wanted)
 
 ;; ── The four ways in ───────────────────────────────────────────
 

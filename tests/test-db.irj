@@ -1,5 +1,6 @@
-use std.test :open
-use std.db :open
+use std.test {assert-eq test}
+use std.db :as db
+use std.db {Db}
 
 ;; ── std.db effect surface ────────────────────────────────────────
 ;;
@@ -22,7 +23,7 @@ fn open-close-body ::: Db
 
 fn test-open-close ::: Db
   =>
-  with default-db
+  with db.default-db
     open-close-body ()
 
 test "db-open and db-close" (-> assert-eq "DbConn" (test-open-close ()))
@@ -43,7 +44,7 @@ fn round-trip-body ::: Db
 
 fn test-round-trip ::: Db
   =>
-  with default-db
+  with db.default-db
     round-trip-body ()
 
 test "db-exec + db-query round-trip" (-> test-round-trip ())
@@ -63,7 +64,7 @@ fn affected-body ::: Db
 
 fn test-affected ::: Db
   =>
-  with default-db
+  with db.default-db
     affected-body ()
 
 test "db-exec returns affected count" (-> assert-eq 2 (test-affected ()))
@@ -85,7 +86,7 @@ fn types-body ::: Db
 
 fn test-types ::: Db
   =>
-  with default-db
+  with db.default-db
     types-body ()
 
 test "query returns correct types" (-> test-types ())
@@ -105,7 +106,7 @@ fn null-body ::: Db
 
 fn test-null ::: Db
   =>
-  with default-db
+  with db.default-db
     null-body ()
 
 test "query with null values" (-> test-null ())
@@ -128,7 +129,7 @@ fn tx-commit-body ::: Db
 
 fn test-tx-commit ::: Db
   =>
-  with default-db
+  with db.default-db
     tx-commit-body ()
 
 test "db-transaction commits" (-> test-tx-commit ())
@@ -153,7 +154,7 @@ fn tx-rollback-body ::: Db
 
 fn test-tx-rollback ::: Db
   =>
-  with default-db
+  with db.default-db
     tx-rollback-body ()
 
 test "db-transaction rolls back on error" (-> test-tx-rollback ())

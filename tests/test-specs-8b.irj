@@ -1,4 +1,4 @@
-use std.test :open
+use std.test {assert-eq assert-throws assert-true summarize test}
 
 ;; ═══════════════════════════════════════════════════════
 ;; Phase 8b: Primitive, Composite, Arrow, Enum Specs

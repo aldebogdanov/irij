@@ -12,18 +12,19 @@
 ;; Piping stdin or capturing stdout gets a clear error instead of a
 ;; program drawing into nowhere. Press q to quit.
 
-use std.term :open
+use std.term :as term
+use std.term {Term}
 
 ;; ── Screen ──────────────────────────────────────────────────────────
 
 fn clear ::: Term
   =>
-  term-write (csi "2J")
+  term-write (term.csi "2J")
 
 ;; Cursor to row/col — 1-based, the terminal's own convention.
 fn move-to ::: Term
   => row col
-  term-write (csi (to-str row ++ ";" ++ to-str col ++ "H"))
+  term-write (term.csi (to-str row ++ ";" ++ to-str col ++ "H"))
 
 fn draw-at ::: Term
   => row col s
@@ -49,7 +50,7 @@ fn draw-frame ::: Term
 fn loop ::: Term
   => last-key count
   draw-frame last-key count
-  ev := term-wait ()
+  ev := term.term-wait ()
   kind := get "kind" ev
   if (kind == "eof")
     count
@@ -91,8 +92,8 @@ fn describe :: Map Str
 ;; in raw mode with no echo.
 fn main-flow ::: Term Console
   =>
-  total := with-term {alt-screen= true} (-> loop "(none)" 0)
+  total := term.with-term {alt-screen= true} (-> loop "(none)" 0)
   println ("bye — " ++ to-str total ++ " keys")
 
-with default-term
+with term.default-term
   main-flow ()

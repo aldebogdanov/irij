@@ -1,7 +1,6 @@
-use std.test :open
-use std.auth :open
-use std.random :open
-use std.text :open
+use std.test {assert-eq assert-true test}
+use std.auth :as auth
+use std.random :as random
 
 ;; ── sha256-hex ────────────────────────────────────────────
 
@@ -33,7 +32,7 @@ fn run-random-token ::: Random
 
 fn wrap-random-token ::: Random
   =>
-  with default-random
+  with random.default-random
     run-random-token ()
 
 test "random-token 32 bytes ⇒ 43 chars" (-> wrap-random-token ())
@@ -46,7 +45,7 @@ fn run-random-token-uniqueness ::: Random
 
 fn wrap-random-token-uniqueness ::: Random
   =>
-  with default-random
+  with random.default-random
     run-random-token-uniqueness ()
 
 test "random-token returns fresh values" (-> wrap-random-token-uniqueness ())
@@ -55,57 +54,57 @@ test "random-token returns fresh values" (-> wrap-random-token-uniqueness ())
 
 fn run-roundtrip ::: Random
   =>
-  salt := new-salt ()
-  stored := hash-password salt "hunter2"
-  assert-true (verify-password stored "hunter2")
-  assert-true (! (verify-password stored "wrong-password"))
+  salt := auth.new-salt ()
+  stored := auth.hash-password salt "hunter2"
+  assert-true (auth.verify-password stored "hunter2")
+  assert-true (! (auth.verify-password stored "wrong-password"))
 
 fn wrap-roundtrip ::: Random
   =>
-  with default-random
+  with random.default-random
     run-roundtrip ()
 
 test "hash-password / verify-password round-trip" (-> wrap-roundtrip ())
 
 fn run-different-salts ::: Random
   =>
-  salt-a := new-salt ()
-  salt-b := new-salt ()
-  h-a := hash-password salt-a "same-password"
-  h-b := hash-password salt-b "same-password"
+  salt-a := auth.new-salt ()
+  salt-b := auth.new-salt ()
+  h-a := auth.hash-password salt-a "same-password"
+  h-b := auth.hash-password salt-b "same-password"
   ;; Different salts ⇒ different stored hashes for the same password.
   assert-true (h-a /= h-b)
   ;; Both still verify against the original password.
-  assert-true (verify-password h-a "same-password")
-  assert-true (verify-password h-b "same-password")
+  assert-true (auth.verify-password h-a "same-password")
+  assert-true (auth.verify-password h-b "same-password")
 
 fn wrap-different-salts ::: Random
   =>
-  with default-random
+  with random.default-random
     run-different-salts ()
 
 test "salt makes identical passwords store differently" (-> wrap-different-salts ())
 
 test "verify-password rejects no-separator" (->
-  assert-true (! (verify-password "no-dollar-sign" "anything")))
+  assert-true (! (auth.verify-password "no-dollar-sign" "anything")))
 
 test "verify-password rejects empty stored" (->
-  assert-true (! (verify-password "" "anything")))
+  assert-true (! (auth.verify-password "" "anything")))
 
 ;; ── sign-token / verify-signed-token ──────────────────────
 
 test "sign / verify signed token round-trip" (->
-  assert-eq (verify-signed-token "shared-secret"
-                                 (sign-token "shared-secret" "session-abc-123"))
+  assert-eq (auth.verify-signed-token "shared-secret"
+                                 (auth.sign-token "shared-secret" "session-abc-123"))
             "session-abc-123")
 
 test "verify-signed-token rejects wrong secret" (->
-  assert-eq (verify-signed-token "secret-B"
-                                 (sign-token "secret-A" "session-id"))
+  assert-eq (auth.verify-signed-token "secret-B"
+                                 (auth.sign-token "secret-A" "session-id"))
             "")
 
 test "verify-signed-token rejects tampered envelope" (->
-  assert-eq (verify-signed-token "secret" "no-dot-here") "")
+  assert-eq (auth.verify-signed-token "secret" "no-dot-here") "")
 
 ;; ── pbkdf2-sha256-hex / constant-time-eq? ─────────────────
 
@@ -122,13 +121,13 @@ test "constant-time-eq? compares exactly" (->
 
 fn run-format ::: Random
   =>
-  stored := hash-password (new-salt ()) "pw"
-  assert-true (starts-with? stored ("pbkdf2-sha256$" ++ (to-str (pbkdf2-iterations ())) ++ "$"))
-  assert-true (! (password-needs-rehash? stored))
+  stored := auth.hash-password (auth.new-salt ()) "pw"
+  assert-true (starts-with? stored ("pbkdf2-sha256$" ++ (to-str (auth.pbkdf2-iterations ())) ++ "$"))
+  assert-true (! (auth.password-needs-rehash? stored))
 
 fn wrap-format ::: Random
   =>
-  with default-random
+  with random.default-random
     run-format ()
 
 test "hash-password stores a PBKDF2 hash" (-> wrap-format ())
@@ -138,16 +137,16 @@ test "hash-password stores a PBKDF2 hash" (-> wrap-format ())
 legacy-stored := "abc$" ++ (sha256-hex "abcpw")
 
 test "verify-password accepts a legacy hash" (->
-  assert-true ((verify-password legacy-stored "pw") && (! (verify-password legacy-stored "nope"))))
+  assert-true ((auth.verify-password legacy-stored "pw") && (! (auth.verify-password legacy-stored "nope"))))
 
 test "legacy hashes need a rehash" (->
-  assert-true (password-needs-rehash? legacy-stored))
+  assert-true (auth.password-needs-rehash? legacy-stored))
 
 test "fewer iterations than asked need a rehash" (->
-  assert-true (password-needs-rehash? ("pbkdf2-sha256$1000$abc$" ++ (pbkdf2-sha256-hex "pw" "abc" 1000))))
+  assert-true (auth.password-needs-rehash? ("pbkdf2-sha256$1000$abc$" ++ (pbkdf2-sha256-hex "pw" "abc" 1000))))
 
 test "verify-password honours the stored iteration count" (->
-  assert-true (verify-password ("pbkdf2-sha256$1000$abc$" ++ (pbkdf2-sha256-hex "pw" "abc" 1000)) "pw"))
+  assert-true (auth.verify-password ("pbkdf2-sha256$1000$abc$" ++ (pbkdf2-sha256-hex "pw" "abc" 1000)) "pw"))
 
 test "verify-password rejects a malformed PBKDF2 hash" (->
-  assert-true ((! (verify-password "pbkdf2-sha256$lots$abc$00" "pw")) && (! (verify-password "md5$1$abc$00" "pw"))))
+  assert-true ((! (auth.verify-password "pbkdf2-sha256$lots$abc$00" "pw")) && (! (auth.verify-password "md5$1$abc$00" "pw"))))

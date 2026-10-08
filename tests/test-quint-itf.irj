@@ -1,6 +1,6 @@
-use std.test :open
-use std.fs :open
-use std.collection :open
+use std.test {assert-eq assert-throws assert-true summarize test}
+use std.fs :as fs
+use std.fs {FileIO}
 use std.quint.itf :as itf
 
 ;; ITF decoding, against traces recorded from Quint 0.32.0 into
@@ -51,10 +51,10 @@ r44 := test "a leading capital does not lead with a hyphen" (-> assert-eq "accou
 ;; Fixtures are recordings: every trace under tests/quint/ came out of
 ;; Quint 0.32.0, not out of a text editor.
 
-bank := itf.parse-trace {} (with default-fs do (fs-read "tests/quint/bank_run_0.itf.json"))
-shapes-json := with default-fs do (fs-read "tests/quint/shapes_0.itf.json")
-collide-json := with default-fs do (fs-read "tests/quint/collide_0.itf.json")
-tracked-json := with default-fs do (fs-read "tests/quint/tracked_run_0.itf.json")
+bank := itf.parse-trace {} (with fs.default-fs do (fs-read "tests/quint/bank_run_0.itf.json"))
+shapes-json := with fs.default-fs do (fs-read "tests/quint/shapes_0.itf.json")
+collide-json := with fs.default-fs do (fs-read "tests/quint/collide_0.itf.json")
+tracked-json := with fs.default-fs do (fs-read "tests/quint/tracked_run_0.itf.json")
 
 s0 := nth 0 bank.states
 s1 := nth 1 bank.states
@@ -92,7 +92,7 @@ r33 := test "a path's own variable leaves the compared state" (-> assert-eq #["b
 
 ;; A `quint test` trace carries no mbt:: variables at all — which is
 ;; the whole reason action-path exists.
-scripted-json := with default-fs do (fs-read "tests/quint/tracked_test_depositThenOverdraftTest_0.itf.json")
+scripted-json := with fs.default-fs do (fs-read "tests/quint/tracked_test_depositThenOverdraftTest_0.itf.json")
 
 r34 := test "a quint test trace has no action of its own" (-> assert-eq () (nth 1 (itf.parse-trace {} scripted-json).states).action)
 r35 := test "action-path recovers it" (-> assert-eq "deposit" (nth 1 (itf.parse-trace paths scripted-json).states).action)
@@ -101,7 +101,7 @@ r36 := test "and nondet-path recovers the picks" (-> assert-eq 50 (get "amount" 
 ;; An Apalache counterexample is the same format in a different
 ;; dialect: #meta carries varTypes and no source, and there are no
 ;; mbt:: variables here either.
-verify-json := with default-fs do (fs-read "tests/quint/tracked_verify_underFifty.itf.json")
+verify-json := with fs.default-fs do (fs-read "tests/quint/tracked_verify_underFifty.itf.json")
 counterexample := itf.parse-trace paths verify-json
 
 r37 := test "a counterexample decodes with no source" (-> assert-eq () counterexample.source)

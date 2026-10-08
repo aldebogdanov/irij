@@ -5,7 +5,7 @@
 ;; src/test/java/dev/irij/compiler/EffectRowLintTest.java — they would
 ;; trip the static checker before this file could even compile.
 
-use std.test :open
+use std.test {assert-eq assert-true summarize test}
 
 ;; ── 1. Shorthand effect annotation ::: Console ──────────────────────
 

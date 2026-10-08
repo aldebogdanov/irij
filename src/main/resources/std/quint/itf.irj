@@ -1,8 +1,8 @@
 mod std.quint.itf
 
-use std.list :open
-use std.collection :open
-use std.text :open
+use std.list :as list
+use std.collection :as collection
+use std.text :as str
 
 ;; ── ITF trace decoding ─────────────────────────────────────────
 ;;
@@ -106,10 +106,10 @@ fn unknown-tag-message :: Str Str
 
 fn decode-record :: Map Map
   => m
-  fold (acc k -> assoc acc (kebab k) (decode-value (get k m))) {} (keys m)
+  list.fold (acc k -> assoc acc (kebab k) (decode-value (get k m))) {} (keys m)
 
 fn decode-pairs :: Vec Map
-  (pairs -> fold add-pair {} pairs)
+  (pairs -> list.fold add-pair {} pairs)
 
 fn add-pair :: Map Vec Map
   => acc pair
@@ -162,20 +162,20 @@ fn bignumber? :: Map Bool
      && (bigint-field? (get "e" m))
      && (vector? limbs)
      && (not (empty? limbs))
-     && (all? bigint-field? limbs))
+     && (collection.all? bigint-field? limbs))
 
 fn decode-bignumber :: Map Int
   => m
   sign := decode-bigint (get "#bigint" (get "s" m))
   exp := decode-bigint (get "#bigint" (get "e" m))
   limbs := @ (x -> get "#bigint" x) (get "c" m)
-  digits := (head limbs) ++ (join "" (@ (pad-left 14 "0") (tail limbs)))
+  digits := (head limbs) ++ (join "" (@ (str.pad-left 14 "0") (tail limbs)))
   scale := exp + 1 - (length digits)
   if (scale < 0)
     error ("ITF: bignumber exponent " ++ (to-str exp)
            ++ " is smaller than its digit count " ++ (to-str (length digits)))
   else
-    sign * (decode-bigint (digits ++ (repeat scale "0")))
+    sign * (decode-bigint (digits ++ (str.repeat scale "0")))
 
 ;; ── States ─────────────────────────────────────────────────────
 
@@ -205,7 +205,7 @@ pub fn short-name :: Str Str
 ;; silently winning. Set `key-fn` in the model to opt out for
 ;; variables.
 pub fn kebab :: Str Str
-  (s -> fold kebab-char "" (chars s))
+  (s -> list.fold kebab-char "" (str.chars s))
 
 fn kebab-char :: Str Str Str
   => acc c
@@ -230,7 +230,7 @@ fn meta-key? :: Str Bool
 ;; that fired, so the name is absent rather than unit.
 fn decode-picks :: Map Map
   => raw
-  fold (acc k -> add-pick acc k (get k raw)) {} (keys raw)
+  list.fold (acc k -> add-pick acc k (get k raw)) {} (keys raw)
 
 fn add-pick :: Map Str _ Map
   => acc k v
@@ -245,7 +245,7 @@ fn add-pick :: Map Str _ Map
 fn decode-state :: Map Map Map
   => opts raw
   blank := {index= 0 action= () picks= {} state= {}}
-  fold (acc k -> place-key acc opts k (get k raw)) blank (keys raw)
+  list.fold (acc k -> place-key acc opts k (get k raw)) blank (keys raw)
 
 fn place-key :: Map Map Str _ Map
   => acc opts k v
@@ -270,7 +270,7 @@ fn place-key :: Map Map Str _ Map
 ;; to reproduce it.
 
 fn path-get :: Map Vec _
-  (m path -> fold (acc k -> if (acc == ()) () else (get k acc)) m path)
+  (m path -> list.fold (acc k -> if (acc == ()) () else (get k acc)) m path)
 
 fn apply-paths :: Map Map Map
   => opts st
@@ -282,7 +282,7 @@ fn apply-paths :: Map Map Map
 
 fn drop-roots :: Map Vec Map
   => state paths
-  fold (acc p -> if (p == ()) acc else (dissoc acc (head p))) state paths
+  list.fold (acc p -> if (p == ()) acc else (dissoc acc (head p))) state paths
 
 fn action-at :: Map Vec Str
   => st path
@@ -316,7 +316,7 @@ fn picks-at :: Map Vec Map
 ;; another, so the raw keys are checked before anything is decoded.
 fn check-collisions :: Map Vec ()
   => opts raw-states
-  fold (acc st -> fold (a k -> note-name opts a k) acc (keys st)) {} raw-states
+  list.fold (acc st -> list.fold (a k -> note-name opts a k) acc (keys st)) {} raw-states
   ()
 
 fn note-name :: Map Map Str Map
@@ -337,7 +337,7 @@ fn note-name :: Map Map Str Map
 ;; decoded state keys instead.
 fn trace-vars :: Vec Vec
   => states
-  sort (distinct (fold (acc st -> acc ++ (keys st.state)) #[] states))
+  sort (collection.distinct (list.fold (acc st -> acc ++ (keys st.state)) #[] states))
 
 pub fn decode-trace :: Map Map Map
   => opts itf
