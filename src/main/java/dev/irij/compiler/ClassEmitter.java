@@ -56,10 +56,13 @@ final class ClassEmitter implements Opcodes {
     final Map<String, String> topLevelFields = new HashMap<>();
 
     /** The {@code main} method's Locals — where top-level bindings get
-     *  their dual local slot. Identity-compared during lambda capture
-     *  to distinguish "this name is a top-level binding" from "this
-     *  name is a parameter that happens to share its spelling". */
+     *  their dual local slot. See {@link #isTopLevelSlot}. */
     Locals topLevelLocals = null;
+    /** Each top-level binding's dual local slot in {@code main}, for
+     *  its latest binding. Only the bind itself reads it: the hoist
+     *  copies it into the static field (and, in namespace mode, into
+     *  the session namespace). */
+    final Map<String, Integer> topLevelSlots = new HashMap<>();
     /** Sum-spec variants, kept in declaration order for deterministic
      *  emission. Each entry maps {@code variantName → arity}. */
     final Map<String, LinkedHashMap<String, Integer>> sumVariants = new LinkedHashMap<>();
@@ -656,9 +659,9 @@ final class ClassEmitter implements Opcodes {
             case Decl.BindingDecl bd -> {
                 // Top-level binds with a simple target also get hoisted
                 // to a static field so user-fns can read them (mirrors
-                // the interpreter's globalEnv lookup). The original
-                // local-slot store still happens (via emitStmt) so the
-                // rest of main()'s code sees the binding.
+                // the interpreter's globalEnv lookup). The initializer
+                // still stores into a local slot (via emitStmt); the rest
+                // of main()'s code reads the field, as fns do.
                 exprEm.emitStmt(bd.stmt(), mv, locals);
                 String topName = null;
                 if (bd.stmt() instanceof Stmt.Bind b
@@ -674,6 +677,7 @@ final class ClassEmitter implements Opcodes {
                         String field = ensureTopLevelField(topName);
                         mv.visitVarInsn(ALOAD, slot);
                         mv.visitFieldInsn(PUTSTATIC, internalName, field, OBJ_DESC);
+                        topLevelSlots.put(topName, slot);
                     }
                 }
                 // Keep the old narrow nsPut path for namespace mode.
@@ -776,6 +780,19 @@ final class ClassEmitter implements Opcodes {
             mv.visitLdcInsn(v);
             mv.visitInsn(AASTORE);
         }
+    }
+
+    /** Whether {@code name}, seen from {@code locals}, resolves to a
+     *  top-level binding's dual slot in {@code main} rather than to a
+     *  local that shadows the binding (a param, pattern variable or
+     *  let of any scope). Code that resolves there must use the static
+     *  field instead: fns and lambdas write the binding through it, so
+     *  the slot goes stale. Slots are numbered per method, so the slot
+     *  and the method's root scope together identify it. */
+    boolean isTopLevelSlot(String name, Locals locals) {
+        Integer slot = locals.lookup(name);
+        return slot != null && slot.equals(topLevelSlots.get(name))
+                && locals.root() == topLevelLocals;
     }
 
     /** Lazily declare a static field for a top-level binding. Field

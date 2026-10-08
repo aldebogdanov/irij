@@ -217,23 +217,16 @@ final class ExprEmitter implements Opcodes {
             return;
         }
         emitExpr(a.value(), mv, locals);
-        // Top-level mutable bind: write the static field FIRST so
-        // captured-by-static-field readers (lambdas, other threads)
-        // see the update. Falls through to local-slot update if there
-        // is one, so same-method reads also see the new value.
+        // Top-level mutable bind: write the static field, which every
+        // reader uses (fns, lambdas, other threads, and main itself —
+        // see emitVarLoad). A local that shadows the binding is
+        // written in place and leaves the binding alone.
+        Integer slot = locals.lookup(s.name());
         String topField = ce.topLevelFields.get(s.name());
-        if (topField != null) {
-            mv.visitInsn(DUP);
+        if (topField != null && (slot == null || ce.isTopLevelSlot(s.name(), locals))) {
             mv.visitFieldInsn(PUTSTATIC, ce.internalName, topField, ClassEmitter.OBJ_DESC);
-            Integer slotMaybe = locals.lookup(s.name());
-            if (slotMaybe != null) {
-                mv.visitVarInsn(ASTORE, slotMaybe);
-            } else {
-                mv.visitInsn(POP);
-            }
             return;
         }
-        Integer slot = locals.lookup(s.name());
         if (slot != null) {
             mv.visitVarInsn(ASTORE, slot);
             return;
@@ -449,10 +442,17 @@ final class ExprEmitter implements Opcodes {
     void emitVarLoad(String name, MethodVisitor mv, Locals locals) {
         // Locals shadow ALL outer scopes — pattern binds, params, lets.
         // Without this, `Err e => e` returned Math.E (the `e` constant
-        // shadowed by the pattern-bound `e`).
+        // shadowed by the pattern-bound `e`). A top-level binding's own
+        // slot in main is not such a local: it goes stale once a fn
+        // writes the binding, so main reads the static field as fns do.
         Integer __preSlot = locals.lookup(name);
         if (__preSlot != null) {
-            mv.visitVarInsn(ALOAD, __preSlot);
+            if (ce.isTopLevelSlot(name, locals)) {
+                mv.visitFieldInsn(GETSTATIC, ce.internalName,
+                        ce.topLevelFields.get(name), ClassEmitter.OBJ_DESC);
+            } else {
+                mv.visitVarInsn(ALOAD, __preSlot);
+            }
             return;
         }
         Integer __preLifted = ce.currentLiftedLocals.get(name);
@@ -465,9 +465,6 @@ final class ExprEmitter implements Opcodes {
         }
         // Top-level mut binds: read via GETSTATIC so cross-thread
         // updates (e.g. assignments inside a forked fiber) are visible.
-        // The dual local slot allocated at init time is only used by
-        // the initializer itself; once init completes, the static is
-        // authoritative.
         if (ce.topLevelFields.containsKey(name)
                 && !ClassEmitter.BUILTIN_CONST_NAMES.contains(name)) {
             mv.visitFieldInsn(GETSTATIC, ce.internalName,
