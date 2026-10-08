@@ -177,6 +177,38 @@ class IfBranchScopeTest {
                 """));
     }
 
+    /** A branch that performs is lowered into the step's own scope,
+     *  where lifted locals are keyed by name; its bindings get fresh
+     *  names, so they still end with the branch. */
+    @Test void bindingInABranchThatPerformsEndsWithTheBranch() throws Exception {
+        assertEquals("7\n1\n8\n1", run(COUNTER + """
+                with acc
+                  x := 1
+                  if true
+                    x := tick ()
+                    println x
+                  println x
+                  if true
+                    x := x + tick ()
+                    println x
+                  println x
+                """));
+    }
+
+    @Test void nestedBranchesThatPerformEachHaveTheirOwnScope() throws Exception {
+        assertEquals("14\n7\n1", run(COUNTER + """
+                with acc
+                  x := 1
+                  if true
+                    x := tick ()
+                    if true
+                      x := x + tick ()
+                      println x
+                    println x
+                  println x
+                """));
+    }
+
     @Test void assignmentsInsideAnOpBearingWithBodyPickTheRightBinding() throws Exception {
         assertEquals("51\n8\n12", run("""
                 effect Counter
@@ -225,6 +257,15 @@ class IfBranchScopeTest {
                   println (call-it f)
                 """));
     }
+
+    private static final String COUNTER = """
+            effect Counter
+              tick :: () -> Int
+
+            handler acc :: Counter
+              tick () => resume 7
+
+            """;
 
     static final class BytesLoader extends ClassLoader {
         BytesLoader() { super(IfBranchScopeTest.class.getClassLoader()); }
