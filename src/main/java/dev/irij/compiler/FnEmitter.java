@@ -511,17 +511,18 @@ final class FnEmitter implements Opcodes {
 
 
     /** Emit an IfStmt at tail position. Each branch's last statement
-     *  supplies the fn's return value via {@link #emitImperativeTail}. */
+     *  supplies the fn's return value via {@link #emitImperativeTail}.
+     *  Each branch has its own scope, as in {@code emitIfStmt}. */
     void emitTailIfStmt(Stmt.IfStmt ifs, MethodVisitor mv, Locals locals) {
         ce.exprEm.emitExpr(ifs.cond(), mv, locals);
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy",
                 "(Ljava/lang/Object;)Z", false);
         Label elseL = new Label();
         mv.visitJumpInsn(IFEQ, elseL);
-        emitImperativeTail(ifs.thenBranch(), mv, locals);
+        emitImperativeTail(ifs.thenBranch(), mv, locals.childScope());
         mv.visitLabel(elseL);
         if (ifs.elseBranch() != null) {
-            emitImperativeTail(ifs.elseBranch(), mv, locals);
+            emitImperativeTail(ifs.elseBranch(), mv, locals.childScope());
         } else {
             mv.visitInsn(ACONST_NULL);
             emitTailReturn(mv);

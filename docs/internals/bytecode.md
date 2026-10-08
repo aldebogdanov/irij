@@ -163,6 +163,32 @@ Each level is one fast path. The lifted-locals map is the only one
 that's per-emit-context (set by `emitSMSequence` / `emitSMEffIR`
 before they invoke recursive emits).
 
+### Block scopes
+
+Every block gets its own `Locals` (`childScope()`): each branch of an
+`if` (statement, tail, or inline with a `(…; …)` branch), each match
+arm, each `(…; …)` block, a `with`'s `on-failure`. A binding made in
+one ends with it; lookups and `<-` reach outward through the parents.
+Child scopes share the method's slot counter, so a slot is never
+reused. A branch's binding left in the enclosing scope would name a
+slot the other path never wrote, and the JVM verifier rejects the
+method (`VerifyError: Bad local variable type`).
+
+Inside an SM step, a nested scope's binding is a plain local even when
+its name is lifted (`emitBind`, `emitMutBind`; `emitAssign` writes it
+in place), as its bindings of other names always were. A lifted name
+lives in the continuation only so it survives a perform; the classifier
+lowers a branch that performs into blocks of the step's root scope, so
+code in a nested scope never needs that. Writing the field would rebind
+the step's own name for the code after the block. A branch that
+performs is lowered into the step's root scope itself, where lifted
+fields are keyed by name, so `SmClassifier`'s `EffIRBuilder.scoped`
+gives each of its bindings a fresh name (`x$if$N`) first: the binder
+and every later use in the branch, not the binding's own initializer.
+The rename is module privacy's (`ModulePrivacy.renamed`), binders and
+uses alike, so an inner binder of the same name stays consistent.
+`IfBranchScopeTest` pins all of this.
+
 ### `&&` / `||` are branches, not calls
 
 `emitBinaryOp` intercepts both before either operand is emitted and
