@@ -363,15 +363,8 @@ final class ClassEmitter implements Opcodes {
                     fnEffectRow.put(fn.name(), fn.effectRow());
                 }
             }
-            if (d instanceof Decl.BindingDecl bd
-                    && bd.stmt() instanceof Stmt.Bind b
-                    && b.target() instanceof Stmt.BindTarget.Simple sm) {
-                ensureTopLevelField(sm.name());
-            }
-            if (d instanceof Decl.BindingDecl bd2
-                    && bd2.stmt() instanceof Stmt.MutBind mb
-                    && mb.target() instanceof Stmt.BindTarget.Simple sm2) {
-                ensureTopLevelField(sm2.name());
+            if (d instanceof Decl.BindingDecl bd) {
+                for (String n : ModuleScope.valueNames(bd)) ensureTopLevelField(n);
             }
             Object inner = d instanceof Decl.PubDecl pd ? pd.inner() : d;
             if (inner instanceof Decl.SpecDecl sd) {
@@ -632,47 +625,29 @@ final class ClassEmitter implements Opcodes {
         switch (d) {
             case Decl.ExprDecl ed -> exprEm.emitStmtExpr(ed.expr(), mv, locals);
             case Decl.BindingDecl bd -> {
-                // Top-level binds with a simple target also get hoisted
-                // to a static field so user-fns can read them (mirrors
-                // the interpreter's globalEnv lookup). The initializer
-                // still stores into a local slot (via emitStmt); the rest
-                // of main()'s code reads the field, as fns do.
+                // Every name a top-level bind binds (a destructuring one
+                // too) also gets hoisted to a static field so user-fns can
+                // read it (mirrors the interpreter's globalEnv lookup). The
+                // initializer still stores into a local slot (via
+                // emitStmt); the rest of main()'s code reads the field, as
+                // fns do.
                 exprEm.emitStmt(bd.stmt(), mv, locals);
-                String topName = null;
-                if (bd.stmt() instanceof Stmt.Bind b
-                        && b.target() instanceof Stmt.BindTarget.Simple sm) {
-                    topName = sm.name();
-                } else if (bd.stmt() instanceof Stmt.MutBind mb
-                        && mb.target() instanceof Stmt.BindTarget.Simple sm) {
-                    topName = sm.name();
-                }
-                if (topName != null) {
-                    Integer slot = locals.lookup(topName);
-                    if (slot != null) {
-                        String field = ensureTopLevelField(topName);
+                for (String name : ModuleScope.valueNames(bd)) {
+                    Integer slot = locals.lookup(name);
+                    if (slot == null) continue;
+                    String field = ensureTopLevelField(name);
+                    mv.visitVarInsn(ALOAD, slot);
+                    mv.visitFieldInsn(PUTSTATIC, internalName, field, OBJ_DESC);
+                    topLevelSlots.put(name, slot);
+                    // Namespace-mode write-through (`:=` binds only): also
+                    // store into the session namespace so subsequent
+                    // eval-bytecode calls see it.
+                    if (options.namespaceMode() && bd.stmt() instanceof Stmt.Bind) {
+                        mv.visitLdcInsn(name);
                         mv.visitVarInsn(ALOAD, slot);
-                        mv.visitFieldInsn(PUTSTATIC, internalName, field, OBJ_DESC);
-                        topLevelSlots.put(topName, slot);
-                    }
-                }
-                // Keep the old narrow nsPut path for namespace mode.
-                if (bd.stmt() instanceof Stmt.Bind b
-                        && b.target() instanceof Stmt.BindTarget.Simple sm) {
-                    Integer slot = locals.lookup(sm.name());
-                    if (slot != null) {
-                        String field = ensureTopLevelField(sm.name());
-                        mv.visitVarInsn(ALOAD, slot);
-                        mv.visitFieldInsn(PUTSTATIC, internalName, field, OBJ_DESC);
-                        // Namespace-mode write-through: also store into
-                        // the session namespace so subsequent
-                        // eval-bytecode calls see it.
-                        if (options.namespaceMode()) {
-                            mv.visitLdcInsn(sm.name());
-                            mv.visitVarInsn(ALOAD, slot);
-                            mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nsPut"), "nsPut",
-                                    "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
-                            mv.visitInsn(POP);
-                        }
+                        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("nsPut"), "nsPut",
+                                "(Ljava/lang/String;Ljava/lang/Object;)Ljava/lang/Object;", false);
+                        mv.visitInsn(POP);
                     }
                 }
             }

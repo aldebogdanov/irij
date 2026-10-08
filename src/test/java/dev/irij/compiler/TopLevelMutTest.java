@@ -104,6 +104,19 @@ class TopLevelMutTest {
                 """));
     }
 
+    /** A destructuring top-level bind binds top-level names too. */
+    @Test void fnsReadTopLevelDestructuredNames() throws Exception {
+        assertEquals("3\n3", run("""
+                #[a b] := #[1 2]
+
+                fn s :: () Int
+                  (_ -> a + b)
+
+                println (a + b)
+                println (s ())
+                """));
+    }
+
     @Test void modulePubBindingWrittenByItsFnsReadsCurrentFromImporter() throws Exception {
         Path p = root.resolve("lib/counter.irj");
         Files.createDirectories(p.getParent());
