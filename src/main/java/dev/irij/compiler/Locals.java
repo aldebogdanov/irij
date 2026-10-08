@@ -60,4 +60,13 @@ final class Locals {
         if (s != null) return s;
         return parent == null ? null : parent.lookup(name);
     }
+
+    /** Whether this is a block, branch or arm inside the method's root scope. */
+    boolean isNested() { return parent != null; }
+
+    /** Whether {@code name} is bound in this scope or an enclosing one
+     *  short of the method's root. */
+    boolean boundBelowRoot(String name) {
+        return parent != null && (slots.containsKey(name) || parent.boundBelowRoot(name));
+    }
 }
