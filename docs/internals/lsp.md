@@ -97,8 +97,8 @@ change + a merge helper in `LspText`.
 
 `LspIndex.build(source)` parses the source into an AST and emits
 one `Symbol(name, kind, loc, signature, docComment)` per surface
-decl. Supported kinds: `FN, EFFECT, HANDLER, CAP, SPEC, NEWTYPE,
-PROTO, ROLE`.
+decl. Supported kinds: `FN, EFFECT, HANDLER, CAP, SPEC, PROTO, ROLE`
+(a newtype is a `SPEC`).
 
 Doc-comment extraction walks upward from the decl line gathering
 any contiguous `;;`-prefixed lines, strips the leading `;;`, and
@@ -126,7 +126,7 @@ surfaces as `Symbol(name=foo, kind=FN, …)` rather than a wrapper.
 - **completion** — keyword list first, then in-scope identifiers
   from the index with `CompletionItemKind` mapped per decl kind
   (`FN→Function`, `EFFECT/PROTO→Interface`, `HANDLER/CAP→Module`,
-  `SPEC/NEWTYPE→Struct`, `ROLE→Constant`). Each item carries the
+  `SPEC→Struct`, `ROLE→Constant`). Each item carries the
   symbol signature in `detail`.
 
 ## Effect-row diagnostics (2b.1.d)

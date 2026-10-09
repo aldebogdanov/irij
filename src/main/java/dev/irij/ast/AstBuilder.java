@@ -506,9 +506,12 @@ public class AstBuilder {
         throw new IllegalStateException("Empty spec body at " + loc(ctx));
     }
 
+    /** {@code newtype Email := Str} is {@code spec Email} with the one
+     *  variant {@code Email Str} (spec §2.2, *Newtypes*). */
     private Decl visitNewtypeDecl(NewtypeDeclContext ctx) {
         String name = ctx.upperName().UPPER_NAME().getText();
-        return new Decl.NewtypeDecl(name, loc(ctx));
+        return new Decl.SpecDecl(name, List.of(),
+                new Decl.SpecBody.SumSpec(List.of(new Decl.Variant(name, 1))), loc(ctx));
     }
 
     // ── cap ─────────────────────────────────────────────────────────────

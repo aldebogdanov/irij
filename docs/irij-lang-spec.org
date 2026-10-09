@@ -421,12 +421,19 @@
      Leaf a
      Node (Tree a) a (Tree a)
 
-   ;; newtype (zero-cost wrapper)
+   ;; newtype: a spec with one one-field variant of the same name
    newtype Email := Str
+   e := Email "jo@x.io"         ;; wraps; (Email s) unwraps
 
    ;; anonymous record (structural typing)
    person := {name= "Jo" age= 30}
    #+end_example
+
+   *Newtypes.* =newtype Email := Str= declares the same spec as =spec
+   Email= with the one variant =Email Str=: =Email "jo@x.io"= wraps a
+   string, =(Email s)= unwraps it, and =:: Email= admits only a wrapped
+   value, never a bare =Str=. As with any variant's fields, the wrapped
+   spec (=Str=) is not checked when a value is wrapped.
 
    *Product specs are closed.* A value satisfies a product spec when it
    carries exactly the declared fields — no more, no fewer — and each

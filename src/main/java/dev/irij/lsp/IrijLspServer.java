@@ -214,7 +214,7 @@ public final class IrijLspServer implements LanguageServer,
                 case FN -> CompletionItemKind.Function;
                 case EFFECT -> CompletionItemKind.Interface;
                 case HANDLER, CAP -> CompletionItemKind.Module;
-                case SPEC, NEWTYPE -> CompletionItemKind.Struct;
+                case SPEC -> CompletionItemKind.Struct;
                 case PROTO -> CompletionItemKind.Interface;
                 case PARTY -> CompletionItemKind.Constant;
             });
