@@ -23,6 +23,9 @@ import java.util.Set;
 final class SmClassifier implements Opcodes {
 
     private final ClassEmitter ce;
+    /** Numbers the fresh names {@code EffIRBuilder.scoped} gives branch
+     *  bindings — class-wide, so a nested `with` can't reuse one. */
+    private int branchBindCounter = 0;
 
     SmClassifier(ClassEmitter ce) { this.ce = ce; }
 
@@ -167,6 +170,52 @@ final class SmClassifier implements Opcodes {
             if (liftedSet.add(n)) lifted.add(n);
         }
 
+        /** A branch is a scope: its bindings end with it. Lowered here,
+         *  into the step's own scope where lifted locals are keyed by
+         *  name, a branch's `x := …` would rebind the body's `x` for the
+         *  code after the `if`. So each binding the branch makes gets a
+         *  fresh name, given to its binder and to every later use in the
+         *  branch, but not to its own initializer (which still sees the
+         *  enclosing `x`). Fresh names contain `$`, so no source name
+         *  can capture them. */
+        List<Stmt> scoped(List<Stmt> branch) {
+            Map<String, String> renames = new HashMap<>();
+            List<Stmt> out = new ArrayList<>(branch.size());
+            for (Stmt s : branch) {
+                switch (s) {
+                    case Stmt.Bind b -> {
+                        Expr value = ModulePrivacy.renamed(b.value(), renames);
+                        out.add(new Stmt.Bind(freshTarget(b.target(), renames),
+                                value, b.specAnnotation(), b.loc()));
+                    }
+                    case Stmt.MutBind mb -> {
+                        Expr value = ModulePrivacy.renamed(mb.value(), renames);
+                        out.add(new Stmt.MutBind(freshTarget(mb.target(), renames),
+                                value, mb.loc()));
+                    }
+                    default -> out.add(ModulePrivacy.renamed(s, renames));
+                }
+            }
+            return out;
+        }
+
+        /** {@code t} with each name it binds made fresh, recorded in {@code renames}. */
+        Stmt.BindTarget freshTarget(Stmt.BindTarget t, Map<String, String> renames) {
+            return switch (t) {
+                case Stmt.BindTarget.Simple sm -> {
+                    String fresh = sm.name() + "$if$" + branchBindCounter++;
+                    renames.put(sm.name(), fresh);
+                    yield new Stmt.BindTarget.Simple(fresh);
+                }
+                case Stmt.BindTarget.Destructure d -> {
+                    Set<String> names = new HashSet<>();
+                    ce.patEm.collectPatternBinds(d.pattern(), names);
+                    for (String n : names) renames.put(n, n + "$if$" + branchBindCounter++);
+                    yield new Stmt.BindTarget.Destructure(ModulePrivacy.renamed(d.pattern(), renames));
+                }
+            };
+        }
+
         /** Lower a stmt list starting at `entry`. After the last stmt, jump
          *  to `exitJump` (null = terminate with Return of last expr).
          *  Returns the id of the tail block (post-last-stmt).  */
@@ -207,10 +256,10 @@ final class SmClassifier implements Opcodes {
                     int thenB = newBlock();
                     int elseB = newBlock();
                     finalize(cur, new Term.Branch(ifs.cond(), thenB, elseB));
-                    int thenTail = lower(ifs.thenBranch(), thenB, null);
+                    int thenTail = lower(scoped(ifs.thenBranch()), thenB, null);
                     List<Stmt> el = ifs.elseBranch() != null
                             ? ifs.elseBranch() : List.of();
-                    int elseTail = lower(el, elseB, null);
+                    int elseTail = lower(scoped(el), elseB, null);
                     // Either branch may have been the "value-producing"
                     // tail — record one whose Return carries the tail expr.
                     lastValueBlock = thenTail;
@@ -226,10 +275,10 @@ final class SmClassifier implements Opcodes {
                     int elseB = newBlock();
                     int merge = newBlock();
                     finalize(cur, new Term.Branch(ifs.cond(), thenB, elseB));
-                    lower(ifs.thenBranch(), thenB, merge);
+                    lower(scoped(ifs.thenBranch()), thenB, merge);
                     List<Stmt> el = ifs.elseBranch() != null
                             ? ifs.elseBranch() : List.of();
-                    lower(el, elseB, merge);
+                    lower(scoped(el), elseB, merge);
                     cur = merge;
                 } else if (stmtContainsOpRecursive(s)) {
                     // Ops nested inside non-If stmt (match, with, block...): 3c

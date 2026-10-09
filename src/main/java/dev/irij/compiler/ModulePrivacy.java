@@ -327,4 +327,19 @@ final class ModulePrivacy {
             return out;
         }
     }
+
+    // The same consistent rename, binders and uses alike, for
+    // SmClassifier: it gives a performing branch's bindings fresh names.
+
+    static Stmt renamed(Stmt s, Map<String, String> renames) {
+        return renames.isEmpty() ? s : new Renamer(renames).stmt(s);
+    }
+
+    static Expr renamed(Expr e, Map<String, String> renames) {
+        return renames.isEmpty() ? e : new Renamer(renames).expr(e);
+    }
+
+    static Pattern renamed(Pattern p, Map<String, String> renames) {
+        return renames.isEmpty() ? p : new Renamer(renames).pat(p);
+    }
 }

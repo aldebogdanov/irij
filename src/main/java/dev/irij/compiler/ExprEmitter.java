@@ -96,9 +96,11 @@ final class ExprEmitter implements Opcodes {
             return;
         }
 
-        // 3. Block: earlier stmts non-tail, last expr tail.
+        // 3. Block: earlier stmts non-tail, last expr tail. Its own
+        // scope, as in emitBlock — `if c (x := 1; x) else x` must not
+        // hand the then-branch's x to the else.
         if (e instanceof Expr.Block blk) {
-            ce.fnEm.emitImperativeTail(blk.stmts(), mv, locals);
+            ce.fnEm.emitImperativeTail(blk.stmts(), mv, locals.childScope());
             return;
         }
 
@@ -207,8 +209,10 @@ final class ExprEmitter implements Opcodes {
             throw new IrijCompiler.CompileException(
                     "MVP: assignment must target a simple name");
         }
+        // A nested scope's own binding of the name is a plain local
+        // (see emitBind), so it is assigned in place.
         Integer liftedIdx = ce.currentLiftedLocals.get(s.name());
-        if (liftedIdx != null && ce.currentKSlot >= 0) {
+        if (liftedIdx != null && ce.currentKSlot >= 0 && !locals.boundBelowRoot(s.name())) {
             mv.visitVarInsn(ALOAD, ce.currentKSlot);
             mv.visitFieldInsn(GETFIELD, ClassEmitter.CONT, "fields", "[Ljava/lang/Object;");
             pushIconst(mv, liftedIdx);
@@ -255,7 +259,7 @@ final class ExprEmitter implements Opcodes {
                             + mb.target().getClass().getSimpleName() + ")");
         }
         Integer liftedIdx = ce.currentLiftedLocals.get(simple.name());
-        if (liftedIdx != null && ce.currentKSlot >= 0) {
+        if (liftedIdx != null && ce.currentKSlot >= 0 && !locals.isNested()) {
             mv.visitVarInsn(ALOAD, ce.currentKSlot);
             mv.visitFieldInsn(GETFIELD, ClassEmitter.CONT, "fields", "[Ljava/lang/Object;");
             pushIconst(mv, liftedIdx);
@@ -272,8 +276,15 @@ final class ExprEmitter implements Opcodes {
     void emitBind(Stmt.Bind b, MethodVisitor mv, Locals locals) {
         switch (b.target()) {
             case Stmt.BindTarget.Simple simple -> {
+                // A lifted name lives in the continuation so it survives a
+                // perform. A nested scope (branch, block, arm) keeps its
+                // bindings in plain locals, as it always has for names not
+                // lifted — the SM classifier lowers a branch that performs
+                // into blocks of the step's root scope — so its binding of
+                // a lifted name is one too, ending with the scope. Writing
+                // the field would rebind the step's own `x` after it.
                 Integer liftedIdx = ce.currentLiftedLocals.get(simple.name());
-                if (liftedIdx != null && ce.currentKSlot >= 0) {
+                if (liftedIdx != null && ce.currentKSlot >= 0 && !locals.isNested()) {
                     mv.visitVarInsn(ALOAD, ce.currentKSlot);
                     mv.visitFieldInsn(GETFIELD, ClassEmitter.CONT, "fields", "[Ljava/lang/Object;");
                     pushIconst(mv, liftedIdx);
@@ -304,17 +315,23 @@ final class ExprEmitter implements Opcodes {
     }
 
 
+    /** Each branch is a block with its own scope, as a match arm is: a
+     *  binding made in one ends with it. In the enclosing scope it would
+     *  name a slot the other path never wrote, which the JVM verifier
+     *  rejects. */
     void emitIfStmt(Stmt.IfStmt ifs, MethodVisitor mv, Locals locals) {
         emitExpr(ifs.cond(), mv, locals);
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy", "(Ljava/lang/Object;)Z", false);
         Label elseL = new Label();
         Label endL = new Label();
         mv.visitJumpInsn(IFEQ, elseL);
-        for (Stmt t : ifs.thenBranch()) emitStmt(t, mv, locals);
+        Locals thenLocals = locals.childScope();
+        for (Stmt t : ifs.thenBranch()) emitStmt(t, mv, thenLocals);
         mv.visitJumpInsn(GOTO, endL);
         mv.visitLabel(elseL);
         if (ifs.elseBranch() != null) {
-            for (Stmt t : ifs.elseBranch()) emitStmt(t, mv, locals);
+            Locals elseLocals = locals.childScope();
+            for (Stmt t : ifs.elseBranch()) emitStmt(t, mv, elseLocals);
         }
         mv.visitLabel(endL);
     }
