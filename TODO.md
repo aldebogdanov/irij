@@ -884,6 +884,19 @@ Full design and the recorded Quint behaviour it rests on:
       a test file's `tracked := …` broke `std.quint.itf`'s own private
       `tracked` (since renamed). `pub` names are alias-rewritten during
       inlining; private ones are not, and should be.
+- [ ] **std, examples and tests import with `:open`** — 79 uses in 49
+      files, against 2 `:as`. The spec now says to qualify (§2.4, *Style:
+      qualify*), and code here is what people and agents copy. Convert
+      them to `:as` aliases, by-name imports only for specs, effects,
+      protos and newtypes (and `std.test`'s assertions in tests).
+- [ ] **A top-level fn named like a builtin doesn't shadow it** — spec
+      §2.4 puts a file's own definition before builtins, but `fn sqrt ::
+      Str Str` then `sqrt "x"` calls the builtin ("sqrt expects a number,
+      got Str"), and `fn quo` beside `use std.math :as math` makes `quo
+      "x"` fail with "Not callable: ()" (std.math's `pub quo := quo`
+      stays program-wide). Same on v0.9.275. `docs/internals/modules.md`'s
+      shadowed-builtin example shows the intended behaviour, with a
+      `math.div` that std.math no longer has (it is `quo` now).
 - [x] **irij.online wedged after any SSE client-disconnect (prod hang, needed `systemctl restart`)** — Fixed. Root cause: `com.sun.net.httpserver`'s single selector dispatcher thread **wedges on JDK 25** when a client disconnects from an SSE/streaming response, then accepts no new connection server-wide. Latent for ages; surfaced when the server's JDK was bumped 21→25 (servers `7fe01c0`). Reproduced under JDK 25 + Caddy (JDK 26 tolerates it; 26 isn't in nixpkgs). Hit both the Playground stream and the patch-once `/api/seeds`. Fix: replaced `com.sun.net.httpserver` with `IrijHttpServer` — a virtual-thread-per-connection `ServerSocket` server (one vthread per connection, blocking I/O, `Connection: close`), so a dead peer only ends its own thread. `IrijExchange` mirrors the `HttpExchange` surface; helpers ported near-verbatim. Regression test `IrijHttpServerTest`. NOT the same as the earlier empty-seed-page (v0.8.7) or "headers already sent" (v0.8.6) bugs — those were separate.
 
 
