@@ -11,8 +11,8 @@
 ;;
 ;; Run:  irij run examples/quint.irj
 
-use std.quint :open
-use std.fs :open
+use std.quint :as quint
+use std.fs :as fs
 
 ;; ── The implementation ─────────────────────────────────────────
 ;;
@@ -49,12 +49,12 @@ model bank :: "tests/quint/bank.qnt" :pure {main= "bankTest"}
 
 ;; ── Generating and replaying ───────────────────────────────────
 
-result := with default-quint
-  check bank {traces= 20 max-steps= 10 max-samples= 500 seed= 42}
+result := with quint.default-quint
+  quint.check bank {traces= 20 max-steps= 10 max-samples= 500 seed= 42}
 
 println ("agrees with the spec: " ++ (to-str result.ok?))
 println ((to-str result.traces) ++ " traces, " ++ (to-str result.steps) ++ " steps, seed " ++ (to-str result.seed))
-print (report result)
+print (quint.report result)
 
 ;; ── The same thing, one step wrong ─────────────────────────────
 ;;
@@ -74,9 +74,9 @@ fn off-by-one :: Map Str Int Map
   {...st balances= (assoc st.balances who (balance + amount + 1)) last-error= ""}
 
 println ""
-bad := with default-quint
-  check broken {traces= 20 max-steps= 10 max-samples= 500 seed= 42}
-print (report bad)
+bad := with quint.default-quint
+  quint.check broken {traces= 20 max-steps= 10 max-samples= 500 seed= 42}
+print (quint.report bad)
 
 ;; ── A committed trace needs no Quint at all ────────────────────
 ;;
@@ -84,6 +84,6 @@ print (report bad)
 ;; replays in milliseconds, in CI, on a machine with no Node.
 
 println ""
-replayed := with default-fs
-  replay-file bank "tests/quint/bank_run_0.itf.json"
+replayed := with fs.default-fs
+  quint.replay-file bank "tests/quint/bank_run_0.itf.json"
 println ("committed trace replays: " ++ (to-str replayed.ok?))

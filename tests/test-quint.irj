@@ -1,6 +1,8 @@
-use std.test :open
-use std.fs :open
-use std.quint :open
+use std.test {assert-eq assert-false assert-throws assert-true summarize test}
+use std.fs :as fs
+use std.fs {FileIO}
+use std.quint :as quint
+use std.quint {Quint}
 use std.text {contains-substr?}
 use std.collection {map-vals}
 
@@ -33,8 +35,8 @@ broken := {spec-file= "tests/quint/bank.qnt" mode= :pure start= bank-start actio
 
 bank-trace := "tests/quint/bank_run_0.itf.json"
 
-ok-result := with default-fs do (replay-file good bank-trace)
-bad-result := with default-fs do (replay-file broken bank-trace)
+ok-result := with fs.default-fs do (quint.replay-file good bank-trace)
+bad-result := with fs.default-fs do (quint.replay-file broken bank-trace)
 
 r1 := test "a model that agrees with the spec passes" (-> assert-true ok-result.ok?)
 r2 := test "every state in the trace is replayed" (-> assert-eq 9 ok-result.steps)
@@ -61,8 +63,8 @@ sloppy-actions := {deposit= deposit-step withdraw= withdraw-step overdraft= (st 
 sloppy := {spec-file= "tests/quint/bank.qnt" mode= :pure start= bank-start actions= sloppy-actions}
 sloppy-ignoring := {...sloppy ignore= #{"last-error"}}
 
-sloppy-result := with default-fs do (replay-file sloppy bank-trace)
-ignoring-result := with default-fs do (replay-file sloppy-ignoring bank-trace)
+sloppy-result := with fs.default-fs do (quint.replay-file sloppy bank-trace)
+ignoring-result := with fs.default-fs do (quint.replay-file sloppy-ignoring bank-trace)
 
 r13 := test "an unmodelled variable diverges" (-> assert-false sloppy-result.ok?)
 r14 := test "ignore takes it out of the comparison" (-> assert-true ignoring-result.ok?)
@@ -74,9 +76,9 @@ r14 := test "ignore takes it out of the comparison" (-> assert-true ignoring-res
 no-deposit := {spec-file= "tests/quint/bank.qnt" mode= :pure start= bank-start actions= {withdraw= withdraw-step}}
 
 fn replay-without-deposit :: _ _ ::: FileIO
-  (_ -> replay-file no-deposit bank-trace)
+  (_ -> quint.replay-file no-deposit bank-trace)
 
-r15 := test "an action nothing handles is an error, not a diff" (-> assert-throws (-> with default-fs do (replay-without-deposit ())))
+r15 := test "an action nothing handles is an error, not a diff" (-> assert-throws (-> with fs.default-fs do (replay-without-deposit ())))
 
 ;; ── An anonymous action ────────────────────────────────────────
 ;;
@@ -88,17 +90,17 @@ r15 := test "an action nothing handles is an error, not a diff" (-> assert-throw
 anon := {spec-file= "tests/quint/anonymous.qnt" mode= :pure start= {n= 0 touched= false} actions= {idle= (st p -> st)}}
 
 fn replay-anonymous :: _ _ ::: FileIO
-  (_ -> replay-file anon "tests/quint/anonymous_0.itf.json")
+  (_ -> quint.replay-file anon "tests/quint/anonymous_0.itf.json")
 
-r29 := test "an anonymous action is an error the spec has to fix" (-> assert-throws (-> with default-fs do (replay-anonymous ())))
+r29 := test "an anonymous action is an error the spec has to fix" (-> assert-throws (-> with fs.default-fs do (replay-anonymous ())))
 
 ;; ── The report ─────────────────────────────────────────────────
 
-failure-text := report bad-result
+failure-text := quint.report bad-result
 
 r16 := test "the report names the step" (-> assert-true (contains-substr? failure-text "step     6"))
 r17 := test "the report shows both states" (-> assert-true (contains-substr? failure-text "expected"))
-r18 := test "a passing result reports nothing alarming" (-> assert-false (contains-substr? (report ok-result) "diverged"))
+r18 := test "a passing result reports nothing alarming" (-> assert-false (contains-substr? (quint.report ok-result) "diverged"))
 
 ;; ── A live model ───────────────────────────────────────────────
 ;;
@@ -153,10 +155,10 @@ live := {spec-file= "tests/quint/bank.qnt" mode= :live init= start-bank state= r
          actions= {deposit= do-deposit withdraw= do-withdraw overdraft= do-overdraft}}
 
 fn replay-live :: _ _ ::: FileIO Bank
-  (_ -> replay-file live bank-trace)
+  (_ -> quint.replay-file live bank-trace)
 
 live-result := with in-memory-bank
-  with default-fs
+  with fs.default-fs
     replay-live ()
 
 r19 := test "a live model replays against a running system" (-> assert-true live-result.ok?)
@@ -179,7 +181,7 @@ model declared :: "tests/quint/bank.qnt" :pure {main= "bankTest"}
   withdraw st who amount => {...st balances= (credit st.balances who (0 - amount)) last-error= ""}
   overdraft st _ _       => {...st last-error= "insufficient funds"}
 
-declared-result := with default-fs do (replay-file declared bank-trace)
+declared-result := with fs.default-fs do (quint.replay-file declared bank-trace)
 
 r30 := test "a declared model replays" (-> assert-true declared-result.ok?)
 r31 := test "it desugars to the same spec-file" (-> assert-eq "tests/quint/bank.qnt" declared.spec-file)
@@ -198,10 +200,10 @@ model live-declared :: "tests/quint/bank.qnt" :live ::: Bank
   overdraft _ _       => bank-fail ()
 
 fn replay-live-declared :: _ _ ::: FileIO Bank
-  (_ -> replay-file live-declared bank-trace)
+  (_ -> quint.replay-file live-declared bank-trace)
 
 live-declared-result := with in-memory-bank
-  with default-fs
+  with fs.default-fs
     replay-live-declared ()
 
 r37 := test "a declared live model drives a running system" (-> assert-true live-declared-result.ok?)
@@ -214,7 +216,7 @@ r38 := test "its lifecycle clauses become callable" (-> assert-eq 9 live-declare
 ;; replay path with nothing installed. This is the same seam that
 ;; lets a committed trace replay in CI.
 
-recorded := with default-fs do (fs-read bank-trace)
+recorded := with fs.default-fs do (fs-read bank-trace)
 
 handler canned-quint :: Quint
   quint-version _ => resume "0.32.0"
@@ -223,7 +225,7 @@ handler canned-quint :: Quint
   quint-verify opts => resume {exit= 1 stdout= "" stderr= "" cmd= #["quint" "verify"] dir= "." traces= #[]}
 
 fn checked :: Map Map ::: Quint
-  (driver -> check driver {})
+  (driver -> quint.check driver {})
 
 checked-good := with canned-quint do (checked good)
 checked-broken := with canned-quint do (checked broken)
@@ -242,14 +244,14 @@ handler empty-quint :: Quint
   quint-verify opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "verify"] dir= "." traces= #[]}
 
 fn check-with-nothing :: _ _ ::: Quint
-  (_ -> check good {})
+  (_ -> quint.check good {})
 
 r26 := test "a run that generated no traces is an error" (-> assert-throws (-> with empty-quint do (check-with-nothing ())))
 
 ;; An invariant that holds writes no counterexample, and that is the
 ;; pass rather than the empty-result error above.
 fn verify-holding :: _ _ ::: Quint
-  (_ -> verify good {invariant= "noNegatives"})
+  (_ -> quint.verify good {invariant= "noNegatives"})
 
 holding := with empty-quint do (verify-holding ())
 
@@ -276,16 +278,16 @@ handler recording-fs :: FileIO
   fs-mkdir path => resume ()
 
 fn save-it :: _ Str ::: FileIO
-  (_ -> save-failure broken checked-broken "tests/quint")
+  (_ -> quint.save-failure broken checked-broken "tests/quint")
 
 fn save-passing :: _ Str ::: FileIO
-  (_ -> save-failure good checked-good "tests/quint")
+  (_ -> quint.save-failure good checked-good "tests/quint")
 
 ;; The handler's state lives with the `with` block, so reading back
 ;; what was written happens inside the same one.
 fn save-and-read :: _ Str ::: FileIO
   =>
-  path := save-failure broken checked-broken "tests/quint"
+  path := quint.save-failure broken checked-broken "tests/quint"
   fs-read path
 
 saved-path := with recording-fs do (save-it ())
@@ -323,8 +325,8 @@ model unviewed :: "tests/quint/bank.qnt" :pure {main= "bankTest"}
   withdraw st who amount => move st who (0 - amount)
   overdraft st _ _       => {...st err= :overdraft}
 
-viewed-result := with default-fs do (replay-file viewed bank-trace)
-unviewed-result := with default-fs do (replay-file unviewed bank-trace)
+viewed-result := with fs.default-fs do (quint.replay-file viewed bank-trace)
+unviewed-result := with fs.default-fs do (quint.replay-file unviewed bank-trace)
 
 r43 := test "a view renders the model's state for comparison" (-> assert-true viewed-result.ok?)
 r44 := test "it is compared at every step" (-> assert-eq ok-result.steps viewed-result.steps)

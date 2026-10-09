@@ -1,5 +1,5 @@
-use std.test :open
-use std.http :open
+use std.test {assert-eq summarize test}
+use std.http {Http}
 
 ;; ── Mock handler ──────────────────────────────────────────────────
 

@@ -1,7 +1,8 @@
 ;; ── std.log tests ──────────────────────────────────────────────────
 
-use std.test :open
-use std.log :open
+use std.test {assert-eq summarize test}
+use std.log :as log
+use std.log {Log}
 
 handler mem-log :: Log
   state :! #[]
@@ -10,25 +11,25 @@ handler mem-log :: Log
     resume ()
 
 captured := with mem-log
-  log-info "hello"
-  log-warn "careful"
-  log-error "boom"
+  log.log-info "hello"
+  log.log-warn "careful"
+  log.log-error "boom"
   mem-log.state
 
 r1 := test "levels route through log-msg" (-> assert-eq captured #["info:hello" "warn:careful" "error:boom"])
 
-silent := with silent-log
-  log-info "dropped"
+silent := with log.silent-log
+  log.log-info "dropped"
   :done
 
 r2 := test "silent-log drops output" (-> assert-eq silent :done)
 
 fn do-work :: Int Int ::: Log
   n =>
-    log-info "working on ${n}"
+    log.log-info "working on ${n}"
     n * 2
 
-dl-result := with default-log
+dl-result := with log.default-log
   do-work 5
 
 r3 := test "default-log prints and resumes" (-> assert-eq dl-result 10)

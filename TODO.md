@@ -883,11 +883,14 @@ Full design and the recorded Quint behaviour it rests on:
       program leaves a module's own `helper` alone (checked on v0.9.279).
       Found when a test file's `tracked := …` broke `std.quint.itf`'s own
       private `tracked`.
-- [ ] **std, examples and tests import with `:open`** — 79 uses in 49
-      files, against 2 `:as`. The spec now says to qualify (§2.4, *Style:
-      qualify*), and code here is what people and agents copy. Convert
-      them to `:as` aliases, by-name imports only for specs, effects,
-      protos and newtypes (and `std.test`'s assertions in tests).
+- [x] **std, examples and tests imported with `:open`** — Converted
+      (2026-10): 69 `use … :open` lines in 38 files (5 std modules, 30
+      tests, 3 examples) are `:as` aliases (`str` for std.text, the last
+      segment otherwise), by-name imports for the specs and effects they
+      use, and `use std.test {…}` for tests' assertions; 5 unused imports
+      went. The spec says to qualify (§2.4, *Style: qualify*), and code
+      here is what people and agents copy. The rewrite was driven by
+      where the compiler resolved each name, not by text matching.
 - [x] **A top-level definition named like a builtin was the builtin
       everywhere, or not at all** — Fixed (2026-10). Modules inline into
       one program, so a program's `fn length` was the `length` every

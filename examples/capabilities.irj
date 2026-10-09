@@ -9,8 +9,8 @@
 ;;
 ;; Run:  irij examples/capabilities.irj
 
-use std.fs :open
-use std.list :open
+use std.fs :as fs
+use std.fs {FileIO}
 
 ;; ═══════════════════════════════════════════════════════════════════
 ;; 1. Java-backed cap is the default shape for stdlib modules.
@@ -19,7 +19,7 @@ use std.list :open
 ;;    User code just runs `with default-fs do (op …)`.
 ;; ═══════════════════════════════════════════════════════════════════
 
-irij-toml-exists := with default-fs do (fs-exists? "irij.toml")
+irij-toml-exists := with fs.default-fs do (fs-exists? "irij.toml")
 println ("irij.toml present: " ++ (to-str irij-toml-exists))
 
 ;; ═══════════════════════════════════════════════════════════════════
@@ -77,6 +77,6 @@ console-run ()
 
 fn list-count ::: FileIO
   => dir
-  with default-fs do (length (fs-list-dir dir))
+  with fs.default-fs do (length (fs-list-dir dir))
 
 println ("entries in `.': " ++ (to-str (list-count ".")))

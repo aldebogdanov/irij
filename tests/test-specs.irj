@@ -1,7 +1,7 @@
 ;; ── Spec System Tests ─────────────────────────────────────────────
 ;; Phase 8a: spec replaces type
 
-use std.test :open
+use std.test {assert-eq summarize test}
 
 ;; ── Sum spec ─────────────────────────────────────────────────────
 spec Shape

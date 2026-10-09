@@ -1,5 +1,5 @@
-use std.test :open
-use std.proc :open
+use std.test {assert-eq summarize test}
+use std.proc {Proc}
 
 ;; std.proc under a mock handler: the effect's surface, with no process
 ;; started (CI runs these suites with no external binaries). The real

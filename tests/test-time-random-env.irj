@@ -1,7 +1,10 @@
-use std.test :open
-use std.time :open
-use std.random :open
-use std.env :open
+use std.test {assert-eq assert-true test}
+use std.time :as time
+use std.time {Time}
+use std.random :as random
+use std.random {Random}
+use std.env :as env
+use std.env {Env}
 
 ;; ── std.time ──────────────────────────────────────────────
 
@@ -12,7 +15,7 @@ fn run-time-now ::: Time
 
 fn wrap-time-now ::: Time
   =>
-  with default-time
+  with time.default-time
     run-time-now ()
 
 test "time-now returns positive" (-> wrap-time-now ())
@@ -26,7 +29,7 @@ fn run-time-sleep ::: Time
 
 fn wrap-time-sleep ::: Time
   =>
-  with default-time
+  with time.default-time
     run-time-sleep ()
 
 test "time-sleep does not error" (-> wrap-time-sleep ())
@@ -59,7 +62,7 @@ fn run-rand-int ::: Random
 
 fn wrap-rand-int ::: Random
   =>
-  with default-random
+  with random.default-random
     run-rand-int ()
 
 test "rand-int stays in bound" (-> wrap-rand-int ())
@@ -72,7 +75,7 @@ fn run-rand-float ::: Random
 
 fn wrap-rand-float ::: Random
   =>
-  with default-random
+  with random.default-random
     run-rand-float ()
 
 test "rand-float in [0,1)" (-> wrap-rand-float ())
@@ -102,7 +105,7 @@ fn run-env-default ::: Env
 
 fn wrap-env-default ::: Env
   =>
-  with default-env
+  with env.default-env
     run-env-default ()
 
 test "env-var returns default when unset" (-> wrap-env-default ())
@@ -113,7 +116,7 @@ fn run-env-args-default ::: Env
 
 fn wrap-env-args-default ::: Env
   =>
-  with default-env
+  with env.default-env
     run-env-args-default ()
 
 test "env-args is empty when a test file runs" (-> wrap-env-args-default ())

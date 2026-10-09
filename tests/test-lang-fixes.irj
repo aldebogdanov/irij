@@ -1,6 +1,6 @@
 ;; ── PR4 language fixes: curried lambdas, dynamic map keys, captures ──
 
-use std.test :open
+use std.test {assert-eq assert-throws summarize test}
 
 ;; curried lambda chains
 add := (a -> b -> a + b)

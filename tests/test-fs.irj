@@ -1,5 +1,6 @@
-use std.test :open
-use std.fs :open
+use std.test {assert-eq assert-false assert-true summarize test}
+use std.fs :as fs
+use std.fs {FileIO}
 
 ;; ── Mock handler for testing ──────────────────────────────────────
 
@@ -83,7 +84,7 @@ r5 := test "list dir adds entries" (-> assert-eq 2 (run-list ()))
 
 fn run-real-fs
   =>
-  with default-fs
+  with fs.default-fs
     fs-write "/tmp/irij-test-fs.txt" "real data"
     result := fs-read "/tmp/irij-test-fs.txt"
     fs-delete "/tmp/irij-test-fs.txt"
@@ -93,7 +94,7 @@ r6 := test "real fs write/read/delete" (-> assert-eq "real data" (run-real-fs ()
 
 fn run-real-mkdir
   =>
-  with default-fs
+  with fs.default-fs
     fs-mkdir "/tmp/irij-test-dir"
     result := fs-exists? "/tmp/irij-test-dir"
     fs-delete "/tmp/irij-test-dir"
