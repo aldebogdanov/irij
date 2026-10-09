@@ -31,7 +31,7 @@ editors/emacs/                 — irij-mode.el (syntax + REPL) + irij-nrepl.el 
 8. **TODO.md updates.** Always update TODO.md if you confident in step correct implementation. Also possible to mark incomplete/problematic steps.
 9. **Docs after milestone.** When a phase or important steps are implemented, update the matching page in `./docs/internals/` (the live, topic-organised reference). Avoid one-off single-page architecture docs — the irij.online website is where the public architecture view lives.
 10. **Wipe old things.** Completely purge any mentions of removed design patterns. If something changes, then spec, docs and examples must show like it always was so.
-11. **Qualified imports.** In Irij code you write (std, tests, examples, programs), import with `use m :as alias` and name things as `alias.name`. Import by name (`use m {Mode}`) only what an alias can't reach (specs, effects, protos, newtypes) or a few names a file uses constantly (`std.test`'s assertions in tests). Don't add `:open`. Spec §2.4, *Style: qualify*.
+11. **Qualified imports.** In Irij code you write (std, tests, examples, programs), import with `use m :as alias` and name things as `alias.name`. That includes specs, variants, effects and ops (`:: m.Mode`, `m.Calm`, `::: m.Tick`, `m.tick ()`). Import by name (`use m {assert-eq}`) only a few names a file uses constantly (`std.test`'s assertions in tests, an effect whose ops it performs throughout). Don't add `:open`. Spec §2.4, *Style: qualify*.
 
 ## Current implementation status
 

@@ -100,11 +100,13 @@ also a compile error, since `false` can never be called.
   `length` in every file. Now each of those is a compile error that names
   the module and the `use` line to add:
   `` `twice` is not imported here: it is lib.m's; import it with `use lib.m {twice}`, or write `m.twice` after `use lib.m :as m` at main.irj:2:10 ``.
-  Specs, effects, protos and newtypes are imported by name and bring
-  their members: `use m {Mode}` brings the spec and its variants, `use m
-  {Tick}` the effect and its ops — also when you only name it in a row
-  (`::: FileIO` needs `use std.fs {FileIO}`). They aren't reached through
-  an alias (`m.Calm` is an error). Builtin effects (`Console`, `Time`,
+  Specs, effects, protos and newtypes bring their members: `use m
+  {Mode}` brings the spec and its variants, `use m {Tick}` the effect and
+  its ops — also when you only name it in a row (`::: FileIO` needs `use
+  std.fs {FileIO}`). In releases after v0.9.279 they are also reached
+  through an alias: `:: m.Mode`, `m.Calm`, `(m.Busy n)`, `::: m.Tick`,
+  `handler h :: m.Tick`, `impl Show for m.Mode`, `m.tick ()` (up to
+  v0.9.279, `m.Calm` is an error). Builtin effects (`Console`, `Time`,
   `Env`, `Random`, `JVM`) and specs (`Int`, `Str`, `Ok`, `Err`, …) need no
   import. `use m {nope}` and `m.nope` for a name `m` doesn't export are
   errors too (they used to be silently ignored). A name two `:open`
@@ -112,9 +114,9 @@ also a compile error, since `false` can never be called.
   local now shadows an alias (`(m -> m.x)` is the parameter's field).
   `pub use m {names}` re-exports. In a REPL, an eval keeps the imports of
   the evals before it. While you add imports, write them qualified:
-  `use m :as m` and `m.name` (also `with m.handler`), by name only for
-  specs, effects, protos and newtypes, and no `:open`: the spec's §2.4,
-  *Style: qualify*.
+  `use m :as m` and `m.name` (also `with m.handler`, and after v0.9.279
+  `:: m.Mode` and `::: m.Tick`), by name only for a few names you use
+  constantly, and no `:open`: the spec's §2.4, *Style: qualify*.
 - **Spec-lint is back.** `irij <file>` and `irij build` print a warning
   on stderr for every `pub fn` without a `::` spec annotation, including
   in your own modules and seeds. Add the specs (use `_` where the shape
@@ -266,8 +268,9 @@ So:
    the module's.
 6. Imports (v0.9.277): compile and run everything once; each "is not
    imported here" error names the `use` line to add. Expect them for
-   variants used after `use m :as m` (add `use m {Spec}`), for effects
-   named in rows (`use std.fs {FileIO}`, `use std.proc {Proc}`), for
+   variants used after `use m :as m` (write `m.Variant` after v0.9.279,
+   or add `use m {Spec}`), for effects named in rows (`::: fs.FileIO`
+   after v0.9.279, or `use std.fs {FileIO}`), for
    names a module got through another module's `:open`, and for
    `use m {names}` lists naming something `m` doesn't export.
 7. Static assets: everything the browser fetches directly must be under

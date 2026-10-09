@@ -105,12 +105,21 @@ public class AstBuilder {
         return new Decl.UseDecl(name, mod, loc(ctx));
     }
 
+    /** {@code Mode}, or {@code m.Mode} through an import alias — left
+     *  qualified here; ModuleScope resolves it. */
+    private static String typeName(IrijParser.TypeNameContext ctx) {
+        return ctx.IDENT() != null ? ctx.IDENT().getText() + "." + ctx.UPPER_NAME().getText()
+                : ctx.UPPER_NAME().getText();
+    }
+
     private Decl visitPubDecl(PubDeclContext ctx) {
         var loc = loc(ctx);
         if (ctx.fnDecl() != null) return new Decl.PubDecl(visitFnDecl(ctx.fnDecl(), true), loc);
         if (ctx.specDecl() != null) return new Decl.PubDecl(visitSpecDecl(ctx.specDecl()), loc);
         if (ctx.effectDecl() != null) return new Decl.PubDecl(visitEffectDecl(ctx.effectDecl()), loc);
         if (ctx.handlerDecl() != null) return new Decl.PubDecl(visitHandlerDecl(ctx.handlerDecl()), loc);
+        if (ctx.newtypeDecl() != null) return new Decl.PubDecl(visitNewtypeDecl(ctx.newtypeDecl()), loc);
+        if (ctx.protoDecl() != null) return new Decl.PubDecl(visitProtoDecl(ctx.protoDecl()), loc);
         if (ctx.useDecl() != null) return new Decl.PubDecl(visitUseDecl(ctx.useDecl()), loc);
         if (ctx.binding() != null) return new Decl.PubDecl(new Decl.BindingDecl(visitBinding(ctx.binding()), loc), loc);
         throw new IllegalStateException("Unknown pub declaration at " + loc);
@@ -252,8 +261,8 @@ public class AstBuilder {
             return buildSpecAtom(atoms.get(0));
         }
         // Multiple atoms: application
-        String head = atoms.get(0).upperName() != null
-            ? atoms.get(0).upperName().UPPER_NAME().getText() : null;
+        String head = atoms.get(0).typeName() != null
+            ? typeName(atoms.get(0).typeName()) : null;
         if ("Enum".equals(head)) {
             var values = new ArrayList<String>();
             for (int i = 1; i < atoms.size(); i++) {
@@ -294,8 +303,8 @@ public class AstBuilder {
 
     /** Build a SpecExpr from a single specAtom. */
     private SpecExpr buildSpecAtom(IrijParser.SpecAtomContext atom) {
-        if (atom.upperName() != null) {
-            return new SpecExpr.Name(atom.upperName().UPPER_NAME().getText());
+        if (atom.typeName() != null) {
+            return new SpecExpr.Name(typeName(atom.typeName()));
         }
         if (atom.UNDERSCORE() != null) {
             return new SpecExpr.Wildcard();
@@ -373,8 +382,8 @@ public class AstBuilder {
         var out = new ArrayList<String>();
         for (int i = 0; i < ctx.getChildCount(); i++) {
             var ch = ctx.getChild(i);
-            if (ch instanceof IrijParser.UpperNameContext un) {
-                out.add(un.UPPER_NAME().getText());
+            if (ch instanceof IrijParser.TypeNameContext tn) {
+                out.add(typeName(tn));
             } else if (ch instanceof org.antlr.v4.runtime.tree.TerminalNode tn
                     && tn.getSymbol().getType() == IrijLexer.IDENT) {
                 out.add(tn.getText());
@@ -516,7 +525,7 @@ public class AstBuilder {
     private Decl visitCapDecl(CapDeclContext ctx) {
         boolean isPub = ctx.PUB() != null;
         String name = ctx.IDENT().getText();
-        String effectName = ctx.upperName().UPPER_NAME().getText();
+        String effectName = typeName(ctx.typeName());
         // RHS: either a STRING (JVM classpath) or a map literal (Irij record).
         if (ctx.STRING() != null) {
             String rawString = ctx.STRING().getText();
@@ -558,7 +567,7 @@ public class AstBuilder {
 
     private Decl visitHandlerDecl(HandlerDeclContext ctx) {
         String name = ctx.fnName().IDENT().getText();
-        String effectName = ctx.upperName().UPPER_NAME().getText();
+        String effectName = typeName(ctx.typeName());
 
         // Extract required effects from optional effect annotation
         List<String> requiredEffects = null;
@@ -776,8 +785,8 @@ public class AstBuilder {
     }
 
     private Decl visitImplDecl(ImplDeclContext ctx) {
-        String protoName = ctx.upperName(0).UPPER_NAME().getText();
-        String forType = ctx.upperName(1).UPPER_NAME().getText();
+        String protoName = typeName(ctx.typeName(0));
+        String forType = typeName(ctx.typeName(1));
         var bindings = new ArrayList<Decl.ImplBinding>();
         for (var member : ctx.implBody().implMember()) {
             bindings.add(new Decl.ImplBinding(
@@ -1506,9 +1515,9 @@ public class AstBuilder {
     private Pattern visitPattern(PatternContext ctx) {
         var loc = loc(ctx);
 
-        // Constructor pattern: UPPER_NAME patterns*
-        if (ctx.UPPER_NAME() != null) {
-            String name = ctx.UPPER_NAME().getText();
+        // Constructor pattern: typeName patterns*
+        if (ctx.typeName() != null) {
+            String name = typeName(ctx.typeName());
             var args = new ArrayList<Pattern>();
             for (var p : ctx.pattern()) {
                 args.add(visitPattern(p));

@@ -399,7 +399,7 @@ final class ModuleScope {
             List<Exports> owners = valueIndex.getOrDefault(name, List.of());
             if (!owners.isEmpty()) {
                 Exports ex = owners.get(0);
-                String alias = ex.module().substring(ex.module().lastIndexOf('.') + 1);
+                String alias = aliasFor(ex);
                 throw error("`" + name + "` is not imported here: it is "
                         + (owners.size() == 1 ? ex.module() + "'s"
                                 : "exported by " + String.join(", ", owners.stream().map(Exports::module).toList()))
@@ -421,17 +421,56 @@ final class ModuleScope {
             privateOrProgram(name, loc);
         }
 
-        private void row(List<String> row, SourceLoc loc) {
-            if (row == null) return;
-            for (String e : row) if (!e.isEmpty() && Character.isUpperCase(e.charAt(0))) type(e, loc);
+        /** A type-level name as written — {@code Mode}, or {@code m.Mode}
+         *  through an import alias — checked, as the program names it: a
+         *  module's type-level names keep their spelling program-wide. */
+        String typeName(String name, SourceLoc loc) {
+            int dot = name == null ? -1 : name.indexOf('.');
+            if (dot < 0) {
+                type(name, loc);
+                return name;
+            }
+            String alias = name.substring(0, dot);
+            String member = name.substring(dot + 1);
+            Exports ex = cx.imports().aliases.get(alias);
+            if (ex == null) {
+                throw error("`" + name + "`: `" + alias + "` is not an import alias here; import the module "
+                        + "with `use <module> :as " + alias + "`", loc);
+            }
+            if (ex.groupOf(member) == null) {
+                throw error("`" + name + "`: " + ex.module() + " exports no `" + member + "`"
+                        + (ex.privates().contains(member) ? " (it is private to " + ex.module() + ")" : ""), loc);
+            }
+            return member;
+        }
+
+        /** An effect row: effects (bare or qualified) resolved, row variables kept. */
+        private List<String> row(List<String> row, SourceLoc loc) {
+            if (row == null) return null;
+            List<String> out = new ArrayList<>(row.size());
+            for (String e : row) {
+                boolean effect = e.indexOf('.') >= 0 || (!e.isEmpty() && Character.isUpperCase(e.charAt(0)));
+                out.add(effect ? typeName(e, loc) : e);
+            }
+            return out;
         }
 
         private IrijCompiler.CompileException notImportedType(String name, Exports ex, SourceLoc loc) {
             String group = ex.groupOf(name);
             String what = group.equals(name) ? ex.kinds().get(group) + " `" + name + "`"
                     : "`" + name + "`, of " + ex.kinds().get(group) + " `" + group + "`";
+            String alias = aliasFor(ex);
             return error("`" + name + "` is not imported here: it is " + ex.module() + "'s ("
-                    + what + "); import it with `use " + ex.module() + " {" + group + "}`", loc);
+                    + what + "); import it with `use " + ex.module() + " {" + group + "}`, or write `"
+                    + alias + "." + name + "` after `use " + ex.module() + " :as " + alias + "`", loc);
+        }
+
+        /** The alias this file imports {@code ex} under, or its last segment. */
+        private String aliasFor(Exports ex) {
+            for (var e : cx.imports().aliases.entrySet()) {
+                if (e.getValue().module().equals(ex.module())) return e.getKey();
+            }
+            return ex.module().substring(ex.module().lastIndexOf('.') + 1);
         }
 
         /** A name only a module's private code, or only the program, defines. */
@@ -453,35 +492,30 @@ final class ModuleScope {
                 case Decl.PubDecl pd -> new Decl.PubDecl(pd.inner() instanceof Decl inner ? decl(inner) : pd.inner(),
                         pd.loc());
                 case Decl.HandlerDecl hd -> {
-                    type(hd.effectName(), hd.loc());
-                    row(hd.requiredEffects(), hd.loc());
+                    String effect = typeName(hd.effectName(), hd.loc());
+                    List<String> required = row(hd.requiredEffects(), hd.loc());
                     Scope sc = Scope.top().child();
                     List<Stmt> state = stmtsInto(hd.stateBindings(), sc);
                     List<Decl.HandlerClause> clauses = new ArrayList<>();
                     for (var c : hd.clauses()) {
                         Scope cs = sc.with(bound(c.params()));
-                        clauses.add(new Decl.HandlerClause(c.opName(), c.params(), expr(c.body(), cs)));
+                        clauses.add(new Decl.HandlerClause(c.opName(), pats(c.params()), expr(c.body(), cs)));
                     }
-                    yield new Decl.HandlerDecl(hd.name(), hd.effectName(), hd.requiredEffects(), clauses,
-                            state, hd.loc());
+                    yield new Decl.HandlerDecl(hd.name(), effect, required, clauses, state, hd.loc());
                 }
-                case Decl.ImplDecl im -> {
-                    type(im.protoName(), im.loc());
-                    type(im.forType(), im.loc());
-                    yield new Decl.ImplDecl(im.protoName(), im.forType(), im.bindings().stream()
-                            .map(b -> new Decl.ImplBinding(b.name(), expr(b.value(), Scope.top())))
-                            .toList(), im.loc());
-                }
-                case Decl.CapDecl cd -> {
-                    type(cd.effectName(), cd.loc());
-                    yield new Decl.CapDecl(cd.isPub(), cd.name(), cd.effectName(), cd.providerClass(),
-                            expr(cd.recordExpr(), Scope.top()), cd.loc());
-                }
+                case Decl.ImplDecl im -> new Decl.ImplDecl(typeName(im.protoName(), im.loc()),
+                        typeName(im.forType(), im.loc()), im.bindings().stream()
+                                .map(b -> new Decl.ImplBinding(b.name(), expr(b.value(), Scope.top())))
+                                .toList(), im.loc());
+                case Decl.CapDecl cd -> new Decl.CapDecl(cd.isPub(), cd.name(), typeName(cd.effectName(), cd.loc()),
+                        cd.providerClass(), expr(cd.recordExpr(), Scope.top()), cd.loc());
                 case Decl.SpecDecl sd -> {
-                    if (sd.body() instanceof Decl.SpecBody.ProductSpec ps) {
-                        for (var f : ps.fields()) spec(f.spec(), Set.copyOf(sd.specParams()), sd.loc());
-                    }
-                    yield sd;
+                    if (!(sd.body() instanceof Decl.SpecBody.ProductSpec ps)) yield sd;
+                    Set<String> vars = Set.copyOf(sd.specParams());
+                    List<Decl.SpecField> fields = new ArrayList<>();
+                    for (var f : ps.fields()) fields.add(new Decl.SpecField(f.name(), spec(f.spec(), vars, sd.loc())));
+                    yield new Decl.SpecDecl(sd.name(), sd.specParams(), sd.rowParams(),
+                            new Decl.SpecBody.ProductSpec(fields), sd.loc());
                 }
                 case Decl.BindingDecl bd -> new Decl.BindingDecl(stmt(bd.stmt(), Scope.top()), bd.loc());
                 case Decl.ExprDecl ed -> new Decl.ExprDecl(expr(ed.expr(), Scope.top()), ed.loc());
@@ -500,26 +534,26 @@ final class ModuleScope {
         }
 
         private Decl.FnDecl fnDecl(Decl.FnDecl fn) {
-            row(fn.effectRow(), fn.loc());
+            List<String> row = row(fn.effectRow(), fn.loc());
+            List<SpecExpr> specs = null;
             if (fn.specAnnotations() != null) {
-                for (SpecExpr s : fn.specAnnotations()) spec(s, Set.of(), fn.loc());
+                specs = new ArrayList<>();
+                for (SpecExpr s : fn.specAnnotations()) specs.add(spec(s, Set.of(), fn.loc()));
             }
             Scope sc = Scope.top();
             Decl.FnBody body = switch (fn.body()) {
                 case Decl.FnBody.LambdaBody lb -> {
-                    for (Pattern p : lb.params()) pattern(p);
                     sc = sc.with(params(lb.params(), lb.restParam()));
-                    yield new Decl.FnBody.LambdaBody(lb.params(), lb.restParam(), expr(lb.body(), sc));
+                    yield new Decl.FnBody.LambdaBody(pats(lb.params()), lb.restParam(), expr(lb.body(), sc));
                 }
                 case Decl.FnBody.ImperativeBody ib -> {
-                    for (Pattern p : ib.params()) pattern(p);
                     sc = sc.with(params(ib.params(), ib.restParam()));
-                    yield new Decl.FnBody.ImperativeBody(ib.params(), ib.restParam(), stmts(ib.stmts(), sc));
+                    yield new Decl.FnBody.ImperativeBody(pats(ib.params()), ib.restParam(), stmts(ib.stmts(), sc));
                 }
                 case Decl.FnBody.MatchArmsBody mab -> new Decl.FnBody.MatchArmsBody(arms(mab.arms(), sc));
                 case Decl.FnBody.NoBody nb -> nb;
             };
-            return new Decl.FnDecl(fn.name(), fn.isPub(), fn.effectRow(), fn.specAnnotations(), body,
+            return new Decl.FnDecl(fn.name(), fn.isPub(), row, specs, body,
                     exprs(fn.preConditions(), sc), exprs(fn.postConditions(), sc),
                     exprs(fn.inContracts(), sc), exprs(fn.outContracts(), sc), fn.loc());
         }
@@ -536,31 +570,40 @@ final class ModuleScope {
             return out;
         }
 
-        /** Checks the type-level names in a spec; {@code vars} are its type
-         *  parameters. */
-        private void spec(SpecExpr s, Set<String> vars, SourceLoc loc) {
-            if (s == null) return;
-            switch (s) {
-                case SpecExpr.Name n -> { if (!vars.contains(n.name())) type(n.name(), loc); }
+        /** A spec with its type-level names checked and resolved;
+         *  {@code vars} are its type parameters. */
+        private SpecExpr spec(SpecExpr s, Set<String> vars, SourceLoc loc) {
+            if (s == null) return null;
+            return switch (s) {
+                case SpecExpr.Name n -> vars.contains(n.name()) ? n : new SpecExpr.Name(typeName(n.name(), loc));
                 case SpecExpr.App a -> {
-                    if (!vars.contains(a.head())) type(a.head(), loc);
-                    for (SpecExpr x : a.args()) spec(x, vars, loc);
                     row(a.rowVar() == null ? null : List.of(a.rowVar()), loc);
+                    yield new SpecExpr.App(vars.contains(a.head()) ? a.head() : typeName(a.head(), loc),
+                            specs(a.args(), vars, loc), a.rowVar());
                 }
                 case SpecExpr.Arrow ar -> {
-                    for (SpecExpr x : ar.inputs()) spec(x, vars, loc);
-                    spec(ar.output(), vars, loc);
                     row(ar.rowVar() == null ? null : List.of(ar.rowVar()), loc);
+                    yield new SpecExpr.Arrow(specs(ar.inputs(), vars, loc), spec(ar.output(), vars, loc), ar.rowVar());
                 }
-                case SpecExpr.VecSpec v -> spec(v.elemSpec(), vars, loc);
-                case SpecExpr.SetSpec v -> spec(v.elemSpec(), vars, loc);
-                case SpecExpr.TupleSpec t -> { for (SpecExpr x : t.elemSpecs()) spec(x, vars, loc); }
-                case SpecExpr.RecordSpec r -> { for (SpecExpr x : r.fields().values()) spec(x, vars, loc); }
-                case SpecExpr.Enum e -> { }
-                case SpecExpr.Var v -> { }
-                case SpecExpr.Wildcard w -> { }
-                case SpecExpr.Unit u -> { }
-            }
+                case SpecExpr.VecSpec v -> new SpecExpr.VecSpec(spec(v.elemSpec(), vars, loc));
+                case SpecExpr.SetSpec v -> new SpecExpr.SetSpec(spec(v.elemSpec(), vars, loc));
+                case SpecExpr.TupleSpec t -> new SpecExpr.TupleSpec(specs(t.elemSpecs(), vars, loc));
+                case SpecExpr.RecordSpec r -> {
+                    var fields = new LinkedHashMap<String, SpecExpr>();
+                    r.fields().forEach((k, x) -> fields.put(k, spec(x, vars, loc)));
+                    yield new SpecExpr.RecordSpec(fields);
+                }
+                case SpecExpr.Enum e -> e;
+                case SpecExpr.Var v -> v;
+                case SpecExpr.Wildcard w -> w;
+                case SpecExpr.Unit u -> u;
+            };
+        }
+
+        private List<SpecExpr> specs(List<SpecExpr> ss, Set<String> vars, SourceLoc loc) {
+            List<SpecExpr> out = new ArrayList<>(ss.size());
+            for (SpecExpr x : ss) out.add(spec(x, vars, loc));
+            return out;
         }
 
         // ── Statements ──────────────────────────────────────────────
@@ -587,15 +630,9 @@ final class ModuleScope {
         private Stmt stmt(Stmt s, Scope sc) {
             return switch (s) {
                 case Stmt.ExprStmt es -> new Stmt.ExprStmt(expr(es.expr(), sc), es.loc());
-                case Stmt.Bind b -> {
-                    spec(b.specAnnotation(), Set.of(), b.loc());
-                    pattern(b.target(), b.loc());
-                    yield new Stmt.Bind(b.target(), expr(b.value(), sc), b.specAnnotation(), b.loc());
-                }
-                case Stmt.MutBind mb -> {
-                    pattern(mb.target(), mb.loc());
-                    yield new Stmt.MutBind(mb.target(), expr(mb.value(), sc), mb.loc());
-                }
+                case Stmt.Bind b -> new Stmt.Bind(target(b.target()), expr(b.value(), sc),
+                        spec(b.specAnnotation(), Set.of(), b.loc()), b.loc());
+                case Stmt.MutBind mb -> new Stmt.MutBind(target(mb.target()), expr(mb.value(), sc), mb.loc());
                 case Stmt.Assign a -> new Stmt.Assign(a.target() instanceof Stmt.BindTarget.Simple sm
                         ? new Stmt.BindTarget.Simple(value(sm.name(), sc, a.loc())) : a.target(),
                         expr(a.value(), sc), a.loc());
@@ -609,39 +646,44 @@ final class ModuleScope {
             };
         }
 
-        private void pattern(Stmt.BindTarget t, SourceLoc loc) {
-            if (t instanceof Stmt.BindTarget.Destructure ds) pattern(ds.pattern());
+        private Stmt.BindTarget target(Stmt.BindTarget t) {
+            return t instanceof Stmt.BindTarget.Destructure ds ? new Stmt.BindTarget.Destructure(pat(ds.pattern())) : t;
         }
 
-        /** Checks the constructors a pattern names. */
-        private void pattern(Pattern p) {
-            if (p == null) return;
-            switch (p) {
-                case Pattern.ConstructorPat cp -> {
-                    type(cp.name(), cp.loc());
-                    for (Pattern a : cp.args()) pattern(a);
-                }
-                case Pattern.KeywordPat kp -> pattern(kp.arg());
-                case Pattern.GroupedPat gp -> pattern(gp.inner());
-                case Pattern.VectorPat vp -> { for (Pattern e : vp.elements()) pattern(e); }
-                case Pattern.TuplePat tp -> { for (Pattern e : tp.elements()) pattern(e); }
-                case Pattern.DestructurePat dp -> { for (var f : dp.fields()) pattern(f.value()); }
-                case Pattern.VarPat vp -> { }
-                case Pattern.SpreadPat sp -> { }
-                case Pattern.LitPat lp -> { }
-                case Pattern.WildcardPat wp -> { }
-                case Pattern.UnitPat up -> { }
-            }
+        /** A pattern with the constructors it names checked and resolved. */
+        private Pattern pat(Pattern p) {
+            if (p == null) return null;
+            return switch (p) {
+                case Pattern.ConstructorPat cp -> new Pattern.ConstructorPat(typeName(cp.name(), cp.loc()),
+                        pats(cp.args()), cp.loc());
+                case Pattern.KeywordPat kp -> new Pattern.KeywordPat(kp.name(), pat(kp.arg()), kp.loc());
+                case Pattern.GroupedPat gp -> new Pattern.GroupedPat(pat(gp.inner()), gp.loc());
+                case Pattern.VectorPat vp -> new Pattern.VectorPat(pats(vp.elements()), vp.spread(), vp.loc());
+                case Pattern.TuplePat tp -> new Pattern.TuplePat(pats(tp.elements()), tp.loc());
+                case Pattern.DestructurePat dp -> new Pattern.DestructurePat(dp.fields().stream()
+                        .map(f -> new Pattern.DestructureField(f.key(), pat(f.value()))).toList(), dp.loc());
+                case Pattern.VarPat vp -> vp;
+                case Pattern.SpreadPat sp -> sp;
+                case Pattern.LitPat lp -> lp;
+                case Pattern.WildcardPat wp -> wp;
+                case Pattern.UnitPat up -> up;
+            };
+        }
+
+        private List<Pattern> pats(List<Pattern> ps) {
+            if (ps == null) return null;
+            List<Pattern> out = new ArrayList<>(ps.size());
+            for (Pattern p : ps) out.add(pat(p));
+            return out;
         }
 
         private List<Expr.MatchArm> arms(List<Expr.MatchArm> as, Scope sc) {
             List<Expr.MatchArm> out = new ArrayList<>(as.size());
             for (var a : as) {
-                pattern(a.pattern());
                 Set<String> b = new HashSet<>();
                 binders(a.pattern(), b);
                 Scope as2 = sc.with(b);
-                out.add(new Expr.MatchArm(a.pattern(), expr(a.guard(), as2), expr(a.body(), as2)));
+                out.add(new Expr.MatchArm(pat(a.pattern()), expr(a.guard(), as2), expr(a.body(), as2)));
             }
             return out;
         }
@@ -671,11 +713,12 @@ final class ModuleScope {
                             && cx.imports().aliases.get(v.name()) instanceof Exports ex) {
                         String flat = ex.values().get(da.field());
                         if (flat != null) yield new Expr.Var(flat, da.loc());
-                        String group = ex.groupOf(da.field());
-                        if (group != null) {
-                            throw error("`" + v.name() + "." + da.field() + "`: specs, variants and effects "
-                                    + "are not reached through an alias; import `" + da.field()
-                                    + "` by name: `use " + ex.module() + " {" + group + "}`", da.loc());
+                        if (ex.groupOf(da.field()) != null) {
+                            // Type-level names keep their spelling program-wide: a
+                            // variant or newtype is a constructor, an effect's op or
+                            // a proto's method is called by name.
+                            yield Character.isUpperCase(da.field().charAt(0))
+                                    ? new Expr.TypeRef(da.field(), da.loc()) : new Expr.Var(da.field(), da.loc());
                         }
                         throw error("`" + v.name() + "." + da.field() + "`: " + ex.module() + " exports no `"
                                 + da.field() + "`"
@@ -685,7 +728,7 @@ final class ModuleScope {
                     yield new Expr.DotAccess(expr(da.target(), sc), da.field(), da.loc());
                 }
                 case Expr.App a -> new Expr.App(expr(a.fn(), sc), exprs(a.args(), sc), a.loc());
-                case Expr.Lambda l -> new Expr.Lambda(l.params(), l.restParam(),
+                case Expr.Lambda l -> new Expr.Lambda(pats(l.params()), l.restParam(),
                         lambdaBody(l, sc), l.loc());
                 case Expr.BinaryOp b -> new Expr.BinaryOp(b.op(), expr(b.left(), sc), expr(b.right(), sc), b.loc());
                 case Expr.UnaryOp u -> new Expr.UnaryOp(u.op(), expr(u.operand(), sc), u.loc());
@@ -728,7 +771,6 @@ final class ModuleScope {
         }
 
         private Expr lambdaBody(Expr.Lambda l, Scope sc) {
-            for (Pattern p : l.params()) pattern(p);
             return expr(l.body(), sc.with(params(l.params(), l.restParam())));
         }
 

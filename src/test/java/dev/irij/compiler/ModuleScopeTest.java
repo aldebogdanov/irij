@@ -126,10 +126,9 @@ class ModuleScopeTest {
 
     @Test void specsVariantsAndEffectsAreImportedByName() throws Exception {
         module("lib.m", M);
-        assertTrue(compileError("use lib.m :as m\nprintln Calm\n").startsWith(
-                "`Calm` is not imported here: it is lib.m's (`Calm`, of spec `Mode`); import it with `use lib.m {Mode}`"));
-        assertTrue(compileError("use lib.m :as m\nprintln m.Calm\n").startsWith(
-                "`m.Calm`: specs, variants and effects are not reached through an alias"));
+        assertEquals("`Calm` is not imported here: it is lib.m's (`Calm`, of spec `Mode`); import it with "
+                        + "`use lib.m {Mode}`, or write `mm.Calm` after `use lib.m :as mm` at main.irj:2:9",
+                compileError("use lib.m :as mm\nprintln Calm\n"));
         assertEquals("9 0", run("""
                 use lib.m :as m
                 use lib.m {Mode}
@@ -159,6 +158,115 @@ class ModuleScopeTest {
 
                 println (run ())
                 """));
+    }
+
+    /** Specs, variants, effects and ops through the alias: in patterns,
+     *  spec annotations, effect rows, a handler's effect, an impl's type,
+     *  as constructors and as op calls. */
+    @Test void typeLevelNamesAreReachedThroughTheAlias() throws Exception {
+        module("lib.m", M);
+        assertEquals("#[9 0 4 43 8 2 3]", run("""
+                use lib.m :as m
+
+                fn size :: m.Mode Int
+                  m.Calm => 0
+                  (m.Busy k) => k
+
+                fn count :: #[m.Mode] Int
+                  (ms -> length ms)
+
+                fn g :: () Int ::: m.Tick
+                  (_ -> (m.tick ()) + 1)
+
+                handler seven :: m.Tick
+                  tick => resume 7
+
+                proto Sized a
+                  sized :: a -> Int
+
+                impl Sized for m.Mode
+                  sized := (md -> size md)
+
+                fn run :: () Int
+                  => _
+                  with m.fixed-tick
+                    g ()
+
+                fn run7 :: () Int
+                  => _
+                  with seven
+                    g ()
+
+                println #[(size (m.mode-of 9)) (size m.Calm) (size (m.Busy 4)) (run ()) (run7 ()) (count #[m.Calm m.Calm]) (sized (m.Busy 3))]
+                """));
+    }
+
+    @Test void aModuleReachesAnotherModulesTypesThroughItsAlias() throws Exception {
+        module("lib.m", M);
+        module("lib.k", """
+                mod lib.k
+
+                use lib.m :as m
+
+                pub fn size :: m.Mode Int
+                  m.Calm => 0
+                  (m.Busy k) => k
+
+                pub handler nine :: m.Tick
+                  tick => resume 9
+
+                pub fn g :: () Int ::: m.Tick
+                  (_ -> (m.tick ()) + 1)
+
+                pub fn busy :: Int m.Mode
+                  (n -> m.Busy n)
+                """);
+        assertEquals("#[4 0 10]", run("""
+                use lib.k :as k
+                use lib.m :as m
+
+                r := with k.nine
+                  k.g ()
+
+                println #[(k.size (k.busy 4)) (k.size m.Calm) r]
+                """));
+    }
+
+    /** `pub proto` didn't parse, though a proto was importable. */
+    @Test void aPubProtoIsImportedByNameOrReachedThroughTheAlias() throws Exception {
+        module("lib.t", "mod lib.t\n\npub proto Show a\n  show :: a -> Str\n\nimpl Show for Int\n  show := (n -> \"Int:\" ++ to-str n)\n");
+        assertEquals("Int:4 Str:x", run("""
+                use lib.t :as t
+
+                impl t.Show for Str
+                  show := (s -> "Str:" ++ s)
+
+                println ((t.show 4) ++ " " ++ (t.show "x"))
+                """));
+        assertEquals("Int:4 yes", run("""
+                use lib.t {Show}
+
+                impl Show for Bool
+                  show := (b -> if b "yes" else "no")
+
+                println ((show 4) ++ " " ++ (show true))
+                """));
+        assertTrue(compileError("use lib.t :as t\nprintln (show 4)\n").startsWith(
+                "`show` is not imported here: it is lib.t's (`show`, of proto `Show`)"));
+    }
+
+    @Test void aQualifiedTypeNameMustNameAnAliasAndAnExport() throws Exception {
+        module("lib.m", M);
+        module("lib.p", "mod lib.p\n\nspec Hidden\n  Shh\n\npub fn one :: Int Int\n  (x -> x)\n");
+        assertEquals("`nope.Calm`: `nope` is not an import alias here; import the module with "
+                        + "`use <module> :as nope` at main.irj:4:3",
+                compileError("use lib.m :as m\n\nfn f :: Int Int\n  nope.Calm => 0\n  _ => 1\n\nprintln (f 1)\n"));
+        assertEquals("`m.Nope`: lib.m exports no `Nope` at main.irj:3:1",
+                compileError("use lib.m :as m\n\nfn f :: m.Nope Int\n  (x -> 0)\n\nprintln 1\n"));
+        assertTrue(compileError("use lib.p :as p\n\nfn f :: p.Hidden Int\n  (x -> 0)\n\nprintln 1\n")
+                .contains("(it is private to lib.p)"));
+        assertEquals("`m.Nope`: lib.m exports no `Nope` at main.irj:2:9",
+                compileError("use lib.m :as m\nprintln m.Nope\n"));
     }
 
     @Test void aNameTwoOpenImportsShareIsAmbiguous() throws Exception {

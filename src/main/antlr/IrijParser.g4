@@ -63,7 +63,7 @@ nameListItem
     ;
 
 pubDecl
-    : PUB (fnDecl | specDecl | effectDecl | handlerDecl | useDecl | binding)
+    : PUB (fnDecl | specDecl | newtypeDecl | effectDecl | handlerDecl | protoDecl | useDecl | binding)
     ;
 
 partyDecl
@@ -81,7 +81,7 @@ fnDecl
 // `FileIO`) or a lowercase row-variable bound by the function's
 // signature (IDENT like `eff`, `e1`, `e2`).
 effectAnnotation
-    : EFFECT_SEP (upperName | IDENT)+
+    : EFFECT_SEP (typeName | IDENT)+
     ;
 
 fnName
@@ -148,6 +148,13 @@ upperName
     : UPPER_NAME
     ;
 
+// A type-level name used, not declared: `Mode`, or `m.Mode` through an
+// import alias (spec §2.4).
+typeName
+    : IDENT DOT UPPER_NAME
+    | UPPER_NAME
+    ;
+
 specParams
     : IDENT+
     ;
@@ -200,7 +207,7 @@ effectOp
 // ── handler ──────────────────────────────────────────────────────────
 
 handlerDecl
-    : HANDLER fnName SPEC_ANN upperName effectAnnotation? (NEWLINE INDENT handlerBody NEWLINE* DEDENT)?
+    : HANDLER fnName SPEC_ANN typeName effectAnnotation? (NEWLINE INDENT handlerBody NEWLINE* DEDENT)?
     ;
 
 handlerBody
@@ -269,7 +276,7 @@ modelClause
 // is still only usable inside matching-effect handler clauses regardless.
 
 capDecl
-    : PUB? CAP IDENT SPEC_ANN upperName EQUALS (STRING | mapLiteral)
+    : PUB? CAP IDENT SPEC_ANN typeName EQUALS (STRING | mapLiteral)
     ;
 
 // ── proto ────────────────────────────────────────────────────────────
@@ -289,7 +296,7 @@ protoMember
 // ── impl ─────────────────────────────────────────────────────────────
 
 implDecl
-    : IMPL upperName FOR upperName NEWLINE INDENT implBody NEWLINE* DEDENT
+    : IMPL typeName FOR typeName NEWLINE INDENT implBody NEWLINE* DEDENT
     ;
 
 implBody
@@ -325,7 +332,7 @@ specApp
     ;
 
 specAtom
-    : upperName                               // Int, Str, Result
+    : typeName                                // Int, Str, Result, m.Mode
     | IDENT                                   // spec variable: a, b
     | KEYWORD                                 // enum value: :admin, :ok
     | UNDERSCORE                              // spec hole: _
@@ -686,7 +693,7 @@ parEachExpr
 // ═══════════════════════════════════════════════════════════════════════
 
 pattern
-    : UPPER_NAME pattern*                      // Constructor Pat1 Pat2
+    : typeName pattern*                        // Constructor Pat1 Pat2 (or m.Constructor …)
     | KEYWORD pattern?                         // :ok value
     | IDENT                                    // variable binding
     | UNDERSCORE                               // wildcard _

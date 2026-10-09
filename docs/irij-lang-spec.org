@@ -535,26 +535,31 @@
    export (=use m {nope}=, =alias.nope=) is a compile error that says
    which module has the name and how to import it.
 
-   Specs, effects, protos and newtypes are imported by name, and bring
-   their members: =use m {Mode}= brings spec =Mode= and its variants,
-   =use m {Tick}= brings effect =Tick= and its ops. They are not reached
-   through an alias (=m.Calm= is an error naming the import to write),
-   and a file that only names an effect in a row (=::: Tick=) imports it
-   all the same. The effects builtins perform (=Console=, =Time=, =Env=,
-   =Random=, =JVM=) and the builtin specs (=Int=, =Str=, …, with =Ok= and
-   =Err=) need no import.
+   Specs, effects, protos and newtypes (=pub spec=, =pub effect=, =pub
+   proto=, =pub newtype=) come with their members: a spec's variants, an
+   effect's ops, a proto's methods. Imported by name, =use m {Mode}=
+   brings spec =Mode= and its variants and =use m {Tick}= brings effect
+   =Tick= and its ops, bare. Through an alias they are qualified wherever
+   such a name goes: after =use m :as m=, =m.Mode= in a spec (=:: Int
+   m.Mode=, =#[m.Mode]=), =m.Calm= and =(m.Busy n)= in patterns and as
+   constructors, =m.Tick= in an effect row (=::: m.Tick=) or a handler's
+   or cap's head (=handler h :: m.Tick=), =impl Show for m.Mode=, and
+   =m.tick ()= for an op. A handler's clauses name its effect's ops bare.
+   A file that only names an effect in a row imports it all the same. The
+   effects builtins perform (=Console=, =Time=, =Env=, =Random=, =JVM=)
+   and the builtin specs (=Int=, =Str=, …, with =Ok= and =Err=) need no
+   import.
 
-   *Style: qualify.* Import a module's functions, values and handlers
-   with =:as= and name them through the alias: =str.words=, =with
-   db.default-db=. A qualified name says where it comes from, so a
-   reader needs no search to find it, and two modules' names never meet.
-   Import by name what an alias cannot reach (specs, effects, protos,
-   newtypes), and otherwise only a few names a file uses so often that
-   the alias is noise, such as =std.test='s assertions in a test file.
-   One module may be imported both ways (=use m :as m= and =use m
-   {Mode}=). Avoid =:open=: it makes every =pub= name bare, including
-   those the module adds later, and leaves the reader to guess which
-   module each one is from.
+   *Style: qualify.* Import a module with =:as= and name what it gives
+   through the alias: =str.words=, =with db.default-db=, =:: m.Mode=,
+   =::: m.Tick=. A qualified name says where it comes from, so a reader
+   needs no search to find it, and two modules' names never meet. Import
+   by name only a few names a file uses so often that the alias is noise,
+   such as =std.test='s assertions in a test file, or an effect whose ops
+   it performs throughout. One module may be imported both ways (=use m
+   :as m= and =use m {Mode}=). Avoid =:open=: it makes every =pub= name
+   bare, including those the module adds later, and leaves the reader to
+   guess which module each one is from.
 
    *Scoping.* A module's own code always refers to its own top-level
    definitions, exported or not: nothing an importer defines can replace
