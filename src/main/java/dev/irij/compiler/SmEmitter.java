@@ -134,22 +134,32 @@ final class SmEmitter implements Opcodes {
         sm.visitInsn(AALOAD);
         sm.visitVarInsn(ASTORE, vSlot);
 
-        switch (shape) {
-            case WithBodyShape.Pure p -> emitSMStateBody(body, sm, inner);
-            case WithBodyShape.SingleOp so -> emitSMSingleOp(so, body, sm, inner, kSlot, vSlot);
-            case WithBodyShape.Sequence seq -> emitSMSequence(seq, sm, inner, kSlot, vSlot);
-            case WithBodyShape.EffIR eir -> emitSMEffIR(eir, sm, inner, kSlot, vSlot);
-            case WithBodyShape.Unsupported ignored ->
-                    throw new IrijCompiler.CompileException("internal: Unsupported in emitSMStep");
+        // A step of its own, with its own continuation: an enclosing step's
+        // lifted locals aren't reachable here (what the body reads of them
+        // was captured). Sequence and EffIR set their own.
+        Map<String, Integer> savedLifted = ce.currentLiftedLocals;
+        int savedKSlot = ce.currentKSlot;
+        ce.currentLiftedLocals = Map.of();
+        ce.currentKSlot = -1;
+        try {
+            switch (shape) {
+                case WithBodyShape.Pure p -> emitSMStateBody(body, sm, inner);
+                case WithBodyShape.SingleOp so -> emitSMSingleOp(so, body, sm, inner, kSlot, vSlot);
+                case WithBodyShape.Sequence seq -> emitSMSequence(seq, sm, inner, kSlot, vSlot);
+                case WithBodyShape.EffIR eir -> emitSMEffIR(eir, sm, inner, kSlot, vSlot);
+                case WithBodyShape.Unsupported ignored ->
+                        throw new IrijCompiler.CompileException("internal: Unsupported in emitSMStep");
+            }
+        } finally {
+            ce.currentLiftedLocals = savedLifted;
+            ce.currentKSlot = savedKSlot;
         }
 
         sm.visitMaxs(0, 0);
         sm.visitEnd();
 
         // Call site: push captures, invokedynamic → IrijFn.
-        for (String cap : captures) {
-            mv.visitVarInsn(ALOAD, outerLocals.lookup(cap));
-        }
+        for (String cap : captures) ce.exprEm.emitVarLoad(cap, mv, outerLocals);
         StringBuilder indyDesc = new StringBuilder("(");
         for (int i = 0; i < captures.size(); i++) indyDesc.append(ClassEmitter.OBJ_DESC);
         indyDesc.append(")").append(ClassEmitter.IRIJ_FN_DESC);
