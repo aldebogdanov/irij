@@ -206,12 +206,15 @@ arguments it has already been handed.
 
 ### Top-level bindings vs locals
 
-A **top-level binding** (`x := …` / `x :! …` at file scope) lives in a
-static field. Its initializer also stores into a local slot in `main`,
-the *dual slot*, which the hoist copies into the field; nothing else
-uses that slot. Fns, lambdas and other threads write the binding
-through the field, so any copy of it goes stale. Three emit sites
-apply one rule:
+A **top-level binding** (`x := …` / `x :! …` at file scope, and each
+name a destructuring `#[a b] := …` binds) lives in a static field. Its
+initializer also stores into a local slot in `main`, the *dual slot*,
+which the hoist copies into the field; nothing else uses that slot.
+Fns, lambdas and other threads write the binding through the field, so
+any copy of it goes stale. (In a REPL eval, top-level code before the
+eval's own binding of a name reads the session's value, `nsGet`, so
+`x := x + 1` builds on the earlier evals' `x`.) Three emit sites apply
+one rule:
 
 - **Reads** (`emitVarLoad`) and **writes** (`emitAssign`) of a
   top-level binding are `GETSTATIC` / `PUTSTATIC` — in fns, in

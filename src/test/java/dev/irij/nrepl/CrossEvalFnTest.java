@@ -72,4 +72,38 @@ class CrossEvalFnTest {
         assertTrue(second.get("out").toString().contains("99"),
                 () -> "expected 99 after redef, got: " + second.get("out"));
     }
+
+    /** What an eval prints, trimmed. */
+    private String out(NReplSession session, String code) {
+        var r = eval(session, code);
+        assertEquals(List.of("done"), r.get("status"), () -> "eval failed: " + r);
+        return r.get("out").toString().trim();
+    }
+
+    /** A definition named like a builtin is what later evals reach, as
+     *  within one eval — not the builtin. */
+    @Test void builtinNamedDefinitionsReachLaterEvals() {
+        var session = new NReplSession();
+        eval(session, "fn length\n  (_ -> 42)");
+        assertEquals("42", out(session, "println (length #[1])"));
+        eval(session, "e := 3");
+        assertEquals("3", out(session, "println e"));
+    }
+
+    @Test void destructuredNamesReachLaterEvals() {
+        var session = new NReplSession();
+        eval(session, "#[a b] := #[1 2]");
+        assertEquals("3", out(session, "println (a + b)"));
+    }
+
+    /** Before an eval binds a name, its code means the earlier evals' one. */
+    @Test void rebindingInTermsOfAnEarlierEval() {
+        var session = new NReplSession();
+        eval(session, "x := 1");
+        eval(session, "x := x + 1");
+        assertEquals("2", out(session, "println x"));
+        eval(session, "fn length\n  (_ -> 42)");
+        eval(session, "length := length #[7 8 9]");
+        assertEquals("42", out(session, "println length"));
+    }
 }

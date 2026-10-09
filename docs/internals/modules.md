@@ -43,10 +43,10 @@ The shadowed-builtin escape pattern uses `:as` directly:
 ```
 use std.math :as math
 
-fn div :: Map Vec Map
-  (attrs children -> el "div" attrs children)
+fn sqrt :: Str Str
+  (s -> "√" ++ s)
 
-result := math.div 10 3   ;; bare `div` is the local user fn
+result := math.sqrt 16    ;; 4.0: bare `sqrt` is the local user fn
 ```
 
 
@@ -100,10 +100,17 @@ path dep, `…/uzor`) or the one above it (an installed seed,
      program-wide names made privacy fictional: a program defining
      `find-route` replaced `std.serve`'s router internals, two seeds with
      the same helper name called each other's, and a module's
-     `pub fn length` replaced the builtin `length` in every file. The one
-     name left as written is a binding that mentions its own name —
-     `pub sqrt := sqrt` re-exports the builtin, and renaming would make it
-     refer to itself. Error messages, spec failures and spec-lint show
+     `pub fn length` replaced the builtin `length` in every file. One
+     place is not renamed uniformly: in a top-level binding's initializer,
+     the binding's own name means the binding only inside a lambda (so
+     `fact := (n -> … fact …)` recurses) and elsewhere what it meant
+     before (`pub sqrt := sqrt` re-exports the builtin;
+     `ModulePrivacy.renameTopLevel`). The program's own top-level values
+     keep their names, except one named like a builtin, which becomes
+     `name$` (`privatizeProgram`; a REPL session renames later evals' uses
+     to match). So no definition anywhere is spelled like a builtin, and a
+     module's `length` is always the builtin, whatever the program
+     defines. Error messages, spec failures and spec-lint show
      names as written (`ClassEmitter.displayName`); a JVM stack frame
      carries the private name (`boom$greeter`).
 4. Name resolution (`ModuleScope`), per file, before the file's decls

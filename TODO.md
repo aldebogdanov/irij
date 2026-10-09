@@ -877,26 +877,39 @@ Full design and the recorded Quint behaviour it rests on:
       `emitHandlerBuilder` builds one: unit patterns are dropped there,
       so `beep () =>` is zero-argument and `s-read u =>` is
       one-argument. 2 tests in `tests/test-effects.irj`.
-- [ ] **A module's private fn can be shadowed by an importer's
-      top-level binding** — modules inline into one namespace, so a
-      user binding named after a std module's private helper captures
-      it and calls through it fail with "Not callable: ()". Found when
-      a test file's `tracked := …` broke `std.quint.itf`'s own private
-      `tracked` (since renamed). `pub` names are alias-rewritten during
-      inlining; private ones are not, and should be.
+- [x] **A module's private fn could be shadowed by an importer's
+      top-level binding** — Fixed (2026-10, v0.9.277): every module
+      value has a private name (`ModulePrivacy`), so `helper := ()` in a
+      program leaves a module's own `helper` alone (checked on v0.9.279).
+      Found when a test file's `tracked := …` broke `std.quint.itf`'s own
+      private `tracked`.
 - [ ] **std, examples and tests import with `:open`** — 79 uses in 49
       files, against 2 `:as`. The spec now says to qualify (§2.4, *Style:
       qualify*), and code here is what people and agents copy. Convert
       them to `:as` aliases, by-name imports only for specs, effects,
       protos and newtypes (and `std.test`'s assertions in tests).
-- [ ] **A top-level fn named like a builtin doesn't shadow it** — spec
-      §2.4 puts a file's own definition before builtins, but `fn sqrt ::
-      Str Str` then `sqrt "x"` calls the builtin ("sqrt expects a number,
-      got Str"), and `fn quo` beside `use std.math :as math` makes `quo
-      "x"` fail with "Not callable: ()" (std.math's `pub quo := quo`
-      stays program-wide). Same on v0.9.275. `docs/internals/modules.md`'s
-      shadowed-builtin example shows the intended behaviour, with a
-      `math.div` that std.math no longer has (it is `quo` now).
+- [x] **A top-level definition named like a builtin was the builtin
+      everywhere, or not at all** — Fixed (2026-10). Modules inline into
+      one program, so a program's `fn length` was the `length` every
+      library called (`q.len2 #[1 2]` returned the program's 42); the
+      emitter's builtin cases beat the program's own `e := 3` in its fns
+      and its `fn length` passed as a value; std.math's self-referential
+      re-exports (`pub quo := quo`) stayed program-wide, so the program's
+      `fn sqrt`/`fn quo` lost to them, and as values they were unset
+      (`f := math.quo` then `f 10 3`: "Not callable: ()"). A module's
+      recursive binding (`fact := (n -> … fact …)`) stayed program-wide
+      too, where the program's `fact := 7` replaced it. Now every module
+      value is private-named, with the binding's own name in its
+      initializer meaning the binding only inside a lambda and elsewhere
+      what it meant before (spec §2.4); the program's values named like
+      builtins become `name$` (`ModulePrivacy.privatizeProgram`), and a
+      REPL session renames later evals' uses to match. Along the way: a
+      top-level destructuring bind (`#[a b] := …`) now binds top-level
+      names fns can read (it was "Unbound variable"), in modules
+      privately; and in a REPL eval, top-level code before the eval's own
+      binding of a name reads the session's value, so `x := x + 1` builds
+      on the earlier `x` (it read Unit). `BuiltinShadowingTest`,
+      `TopLevelMutTest`, `CrossEvalFnTest`.
 - [x] **irij.online wedged after any SSE client-disconnect (prod hang, needed `systemctl restart`)** — Fixed. Root cause: `com.sun.net.httpserver`'s single selector dispatcher thread **wedges on JDK 25** when a client disconnects from an SSE/streaming response, then accepts no new connection server-wide. Latent for ages; surfaced when the server's JDK was bumped 21→25 (servers `7fe01c0`). Reproduced under JDK 25 + Caddy (JDK 26 tolerates it; 26 isn't in nixpkgs). Hit both the Playground stream and the patch-once `/api/seeds`. Fix: replaced `com.sun.net.httpserver` with `IrijHttpServer` — a virtual-thread-per-connection `ServerSocket` server (one vthread per connection, blocking I/O, `Connection: close`), so a dead peer only ends its own thread. `IrijExchange` mirrors the `HttpExchange` surface; helpers ported near-verbatim. Regression test `IrijHttpServerTest`. NOT the same as the earlier empty-seed-page (v0.8.7) or "headers already sent" (v0.8.6) bugs — those were separate.
 
 

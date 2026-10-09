@@ -140,7 +140,8 @@ final class ModuleScope {
         };
     }
 
-    private static List<String> valueNames(Node d) {
+    /** The value names (fns, handlers, caps, binding targets) {@code d} defines. */
+    static List<String> valueNames(Node d) {
         return switch (d) {
             case Decl.FnDecl fn -> List.of(fn.name());
             case Decl.HandlerDecl hd -> List.of(hd.name());

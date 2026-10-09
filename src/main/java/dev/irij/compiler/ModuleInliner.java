@@ -124,7 +124,8 @@ final class ModuleInliner {
     List<Decl> inline(List<Decl> decls, String rootFile) {
         List<Decl> out = new ArrayList<>();
         programNames = ModuleScope.ownNames(decls);
-        Set<String> own = new HashSet<>(programNames);
+        decls = ModulePrivacy.privatizeProgram(decls);
+        Set<String> own = new HashSet<>(ModuleScope.ownNames(decls));
         own.addAll(sessionNames);
         expand(decls, out, rootFile != null ? rootFile : "Program.irj", null, own, null);
         return out;
