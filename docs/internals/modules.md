@@ -19,9 +19,9 @@ fn helper
   (x -> x * 2)            ;; not pub — invisible to importers
 ```
 
-Write imports qualified (`:as`), by name only for what an alias can't
-reach (specs, effects, protos, newtypes) or a few names used
-constantly, and avoid `:open`: spec §2.4, *Style: qualify*.
+Write imports qualified (`:as`), types included (`:: m.Mode`,
+`::: m.Tick`), by name only for a few names used constantly, and avoid
+`:open`: spec §2.4, *Style: qualify*.
 
 **Modifier required** (v0.6.4+). `use mod.path` without a
 modifier is rejected at compile time:
@@ -128,15 +128,20 @@ path dep, `…/uzor`) or the one above it (an installed seed,
    - Specs (with variants), effects (with ops), protos (with methods) and
      newtypes keep their names program-wide, so for them the check is
      the enforcement: a file names one only if it declares or imports it
-     (`use m {Mode}` brings `Mode` and its variants). They are not
-     reached through an alias. Effects that builtins perform (`Console`,
-     `Time`, `Env`, `Random`, `JVM`) and builtin specs (`Int`, `Str`, …,
-     `Ok`, `Err`) need no import.
+     (`use m {Mode}` brings `Mode` and its variants). Through an alias
+     one is written `m.Mode` wherever a type-level name goes — specs,
+     effect rows, handler/cap/impl heads, patterns (the grammar's
+     `typeName`) — and `ModuleScope.typeName` checks the alias and the
+     export, then drops the qualifier. As a value, `m.Calm` becomes a
+     `TypeRef` and `m.tick` a `Var` of the bare name. Effects that
+     builtins perform (`Console`, `Time`, `Env`, `Random`, `JVM`) and
+     builtin specs (`Int`, `Str`, …, `Ok`, `Err`) need no import.
    - Errors, each naming the file and position: a module's pub name the
      file does not import (with the `use` line to add); a module's private
      name; a module naming something only the program defines; a name two
      `:open` imports both export, when the file uses it; `use m {nope}`
-     and `alias.nope` for a name `m` does not export; `pub use m :as a`.
+     and `alias.nope` for a name `m` does not export; `nope.Mode` where
+     `nope` is no import alias; `pub use m :as a`.
      Any other unknown name is left to the emitter to report.
    - `pub use m :open` / `pub use m {names}` add those names to the
      module's own exports.

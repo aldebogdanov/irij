@@ -852,9 +852,14 @@ Full design and the recorded Quint behaviour it rests on:
       Specs/effects/protos/newtypes are imported by name with their
       members. A local shadows an alias. `pub use m :open|{names}`
       re-exports. REPL evals carry earlier imports.
-- [ ] **Qualified type-level names** — `m.Variant` in patterns, `::: m.Tick`
-      and `:: Int m.Mode` don't parse; specs, variants and effects are
-      imported by name meanwhile.
+- [x] **Qualified type-level names (2026-10)** — after `use m :as m`, a
+      module's specs, variants, effects, ops, protos and methods are
+      reached through the alias: `:: Int m.Mode`, `#[m.Mode]`, `m.Calm`
+      and `(m.Busy n)` in patterns and as constructors, `::: m.Tick`,
+      `handler h :: m.Tick`, `impl Show for m.Mode`, `m.tick ()`. A
+      qualified name checks the alias and the export, then means the
+      program-wide name. `pub proto` and `pub newtype` parse (they
+      didn't, though protos and newtypes were importable).
 - [ ] **Open from the audit** —
   - Composite set elements (vectors, maps) with colliding hashCodes share
     a flat bucket in PSet; scalars are SipHash-protected.

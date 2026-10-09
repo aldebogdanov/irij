@@ -180,6 +180,39 @@ class NReplSessionTest {
         assertEquals("mine", eval(session, "words \"a b\"").get("value"));
     }
 
+    /** A later eval reaches an earlier import's specs, variants and effects
+     *  through its alias. */
+    @Test void qualifiedTypeLevelNamesCarryAcrossEvals(@TempDir Path project) throws Exception {
+        Files.createDirectories(project.resolve("lib"));
+        Files.writeString(project.resolve("lib/tm.irj"), """
+                mod tm
+
+                pub spec Mode
+                  Calm
+                  Busy Int
+
+                pub effect Tick
+                  tick :: () Int
+
+                pub handler fixed-tick :: Tick
+                  tick => resume 42
+                """);
+        Files.writeString(project.resolve("irij.toml"), """
+                [project]
+                name = "host"
+                version = "0.1"
+
+                [seeds]
+                tm = { path = "lib" }
+                """);
+        var session = new NReplSession(project);
+        assertNull(eval(session, "use tm :as m").get("err"));
+        assertNull(eval(session, "fn size :: m.Mode Int\n  m.Calm => 0\n  (m.Busy k) => k").get("err"));
+        assertEquals("5", eval(session, "size (m.Busy 5)").get("value"));
+        assertNull(eval(session, "fn g :: () Int ::: m.Tick\n  (_ -> (m.tick ()) + 1)").get("err"));
+        assertEquals("43", eval(session, "r := with m.fixed-tick\n  g ()\nr").get("value"));
+    }
+
     /** A session with no project (null root) still works for seed-free
      *  code — the resolver degrades to no seeds. */
     @Test void evalWithoutProjectRootStillWorks() {

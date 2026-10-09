@@ -2,9 +2,8 @@
 
 use std.test {assert-eq summarize test}
 use std.log :as log
-use std.log {Log}
 
-handler mem-log :: Log
+handler mem-log :: log.Log
   state :! #[]
   log-msg level msg =>
     state <- conj state (level ++ ":" ++ msg)
@@ -24,7 +23,7 @@ silent := with log.silent-log
 
 r2 := test "silent-log drops output" (-> assert-eq silent :done)
 
-fn do-work :: Int Int ::: Log
+fn do-work :: Int Int ::: log.Log
   n =>
     log.log-info "working on ${n}"
     n * 2
