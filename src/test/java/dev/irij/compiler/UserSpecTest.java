@@ -52,6 +52,35 @@ class UserSpecTest {
                 () -> "expected '" + fragment + "' in error, got: " + msg);
     }
 
+    // ── Newtype ─────────────────────────────────────────────────────────
+
+    /** `newtype` parsed but didn't compile ("unsupported top-level decl"). */
+    @Test
+    void newtypeWrapsAndUnwraps() throws Exception {
+        assertEquals("jo@x.io!\nEmail \"jo@x.io\"", run("""
+            newtype Email := Str
+
+            fn shout :: Email Str
+              (Email s) => s ++ "!"
+
+            e := Email "jo@x.io"
+            println (shout e)
+            println e
+            """).replace("\r\n", "\n"));
+    }
+
+    @Test
+    void newtypeRejectsTheBareValue() {
+        expectFailure("""
+            newtype Email := Str
+
+            fn shout :: Email Str
+              (Email s) => s ++ "!"
+
+            println (shout "jo@x.io")
+            """, "expected Email variant, got Str");
+    }
+
     // ── Sum-spec input ──────────────────────────────────────────────────
 
     @Test

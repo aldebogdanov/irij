@@ -199,7 +199,6 @@ final class ModulePrivacy {
                 case Decl.WithDecl wd -> new Decl.WithDecl((Stmt.With) stmt(wd.with()), wd.loc());
                 case Decl.ScopeDecl sd -> new Decl.ScopeDecl((Stmt.Scope) stmt(sd.scope()), sd.loc());
                 case Decl.SpecDecl sd -> sd;
-                case Decl.NewtypeDecl nd -> nd;
                 case Decl.ModDecl md -> md;
                 case Decl.UseDecl ud -> ud;
                 case Decl.EffectDecl ed -> ed;

@@ -14,7 +14,7 @@ import java.util.List;
  * and completion handlers.
  *
  * <p>One symbol per top-level decl we want to surface — fn,
- * effect, handler, cap, spec, newtype, proto, role. Each carries:
+ * effect, handler, cap, spec (newtypes too), proto, role. Each carries:
  * name, kind, location (1-based line/col from the AST's
  * {@code SourceLoc}), and a short signature blurb computed
  * cheaply from the decl shape.
@@ -25,7 +25,7 @@ import java.util.List;
  */
 final class LspIndex {
 
-    enum Kind { FN, EFFECT, HANDLER, CAP, SPEC, NEWTYPE, PROTO, PARTY }
+    enum Kind { FN, EFFECT, HANDLER, CAP, SPEC, PROTO, PARTY }
 
     /** Per-document symbol. {@code docComment} carries any contiguous
      *  {@code ;;} comment block found immediately above the decl in
@@ -109,9 +109,6 @@ final class LspIndex {
                     "spec " + sd.name()
                             + (sd.specParams().isEmpty() ? "" : " " + String.join(" ", sd.specParams()))
                             + (sd.rowParams().isEmpty() ? "" : " ::: " + String.join(" ", sd.rowParams()))));
-            case Decl.NewtypeDecl nt -> out.add(new Symbol(
-                    nt.name(), Kind.NEWTYPE, nt.loc(),
-                    "newtype " + nt.name()));
             case Decl.ProtoDecl pd -> out.add(new Symbol(
                     pd.name(), Kind.PROTO, pd.loc(),
                     "proto " + pd.name()

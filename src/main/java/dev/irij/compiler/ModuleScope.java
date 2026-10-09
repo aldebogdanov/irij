@@ -52,11 +52,11 @@ final class ModuleScope {
      * @param module   the module's qualified name
      * @param values   pub fn, binding, handler and cap names → the name each
      *                 has in the flat program
-     * @param types    pub spec, effect, proto and newtype names → what
-     *                 importing one brings: itself, then its variants, ops or
-     *                 methods
-     * @param kinds    each of {@code types}' keys → "spec", "effect", "proto"
-     *                 or "newtype", for messages
+     * @param types    pub spec (newtypes included), effect and proto names →
+     *                 what importing one brings: itself, then its variants,
+     *                 ops or methods
+     * @param kinds    each of {@code types}' keys → "spec", "effect" or
+     *                 "proto", for messages
      * @param privates names the module declares without {@code pub}
      */
     record Exports(String module, Map<String, String> values,
@@ -125,7 +125,6 @@ final class ModuleScope {
                 g.add(pd.name());
                 for (var m : pd.methods()) g.add(m.name());
             }
-            case Decl.NewtypeDecl nd -> g.add(nd.name());
             default -> { return null; }
         }
         return g;
@@ -136,7 +135,7 @@ final class ModuleScope {
             case Decl.SpecDecl sd -> "spec";
             case Decl.EffectDecl ed -> "effect";
             case Decl.ProtoDecl pd -> "proto";
-            default -> "newtype";
+            default -> throw new IllegalArgumentException("not a type-level decl: " + d);
         };
     }
 
@@ -523,7 +522,6 @@ final class ModuleScope {
                 case Decl.IfDecl id -> new Decl.IfDecl((Stmt.IfStmt) stmt(id.ifStmt(), Scope.top()), id.loc());
                 case Decl.WithDecl wd -> new Decl.WithDecl((Stmt.With) stmt(wd.with(), Scope.top()), wd.loc());
                 case Decl.ScopeDecl sd -> new Decl.ScopeDecl((Stmt.Scope) stmt(sd.scope(), Scope.top()), sd.loc());
-                case Decl.NewtypeDecl nd -> nd;
                 case Decl.ModDecl md -> md;
                 case Decl.UseDecl ud -> ud;
                 case Decl.EffectDecl ed -> ed;

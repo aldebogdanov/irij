@@ -52,9 +52,6 @@ public sealed interface Decl extends Node {
         }
     }
 
-    /** Newtype declaration: newtype Name := Type. */
-    record NewtypeDecl(String name, SourceLoc loc) implements Decl {}
-
     /** Module declaration: mod qualified.name. */
     record ModDecl(String qualifiedName, SourceLoc loc) implements Decl {}
 
