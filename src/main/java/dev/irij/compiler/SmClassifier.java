@@ -303,6 +303,10 @@ final class SmClassifier implements Opcodes {
                         if (acc.get(acc.size() - 1) instanceof Stmt.ExprStmt es) {
                             retExpr = es.expr();
                             acc.remove(acc.size() - 1);
+                        } else if (acc.get(acc.size() - 1) instanceof Stmt.MatchStmt ms) {
+                            // A tail `match` is a value too.
+                            retExpr = new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc());
+                            acc.remove(acc.size() - 1);
                         }
                         finalize(cur, new Term.Return(retExpr));
                         lastValueBlock = cur;
@@ -374,12 +378,168 @@ final class SmClassifier implements Opcodes {
                     out.add(new Stmt.IfStmt(cond, thenN, elseN, ifs.loc()));
                 }
                 case Stmt.MatchStmt ms -> {
-                    Expr scrut = normalizeExpr(ms.scrutinee(), out);
-                    // Arms kept as-is: guards/bodies with ops are rejected later.
-                    out.add(new Stmt.MatchStmt(scrut, ms.arms(), ms.loc()));
+                    if (armsPerform(ms.arms())) {
+                        desugarMatch(ms.scrutinee(), ms.arms(), null, ms.loc(), out);
+                    } else {
+                        // A guard that performs stays, and is refused later.
+                        Expr scrut = normalizeExpr(ms.scrutinee(), out);
+                        out.add(new Stmt.MatchStmt(scrut, ms.arms(), ms.loc()));
+                    }
                 }
                 default -> out.add(s);
             }
+        }
+
+        // ── Places an op runs only sometimes ────────────────────────────
+        //
+        // A `match` arm, an `if` expression's branch and the right of
+        // `&&` / `||` run only when chosen, so an op there can't be lifted
+        // ahead of them like the ones above. The state machine performs in
+        // `if` branches (EffIR), so each such place becomes an `if` chain,
+        // its value assigned to a fresh result variable. A branch is a
+        // scope (EffIRBuilder.scoped), so an arm's bindings stay its own.
+
+        boolean armsPerform(List<Expr.MatchArm> arms) {
+            for (Expr.MatchArm arm : arms) if (containsOpCallExpr(arm.body())) return true;
+            return false;
+        }
+
+        /**
+         * {@code match scrut} with {@code arms}, one of which performs, as:
+         * <pre>
+         * $m   := scrut
+         * $sel := match $m                  ;; pure: picks the arm, collects
+         *   p0 | g0 => #[0 a b]             ;; what its pattern bound
+         *   p1 => #[1 c]
+         * $k   := nth 0 $sel
+         * if $k == 0                        ;; one branch per arm
+         *   a := nth 1 $sel
+         *   b := nth 2 $sel
+         *   body0
+         * else
+         *   c := nth 1 $sel
+         *   body1
+         * </pre>
+         * A scrutinee no arm matches fails in the pure match, as before.
+         * With {@code result}, each arm's value is assigned to it.
+         */
+        void desugarMatch(Expr scrutinee, List<Expr.MatchArm> arms, String result,
+                          Node.SourceLoc loc, List<Stmt> out) {
+            String m = fresh();
+            out.add(bind(m, normalizeExpr(scrutinee, out), loc));
+            String sel = fresh();
+            List<List<String>> vars = new ArrayList<>();
+            List<Expr.MatchArm> pick = new ArrayList<>();
+            for (int i = 0; i < arms.size(); i++) {
+                Expr.MatchArm arm = arms.get(i);
+                Set<String> bound = new java.util.LinkedHashSet<>();
+                ce.patEm.collectPatternBinds(arm.pattern(), bound);
+                List<String> vs = new ArrayList<>(bound);
+                vars.add(vs);
+                List<Expr> picked = new ArrayList<>();
+                picked.add(new Expr.IntLit(i, loc));
+                for (String v : vs) picked.add(new Expr.Var(v, loc));
+                pick.add(new Expr.MatchArm(arm.pattern(), arm.guard(), new Expr.VectorLit(picked, loc)));
+            }
+            out.add(bind(sel, new Expr.MatchExpr(new Expr.Var(m, loc), pick, loc), loc));
+            String k = fresh();
+            out.add(bind(k, nth(0, sel, loc), loc));
+            int last = arms.size() - 1;
+            List<Stmt> chain = armStmts(arms.get(last), vars.get(last), sel, result, loc);
+            for (int i = last - 1; i >= 0; i--) {
+                Expr isArm = new Expr.BinaryOp("==", new Expr.Var(k, loc), new Expr.IntLit(i, loc), loc);
+                chain = List.of(new Stmt.IfStmt(isArm,
+                        armStmts(arms.get(i), vars.get(i), sel, result, loc), chain, loc));
+            }
+            // One arm still gets a branch of its own, for its scope.
+            if (arms.size() == 1) {
+                chain = List.of(new Stmt.IfStmt(new Expr.BoolLit(true, loc), chain, null, loc));
+            }
+            out.addAll(chain);
+        }
+
+        List<Stmt> armStmts(Expr.MatchArm arm, List<String> vars, String sel, String result,
+                            Node.SourceLoc loc) {
+            List<Stmt> s = new ArrayList<>();
+            for (int j = 0; j < vars.size(); j++) s.add(bind(vars.get(j), nth(j + 1, sel, loc), loc));
+            s.addAll(bodyStmts(arm.body(), loc));
+            return normalize(result == null ? s : assignResult(s, result, loc));
+        }
+
+        /** An `if` or `match` expression, value block or `&&` / `||` whose
+         *  conditional part performs: its value, via a result variable. */
+        Expr viaResult(Expr e, List<Stmt> out) {
+            Node.SourceLoc loc = e.loc();
+            String r = fresh();
+            switch (e) {
+                case Expr.IfExpr ie -> {
+                    Expr cond = normalizeExpr(ie.cond(), out);
+                    out.add(bind(r, new Expr.UnitLit(loc), loc));
+                    out.add(new Stmt.IfStmt(cond,
+                            normalize(assignResult(bodyStmts(ie.thenBranch(), loc), r, loc)),
+                            normalize(assignResult(bodyStmts(ie.elseBranch(), loc), r, loc)), loc));
+                }
+                case Expr.MatchExpr me -> {
+                    out.add(bind(r, new Expr.UnitLit(loc), loc));
+                    desugarMatch(me.scrutinee(), me.arms(), r, loc, out);
+                }
+                case Expr.Block blk -> {
+                    out.add(bind(r, new Expr.UnitLit(loc), loc));
+                    out.add(new Stmt.IfStmt(new Expr.BoolLit(true, loc),
+                            normalize(assignResult(blk.stmts(), r, loc)), null, loc));
+                }
+                case Expr.BinaryOp bop -> {
+                    // `a && b` is false unless a holds, and then b as a Bool
+                    // (`true && b`); `a || b` mirrors it.
+                    boolean and = bop.op().equals("&&");
+                    Expr left = normalizeExpr(bop.left(), out);
+                    out.add(bind(r, new Expr.UnitLit(loc), loc));
+                    List<Stmt> decide = new ArrayList<>();
+                    Expr right = normalizeExpr(bop.right(), decide);
+                    decide.add(new Stmt.Assign(new Stmt.BindTarget.Simple(r),
+                            new Expr.BinaryOp(bop.op(), new Expr.BoolLit(and, loc), right, loc), loc));
+                    List<Stmt> settled = List.of(new Stmt.Assign(new Stmt.BindTarget.Simple(r),
+                            new Expr.BoolLit(!and, loc), loc));
+                    out.add(new Stmt.IfStmt(left, and ? decide : settled, and ? settled : decide, loc));
+                }
+                default -> throw new IllegalStateException("viaResult: " + e.getClass().getSimpleName());
+            }
+            return new Expr.Var(r, loc);
+        }
+
+        /** {@code stmts} with the value of the last one assigned to {@code r}. */
+        List<Stmt> assignResult(List<Stmt> stmts, String r, Node.SourceLoc loc) {
+            if (stmts.isEmpty()) return stmts;
+            List<Stmt> s = new ArrayList<>(stmts.subList(0, stmts.size() - 1));
+            Stmt last = stmts.get(stmts.size() - 1);
+            s.add(switch (last) {
+                case Stmt.ExprStmt es -> new Stmt.Assign(new Stmt.BindTarget.Simple(r), es.expr(), es.loc());
+                case Stmt.IfStmt ifs -> new Stmt.IfStmt(ifs.cond(), assignResult(ifs.thenBranch(), r, loc),
+                        ifs.elseBranch() == null ? null : assignResult(ifs.elseBranch(), r, loc), ifs.loc());
+                case Stmt.MatchStmt ms -> {
+                    List<Expr.MatchArm> arms = new ArrayList<>();
+                    for (Expr.MatchArm arm : ms.arms()) {
+                        arms.add(new Expr.MatchArm(arm.pattern(), arm.guard(),
+                                new Expr.Block(assignResult(bodyStmts(arm.body(), loc), r, loc), loc)));
+                    }
+                    yield new Stmt.MatchStmt(ms.scrutinee(), arms, ms.loc());
+                }
+                default -> last; // a binding's value is (), which r already holds
+            });
+            return s;
+        }
+
+        List<Stmt> bodyStmts(Expr body, Node.SourceLoc loc) {
+            return body instanceof Expr.Block blk ? blk.stmts() : List.of(new Stmt.ExprStmt(body, loc));
+        }
+
+        Stmt bind(String name, Expr value, Node.SourceLoc loc) {
+            return new Stmt.Bind(new Stmt.BindTarget.Simple(name), value, loc);
+        }
+
+        Expr nth(int i, String coll, Node.SourceLoc loc) {
+            return new Expr.App(new Expr.Var("nth", loc),
+                    List.of(new Expr.IntLit(i, loc), new Expr.Var(coll, loc)), loc);
         }
 
         /** Normalize only the args of a direct op call (the call itself stays
@@ -410,6 +570,19 @@ final class SmClassifier implements Opcodes {
             if (e == null) return null;
             if (!containsOpCallExpr(e)) return e;
             return switch (e) {
+                case Expr.BinaryOp bop when (bop.op().equals("&&") || bop.op().equals("||"))
+                        && containsOpCallExpr(bop.right()) -> viaResult(bop, out);
+                case Expr.IfExpr ie when containsOpCallExpr(ie.thenBranch())
+                        || containsOpCallExpr(ie.elseBranch()) -> viaResult(ie, out);
+                case Expr.IfExpr ie -> new Expr.IfExpr(normalizeExpr(ie.cond(), out),
+                        ie.thenBranch(), ie.elseBranch(), ie.loc());
+                case Expr.MatchExpr me when armsPerform(me.arms()) -> viaResult(me, out);
+                case Expr.MatchExpr me -> new Expr.MatchExpr(normalizeExpr(me.scrutinee(), out),
+                        me.arms(), me.loc());
+                // A block holding a nested `with` or `scope` is a segment of
+                // its own (extractTopLevelBindWith), not a value to compute.
+                case Expr.Block blk when blk.stmts().stream()
+                        .noneMatch(st -> st instanceof Stmt.With || st instanceof Stmt.Scope) -> viaResult(blk, out);
                 case Expr.App app -> {
                     boolean isOp = app.fn() instanceof Expr.Var v
                             && ce.effectOps.containsKey(v.name());
@@ -489,9 +662,8 @@ final class SmClassifier implements Opcodes {
                     }
                     yield new Expr.RecordUpdate(ru.base(), updates, ru.loc());
                 }
-                // IfExpr / MatchExpr / Lambda / Block: can't easily A-normalize
-                // inline — leave untouched; EffIRBuilder will reject if ops
-                // remain in non-top-level positions.
+                // A block with a nested `with`/`scope`: left as is, and refused
+                // later if it isn't a top-level `x := with …` segment.
                 default -> e;
             };
         }
@@ -519,8 +691,18 @@ final class SmClassifier implements Opcodes {
             case Stmt.Bind b -> containsOpCallExpr(b.value());
             case Stmt.MutBind b -> containsOpCallExpr(b.value());
             case Stmt.Assign a -> containsOpCallExpr(a.value());
+            case Stmt.MatchStmt ms -> matchContainsOp(ms.scrutinee(), ms.arms());
             default -> true;
         };
+    }
+
+    /** A `match` performs if its scrutinee, a guard or an arm does. */
+    boolean matchContainsOp(Expr scrutinee, List<Expr.MatchArm> arms) {
+        if (containsOpCallExpr(scrutinee)) return true;
+        for (Expr.MatchArm arm : arms) {
+            if (containsOpCallExpr(arm.guard()) || containsOpCallExpr(arm.body())) return true;
+        }
+        return false;
     }
 
 
@@ -790,6 +972,7 @@ final class SmClassifier implements Opcodes {
             // emit as a regular branch in the segment. The bodyHasBranchingOp
             // gate above already routed if-with-op-in-branches to EffIR.
             case Stmt.IfStmt ifs -> stmtContainsOpRecursive(ifs);
+            case Stmt.MatchStmt ms -> matchContainsOp(ms.scrutinee(), ms.arms());
             // Step 8: nested `with` would require the outer continuation to
             // resume INSIDE the inner with rather than at its start, plus
             // bridging PerformSignal across nested dispatch loops — not
@@ -817,7 +1000,10 @@ final class SmClassifier implements Opcodes {
                 for (Stmt st : blk.stmts()) if (containsOpCall(st)) yield true;
                 yield false;
             }
-            case Expr.Lambda lam -> containsOpCallExpr(lam.body()); // conservative
+            // A lambda's body runs when it's called, not where it's built:
+            // like a fn, it performs through the handler that's in scope
+            // then (RtEffects' synchronous perform), not as a step state.
+            case Expr.Lambda lam -> false;
             case Expr.VectorLit vl -> { for (Expr x : vl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
             case Expr.SetLit sl -> { for (Expr x : sl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
