@@ -30,7 +30,7 @@ class ProcCapabilityTest {
         return ((IrijMap) map).entries().get(key);
     }
 
-    @Test void run_returns_exit_code_and_both_streams() {
+    @Test void runReturnsExitCodeAndBothStreams() {
         var r = ProcCapability.run(opts("cmd", cmd("sh", "-c", "echo out; echo err 1>&2; exit 3")));
         assertEquals(3L, get(r, "exit"));
         assertEquals("out\n", get(r, "stdout"));
@@ -38,13 +38,13 @@ class ProcCapabilityTest {
         assertEquals(false, get(r, "timed-out?"));
     }
 
-    @Test void run_feeds_stdin_and_honours_dir_and_env() {
+    @Test void runFeedsStdinAndHonoursDirAndEnv() {
         var r = ProcCapability.run(opts("cmd", cmd("sh", "-c", "cat; pwd; echo $GREETING"),
                 "stdin", "fed\n", "dir", "/", "env", opts("GREETING", "hi")));
         assertEquals("fed\n/\nhi\n", get(r, "stdout"));
     }
 
-    @Test void run_kills_a_command_past_its_timeout() {
+    @Test void runKillsACommandPastItsTimeout() {
         long t0 = System.nanoTime();
         var r = ProcCapability.run(opts("cmd", cmd("sleep", "30"), "timeout-ms", 200L));
         assertEquals(true, get(r, "timed-out?"));
@@ -52,7 +52,7 @@ class ProcCapabilityTest {
         assertTrue((System.nanoTime() - t0) / 1_000_000 < 10_000, "returned long after the timeout");
     }
 
-    @Test void started_process_streams_lines_both_ways() {
+    @Test void startedProcessStreamsLinesBothWays() {
         var h = ProcCapability.start(opts("cmd", cmd("sh", "-c", "echo one; read x; echo got $x; echo bye 1>&2")));
         assertEquals("one", get(ProcCapability.line(h, 5000L), "text"));
         ProcCapability.send(h, "two\n");
@@ -64,14 +64,14 @@ class ProcCapabilityTest {
         assertEquals("bye\n", get(w, "stderr"));
     }
 
-    @Test void line_times_out_when_nothing_arrives_and_kill_ends_it() {
+    @Test void lineTimesOutWhenNothingArrivesAndKillEndsIt() {
         var h = ProcCapability.start(opts("cmd", cmd("sleep", "30")));
         assertEquals("timeout", get(ProcCapability.line(h, 50L), "kind"));
         ProcCapability.kill(h);
         assertThrows(IrijRuntimeError.class, () -> ProcCapability.line(h, 0L), "a killed handle is gone");
     }
 
-    @Test void run_timeout_covers_a_child_that_never_reads_stdin() {
+    @Test void runTimeoutCoversAChildThatNeverReadsStdin() {
         // 1 MiB of stdin fills the pipe; the write used to block before
         // the timeout had started, so `run` hung for the child's lifetime.
         long t0 = System.nanoTime();
@@ -81,7 +81,7 @@ class ProcCapabilityTest {
         assertTrue((System.nanoTime() - t0) / 1_000_000 < 10_000, "stdin write outlived the timeout");
     }
 
-    @Test void await_reports_all_of_stderr() {
+    @Test void awaitReportsAllOfStderr() {
         for (int i = 0; i < 20; i++) {
             var h = ProcCapability.start(opts("cmd", cmd("sh", "-c", "printf 'e%.0s' $(seq 1 5000) 1>&2")));
             var w = ProcCapability.await(h, 10_000L);
@@ -89,7 +89,7 @@ class ProcCapabilityTest {
         }
     }
 
-    @Test void a_missing_command_is_an_error_naming_it() {
+    @Test void aMissingCommandIsAnErrorNamingIt() {
         var e = assertThrows(IrijRuntimeError.class,
                 () -> ProcCapability.run(opts("cmd", cmd("no-such-binary-irij"))));
         assertTrue(e.getMessage().contains("no-such-binary-irij"), e.getMessage());

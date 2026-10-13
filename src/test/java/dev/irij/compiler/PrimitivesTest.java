@@ -39,7 +39,7 @@ class PrimitivesTest {
         return buf.toString().trim();
     }
 
-    @Test void a_bare_inline_if_cannot_be_applied_or_an_operand() {
+    @Test void aBareInlineIfCannotBeAppliedOrAnOperand() {
         var applied = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
                 () -> run("fn g\n  (a b -> a == b)\nfn f\n  (x -> if (x < 1) false else g x 2)\nprintln (f 0)"));
         org.junit.jupiter.api.Assertions.assertTrue(applied.getMessage().contains("if c a else (f x)"), applied.getMessage());
@@ -51,7 +51,7 @@ class PrimitivesTest {
         org.junit.jupiter.api.Assertions.assertTrue(piped.getMessage().contains("operand of `|>`"), piped.getMessage());
     }
 
-    @Test void parens_and_tilde_disambiguate_an_inline_if() throws Exception {
+    @Test void parensAndTildeDisambiguateAnInlineIf() throws Exception {
         String fns = "fn f\n  (x -> x * 10)\nfn g\n  (x -> x + 1)\nc := false\n";
         assertEquals("20", run(fns + "println (if c g else f ~ 2)"));
         assertEquals("30", run(fns + "println ((if c g else f) 3)"));
@@ -59,13 +59,13 @@ class PrimitivesTest {
         assertEquals("6", run(fns + "println ((if c 1 else 5) + 1)"));
     }
 
-    @Test void applying_an_if_whose_branch_is_a_literal_is_a_compile_error() {
+    @Test void applyingAnIfWhoseBranchIsALiteralIsACompileError() {
         var e = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
                 () -> run("fn g\n  (a -> a)\nprintln ((if true false else g) 2)"));
         org.junit.jupiter.api.Assertions.assertTrue(e.getMessage().contains("one branch is a literal"), e.getMessage());
     }
 
-    @Test void rational_literals_are_exact_values() throws Exception {
+    @Test void rationalLiteralsAreExactValues() throws Exception {
         assertEquals("5", run("println (10/2)"));       // whole → Int
         assertEquals("7/2", run("println (7/2)"));
         assertEquals("3", run("println (7 / 2)"));     // Int / Int truncates
@@ -73,7 +73,7 @@ class PrimitivesTest {
         assertEquals("7", run("println (7/2 * 2)"));
     }
 
-    @Test void ints_never_wrap() throws Exception {
+    @Test void intsNeverWrap() throws Exception {
         assertEquals("9223372036854775808", run("println (9223372036854775807 + 1)"));
         assertEquals("-9223372036854775809", run("println (0 - 9223372036854775807 - 2)"));
         assertEquals("9223372037000250000", run("println (3037000500 * 3037000500)"));
@@ -83,7 +83,7 @@ class PrimitivesTest {
         assertEquals("123456789012345678901234567890", run("println 123456789012345678901234567890"));
     }
 
-    @Test void int_equality_is_exact_past_2_pow_53() throws Exception {
+    @Test void intEqualityIsExactPast2Pow53() throws Exception {
         // Both round to the same double; as Ints they differ.
         assertEquals("false", run("println (9007199254740993 == 9007199254740992)"));
         assertEquals("true", run("println (9007199254740993 /= 9007199254740992)"));
@@ -91,13 +91,13 @@ class PrimitivesTest {
         assertEquals("true", run("println (2 == 2.0)"));
     }
 
-    @Test void length_works_on_string_and_vector() throws Exception {
+    @Test void lengthWorksOnStringAndVector() throws Exception {
         assertEquals("5", run("println (length \"hello\")"));
         assertEquals("3", run("println (length #[1 2 3])"));
         assertEquals("0", run("println (length #[])"));
     }
 
-    @Test void nth_indexes_vector_and_string() throws Exception {
+    @Test void nthIndexesVectorAndString() throws Exception {
         // Irij convention: `nth idx coll` (idx first, coll second) —
         // matches std.collection's `(nth i v1)` usage and the
         // Builtins.nth registration order.
@@ -105,22 +105,22 @@ class PrimitivesTest {
         assertEquals("e", run("println (nth 1 \"hello\")"));
     }
 
-    @Test void conj_appends_to_vector() throws Exception {
+    @Test void conjAppendsToVector() throws Exception {
         assertEquals("3", run("println (length (conj #[1 2] 3))"));
     }
 
-    @Test void empty_predicate() throws Exception {
+    @Test void emptyPredicate() throws Exception {
         assertEquals("true", run("println (empty? #[])"));
         assertEquals("false", run("println (empty? #[1]))".replace("))", ")")));
         assertEquals("true", run("println (empty? \"\")"));
     }
 
-    @Test void head_and_tail_of_vector() throws Exception {
+    @Test void headAndTailOfVector() throws Exception {
         assertEquals("1", run("println (head #[1 2 3])"));
         assertEquals("2", run("println (head (tail #[1 2 3]))"));
     }
 
-    @Test void primitives_compose_into_fold_via_tco() throws Exception {
+    @Test void primitivesComposeIntoFoldViaTco() throws Exception {
         // Real-world test: write fold in Irij using the new primitives,
         // rely on self-TCO to avoid stack overflow on 1k-element vector.
         StringBuilder src = new StringBuilder();

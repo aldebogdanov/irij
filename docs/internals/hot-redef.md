@@ -83,9 +83,9 @@ sites pick up the new implementation on their next invocation.
 
 `HotRedefTest`:
 
-- `redef_swaps_top_level_fn_impl` — compile, run (prints "hi"), swap
+- `redefSwapsTopLevelFnImpl` — compile, run (prints "hi"), swap
   target to a Java method that prints "yo!", run again, verify.
-- `direct_linking_skips_indy_so_redef_has_no_effect` — same source
+- `directLinkingSkipsIndySoRedefHasNoEffect` — same source
   compiled with `--direct-linking`; `redefine()` returns false (no
   site registered) and the original impl runs.
 

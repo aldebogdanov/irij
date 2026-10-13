@@ -39,7 +39,7 @@ class TcoTest {
         return buf.toString().trim();
     }
 
-    @Test void self_tail_call_1M_deep() throws Exception {
+    @Test void selfTailCall1MDeep() throws Exception {
         // sum-to(0, 1_000_000) = 500000500000. Recursion depth is 1M;
         // without TCO this blows the JVM stack (typical limit ~10K).
         String src = """
@@ -52,7 +52,7 @@ class TcoTest {
         assertEquals("500000500000", run(src, CompileOptions.defaults()));
     }
 
-    @Test void self_tail_call_in_if_then_branch() throws Exception {
+    @Test void selfTailCallInIfThenBranch() throws Exception {
         // Tail position in only the then branch. else is a plain value.
         String src = """
             fn count-down
@@ -63,7 +63,7 @@ class TcoTest {
         assertEquals("done", run(src, CompileOptions.defaults()));
     }
 
-    @Test void self_tail_call_args_use_old_param_values() throws Exception {
+    @Test void selfTailCallArgsUseOldParamValues() throws Exception {
         // Both new-arg expressions reference original param values; the
         // emitter must evaluate all args BEFORE rebinding any slot.
         // sum-to(0, 100) = 5050.
@@ -76,7 +76,7 @@ class TcoTest {
         assertEquals("5050", run(src, CompileOptions.defaults()));
     }
 
-    @Test void non_tail_call_is_not_rewritten() throws Exception {
+    @Test void nonTailCallIsNotRewritten() throws Exception {
         // 1 + (recursive call): the recursive call is NOT in tail position
         // (the +1 happens after). Must compile to a normal INVOKESTATIC,
         // not a GOTO. Small N to keep stack usage bounded.

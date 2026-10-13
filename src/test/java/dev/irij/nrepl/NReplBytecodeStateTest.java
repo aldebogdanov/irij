@@ -28,7 +28,7 @@ class NReplBytecodeStateTest {
         return s.handleOp(msg);
     }
 
-    @Test void cross_eval_simple_bind() {
+    @Test void crossEvalSimpleBind() {
         var s = new NReplSession();
         Map<String, Object> r1 = evalBC(s, "x := 42");
         assertEquals(List.of("done"), r1.get("status"));
@@ -38,7 +38,7 @@ class NReplBytecodeStateTest {
         assertEquals("42\n", r2.get("out"));
     }
 
-    @Test void redefine_bind_in_next_eval() {
+    @Test void redefineBindInNextEval() {
         var s = new NReplSession();
         evalBC(s, "x := 1");
         evalBC(s, "x := 100");
@@ -46,7 +46,7 @@ class NReplBytecodeStateTest {
         assertEquals("100\n", r.get("out"));
     }
 
-    @Test void compute_using_prior_binds() {
+    @Test void computeUsingPriorBinds() {
         var s = new NReplSession();
         evalBC(s, "a := 10");
         evalBC(s, "b := 20");
@@ -54,7 +54,7 @@ class NReplBytecodeStateTest {
         assertEquals("30\n", r.get("out"));
     }
 
-    @Test void unbound_throws() {
+    @Test void unboundThrows() {
         var s = new NReplSession();
         var r = evalBC(s, "println undefined-thing");
         assertEquals(List.of("done", "error"), r.get("status"));
@@ -62,7 +62,7 @@ class NReplBytecodeStateTest {
                 "expected Unbound-variable error, got: " + r.get("err"));
     }
 
-    @Test void state_isolated_between_sessions() {
+    @Test void stateIsolatedBetweenSessions() {
         var s1 = new NReplSession();
         var s2 = new NReplSession();
         evalBC(s1, "leaked := \"only-s1\"");
