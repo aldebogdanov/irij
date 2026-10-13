@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "out",
+    "rootDir": ".",
+    "types": [
+      "node"
+    ],
+    "module": "commonjs",
+    "moduleResolution": "node10",
+    "noEmit": false
+  },
+  "include": [
+    "src/forms.ts",
+    "test"
+  ]
+}

@@ -1,0 +1,171 @@
+{
+  "name": "irij",
+  "displayName": "Irij",
+  "description": "Irij (ℑ) language support: highlighting, language server, REPL",
+  "version": "0.1.0",
+  "publisher": "irij",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/aldebogdanov/irij",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "irij",
+    "lsp",
+    "repl"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "languages": [
+      {
+        "id": "irij",
+        "aliases": [
+          "Irij",
+          "irij"
+        ],
+        "extensions": [
+          ".irj"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "irij",
+        "scopeName": "source.irij",
+        "path": "./syntaxes/irij.tmLanguage.json"
+      },
+      {
+        "scopeName": "markdown.irij.codeblock",
+        "path": "./syntaxes/markdown-codeblock.json",
+        "injectTo": [
+          "text.html.markdown"
+        ],
+        "embeddedLanguages": {
+          "meta.embedded.block.irij": "irij"
+        }
+      }
+    ],
+    "configuration": {
+      "title": "Irij",
+      "properties": {
+        "irij.executable": {
+          "type": "string",
+          "default": "irij",
+          "markdownDescription": "Path to the `irij` executable, used for the language server, the REPL and running files.",
+          "scope": "machine-overridable"
+        },
+        "irij.languageServer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Start `irij lsp` for diagnostics, hover, go to definition, completion and expand selection."
+        },
+        "irij.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Trace the communication between VS Code and the Irij language server."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "irij.startRepl",
+        "title": "Start REPL",
+        "category": "Irij"
+      },
+      {
+        "command": "irij.sendToRepl",
+        "title": "Send Selection or Top-Level Form to REPL",
+        "category": "Irij"
+      },
+      {
+        "command": "irij.sendFileToRepl",
+        "title": "Send File to REPL",
+        "category": "Irij"
+      },
+      {
+        "command": "irij.runFile",
+        "title": "Run Current File",
+        "category": "Irij",
+        "icon": "$(play)"
+      },
+      {
+        "command": "irij.restartLanguageServer",
+        "title": "Restart Language Server",
+        "category": "Irij"
+      }
+    ],
+    "menus": {
+      "editor/title/run": [
+        {
+          "command": "irij.runFile",
+          "when": "resourceLangId == irij"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "irij.sendToRepl",
+          "when": "editorLangId == irij"
+        },
+        {
+          "command": "irij.sendFileToRepl",
+          "when": "editorLangId == irij"
+        },
+        {
+          "command": "irij.runFile",
+          "when": "editorLangId == irij"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "irij.sendToRepl",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "editorTextFocus && editorLangId == irij"
+      },
+      {
+        "command": "irij.sendFileToRepl",
+        "key": "ctrl+alt+enter",
+        "mac": "cmd+alt+enter",
+        "when": "editorTextFocus && editorLangId == irij"
+      }
+    ]
+  },
+  "scripts": {
+    "sync-grammar": "node scripts/sync-grammar.mjs",
+    "build": "npm run sync-grammar && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --sourcemap",
+    "watch": "npm run build -- --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run sync-grammar && tsc -p tsconfig.test.json && node --test out/test/",
+    "test:e2e": "npm run build && node test/e2e/run.mjs",
+    "package": "vsce package --no-dependencies --skip-license",
+    "vscode:prepublish": "npm run build -- --minify"
+  },
+  "dependencies": {
+    "vscode-languageclient": "10.1.2"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "4.0.0",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2"
+  }
+}

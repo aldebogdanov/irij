@@ -24,7 +24,7 @@ console.log(h.codeToHtml(fs.readFileSync('../../examples/basics.irj', 'utf8'),
 
 - **Shiki**: add under `packages/langs` / `textmate-grammars-themes` so ```` ```irij ```` works in docs sites and any tool bundling Shiki.
 - **GitHub Linguist**: needs a language entry plus about 200 `.irj` files in public repos.
-- **VS Code**: wrap in a minimal extension (`package.json` with a `grammars` contribution).
+- **VS Code**: done — `editors/vscode/` copies this grammar at build time.
 
 Other highlighters are maintained separately: `editors/emacs/irij-mode.el` and
 `irij.online/resources/irij-mode.js` (CodeMirror 5). The first two are checked by

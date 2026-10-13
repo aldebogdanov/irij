@@ -152,6 +152,28 @@ The split exists because spawned vthreads outlive the eval that
 created them. Long-running background work prints into the BG buffer
 without colliding with subsequent eval output.
 
+## Terminal REPL (`irij repl`)
+
+`dev.irij.repl.IrijRepl` is the line-based REPL (JLine) that the Emacs
+comint mode and the VS Code extension drive. It evaluates into one
+`BytecodeSession`, like an nREPL session. Lines accumulate until
+`ReplInput.isIncomplete` says the input is whole, by the offside rule,
+as in Python's REPL:
+
+- a blank line, or a line back in column 0 that completes the input,
+  evaluates it;
+- an indented last line keeps reading (a body may continue);
+- so do an open bracket, a parse error *past* the last line (`if c`,
+  `x :=`, `xs |>` — more text would fix it), and a top-level `fn`
+  header with no body yet (bodies are always on the next, indented
+  lines).
+
+An error inside the text (`x := )`) is reported at once. Editors send a
+form followed by a blank line, so any open block closes. The previous
+check counted INDENT/DEDENT tokens, but the lexer closes every block
+at EOF, so it never saw an open one and evaluated `fn square` before
+its body arrived (`unsupported fn body: NoBody`).
+
 ## Open gaps
 
 - **Stateful eval-bytecode** — needs namespace abstraction.
