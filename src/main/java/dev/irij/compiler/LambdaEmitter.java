@@ -32,7 +32,7 @@ final class LambdaEmitter implements Opcodes {
         for (Pattern p : lam.params()) {
             paramNames.add(switch (p) {
                 case Pattern.VarPat v -> v.name();
-                case Pattern.WildcardPat __ -> "_";
+                case Pattern.WildcardPat _ -> "_";
                 default -> throw new IrijCompiler.CompileException(
                         "MVP lambda: param must be VarPat/WildcardPat");
             });

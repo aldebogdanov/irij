@@ -9,15 +9,15 @@ public final class RtIo {
 
     /** What the program was started with; set first thing in every emitted
      *  {@code main(String[])}, so `irij file.irj a b` and a built jar agree. */
-    private static volatile java.util.List<String> PROGRAM_ARGS = java.util.List.of();
+    private static volatile java.util.List<String> startArgs = java.util.List.of();
 
     public static void setProgramArgs(String[] args) {
-        PROGRAM_ARGS = args == null ? java.util.List.of() : java.util.List.of(args);
+        startArgs = args == null ? java.util.List.of() : java.util.List.of(args);
     }
 
     /** {@code program-args ()} — the arguments after the program, as a Vec of Str. */
     public static Object programArgs() {
-        return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<Object>(PROGRAM_ARGS));
+        return new dev.irij.runtime.Values.IrijVector(new java.util.ArrayList<Object>(startArgs));
     }
 
 

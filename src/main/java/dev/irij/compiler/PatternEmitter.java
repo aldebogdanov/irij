@@ -88,7 +88,7 @@ final class PatternEmitter implements Opcodes {
     void emitPatternTest(Pattern pattern, int scrutSlot, MethodVisitor mv,
                                  Locals locals, Label failL) {
         switch (pattern) {
-            case Pattern.WildcardPat __ -> { /* always matches */ }
+            case Pattern.WildcardPat _ -> { /* always matches */ }
             case Pattern.VarPat vp -> {
                 // Bind scrutinee to variable
                 int slot = locals.allocate(vp.name());
@@ -96,7 +96,7 @@ final class PatternEmitter implements Opcodes {
                 mv.visitVarInsn(ASTORE, slot);
             }
             case Pattern.GroupedPat gp -> emitPatternTest(gp.inner(), scrutSlot, mv, locals, failL);
-            case Pattern.UnitPat __ -> {
+            case Pattern.UnitPat _ -> {
                 mv.visitVarInsn(ALOAD, scrutSlot);
                 mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isUnit"), "isUnit", "(Ljava/lang/Object;)Z", false);
                 mv.visitJumpInsn(IFEQ, failL);

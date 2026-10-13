@@ -349,16 +349,16 @@ public final class RuntimeSupport {
     // into RuntimeSupport directly. At that point the registry stays
     // but stops touching the interpreter package.
 
-    private static volatile java.util.Map<String, IrijFn> BUILTIN_REGISTRY;
+    private static volatile java.util.Map<String, IrijFn> builtinRegistry;
 
     public static IrijFn builtinFn(String name) {
-        java.util.Map<String, IrijFn> r = BUILTIN_REGISTRY;
+        java.util.Map<String, IrijFn> r = builtinRegistry;
         if (r == null) {
             synchronized (RuntimeSupport.class) {
-                r = BUILTIN_REGISTRY;
+                r = builtinRegistry;
                 if (r == null) {
                     r = initBuiltinRegistry();
-                    BUILTIN_REGISTRY = r;
+                    builtinRegistry = r;
                 }
             }
         }

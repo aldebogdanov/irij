@@ -655,7 +655,7 @@ final class SmEmitter implements Opcodes {
         for (Pattern p : clauseParams) {
             paramNames.add(switch (p) {
                 case Pattern.VarPat v -> v.name();
-                case Pattern.WildcardPat __ -> "_";
+                case Pattern.WildcardPat _ -> "_";
                 default -> throw new IrijCompiler.CompileException(
                         "tier-c clause: unsupported param pattern");
             });
