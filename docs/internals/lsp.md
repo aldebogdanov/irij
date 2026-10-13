@@ -179,7 +179,10 @@ own history for shrinking. They don't call lsp-mode's
 `lsp-extend-selection`: it caches the answer per buffer edit rather than
 per position (after moving point it expands from the old spot) and has
 no shrink. With no server they fall back to brackets and strings from
-the syntax table.
+the syntax table. In `irij-mode` the commands of puni, expand-region and
+expreg are remapped to these (`irij-selection-remap-commands`): those
+packages only see the syntax table, so their keys would otherwise stop
+at brackets.
 
 ## Effect-row diagnostics (2b.1.d)
 

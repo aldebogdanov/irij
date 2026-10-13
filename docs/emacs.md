@@ -52,7 +52,16 @@ from the text. So:
 
 - imenu: functions, specs, effects/protos, impls, handlers/caps/models
 - `C-c C-z` comint REPL (`irij repl`); `C-c C-r` / `C-c C-b` / `C-c C-l` send region / buffer / line
-- LSP: `irij lsp` is registered with eglot and lsp-mode when they load
+- LSP: `irij lsp` is registered with eglot and lsp-mode when they load;
+  start it with a hook, e.g. `(add-hook 'irij-mode-hook #'lsp-deferred)`
+  or `#'eglot-ensure`
+- Expand/shrink region (`irij-selection.el`): `C-c C-=` / `C-c C--` grow
+  the region along the syntax tree from the language server (name →
+  call → branch → `if` → function body → declaration → file), or by
+  brackets without a server. In Irij buffers the expand-region commands
+  of puni, expand-region and expreg are remapped to these, so their own
+  keys (puni's `C-M-=` / `C-M--`) work the same way; see
+  `irij-selection-remap-commands`
 
 ## Tests
 

@@ -111,6 +111,37 @@
   (should (equal (irij-selection-test--lsp-steps nil 4)
                  '("1" "g 1" "(g 1)" "f (g 1)" "(g 1)"))))
 
+;; ── Remapped expand-region commands (puni stand-in) ──────────────────
+
+(defun puni-expand-region () (interactive) (error "puni ran, not irij"))
+(defun puni-contract-region () (interactive) (error "puni ran, not irij"))
+(defvar irij-selection-test-puni-map
+  (let ((m (make-sparse-keymap)))
+    (define-key m (kbd "C-M-=") #'puni-expand-region)
+    (define-key m (kbd "C-M--") #'puni-contract-region)
+    m))
+(define-minor-mode irij-selection-test-puni-mode "Stand-in for puni-mode."
+  :keymap irij-selection-test-puni-map)
+
+(ert-deftest irij-selection-remaps-puni-keys ()
+  (with-temp-buffer
+    (switch-to-buffer (current-buffer))
+    (transient-mark-mode 1)
+    (insert "x := f (g 1)")
+    (irij-mode)
+    (irij-selection-test-puni-mode 1)   ; a minor mode map, so it wins key lookup
+    (should (eq (key-binding (kbd "C-M-=")) #'irij-expand-region))
+    (should (eq (key-binding (kbd "C-M--")) #'irij-shrink-region))
+    (goto-char 11)                       ; on `1'
+    (execute-kbd-macro (kbd "C-M-= C-M-= C-M-="))
+    (should (equal (buffer-substring (region-beginning) (region-end)) "(g 1)"))
+    ;; One key sequence, as typed: shrink history needs the previous
+    ;; command, and each `execute-kbd-macro' call starts afresh.
+    (goto-char 11)
+    (deactivate-mark)
+    (execute-kbd-macro (kbd "C-M-= C-M-= C-M-= C-M-= C-M-- C-M--"))
+    (should (equal (buffer-substring (region-beginning) (region-end)) "g 1"))))
+
 (ert-deftest irij-selection-keys-bound ()
   (should (eq (lookup-key irij-mode-map (kbd "C-c C-=")) #'irij-expand-region))
   (should (eq (lookup-key irij-mode-map (kbd "C-c C--")) #'irij-shrink-region)))
