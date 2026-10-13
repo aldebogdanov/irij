@@ -9,9 +9,15 @@ Source of truth: `docs/irij-lang-spec.org`
 - [x] **irij-mode** — `editors/emacs/irij-mode.el`
   - [x] Major mode for `.irj` files
   - [x] Syntax highlighting (keywords, digraphs, literals, comments)
-  - [x] 2-space indentation enforcement
+  - [x] Highlighting synced with the lexer: `?`/`!` names, `for`/`proof`, soft `model`, all digraphs, Java refs
+  - [x] Keyword/builtin lists checked against lexer + `IntrinsicsEmitter.NAMES` (`EditorGrammarSyncTest`, also for the TextMate grammar)
+  - [x] Offside-rule indentation: block heads, inline `if`/`with … do`, `else`→`if`, brackets, leading `|>`; TAB cycles levels; `indent-region` keeps valid lines
   - [x] Comment toggling (`;;`)
   - [x] REPL integration (send region, send buffer)
+  - [x] imenu index of top-level declarations
+  - [x] `irij lsp` registered with eglot and lsp-mode
+  - [x] ERT suite — `editors/emacs/test/irij-mode-test.el`
+- [x] **TextMate grammar** — `editors/textmate/irij.tmLanguage.json` (VS Code, Shiki, Linguist, Zed)
 - [x] **irij-nrepl** — `editors/emacs/irij-nrepl.el`
   - [x] Bencode encoder/decoder (pure Elisp, zero external deps)
   - [x] Async TCP transport (`make-network-process`, partial-frame buffering)

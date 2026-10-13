@@ -1,0 +1,162 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Irij",
+  "scopeName": "source.irij",
+  "fileTypes": ["irj"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#declaration" },
+    { "include": "#model-decl" },
+    { "include": "#keyword" },
+    { "include": "#constant" },
+    { "include": "#keyword-atom" },
+    { "include": "#party-name" },
+    { "include": "#number" },
+    { "include": "#operator" },
+    { "include": "#java-ref" },
+    { "include": "#type-name" },
+    { "include": "#builtin" },
+    { "include": "#binding" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "name": "comment.line.double-semicolon.irij",
+      "match": ";;.*$"
+    },
+    "string": {
+      "name": "string.quoted.double.irij",
+      "begin": "\"",
+      "end": "\"|$",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.irij" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.irij" } },
+      "patterns": [
+        { "name": "constant.character.escape.irij", "match": "\\\\[nrte\"\\\\$]" },
+        {
+          "name": "meta.interpolation.irij",
+          "match": "(\\$\\{)([^}]*)(\\})",
+          "captures": {
+            "1": { "name": "punctuation.section.embedded.begin.irij" },
+            "2": { "name": "source.irij.embedded" },
+            "3": { "name": "punctuation.section.embedded.end.irij" }
+          }
+        }
+      ]
+    },
+    "declaration": {
+      "patterns": [
+        {
+          "comment": "fn <name>",
+          "match": "(?<![\\w-])(fn)\\s+([a-z][a-z0-9]*(?:[-_][a-z0-9]+)*[?!]?)",
+          "captures": {
+            "1": { "name": "keyword.declaration.function.irij" },
+            "2": { "name": "entity.name.function.irij" }
+          }
+        },
+        {
+          "comment": "spec / newtype / effect / proto / impl / contract <Name>",
+          "match": "(?<![\\w-])(spec|newtype|effect|proto|impl|contract)\\s+([A-Z][A-Za-z0-9]*)",
+          "captures": {
+            "1": { "name": "keyword.declaration.type.irij" },
+            "2": { "name": "entity.name.type.irij" }
+          }
+        },
+        {
+          "comment": "handler / cap <name>",
+          "match": "(?<![\\w-])(handler|cap)\\s+([a-z][a-z0-9]*(?:[-_][a-z0-9]+)*[?!]?)",
+          "captures": {
+            "1": { "name": "keyword.declaration.handler.irij" },
+            "2": { "name": "entity.name.function.handler.irij" }
+          }
+        }
+      ]
+    },
+    "model-decl": {
+      "comment": "`model` is a soft keyword: only where a declaration starts",
+      "match": "^\\s*(?:(pub)\\s+)?(model)\\s+([a-z][a-z0-9]*(?:[-_][a-z0-9]+)*[?!]?)",
+      "captures": {
+        "1": { "name": "storage.modifier.irij" },
+        "2": { "name": "keyword.declaration.model.irij" },
+        "3": { "name": "entity.name.function.irij" }
+      }
+    },
+    "keyword": {
+      "patterns": [
+        {
+          "name": "keyword.control.irij",
+          "match": "(?<![\\w-])(?:if|else|match|do|with|scope|par-each|on-failure|select|enclave|for|in|out)(?![\\w?!-])"
+        },
+        {
+          "name": "keyword.other.declaration.irij",
+          "match": "(?<![\\w-])(?:fn|spec|newtype|mod|use|pub|effect|party|cap|handler|impl|proto|pre|post|contract|proof)(?![\\w?!-])"
+        }
+      ]
+    },
+    "constant": {
+      "name": "constant.language.boolean.irij",
+      "match": "(?<![\\w-])(?:true|false)(?![\\w?!-])"
+    },
+    "keyword-atom": {
+      "name": "constant.other.keyword-atom.irij",
+      "match": "(?<![:\\w])(?<!:):[a-z][a-z0-9_-]*"
+    },
+    "party-name": {
+      "name": "entity.name.tag.party.irij",
+      "match": "\\$[A-Z][A-Z0-9_-]*"
+    },
+    "number": {
+      "patterns": [
+        { "name": "constant.numeric.hex.irij", "match": "(?<![\\w.])0[xX][0-9a-fA-F](?:[0-9a-fA-F_]*[0-9a-fA-F])?" },
+        { "name": "constant.numeric.rational.irij", "match": "(?<![\\w.])[0-9]+/[0-9]+(?![\\w])" },
+        { "name": "constant.numeric.float.irij", "match": "(?<![\\w.])[0-9][0-9_]*\\.[0-9][0-9_]*" },
+        { "name": "constant.numeric.integer.irij", "match": "(?<![\\w.])[0-9](?:[0-9_]*[0-9])?(?![\\w])" }
+      ]
+    },
+    "operator": {
+      "patterns": [
+        { "name": "keyword.operator.effect-sep.irij", "match": ":::" },
+        { "name": "keyword.operator.spec-annotation.irij", "match": "::" },
+        { "name": "keyword.operator.bind.irij", "match": ":[=!]" },
+        { "name": "keyword.operator.assign.irij", "match": "<-" },
+        { "name": "keyword.operator.arrow.irij", "match": "->|=>" },
+        { "name": "keyword.operator.pipe.irij", "match": "\\|>|<\\|" },
+        { "name": "keyword.operator.compose.irij", "match": ">>|<<" },
+        { "name": "keyword.operator.choreography.irij", "match": "~\\*>|~>|<~|~/" },
+        { "name": "keyword.operator.seq.irij", "match": "/[+*#&|?!^$]|@i?" },
+        { "name": "keyword.operator.spread.irij", "match": "\\.\\.\\.|\\.\\.<|\\.\\." },
+        { "name": "keyword.operator.comparison.irij", "match": "==|/=|<=|>=" },
+        { "name": "keyword.operator.logical.irij", "match": "&&|\\|\\|" },
+        { "name": "keyword.operator.arithmetic.irij", "match": "\\*\\*|\\+\\+|[-+*%/]" },
+        { "name": "keyword.operator.apply-rest.irij", "match": "~" },
+        { "name": "keyword.operator.misc.irij", "match": "[<>!|=]" }
+      ]
+    },
+    "java-ref": {
+      "comment": "Class/member, java.pkg.Class/member, Class/new",
+      "name": "support.function.interop.irij",
+      "match": "(?<![\\w-])[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*/[A-Za-z_]\\w*"
+    },
+    "type-name": {
+      "name": "entity.name.type.irij",
+      "match": "(?<![\\w-])[A-Z][A-Za-z0-9]*"
+    },
+    "builtin": {
+      "name": "support.function.builtin.irij",
+      "match": "(?<![\\w-])(?:json-encode-pretty|constant-time-eq\\?|pbkdf2-sha256-hex|hmac-sha256-hex|from-char-code|program-args|random-float|random-token|starts-with\\?|json-encode|parse-float|ends-with\\?|json-parse|lower-case|random-int|sha256-hex|toml-parse|upper-case|url-decode|url-encode|char-code|contains\\?|parse-int|read-line|substring|validate\\!|identity|index-of|to-tuple|validate|char-at|get-env|println|replace|reverse|timeout|type-of|concat|dissoc|empty\\?|length|now-ms|resume|to-set|to-str|to-vec|assoc|await|const|error|floor|merge|print|round|sleep|spawn|split|ceil|conj|drop|flip|fold|head|join|keys|last|race|sort|sqrt|tail|take|trim|vals|abs|cos|dbg|env|exp|get|log|max|min|not|nth|par|pow|quo|rem|sin|tan|try|pi|e)(?![\\w?!-])"
+    },
+    "binding": {
+      "comment": "name := / name :!",
+      "match": "(?<![\\w-])([a-z][a-z0-9]*(?:[-_][a-z0-9]+)*[?!]?)(?=\\s*:[=!])",
+      "captures": { "1": { "name": "variable.other.binding.irij" } }
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.definition.collection.irij", "match": "#[\\[{(]" },
+        { "name": "punctuation.section.brackets.irij", "match": "[()\\[\\]{}]" },
+        { "name": "punctuation.separator.irij", "match": ";" },
+        { "name": "variable.language.wildcard.irij", "match": "(?<![\\w-])_(?![\\w-])" }
+      ]
+    }
+  }
+}

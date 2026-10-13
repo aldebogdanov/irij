@@ -104,6 +104,10 @@ tasks.processResources {
 tasks.test {
     useJUnitPlatform()
 
+    // EditorGrammarSyncTest reads the editor highlighters; rerun when they change
+    inputs.dir("editors/emacs").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.dir("editors/textmate").withPathSensitivity(PathSensitivity.RELATIVE)
+
     val verbose = project.hasProperty("verbose")
 
     testLogging {

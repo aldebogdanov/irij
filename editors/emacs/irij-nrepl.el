@@ -599,7 +599,7 @@ Show inline overlay at BUF/POS when provided."
   "List of previous REPL inputs (most recent first).")
 
 (defvar-local irij-nrepl--history-index -1
-  "Current position in the history ring.  -1 means 'not browsing'.")
+  "Current position in the history ring.  -1 means not browsing.")
 
 (defvar-local irij-nrepl--history-saved-input nil
   "The unsent input text saved when the user starts browsing history.")
