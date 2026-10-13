@@ -150,7 +150,7 @@
     "build": "npm run sync-grammar && esbuild src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=dist/extension.js --sourcemap",
     "watch": "npm run build -- --watch",
     "typecheck": "tsc --noEmit",
-    "test": "npm run sync-grammar && tsc -p tsconfig.test.json && node --test out/test/",
+    "test": "npm run sync-grammar && tsc -p tsconfig.test.json && node --test \"out/test/**/*.test.js\"",
     "test:e2e": "npm run build && node test/e2e/run.mjs",
     "package": "vsce package --no-dependencies --skip-license",
     "vscode:prepublish": "npm run build -- --minify"
