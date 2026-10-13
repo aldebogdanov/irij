@@ -17,6 +17,7 @@ effect-row diagnostics).
 | `textDocument/hover` | ✅ — signature in a code-fence, leading `;;` doc-comment, kind + line |
 | `textDocument/definition` | ✅ — AST symbol index; jumps to decl location |
 | `textDocument/completion` | ✅ — keywords + in-scope identifiers from the symbol index |
+| `textDocument/selectionRange` | ✅ — expand/shrink selection along the parse tree (`LspSelection`) |
 
 ## Architecture
 
@@ -32,10 +33,12 @@ editor ──stdio──▶ irij lsp
                   │     │
                   │     └── ANTLR errors → LSP Diagnostics
                   │
-                  └── LspText.wordAt(src, pos)                ← hover/completion helper
+                  ├── LspText.wordAt(src, pos)                ← hover/completion helper
+                  │
+                  └── LspSelection.compute(src, positions)    ← selectionRange
 ```
 
-Three classes:
+Main classes:
 
 - `IrijLspServer` — implements `LanguageServer`, `TextDocumentService`,
   `WorkspaceService`. Holds the in-memory document mirror.
@@ -45,6 +48,8 @@ Three classes:
   diagnostics. Parses via `IrijParseDriver`; converts each ANTLR
   error string (`"line:col message"`) to a `Diagnostic` with the
   right range + severity.
+- `LspSelection` — pure function: source + positions → selection-range
+  chains (see *Selection range* below). Also `LspIndex` (symbol index).
 
 Transport: LSP4J's `Launcher.createLauncher` on `System.in` /
 `System.out`. Same wire format every standard LSP client speaks.
@@ -129,6 +134,43 @@ surfaces as `Symbol(name=foo, kind=FN, …)` rather than a wrapper.
   (`FN→Function`, `EFFECT/PROTO→Interface`, `HANDLER/CAP→Module`,
   `SPEC→Struct`, `ROLE→Constant`). Each item carries the
   symbol signature in `detail`.
+
+## Selection range
+
+`textDocument/selectionRange` drives "expand selection" (VS Code's
+Shift+Alt+→, lsp-mode's `lsp-extend-selection`, `irij-expand-region`
+in Emacs). `LspSelection.compute` re-parses the document per request
+and, for each position, walks from the token under the cursor up
+through every enclosing ANTLR rule context:
+
+```
+n  →  n * n  →  n -> n * n  →  (n -> n * n)  →  fn square …  →  file
+```
+
+- **Spans use real tokens only.** A rule's `start`/`stop` can be one
+  of the lexer's synthetic tokens (INDENT, DEDENT, NEWLINE) or EOF,
+  which sit at line ends; each span is trimmed to its first and last
+  default-channel, non-synthetic token, so a block never swallows the
+  newline after it.
+- **Extra steps.** A rule spanning exactly one matched bracket pair
+  (`(`, `[`, `{`, `#[`, `#{`, `#(`) yields its contents first, then the
+  brackets; a STRING token yields its text, then the quotes.
+- **Dedup + nesting.** Single-child rule chains produce identical
+  spans; repeats and any span that doesn't strictly contain the
+  previous one are dropped (LSP requires parents to contain children).
+  The last step is always the whole document.
+- **Offsets.** ANTLR token indexes are code points; LSP columns count
+  UTF-16 units. `LspSelection.Text` converts both ways, so astral
+  characters before the cursor don't shift ranges.
+- **Broken source.** Parse errors leave a partial tree; whatever
+  ancestors exist are used, and the document span is still returned —
+  one result per requested position, as the protocol requires.
+
+Emacs: eglot has no command for `selectionRange`, so
+`editors/emacs/irij-selection.el` adds `irij-expand-region` /
+`irij-shrink-region` (`C-c C-=` / `C-c C--`) over eglot's JSON-RPC.
+Under lsp-mode it defers to `lsp-extend-selection`; with no server it
+falls back to brackets and strings from the syntax table.
 
 ## Effect-row diagnostics (2b.1.d)
 

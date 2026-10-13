@@ -648,6 +648,8 @@ mode once they are loaded, e.g. via (add-hook \\='irij-mode-hook
 
 ;; Load the nREPL client if it is on the load-path (no error if absent).
 (require 'irij-nrepl nil t)
+;; Expand/shrink region (C-c C-= / C-c C--), likewise optional.
+(require 'irij-selection nil t)
 
 (provide 'irij-mode)
 
