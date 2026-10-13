@@ -13,12 +13,17 @@
 ;;   C-c C-=   irij-expand-region   grow the region to the next enclosing node
 ;;   C-c C--   irij-shrink-region   undo the last expansion
 ;;
-;; With eglot managing the buffer, the steps come from the language
-;; server's `textDocument/selectionRange' (`irij lsp' walks the parse
-;; tree: name → application → bracket contents → bracket → statement →
-;; block → declaration → file).  lsp-mode users get the same through
-;; `lsp-extend-selection'.  Without a server the commands fall back to
-;; enclosing brackets and strings, from the syntax table.
+;; With eglot or lsp-mode managing the buffer, the steps come from the
+;; language server's `textDocument/selectionRange' (`irij lsp' walks the
+;; parse tree: name → application → bracket contents → bracket →
+;; statement → block → declaration → file).  Without a server the
+;; commands fall back to enclosing brackets and strings, from the
+;; syntax table.
+;;
+;; Under lsp-mode this asks the server itself rather than calling
+;; `lsp-extend-selection': that command caches the server's answer per
+;; buffer edit, not per position, so after moving point it expands from
+;; the old spot — and it keeps no history to shrink back through.
 ;;
 ;; `irij-mode' loads this file when it is on the load-path.
 
@@ -34,7 +39,11 @@
 (declare-function eglot--pos-to-lsp-position "eglot" (&optional pos))
 (declare-function eglot-range-region "eglot" (range &optional markers))
 (declare-function eglot--range-region "eglot" (range &optional markers))
-(declare-function lsp-extend-selection "lsp-mode" ())
+(declare-function lsp-request "lsp-mode" (method params &rest args))
+(declare-function lsp-feature? "lsp-mode" (method))
+(declare-function lsp--text-document-identifier "lsp-mode" ())
+(declare-function lsp--point-to-position "lsp-mode" (point))
+(declare-function lsp--range-to-region "lsp-mode" (range))
 (defvar lsp-mode)
 
 (defvar-local irij-selection--history nil
@@ -64,6 +73,28 @@ capability."
           (push (funcall to-region (plist-get node :range)) out)
           (setq node (plist-get node :parent)))
         (nreverse out)))))
+
+(defun irij-selection--field (obj key)
+  "KEY of an lsp-mode protocol OBJ, a hash table or a plist."
+  (if (hash-table-p obj)
+      (gethash (substring (symbol-name key) 1) obj)
+    (plist-get obj key)))
+
+(defun irij-selection--lsp-mode-chain (pos)
+  "Innermost-first list of (BEG . END) for POS from lsp-mode's server.
+Nil unless lsp-mode manages the buffer with a selectionRange server."
+  (when (and (bound-and-true-p lsp-mode)
+             (lsp-feature? "textDocument/selectionRange"))
+    (let* ((resp (lsp-request
+                  "textDocument/selectionRange"
+                  (list :textDocument (lsp--text-document-identifier)
+                        :positions (vector (lsp--point-to-position pos)))))
+           (node (and (> (length resp) 0) (elt resp 0)))
+           (out nil))
+      (while node
+        (push (lsp--range-to-region (irij-selection--field node :range)) out)
+        (setq node (irij-selection--field node :parent)))
+      (nreverse out))))
 
 (defun irij-selection--syntax-chain (pos)
   "Innermost-first list of (BEG . END) for POS from brackets and strings."
@@ -97,21 +128,20 @@ capability."
 (defun irij-expand-region ()
   "Grow the region to the next enclosing syntactic node."
   (interactive)
-  (if (bound-and-true-p lsp-mode)
-      (lsp-extend-selection)
-    (let* ((cur   (irij-selection--region))
-           (chain (or (irij-selection--eglot-chain (car cur))
-                      (irij-selection--syntax-chain (car cur))))
-           (next  (seq-find (lambda (r)
-                              (and (<= (car r) (car cur)) (>= (cdr r) (cdr cur))
-                                   (not (equal r cur))))
-                            chain)))
-      (unless (memq last-command '(irij-expand-region irij-shrink-region))
-        (setq irij-selection--history nil))
-      (if (not next)
-          (message "ℑ Selection covers the whole buffer")
-        (push cur irij-selection--history)
-        (irij-selection--set next)))))
+  (let* ((cur   (irij-selection--region))
+         (chain (or (irij-selection--eglot-chain (car cur))
+                    (irij-selection--lsp-mode-chain (car cur))
+                    (irij-selection--syntax-chain (car cur))))
+         (next  (seq-find (lambda (r)
+                            (and (<= (car r) (car cur)) (>= (cdr r) (cdr cur))
+                                 (not (equal r cur))))
+                          chain)))
+    (unless (memq last-command '(irij-expand-region irij-shrink-region))
+      (setq irij-selection--history nil))
+    (if (not next)
+        (message "ℑ Selection covers the whole buffer")
+      (push cur irij-selection--history)
+      (irij-selection--set next))))
 
 ;;;###autoload
 (defun irij-shrink-region ()

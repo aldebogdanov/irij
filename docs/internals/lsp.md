@@ -143,7 +143,7 @@ surfaces as `Symbol(name=foo, kind=FN, …)` rather than a wrapper.
 ## Selection range
 
 `textDocument/selectionRange` drives "expand selection" (VS Code's
-Shift+Alt+→, lsp-mode's `lsp-extend-selection`, `irij-expand-region`
+Shift+Alt+→, `irij-expand-region`
 in Emacs). `LspSelection.compute` re-parses the document per request
 and, for each position, walks from the token under the cursor up
 through every enclosing ANTLR rule context:
@@ -173,9 +173,13 @@ n  →  n * n  →  n -> n * n  →  (n -> n * n)  →  fn square …  →  file
 
 Emacs: eglot has no command for `selectionRange`, so
 `editors/emacs/irij-selection.el` adds `irij-expand-region` /
-`irij-shrink-region` (`C-c C-=` / `C-c C--`) over eglot's JSON-RPC.
-Under lsp-mode it defers to `lsp-extend-selection`; with no server it
-falls back to brackets and strings from the syntax table.
+`irij-shrink-region` (`C-c C-=` / `C-c C--`), which send the request
+through eglot or lsp-mode, whichever manages the buffer, and keep their
+own history for shrinking. They don't call lsp-mode's
+`lsp-extend-selection`: it caches the answer per buffer edit rather than
+per position (after moving point it expands from the old spot) and has
+no shrink. With no server they fall back to brackets and strings from
+the syntax table.
 
 ## Effect-row diagnostics (2b.1.d)
 
@@ -196,6 +200,13 @@ Cross-module checks remain future work: `ModuleInliner` needs
 workspace-aware module resolution relative to `irij.toml`. The
 single-file pass already catches perform-without-row and
 intra-file fn-row-mismatch issues.
+
+Without the inliner, effects named through an import alias stay
+qualified (`::: proc.Proc` after `use std.proc :as proc`). They start
+lowercase like a row variable, so `EffectRowChecker.isRowVar` also
+requires no `.`: a row variable is a bare name (`eff`). Before that
+check, every file using a qualified effect showed a false "Unbound row
+variable 'proc.Proc'" error in the editor while compiling fine.
 
 ## Tests
 
