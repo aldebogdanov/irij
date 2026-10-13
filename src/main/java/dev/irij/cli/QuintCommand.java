@@ -26,33 +26,51 @@ final class QuintCommand {
 
     /** True when traces can be generated here. */
     private static boolean doctor() {
+        Ansi a = Ansi.detect();
         String found;
         try {
             found = Values.toIrijString(QuintCapability.version(Values.UNIT));
         } catch (IrijRuntimeError e) {
-            System.out.println("quint     not usable");
-            System.out.println("          " + e.getMessage());
-            System.out.println();
-            System.out.println("Generating traces needs it. Replaying a committed");
-            System.out.println(".itf.json does not, so a repository's regression traces");
-            System.out.println("still run here.");
+            for (String line : report(a, null, e.getMessage())) System.out.println(line);
             return false;
         }
-        boolean tested = found.equals(QuintCapability.TESTED_VERSION);
-        System.out.println("quint     " + found + (tested ? "" : "   (not the tested version)"));
-        System.out.println("tested    " + QuintCapability.TESTED_VERSION);
-        if (!tested) {
-            System.out.println();
-            System.out.println("ITF decoding was verified against " + QuintCapability.TESTED_VERSION
-                    + " and may differ here.");
-            System.out.println("A trace that decodes wrong is a bug worth reporting rather than");
-            System.out.println("working around.");
-        }
-        System.out.println();
-        System.out.println("Apalache is fetched by `quint verify` on first use, so `verify`");
-        System.out.println("works without a separate install (and takes a few minutes the");
-        System.out.println("first time).");
+        for (String line : report(a, found, null)) System.out.println(line);
         return true;
+    }
+
+    /** The doctor's report: {@code found} is the quint version, or null
+     *  with {@code error} saying why quint can't be run. */
+    static java.util.List<String> report(Ansi a, String found, String error) {
+        var out = new java.util.ArrayList<String>();
+        out.add(a.boldCyan("ℑ") + " " + a.bold("irij quint doctor"));
+        out.add("");
+        String tested = QuintCapability.TESTED_VERSION;
+        if (found == null) {
+            out.add("  " + a.red("✗") + " " + a.bold("quint   ") + "  " + a.boldRed("not usable"));
+            out.add("              " + a.red(error));
+            out.add("");
+            out.add(a.dim("  Generating traces needs it. Replaying a committed .itf.json"));
+            out.add(a.dim("  does not, so a repository's regression traces still run here."));
+            return out;
+        }
+        boolean isTested = found.equals(tested);
+        out.add(isTested
+                ? "  " + a.green("✓") + " " + a.bold("quint   ") + "  " + a.green(found)
+                        + a.dim("  (the tested version)")
+                : "  " + a.yellow("⚠") + " " + a.bold("quint   ") + "  " + a.boldYellow(found)
+                        + a.dim("  (tested: " + tested + ")"));
+        out.add("  " + a.cyan("ℹ") + " " + a.bold("apalache") + "  "
+                + a.dim("fetched by `quint verify` on first use"));
+        out.add("");
+        if (!isTested) {
+            out.add(a.yellow("  ITF decoding was verified against " + tested + " and may differ here."));
+            out.add(a.yellow("  A trace that decodes wrong is a bug worth reporting rather than"));
+            out.add(a.yellow("  working around."));
+            out.add("");
+        }
+        out.add(a.dim("  `verify` needs no separate Apalache install; its first run"));
+        out.add(a.dim("  takes a few minutes."));
+        return out;
     }
 
     private QuintCommand() {}

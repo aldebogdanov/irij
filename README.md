@@ -47,11 +47,15 @@ irij examples/quint.irj       # model-based testing against a Quint spec — nee
 ## Tests
 
 ```sh
-./gradlew test                # 692 Java unit tests, one line per test
+./gradlew test                # 700 Java unit tests, one line per test
 ./gradlew test -Pverbose      # a block per test: its output, full stack traces
 ./gradlew test -q             # only failures and the summary
 irij test                     # 517 integration tests (tests/*.irj)
+irij test -v                  # … listing every test, not only failures
 ```
+
+Both are coloured on a terminal and plain when piped; for `irij`,
+`NO_COLOR=1` turns colour off and `FORCE_COLOR=1` on.
 
 ## Language Features
 

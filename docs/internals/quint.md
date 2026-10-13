@@ -345,7 +345,10 @@ Two properties make that a workflow rather than a pile of files:
 
 Says whether the binary is reachable and whether it is the version the
 ITF decoding was verified against, and exits non-zero when traces
-cannot be generated here. There is no `irij check`: a model is ordinary
+cannot be generated here. The report is a status line each for quint
+(`✓` tested version, `⚠` another version, `✗` not usable) and Apalache
+(`ℹ`), then notes; coloured on a terminal only (`dev.irij.cli.Ansi`:
+`NO_COLOR` off, `FORCE_COLOR` on), pinned by `QuintCommandTest`. There is no `irij check`: a model is ordinary
 Irij code, so running one is `irij run` or `irij test`.
 
 ## Running quint
