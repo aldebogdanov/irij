@@ -375,7 +375,7 @@ final class ExprEmitter implements Opcodes {
                         b.value() ? "TRUE" : "FALSE", "Ljava/lang/Boolean;");
             }
             case Expr.StrLit s -> mv.visitLdcInsn(s.value());
-            case Expr.UnitLit __ -> mv.visitFieldInsn(GETSTATIC, ClassEmitter.VALUES, "UNIT", ClassEmitter.OBJ_DESC);
+            case Expr.UnitLit _ -> mv.visitFieldInsn(GETSTATIC, ClassEmitter.VALUES, "UNIT", ClassEmitter.OBJ_DESC);
             case Expr.KeywordLit k -> {
                 mv.visitTypeInsn(NEW, ClassEmitter.VALUES + "$Keyword");
                 mv.visitInsn(DUP);
@@ -462,21 +462,21 @@ final class ExprEmitter implements Opcodes {
         // shadowed by the pattern-bound `e`). A top-level binding's own
         // slot in main is not such a local: it goes stale once a fn
         // writes the binding, so main reads the static field as fns do.
-        Integer __preSlot = locals.lookup(name);
-        if (__preSlot != null) {
+        Integer preSlot = locals.lookup(name);
+        if (preSlot != null) {
             if (ce.isTopLevelSlot(name, locals)) {
                 mv.visitFieldInsn(GETSTATIC, ce.internalName,
                         ce.topLevelFields.get(name), ClassEmitter.OBJ_DESC);
             } else {
-                mv.visitVarInsn(ALOAD, __preSlot);
+                mv.visitVarInsn(ALOAD, preSlot);
             }
             return;
         }
-        Integer __preLifted = ce.currentLiftedLocals.get(name);
-        if (__preLifted != null && ce.currentKSlot >= 0) {
+        Integer preLifted = ce.currentLiftedLocals.get(name);
+        if (preLifted != null && ce.currentKSlot >= 0) {
             mv.visitVarInsn(ALOAD, ce.currentKSlot);
             mv.visitFieldInsn(GETFIELD, ClassEmitter.CONT, "fields", "[Ljava/lang/Object;");
-            pushIconst(mv, __preLifted);
+            pushIconst(mv, preLifted);
             mv.visitInsn(AALOAD);
             return;
         }

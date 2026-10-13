@@ -1305,9 +1305,9 @@ public class AstBuilder {
 
     private Expr visitIfExpr(IfExprContext ctx) {
         var cond = visitPostfixExpr(ctx.postfixExpr(0));
-        var then_ = visitPostfixExpr(ctx.postfixExpr(1));
-        var else_ = visitPostfixExpr(ctx.postfixExpr(2));
-        return new Expr.IfExpr(cond, then_, else_, loc(ctx));
+        var thenExpr = visitPostfixExpr(ctx.postfixExpr(1));
+        var elseExpr = visitPostfixExpr(ctx.postfixExpr(2));
+        return new Expr.IfExpr(cond, thenExpr, elseExpr, loc(ctx));
     }
 
     private Expr visitMatchExpr(MatchExprContext ctx) {

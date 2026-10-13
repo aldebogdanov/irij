@@ -436,7 +436,7 @@ final class ClassEmitter implements Opcodes {
             if (inner instanceof Decl.ImplDecl id) {
                 for (Decl.ImplBinding b : id.bindings()) {
                     Expr.Lambda lam = protoEm.liftImplBindingToLambda(b);
-                    protoImpls.computeIfAbsent(b.name(), __ -> new HashMap<>())
+                    protoImpls.computeIfAbsent(b.name(), _ -> new HashMap<>())
                             .put(id.forType(), lam);
                     protoArity.putIfAbsent(b.name(), lam.params().size());
                     fnArity.put(b.name(), lam.params().size());
@@ -653,12 +653,12 @@ final class ClassEmitter implements Opcodes {
             }
             case Decl.IfDecl id -> exprEm.emitStmt(id.ifStmt(), mv, locals);
             case Decl.MatchDecl md -> exprEm.emitStmt(md.match(), mv, locals);
-            case Decl.SpecDecl __ -> { /* structural only; constructors resolved via TypeRef */ }
-            case Decl.ProtoDecl __ -> { /* no runtime rep; methods go through dispatchers */ }
-            case Decl.ImplDecl __ -> { /* bindings hoisted to static methods in pass 2b */ }
-            case Decl.EffectDecl __ -> { /* ops registered in pass 1 */ }
-            case Decl.CapDecl __ -> { /* compile-time only; phase 2 wires cap.method dispatch */ }
-            case Decl.ModDecl __ -> { /* preserved by inliner for EffectRowChecker; emitter skips */ }
+            case Decl.SpecDecl _ -> { /* structural only; constructors resolved via TypeRef */ }
+            case Decl.ProtoDecl _ -> { /* no runtime rep; methods go through dispatchers */ }
+            case Decl.ImplDecl _ -> { /* bindings hoisted to static methods in pass 2b */ }
+            case Decl.EffectDecl _ -> { /* ops registered in pass 1 */ }
+            case Decl.CapDecl _ -> { /* compile-time only; phase 2 wires cap.method dispatch */ }
+            case Decl.ModDecl _ -> { /* preserved by inliner for EffectRowChecker; emitter skips */ }
             case Decl.HandlerDecl hd -> effEm.emitHandlerStateInit(hd, mv, locals);
             case Decl.WithDecl wd -> exprEm.emitStmt(wd.with(), mv, locals);
             case Decl.ScopeDecl sd -> {
