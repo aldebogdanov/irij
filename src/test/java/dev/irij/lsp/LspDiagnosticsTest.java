@@ -89,4 +89,28 @@ class LspDiagnosticsTest {
         assertFalse(d.getMessage().matches("^\\d+:\\d+ .*"),
                 () -> "message should have prefix stripped, got: " + d.getMessage());
     }
+
+    @Test void effectRow_qualifiedEffectIsNotARowVariable() {
+        // `proc.Proc` names std.proc's effect through an alias; the
+        // single-file pass has no inliner to resolve it, but it is still
+        // a concrete effect, not an unbound row variable.
+        String src = """
+            use std.proc :as proc
+            fn run :: Str () ::: Console proc.Proc
+              (cmd -> println cmd)
+            """;
+        List<Diagnostic> diags = LspDiagnostics.all(src);
+        assertTrue(diags.stream().noneMatch(d -> d.getMessage().contains("row variable")),
+                () -> "unexpected: " + diags);
+    }
+
+    @Test void effectRow_unboundRowVariableStillReported() {
+        String src = """
+            fn run :: Str () ::: eff
+              (cmd -> println cmd)
+            """;
+        List<Diagnostic> diags = LspDiagnostics.all(src);
+        assertTrue(diags.stream().anyMatch(d -> d.getMessage().contains("Unbound row variable 'eff'")),
+                () -> "expected an unbound row variable, got: " + diags);
+    }
 }

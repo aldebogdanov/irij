@@ -470,9 +470,14 @@ public final class EffectRowChecker {
     }
 
     /** Lowercase first character = parametric row-variable. */
+    /** A row variable is a bare lowercase name (`eff`). A qualified
+     *  effect (`proc.Proc`, through `use std.proc :as proc`) also starts
+     *  lowercase but names a concrete effect: the compiler sees it
+     *  resolved by the inliner, the single-file LSP pass doesn't. */
     private static boolean isRowVar(String name) {
         return name != null && !name.isEmpty()
-                && Character.isLowerCase(name.charAt(0));
+                && Character.isLowerCase(name.charAt(0))
+                && name.indexOf('.') < 0;
     }
 
     /** Identity-comparable ambient sentinel — `contains` always true. */

@@ -12,6 +12,7 @@
 (require 'ert)
 (require 'irij-mode)
 (require 'irij-selection)
+(require 'cl-lib)
 
 (defun irij-selection-test--steps (text needle n)
   "Expand N times from the start of NEEDLE in TEXT; return each region."
@@ -52,6 +53,63 @@
       (setq this-command 'irij-shrink-region)
       (irij-shrink-region)
       (should (equal (buffer-substring (region-beginning) (region-end)) "b")))))
+
+;; ── lsp-mode path, with the server's answer stubbed ──────────────────
+;; `x := f (g 1)': chain at `1' is 1 → g 1 → (g 1) → f (g 1) → line.
+
+(defun irij-selection-test--range (s e)
+  (list :start (list :line 0 :character s) :end (list :line 0 :character e)))
+
+(defun irij-selection-test--answer (as-hash)
+  "A selectionRange answer for `x := f (g 1)', as hash tables or plists."
+  (let ((node nil))
+    (dolist (r '((0 . 12) (5 . 12) (7 . 12) (8 . 11) (10 . 11)))
+      (let ((range (irij-selection-test--range (car r) (cdr r))))
+        (setq node
+              (if as-hash
+                  (let ((h (make-hash-table :test 'equal)))
+                    (puthash "range" range h)
+                    (when node (puthash "parent" node h))
+                    h)
+                (append (list :range range) (when node (list :parent node)))))))
+    (vector node)))
+
+(defun irij-selection-test--lsp-steps (as-hash n)
+  (with-temp-buffer
+    (transient-mark-mode 1)
+    (insert "x := f (g 1)")
+    (irij-mode)
+    (goto-char 11)                       ; on `1'
+    (setq-local lsp-mode t)              ; a mode variable, so dynamic
+    (let ((out nil) (last-command nil) (calls 0))
+      (cl-letf (((symbol-function 'lsp-feature?) (lambda (_) t))
+                ((symbol-function 'lsp--text-document-identifier) (lambda () nil))
+                ((symbol-function 'lsp--point-to-position)
+                 (lambda (p) (list :line 0 :character (1- p))))
+                ((symbol-function 'lsp--range-to-region)
+                 (lambda (r) (cons (1+ (plist-get (plist-get r :start) :character))
+                                   (1+ (plist-get (plist-get r :end) :character)))))
+                ((symbol-function 'lsp-request)
+                 (lambda (&rest _) (setq calls (1+ calls))
+                   (irij-selection-test--answer as-hash))))
+        (dotimes (_ n)
+          (let ((this-command 'irij-expand-region))
+            (irij-expand-region)
+            (push (buffer-substring-no-properties (region-beginning) (region-end)) out)
+            (setq last-command this-command)))
+        (let ((this-command 'irij-shrink-region))
+          (irij-shrink-region)
+          (push (buffer-substring-no-properties (region-beginning) (region-end)) out)))
+      (should (> calls 0))               ; the server was asked, not the fallback
+      (nreverse out))))
+
+(ert-deftest irij-selection-lsp-mode-hash-tables ()
+  (should (equal (irij-selection-test--lsp-steps t 4)
+                 '("1" "g 1" "(g 1)" "f (g 1)" "(g 1)"))))
+
+(ert-deftest irij-selection-lsp-mode-plists ()
+  (should (equal (irij-selection-test--lsp-steps nil 4)
+                 '("1" "g 1" "(g 1)" "f (g 1)" "(g 1)"))))
 
 (ert-deftest irij-selection-keys-bound ()
   (should (eq (lookup-key irij-mode-map (kbd "C-c C-=")) #'irij-expand-region))
