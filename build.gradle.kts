@@ -1,3 +1,8 @@
+import org.gradle.internal.logging.text.StyledTextOutput
+import org.gradle.internal.logging.text.StyledTextOutput.Style
+import org.gradle.internal.logging.text.StyledTextOutputFactory
+import org.gradle.kotlin.dsl.support.serviceOf
+
 plugins {
     java
     id("com.gradleup.shadow") version "9.0.0-beta12"
@@ -110,11 +115,24 @@ tasks.test {
     // under its class; `./gradlew test -Pverbose` prints a block per
     // test (start, the test's stdout/stderr, result, full stack trace on
     // failure) with a blank line between blocks. Gradle's own event
-    // logger is off: it puts a blank line before every event. Lines go
-    // through the task logger, so `-q` keeps only failures and the summary.
+    // logger is off: it puts a blank line before every event.
+    //
+    // Lines go through Gradle's styled output, so `-q` keeps only
+    // failures and the summary, and colour follows the console: green
+    // ✓, red ✗, yellow ○ and STARTED, bold class names in a terminal,
+    // plain text when piped or with --console=plain. StyledTextOutput is
+    // a Gradle internal API (stable for years, but not public).
     val verbose = project.hasProperty("verbose")
     val log = logger
-    fun line(s: String) = log.lifecycle(s)
+    val styled = project.serviceOf<StyledTextOutputFactory>()
+    val lifecycleOut = styled.create("irij-tests", LogLevel.LIFECYCLE)
+    val quietOut = styled.create("irij-tests", LogLevel.QUIET)
+    fun emit(out: StyledTextOutput, vararg parts: Pair<Style, String>) {
+        for ((style, text) in parts) out.withStyle(style).text(text)
+        out.println()
+    }
+    fun line(vararg parts: Pair<Style, String>) = emit(lifecycleOut, *parts)
+    fun quiet(vararg parts: Pair<Style, String>) = emit(quietOut, *parts)
 
     testLogging {
         events = emptySet()      // no built-in per-event lines,
@@ -127,7 +145,7 @@ tasks.test {
         d.className?.substringAfterLast('.')?.replace("$", " > ") ?: ""
 
     addTestOutputListener { _, out ->
-        if (verbose) out.message.trimEnd('\n').lines().forEach { line("      $it") }
+        if (verbose) out.message.trimEnd('\n').lines().forEach { line(Style.Normal to "      $it") }
     }
 
     addTestListener(object : TestListener {
@@ -136,35 +154,40 @@ tasks.test {
         override fun beforeSuite(s: TestDescriptor) {}
 
         override fun beforeTest(d: TestDescriptor) {
-            if (verbose) line("${className(d)} > ${d.displayName}  STARTED")
+            if (verbose) line(Style.Header to className(d), Style.Normal to " > ${d.displayName}  ",
+                              Style.Info to "STARTED")
         }
 
         override fun afterTest(d: TestDescriptor, r: TestResult) {
-            val mark = when (r.resultType) {
-                TestResult.ResultType.SUCCESS -> "✓"
-                TestResult.ResultType.FAILURE -> "✗"
-                else -> "○"
+            val (mark, style) = when (r.resultType) {
+                TestResult.ResultType.SUCCESS -> "✓" to Style.Success
+                TestResult.ResultType.FAILURE -> "✗" to Style.Failure
+                else -> "○" to Style.Info
             }
             val ms = r.endTime - r.startTime
             val failed = r.resultType == TestResult.ResultType.FAILURE
             // Under -q only failures print, with the class in the line
-            val out: (String) -> Unit = if (failed) log::quiet else ::line
+            val out: (Array<out Pair<Style, String>>) -> Unit =
+                if (failed) { p -> quiet(*p) } else { p -> line(*p) }
+            val name = if (failed) Style.Failure else Style.Normal
             if (verbose) {
-                out("${className(d)} > ${d.displayName}  $mark ${r.resultType} ($ms ms)")
+                out(arrayOf(Style.Header to className(d), Style.Normal to " > ${d.displayName}  ",
+                            style to "$mark ${r.resultType}", Style.Normal to " ($ms ms)"))
             } else if (!log.isLifecycleEnabled) {
-                if (failed) out("$mark ${className(d)} > ${d.displayName}")
+                if (failed) out(arrayOf(style to "$mark ", Style.Header to className(d),
+                                        name to " > ${d.displayName}"))
             } else {
                 val cls = className(d)
-                if (cls != lastClass) { line(cls); lastClass = cls }
-                out("  $mark ${d.displayName}")
+                if (cls != lastClass) { line(Style.Header to cls); lastClass = cls }
+                out(arrayOf(style to "  $mark ", name to d.displayName))
             }
             for (e in r.exceptions) {
                 // Exceptions cross from the test JVM as Gradle placeholders;
                 // getExceptionClassName() has the original class.
-                val name = runCatching {
+                val ex = runCatching {
                     e.javaClass.getMethod("getExceptionClassName").invoke(e) as String
                 }.getOrDefault(e.javaClass.name).substringAfterLast('.')
-                log.quiet("      $name: ${e.message?.lines()?.firstOrNull() ?: ""}")
+                quiet(Style.FailureHeader to "      $ex", Style.Normal to ": ${e.message?.lines()?.firstOrNull() ?: ""}")
                 // Normal: the first frame in Irij code. Verbose: the trace up
                 // to the last Irij frame, without the JUnit/JDK tail.
                 val trace = e.stackTrace.toList()
@@ -175,22 +198,23 @@ tasks.test {
                     else -> trace
                 }
                 frames.forEach {
-                    log.quiet("          at ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})")
+                    quiet(Style.Normal to "          at ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})")
                 }
             }
-            if (verbose) line("")
+            if (verbose) line(Style.Normal to "")
         }
 
         override fun afterSuite(s: TestDescriptor, r: TestResult) {
             if (s.parent == null) {
-                println("\n┌─ Test Results ──────────────────────────────────────")
-                println("│  ✓ Passed:  ${r.successfulTestCount}")
+                quiet(Style.Normal to "")
+                quiet(Style.Header to "┌─ Test Results ──────────────────────────────────────")
+                quiet(Style.Normal to "│  ", Style.Success to "✓ Passed:  ${r.successfulTestCount}")
                 if (r.failedTestCount > 0)
-                    println("│  ✗ Failed:  ${r.failedTestCount}")
+                    quiet(Style.Normal to "│  ", Style.Failure to "✗ Failed:  ${r.failedTestCount}")
                 if (r.skippedTestCount > 0)
-                    println("│  ○ Skipped: ${r.skippedTestCount}")
-                println("│  Total:     ${r.testCount}  (${r.endTime - r.startTime} ms)")
-                println("└─────────────────────────────────────────────────────")
+                    quiet(Style.Normal to "│  ", Style.Info to "○ Skipped: ${r.skippedTestCount}")
+                quiet(Style.Normal to "│  Total:     ${r.testCount}  (${r.endTime - r.startTime} ms)")
+                quiet(Style.Header to "└─────────────────────────────────────────────────────")
             }
         }
     })
