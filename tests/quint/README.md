@@ -1,7 +1,10 @@
 # Quint fixtures
 
-Every `.itf.json` here is a **recording**: what Quint 0.32.0 actually
-wrote when run against the `.qnt` beside it, on 2026-08-25. None was
+Every `.itf.json` here is a **recording**: what Quint 0.33.0 actually
+wrote when run against the `.qnt` beside it, on 2026-10-14 (Apalache
+0.62.1 for the counterexample). They were first recorded on 0.32.0 on
+2026-08-25; re-recording on 0.33.0 changed nothing but the `#meta`
+timestamps. None was
 written by hand. A fixture that looks about right would test the
 decoder against our idea of the format rather than against the format.
 

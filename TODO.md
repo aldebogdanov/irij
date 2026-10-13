@@ -730,7 +730,8 @@ Full design and the recorded Quint behaviour it rests on:
       identifier; the bignumber.js leak for integers >= 10^15 is
       reassembled; an integer past 2^63 raises rather than truncating.
       44 tests in `tests/test-quint-itf.irj`, against traces recorded
-      from Quint 0.32.0 into `tests/quint/`.
+      from Quint 0.32.0 into `tests/quint/` (re-recorded on 0.33.0,
+      2026-10-14: identical but for timestamps).
 - [x] **`std.quint`** — `effect Quint` + `cap quint-cli` +
       `default-quint`, models in two shapes (`:pure`, a fold; `:live`,
       a running system), replay, coverage, divergence reports with a

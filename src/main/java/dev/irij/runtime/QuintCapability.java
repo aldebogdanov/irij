@@ -46,7 +46,7 @@ public final class QuintCapability {
      * the format is stable enough that refusing would age worse
      * than the mismatch it guards.
      */
-    public static final String TESTED_VERSION = "0.32.0";
+    public static final String TESTED_VERSION = "0.33.0";
 
     private QuintCapability() {}
 

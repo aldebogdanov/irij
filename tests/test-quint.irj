@@ -7,7 +7,7 @@ use std.text {contains-substr?}
 use std.collection {map-vals}
 
 ;; Model-based testing, replayed against the traces recorded from
-;; Quint 0.32.0 into tests/quint/. Nothing here starts a process:
+;; Quint 0.33.0 into tests/quint/. Nothing here starts a process:
 ;; generation is an effect, so a mock handler stands in for the
 ;; binary and every one of these runs in CI with no Node installed.
 
@@ -219,7 +219,7 @@ r38 := test "its lifecycle clauses become callable" (-> assert-eq 9 live-declare
 recorded := with fs.default-fs do (fs-read bank-trace)
 
 handler canned-quint :: Quint
-  quint-version _ => resume "0.32.0"
+  quint-version _ => resume "0.33.0"
   quint-run opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "run"] dir= "." seed= 1 traces= #[{name= "run_0.itf.json" json= recorded}]}
   quint-test opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "test"] dir= "." traces= #[{name= "test_0.itf.json" json= recorded}]}
   quint-verify opts => resume {exit= 1 stdout= "" stderr= "" cmd= #["quint" "verify"] dir= "." traces= #[]}
@@ -238,7 +238,7 @@ r25 := test "the failure says which trace it was in" (-> assert-eq "run_0.itf.js
 
 ;; A generator that produced nothing is a broken setup, not a pass.
 handler empty-quint :: Quint
-  quint-version _ => resume "0.32.0"
+  quint-version _ => resume "0.33.0"
   quint-run opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "run"] dir= "." seed= 1 traces= #[]}
   quint-test opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "test"] dir= "." traces= #[]}
   quint-verify opts => resume {exit= 0 stdout= "" stderr= "" cmd= #["quint" "verify"] dir= "." traces= #[]}
