@@ -25,6 +25,11 @@
 ;; buffer edit, not per position, so after moving point it expands from
 ;; the old spot — and it keeps no history to shrink back through.
 ;;
+;; In Irij buffers the usual expand-region commands of puni,
+;; expand-region and expreg are remapped to these, so their keys (e.g.
+;; puni's C-M-= / C-M--) expand along the syntax tree too; see
+;; `irij-selection-remap-commands'.
+;;
 ;; `irij-mode' loads this file when it is on the load-path.
 
 ;;; Code:
@@ -153,10 +158,28 @@ Nil unless lsp-mode manages the buffer with a selectionRange server."
      ((= (car prev) (cdr prev)) (deactivate-mark) (goto-char (car prev)))
      (t (irij-selection--set prev)))))
 
+(defcustom irij-selection-remap-commands
+  '((puni-expand-region . irij-expand-region)
+    (puni-contract-region . irij-shrink-region)
+    (er/expand-region . irij-expand-region)
+    (er/contract-region . irij-shrink-region)
+    (expreg-expand . irij-expand-region)
+    (expreg-contract . irij-shrink-region))
+  "Expand-region commands replaced by the Irij ones in `irij-mode'.
+Those packages expand by brackets and words from the syntax table;
+in an Irij buffer their keys run `irij-expand-region' /
+`irij-shrink-region' instead, which follow the syntax tree.  The remap
+lives in `irij-mode-map', so other modes keep the originals.  Set to
+nil before this file loads to keep them in Irij buffers too."
+  :type '(alist :key-type symbol :value-type function)
+  :group 'irij)
+
 (with-eval-after-load 'irij-mode
   (defvar irij-mode-map)
   (define-key irij-mode-map (kbd "C-c C-=") #'irij-expand-region)
-  (define-key irij-mode-map (kbd "C-c C--") #'irij-shrink-region))
+  (define-key irij-mode-map (kbd "C-c C--") #'irij-shrink-region)
+  (dolist (pair irij-selection-remap-commands)
+    (define-key irij-mode-map (vector 'remap (car pair)) (cdr pair))))
 
 (provide 'irij-selection)
 
