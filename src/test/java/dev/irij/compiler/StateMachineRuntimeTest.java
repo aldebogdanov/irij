@@ -55,7 +55,7 @@ class StateMachineRuntimeTest {
         return new CompiledHandler("logger", "Log", Map.of("log", clause));
     }
 
-    @Test void resumes_body_and_returns_body_value() {
+    @Test void resumesBodyAndReturnsBodyValue() {
         AtomicInteger postResume = new AtomicInteger(0);
         IrijFn logClause = args -> {
             assertEquals("hi", args[0]);
@@ -68,7 +68,7 @@ class StateMachineRuntimeTest {
         assertEquals(1, postResume.get(), "body must have continued after resume");
     }
 
-    @Test void aborts_body_if_clause_does_not_resume() {
+    @Test void abortsBodyIfClauseDoesNotResume() {
         AtomicInteger postResume = new AtomicInteger(0);
         IrijFn logClause = args -> "aborted";
         Object result = RtEffects.runWithSM(
@@ -77,7 +77,7 @@ class StateMachineRuntimeTest {
         assertEquals(0, postResume.get(), "body must NOT have continued");
     }
 
-    @Test void resume_unwinds_clause_via_tail_resume() {
+    @Test void resumeUnwindsClauseViaTailResume() {
         // Trampoline semantics: the synthesised resumeFn throws TailResume
         // to unwind the clause's JVM frames so the dispatch loop iterates
         // without growing the stack per perform. Statements after the first
@@ -97,7 +97,7 @@ class StateMachineRuntimeTest {
                 "post-resume clause stmts must not execute under trampoline");
     }
 
-    @Test void multiple_sequential_performs_loop_through_handler() {
+    @Test void multipleSequentialPerformsLoopThroughHandler() {
         // Body: log "a"; log "b"; log "c"; return "final"
         final java.util.List<String> seen = new java.util.ArrayList<>();
         IrijFn step = args -> {
@@ -125,7 +125,7 @@ class StateMachineRuntimeTest {
         assertEquals(java.util.List.of("a", "b", "c"), seen);
     }
 
-    @Test void unhandled_effect_reraises_to_outer() {
+    @Test void unhandledEffectReraisesToOuter() {
         IrijFn step = args -> {
             IrijContinuation k = (IrijContinuation) args[0];
             throw PerformSignal.of("Other", "boom", new Object[]{}, k);
@@ -137,7 +137,7 @@ class StateMachineRuntimeTest {
         assertEquals("boom",  raised.opName);
     }
 
-    @Test void perform_signal_has_no_stack_trace() {
+    @Test void performSignalHasNoStackTrace() {
         PerformSignal s = PerformSignal.of("E", "op", new Object[]{}, null);
         assertEquals(0, s.getStackTrace().length,
                 "stack-trace-free signal — hot-path perf");

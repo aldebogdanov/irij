@@ -10,21 +10,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class LspDiagnosticsTest {
 
-    @Test void cleanProgram_emptyDiagnostics() {
+    @Test void cleanProgramEmptyDiagnostics() {
         String src = "fn greet :: Str Str\n  (n -> \"Hi, \" ++ n)\n";
         List<Diagnostic> diags = LspDiagnostics.parseErrors(src);
         assertTrue(diags.isEmpty(),
                 () -> "expected no diagnostics, got: " + diags);
     }
 
-    @Test void absurdNesting_isADiagnosticNotACrash() {
+    @Test void absurdNestingIsADiagnosticNotACrash() {
         String src = "x := " + "(".repeat(20_000) + "1" + ")".repeat(20_000) + "\n";
         List<Diagnostic> diags = assertDoesNotThrow(() -> LspDiagnostics.all(src));
         assertEquals(1, diags.size());
         assertTrue(diags.get(0).getMessage().contains("nested too deeply"), diags.get(0).getMessage());
     }
 
-    @Test void parseError_surfacedAsErrorDiagnostic() {
+    @Test void parseErrorSurfacedAsErrorDiagnostic() {
         // Intentional syntax error — extra ')'.
         String src = "fn greet :: Str Str\n  (n -> ))\n";
         List<Diagnostic> diags = LspDiagnostics.parseErrors(src);
@@ -37,7 +37,7 @@ class LspDiagnosticsTest {
         assertTrue(d.getRange().getStart().getLine() >= 0);
     }
 
-    @Test void effectRow_missingRowSurfacedAsDiagnostic() {
+    @Test void effectRowMissingRowSurfacedAsDiagnostic() {
         // `log` is declared in effect Logger, but `driver` doesn't list
         // Logger in its effect row — perform should fail with an
         // effect-row error.
@@ -58,7 +58,7 @@ class LspDiagnosticsTest {
                 () -> "expected non-trivial line, got " + d.getRange());
     }
 
-    @Test void effectRow_cleanProgramHasNoEffectDiagnostic() {
+    @Test void effectRowCleanProgramHasNoEffectDiagnostic() {
         // Logger is declared and Logger row is on `driver`; should pass.
         String src = """
             effect Logger
@@ -71,7 +71,7 @@ class LspDiagnosticsTest {
                 () -> "expected no diagnostics, got: " + diags);
     }
 
-    @Test void parseError_rangeMatchesAntlrLineCol() {
+    @Test void parseErrorRangeMatchesAntlrLineCol() {
         // Bad token at column 9 on line 1. After parse, the diagnostic
         // range's start should be (line 0, character 9) — LSP 0-based.
         String src = "fn greet (";
@@ -90,7 +90,7 @@ class LspDiagnosticsTest {
                 () -> "message should have prefix stripped, got: " + d.getMessage());
     }
 
-    @Test void effectRow_qualifiedEffectIsNotARowVariable() {
+    @Test void effectRowQualifiedEffectIsNotARowVariable() {
         // `proc.Proc` names std.proc's effect through an alias; the
         // single-file pass has no inliner to resolve it, but it is still
         // a concrete effect, not an unbound row variable.
@@ -104,7 +104,7 @@ class LspDiagnosticsTest {
                 () -> "unexpected: " + diags);
     }
 
-    @Test void effectRow_unboundRowVariableStillReported() {
+    @Test void effectRowUnboundRowVariableStillReported() {
         String src = """
             fn run :: Str () ::: eff
               (cmd -> println cmd)

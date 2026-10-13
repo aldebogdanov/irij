@@ -47,7 +47,7 @@ class HotRedefTest {
         return buf.toString().trim();
     }
 
-    @Test void redef_swaps_top_level_fn_impl() throws Exception {
+    @Test void redefSwapsTopLevelFnImpl() throws Exception {
         // Compile a small program that calls `greet` from `main`. Default
         // build (directLinking=false) emits an indy site through redefBootstrap.
         String src = """
@@ -81,7 +81,7 @@ class HotRedefTest {
         RuntimeSupport.redefine(key, original);
     }
 
-    @Test void redef_swaps_every_call_site_of_the_fn() throws Exception {
+    @Test void redefSwapsEveryCallSiteOfTheFn() throws Exception {
         // Two separate call sites of `greet`; both must follow a redefine
         // (the registry used to keep only the last one bootstrapped).
         String src = """
@@ -102,7 +102,7 @@ class HotRedefTest {
         assertEquals("yo!\nyo!", runMain(cls));
     }
 
-    @Test void direct_linking_skips_indy_so_redef_has_no_effect() throws Exception {
+    @Test void directLinkingSkipsIndySoRedefHasNoEffect() throws Exception {
         // Compile the same program with --direct-linking. The call site is
         // a plain invokestatic; redefine() finds no site for that key.
         String src = """

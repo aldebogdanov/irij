@@ -44,7 +44,7 @@ class StateMachineWithTest {
         return sb.toString();
     }
 
-    @Test void with_body_tail_pure_if_returns_value() throws Exception {
+    @Test void withBodyTailPureIfReturnsValue() throws Exception {
         // Regression: a `with` block whose body performs an op and
         // then ends in a pure if/else used to drop the if's value.
         // Caller saw Unit. The EffIR lowering now reconstructs the
@@ -69,7 +69,7 @@ class StateMachineWithTest {
         assertEquals(nl("100"), runSM(src));
     }
 
-    @Test void with_body_tail_if_branch_binds_and_performs() throws Exception {
+    @Test void withBodyTailIfBranchBindsAndPerforms() throws Exception {
         // Regression (irij.online seed-detail page white-screen): a `with`
         // body that performs an op, then ends in an if whose TAKEN branch
         // has a leading `:=` bind AND itself performs an op. The tail if
@@ -97,7 +97,7 @@ class StateMachineWithTest {
         assertEquals(nl("then:R"), runSM(src));
     }
 
-    @Test void with_body_tail_if_else_branch_binds_and_performs() throws Exception {
+    @Test void withBodyTailIfElseBranchBindsAndPerforms() throws Exception {
         // Same shape as above but the value-producing work is in the ELSE
         // branch (matching seed-detail-page's `if (empty? pkg) … else
         // { versions := db-query …; render … }`).
@@ -121,7 +121,7 @@ class StateMachineWithTest {
         assertEquals(nl("else:R"), runSM(src));
     }
 
-    @Test void with_pure_body_tail_if_branch_has_bindings() throws Exception {
+    @Test void withPureBodyTailIfBranchHasBindings() throws Exception {
         // Regression (Pure with-body path): a `with` whose body performs
         // NO op and is just a block-form tail if/else whose taken branch
         // has a leading `:=` bind. emitBlockStmtsReturning treated the
@@ -148,7 +148,7 @@ class StateMachineWithTest {
         assertEquals(nl("then-z"), runSM(src));
     }
 
-    @Test void pure_body_no_ops() throws Exception {
+    @Test void pureBodyNoOps() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -161,7 +161,7 @@ class StateMachineWithTest {
         assertEquals(nl("inside", "after"), runSM(src));
     }
 
-    @Test void single_op_call_resumed() throws Exception {
+    @Test void singleOpCallResumed() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -176,7 +176,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: hi", "done"), runSM(src));
     }
 
-    @Test void single_op_with_pre_and_post_stmts() throws Exception {
+    @Test void singleOpWithPreAndPostStmts() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -193,7 +193,7 @@ class StateMachineWithTest {
         assertEquals(nl("before", "got: middle", "after", "done"), runSM(src));
     }
 
-    @Test void single_op_binding_receives_resume_value() throws Exception {
+    @Test void singleOpBindingReceivesResumeValue() throws Exception {
         String src = """
             effect Ask
               ask :: () -> Int
@@ -208,7 +208,7 @@ class StateMachineWithTest {
 
     // ── Step 3a: multi-op sequences + local lifting ──────────────────
 
-    @Test void two_ops_in_sequence() throws Exception {
+    @Test void twoOpsInSequence() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -224,7 +224,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: a", "got: b", "done"), runSM(src));
     }
 
-    @Test void three_ops_interleaved_with_prints() throws Exception {
+    @Test void threeOpsInterleavedWithPrints() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -245,7 +245,7 @@ class StateMachineWithTest {
                 runSM(src));
     }
 
-    @Test void pre_op_local_used_after_perform() throws Exception {
+    @Test void preOpLocalUsedAfterPerform() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -261,7 +261,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: middle", "hello"), runSM(src));
     }
 
-    @Test void resume_value_used_in_later_op() throws Exception {
+    @Test void resumeValueUsedInLaterOp() throws Exception {
         // Single-handler case with two ops from same effect; first op's
         // resume-bind is consumed after the second perform returns.
         String src = """
@@ -283,7 +283,7 @@ class StateMachineWithTest {
 
     // ── Step 3b: branching with ops ──────────────────────────────────
 
-    @Test void if_then_perform_taken() throws Exception {
+    @Test void ifThenPerformTaken() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -299,7 +299,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: yes", "after"), runSM(src));
     }
 
-    @Test void if_then_perform_not_taken() throws Exception {
+    @Test void ifThenPerformNotTaken() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -315,7 +315,7 @@ class StateMachineWithTest {
         assertEquals(nl("after"), runSM(src));
     }
 
-    @Test void if_both_branches_perform() throws Exception {
+    @Test void ifBothBranchesPerform() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -333,7 +333,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: a", "merge"), runSM(src));
     }
 
-    @Test void if_else_branch_performs() throws Exception {
+    @Test void ifElseBranchPerforms() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -351,7 +351,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: b", "merge"), runSM(src));
     }
 
-    @Test void op_before_and_inside_if() throws Exception {
+    @Test void opBeforeAndInsideIf() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -368,7 +368,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: pre", "got: mid", "got: post"), runSM(src));
     }
 
-    @Test void nested_if_with_ops() throws Exception {
+    @Test void nestedIfWithOps() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -389,7 +389,7 @@ class StateMachineWithTest {
 
     // ── Step 3c: A-normalization of nested op calls ─────────────────
 
-    @Test void op_nested_in_binary_op() throws Exception {
+    @Test void opNestedInBinaryOp() throws Exception {
         String src = """
             effect Ask
               ask :: () -> Str
@@ -401,7 +401,7 @@ class StateMachineWithTest {
         assertEquals(nl("hello, world"), runSM(src));
     }
 
-    @Test void op_nested_in_function_arg() throws Exception {
+    @Test void opNestedInFunctionArg() throws Exception {
         String src = """
             effect Ask
               ask :: () -> Int
@@ -413,7 +413,7 @@ class StateMachineWithTest {
         assertEquals(nl("42"), runSM(src));
     }
 
-    @Test void two_nested_ops_in_one_expression() throws Exception {
+    @Test void twoNestedOpsInOneExpression() throws Exception {
         String src = """
             effect Chat
               hello :: () -> Str
@@ -427,7 +427,7 @@ class StateMachineWithTest {
         assertEquals(nl("hi earth"), runSM(src));
     }
 
-    @Test void op_result_used_in_if_cond() throws Exception {
+    @Test void opResultUsedInIfCond() throws Exception {
         String src = """
             effect Ask
               pick :: () -> Int
@@ -442,7 +442,7 @@ class StateMachineWithTest {
         assertEquals(nl("one"), runSM(src));
     }
 
-    @Test void op_nested_in_bind_rhs() throws Exception {
+    @Test void opNestedInBindRhs() throws Exception {
         String src = """
             effect Ask
               ask :: () -> Int
@@ -457,7 +457,7 @@ class StateMachineWithTest {
 
     // ── Step 4: on-failure ───────────────────────────────────────────
 
-    @Test void on_failure_catches_body_error() throws Exception {
+    @Test void onFailureCatchesBodyError() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -478,7 +478,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: before", "recovered: kaboom!"), runSM(src));
     }
 
-    @Test void on_failure_not_triggered_on_success() throws Exception {
+    @Test void onFailureNotTriggeredOnSuccess() throws Exception {
         String src = """
             effect Log
               log :: Str -> ()
@@ -498,7 +498,7 @@ class StateMachineWithTest {
         assertEquals(nl("got: hello", "ok"), runSM(src));
     }
 
-    @Test void on_failure_catches_error_from_clause() throws Exception {
+    @Test void onFailureCatchesErrorFromClause() throws Exception {
         String src = """
             effect Boom
               explode :: () -> ()
@@ -518,7 +518,7 @@ class StateMachineWithTest {
 
     // ── Step 5: handler state + dot-access ───────────────────────────
 
-    @Test void handler_state_accumulates_across_ops() throws Exception {
+    @Test void handlerStateAccumulatesAcrossOps() throws Exception {
         String src = """
             effect Counter
               bump :: () -> ()
@@ -541,7 +541,7 @@ class StateMachineWithTest {
         assertEquals(nl("3"), runSM(src));
     }
 
-    @Test void handler_state_read_via_op_and_dot_access() throws Exception {
+    @Test void handlerStateReadViaOpAndDotAccess() throws Exception {
         String src = """
             effect Counter
               bump :: () -> ()
@@ -567,7 +567,7 @@ class StateMachineWithTest {
 
     // ── Step 6: handler composition (>>) ────────────────────────────
 
-    @Test void composed_two_effects_each_op_once() throws Exception {
+    @Test void composedTwoEffectsEachOpOnce() throws Exception {
         String src = """
             effect Greet
               greet :: Str -> Str
@@ -587,7 +587,7 @@ class StateMachineWithTest {
         assertEquals(nl("Hi, World"), runSM(src));
     }
 
-    @Test void composed_interleaved_ops_across_handlers() throws Exception {
+    @Test void composedInterleavedOpsAcrossHandlers() throws Exception {
         // Cross-handler scenario: op-for-inner, resume, op-for-outer, resume,
         // op-for-inner again. Exercises that outer's resume re-enters the
         // body with the inner handler still in scope.
@@ -614,7 +614,7 @@ class StateMachineWithTest {
         assertEquals(nl("log: between", "hi-A / hi-B"), runSM(src));
     }
 
-    @Test void composed_local_binding() throws Exception {
+    @Test void composedLocalBinding() throws Exception {
         String src = """
             effect Greet
               greet :: Str -> Str
@@ -641,7 +641,7 @@ class StateMachineWithTest {
     // SM_STACK fallback. The threaded path is now only used for handlers
     // whose body shape SM can't lower (none in current tests).
 
-    @Test void tier_c_clause_with_required_effects_annotation() throws Exception {
+    @Test void tierCClauseWithRequiredEffectsAnnotation() throws Exception {
         // Handler declares `::: Logger` and clause body performs log.
         // Native tier-c emits clause body as an SM step; the foreign
         // perform escapes the empty-hs clause loop and is dispatched
@@ -670,7 +670,7 @@ class StateMachineWithTest {
         assertEquals(nl("3"), runSM(src));
     }
 
-    @Test void tier_c_clause_with_explicit_foreign_effect_annotation() throws Exception {
+    @Test void tierCClauseWithExplicitForeignEffectAnnotation() throws Exception {
         // Handler whose clause performs a foreign effect MUST declare
         // that effect via `:::` — the compile-time effect-row checker
         // rejects unannotated tier-c clauses. This test pins the
@@ -697,7 +697,7 @@ class StateMachineWithTest {
         assertEquals(nl("Hi, World"), runSM(src));
     }
 
-    @Test void tier_c_clause_without_annotation_rejected() throws Exception {
+    @Test void tierCClauseWithoutAnnotationRejected() throws Exception {
         // Negative test: clause body performs Logger.log without the
         // handler declaring ::: Logger. The effect-row checker rejects
         // this at compile time.
@@ -726,7 +726,7 @@ class StateMachineWithTest {
     // Outer `with h2 (with h1 body)`. Inner SM frame catches its own effect;
     // anything else propagates out and is caught by the outer SM frame.
 
-    @Test void handler_as_fn_param_dispatches_through_with() throws Exception {
+    @Test void handlerAsFnParamDispatchesThroughWith() throws Exception {
         // v0.8.0b — opaque-handler emit path. A fn parameter typed
         // (Handler Logger) is used as the head of a `with` block;
         // the emitter detects the fn-param as opaque, evaluates the
@@ -755,7 +755,7 @@ class StateMachineWithTest {
         assertEquals(nl("ok"), runSM(src));
     }
 
-    @Test void composed_fn_param_handlers_dispatch_correctly() throws Exception {
+    @Test void composedFnParamHandlersDispatchCorrectly() throws Exception {
         // v0.8.0c — runtime handler composition. Two handler values
         // arrive as fn parameters; `>>` composes them at runtime
         // (RuntimeSupport.compose is a normal Object→Object op) and
@@ -781,7 +781,7 @@ class StateMachineWithTest {
         assertEquals(nl("Hi, Alice"), runSM(src));
     }
 
-    @Test void nested_with_captures_fn_param_across_inner_step() throws Exception {
+    @Test void nestedWithCapturesFnParamAcrossInnerStep() throws Exception {
         // Regression: prior to the fix in collectFreeVarsStmt, `Stmt.With`
         // fell through the default arm so an inner `with` block's body
         // never propagated its free vars up to the outer SM step's
@@ -809,7 +809,7 @@ class StateMachineWithTest {
         assertEquals(nl("Hi, Ana"), runSM(src));
     }
 
-    @Test void nested_with_inner_handles_inner_effect() throws Exception {
+    @Test void nestedWithInnerHandlesInnerEffect() throws Exception {
         String src = """
             effect Logger
               log :: Str -> ()
@@ -830,7 +830,7 @@ class StateMachineWithTest {
         assertEquals(nl("Hi, World"), runSM(src));
     }
 
-    @Test void nested_with_outer_handles_after_inner_resume() throws Exception {
+    @Test void nestedWithOuterHandlesAfterInnerResume() throws Exception {
         // body: greet (inner), log (outer), greet (inner) — exercises that
         // re-throw from inner SM frame escapes to outer SM frame and that
         // outer's resume re-enters body which still has inner frame above.
@@ -864,7 +864,7 @@ class StateMachineWithTest {
     // safety, `with` containing `spawn` falls back to threaded mode where
     // EffectSystem.STACK snapshot machinery is in place.
 
-    @Test void spawn_inside_with_runs_under_handler() throws Exception {
+    @Test void spawnInsideWithRunsUnderHandler() throws Exception {
         // Native concurrency parity: spawn snapshots both EffectSystem.STACK
         // and SM_STACK at fork time; the fiber inherits both. The fiber's
         // perform goes through fireOp which falls through to fireOpToSM
@@ -890,7 +890,7 @@ class StateMachineWithTest {
 
     // ── Trampoline: deep perform-loops don't blow the JVM stack ──────
 
-    @Test void deep_perform_loop_no_stackoverflow() throws Exception {
+    @Test void deepPerformLoopNoStackoverflow() throws Exception {
         // 1000 sequential top-level performs — would have blown the stack
         // before the trampoline (recursive resumeFn → k.resume → throw →
         // dispatchSM grew ~3 JVM frames per iteration). Capped below the
@@ -917,7 +917,7 @@ class StateMachineWithTest {
 
     // ── Native tier-c — clause body as its own SM continuation ──────
 
-    @Test void native_tier_c_clause_resume_value_flows_through() throws Exception {
+    @Test void nativeTierCClauseResumeValueFlowsThrough() throws Exception {
         // Inner handler's clause body performs an outer effect, then
         // resumes with a derived value. The body's `:= bump` bind must
         // receive the post-foreign-perform value.
@@ -950,7 +950,7 @@ class StateMachineWithTest {
 
     // ── Native nested SM — `r := with X body` binds inner result ────
 
-    @Test void nested_inner_with_as_bind_rhs() throws Exception {
+    @Test void nestedInnerWithAsBindRhs() throws Exception {
         // The inner with appears as a Bind RHS (Block-wrapped). Native
         // nested SM extracts it as a segment, runs runWithSM, stores
         // the result both in vSlot AND in k.fields[bindIdx_of_r] so
@@ -978,7 +978,7 @@ class StateMachineWithTest {
 
     // ── Native nested SM — on-failure inside inner with ──────────────
 
-    @Test void nested_inner_with_on_failure_native() throws Exception {
+    @Test void nestedInnerWithOnFailureNative() throws Exception {
         // Inner with has on-failure; outer is also SM. Body in inner
         // with throws via `error` — caught by inner's on-failure block.
         // Native nested-SM emit wraps the inner runWithSM call in a
@@ -1004,7 +1004,7 @@ class StateMachineWithTest {
 
     // ── Native nested SM — outer resume threads value into saved kInner ─
 
-    @Test void nested_sm_outer_resume_into_kInner_preserves_state() throws Exception {
+    @Test void nestedSmOuterResumeIntoKInnerPreservesState() throws Exception {
         // Cross-handler choreography under DUAL SM (no threaded fallback):
         //   greet (inner, friendly)   -> resume "hi-A"
         //   log "between" (outer, echo-log) -> escapes inner trampoline,
@@ -1038,7 +1038,7 @@ class StateMachineWithTest {
         assertEquals(nl("log: between", "hi-A / hi-B"), runSM(src));
     }
 
-    @Test void abort_path_returns_clause_value() throws Exception {
+    @Test void abortPathReturnsClauseValue() throws Exception {
         String src = """
             effect Fail
               fail :: Str -> ()

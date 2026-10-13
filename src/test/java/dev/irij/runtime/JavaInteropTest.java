@@ -38,26 +38,26 @@ class JavaInteropTest {
         return buf.toString().trim();
     }
 
-    @Test void hidden_runtime_class_is_not_reachable() throws Exception {
+    @Test void hiddenRuntimeClassIsNotReachable() throws Exception {
         var p = new ProcessBuilder("true").start();
         p.waitFor();
         assertFalse(JavaInterop.reachable(p.getClass()), p.getClass().getName());
         assertTrue(JavaInterop.reachable(Process.class));
     }
 
-    @Test void override_on_hidden_class_resolves_to_public_declaration() throws Exception {
+    @Test void overrideOnHiddenClassResolvesToPublicDeclaration() throws Exception {
         var p = new ProcessBuilder("true").start();
         p.waitFor();
         var m = JavaInterop.accessible(p.getClass().getMethod("getInputStream"));
         assertEquals(Process.class, m.getDeclaringClass());
     }
 
-    @Test void reachable_method_is_kept_as_is() throws Exception {
+    @Test void reachableMethodIsKeptAsIs() throws Exception {
         var m = String.class.getMethod("trim");
         assertEquals(m, JavaInterop.accessible(m));
     }
 
-    @Test void program_reads_a_child_process_output() throws Exception {
+    @Test void programReadsAChildProcessOutput() throws Exception {
         String src = String.join("\n",
                 "pb := java.lang.ProcessBuilder/new (java.util.List/of \"echo\" \"hi\")",
                 "p := pb.start ()",

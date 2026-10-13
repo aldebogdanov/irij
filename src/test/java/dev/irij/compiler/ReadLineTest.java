@@ -45,7 +45,7 @@ class ReadLineTest {
         return buf.toString().trim();
     }
 
-    @Test void every_piped_line_arrives() throws Exception {
+    @Test void everyPipedLineArrives() throws Exception {
         assertEquals("a|b|c", run("""
             x := read-line ()
             y := read-line ()
@@ -54,7 +54,7 @@ class ReadLineTest {
             """, "a\nb\nc\n"));
     }
 
-    @Test void end_of_input_is_unit() throws Exception {
+    @Test void endOfInputIsUnit() throws Exception {
         assertEquals("true", run("""
             x := read-line ()
             y := read-line ()

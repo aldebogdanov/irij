@@ -35,7 +35,7 @@ class ProgramArgsTest {
         return buf.toString().trim().replace("\r", "");
     }
 
-    @Test void program_args_are_the_main_arguments() throws Exception {
+    @Test void programArgsAreTheMainArguments() throws Exception {
         String src = String.join("\n",
                 "fn show ::: Env Console",
                 "  =>",
@@ -47,7 +47,7 @@ class ProgramArgsTest {
         assertEquals("2\n--port\n9090", run(src, "--port", "9090"));
     }
 
-    @Test void no_arguments_is_an_empty_vec() throws Exception {
+    @Test void noArgumentsIsAnEmptyVec() throws Exception {
         String src = String.join("\n",
                 "fn show ::: Env Console",
                 "  =>",
@@ -56,7 +56,7 @@ class ProgramArgsTest {
         assertEquals("0", run(src));
     }
 
-    @Test void cli_hands_everything_after_the_file_to_the_program() {
+    @Test void cliHandsEverythingAfterTheFileToTheProgram() {
         String[] argv = {"--no-spec-lint", "app.irj", "--ui", "tui", "x"};
         assertArrayEquals(new String[]{"--ui", "tui", "x"}, IrijCliAccess.programArgsAfter(argv, 1));
         assertArrayEquals(new String[]{}, IrijCliAccess.programArgsAfter(new String[]{"app.irj"}, 0));

@@ -66,12 +66,12 @@ fiber or a `timeout`-cancelled fork stops at its next iteration (see
 
 `TcoTest`:
 
-- `self_tail_call_1M_deep` — `sum-to 0 1_000_000` runs to completion
+- `selfTailCall1MDeep` — `sum-to 0 1_000_000` runs to completion
   in both bytecode modes.
-- `self_tail_call_in_if_then_branch` — only one branch is tail.
-- `self_tail_call_args_use_old_param_values` — proves the eval-then-
+- `selfTailCallInIfThenBranch` — only one branch is tail.
+- `selfTailCallArgsUseOldParamValues` — proves the eval-then-
   store-reverse ordering is right.
-- `non_tail_call_is_not_rewritten` — `1 + (f (n - 1))` keeps a normal
+- `nonTailCallIsNotRewritten` — `1 + (f (n - 1))` keeps a normal
   `INVOKESTATIC` because the addition follows the call.
 
 ## Mutual TCO — not implemented
