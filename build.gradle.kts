@@ -195,6 +195,57 @@ tasks.test {
         }
     })
 }
+
+// ── Shadow JAR (fat JAR with all dependencies) ──────────────────────
+
+tasks.shadowJar {
+    archiveBaseName.set("irij")
+    archiveClassifier.set("")
+    archiveVersion.set("")
+    manifest {
+        attributes("Main-Class" to "dev.irij.cli.IrijCli")
+    }
+    mergeServiceFiles()
+}
+
+// ── Run task (development) ──────────────────────────────────────────
+
+tasks.register<JavaExec>("run") {
+    dependsOn("compileJava")
+    mainClass = "dev.irij.interpreter.IrijRunner"
+    classpath = sourceSets["main"].runtimeClasspath
+    standardInput = System.`in`
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+}
+
+// ── Install task ────────────────────────────────────────────────────
+
+tasks.register("install") {
+    dependsOn("shadowJar")
+    doLast {
+        val home = System.getProperty("user.home")
+        val libDir = file("$home/.local/lib").also { it.mkdirs() }
+        val binDir = file("$home/.local/bin").also { it.mkdirs() }
+        copy {
+            from("build/libs/irij.jar")
+            into(libDir)
+        }
+        val script = file("$binDir/irij")
+        script.writeText("#!/bin/bash\nexec java --enable-native-access=ALL-UNNAMED -jar \"$home/.local/lib/irij.jar\" \"\$@\"\n")
+        script.setExecutable(true)
+        println("Installed: $binDir/irij")
+    }
+}
+
+// ── Debug ────────────────────────────────────────────────────
+
+tasks.withType<JavaCompile>().configureEach {
+    options.isIncremental = true
+    // options.debugOptions.debugLevel = "source,lines,vars"
+    options.compilerArgs.add("-g") // Forces all debug information
+    // No --enable-preview needed: unnamed patterns standard since JDK 22
+}
+
 tasks.test {
     // no extra jvmArgs needed
 }
