@@ -104,6 +104,8 @@ tasks.processResources {
 tasks.test {
     useJUnitPlatform()
 
+    inputs.dir("editors")   // EditorGrammarSyncTest reads the highlighters
+
     val verbose = project.hasProperty("verbose")
 
     testLogging {

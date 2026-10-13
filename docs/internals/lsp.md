@@ -49,17 +49,18 @@ Three classes:
 Transport: LSP4J's `Launcher.createLauncher` on `System.in` /
 `System.out`. Same wire format every standard LSP client speaks.
 
-## Editor integration — Emacs (eglot)
+## Editor integration — Emacs (eglot / lsp-mode)
+
+`irij-mode.el` registers the server itself once either client loads:
+an `eglot-server-programs` entry and an `lsp-mode` client
+(`irij-lsp`), both running `irij-executable lsp`. Turn it on with:
 
 ```elisp
-(require 'eglot)
-(add-to-list 'eglot-server-programs
-             '(irij-mode . ("irij" "lsp")))
-(add-hook 'irij-mode-hook 'eglot-ensure)
+(add-hook 'irij-mode-hook 'eglot-ensure)   ; or 'lsp-deferred
 ```
 
-That's it — eglot drives stdio, gets diagnostics on save, hover via
-`C-h .`, goto-def via `M-.`.
+eglot drives stdio, gets diagnostics on save, hover via `C-h .`,
+goto-def via `M-.`.
 
 ## Editor integration — VS Code
 

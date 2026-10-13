@@ -67,6 +67,7 @@ irij test                     # 427 integration tests (tests/*.irj)
 - **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)
 - **Bytecode compiler** &mdash; the only execution model since v0.6.20: ASM-emitted JVM classfiles with state-machine effect lowering, self-TCO, invokedynamic hot-redef; `irij build` packages self-contained runnable JARs
 - **nREPL** &mdash; Emacs integration via `editors/emacs/irij-nrepl.el`
+- **Editors** &mdash; Emacs `irij-mode` (highlighting, offside indentation, LSP wiring; see `docs/emacs.md`) and a TextMate grammar for VS Code / Shiki / Linguist in `editors/textmate/`
 
 ## Documentation
 
@@ -94,7 +95,8 @@ src/main/java/dev/irij/
 src/main/resources/std/  # Standard library (Irij source)
 tests/                   # Integration tests (test-*.irj)
 examples/                # Example programs
-editors/emacs/           # irij-mode.el, irij-nrepl.el
+editors/emacs/           # irij-mode.el, irij-nrepl.el, test/
+editors/textmate/        # irij.tmLanguage.json
 docs/                    # Specification and phase docs
 ```
 

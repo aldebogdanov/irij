@@ -2,9 +2,9 @@
 
 ;; Copyright (C) 2024  Irij Contributors
 ;; Author: Irij Contributors
-;; Version: 0.2.0
+;; Version: 0.3.0
 ;; Keywords: languages irij
-;; URL: https://github.com/irij-lang/irij
+;; URL: https://github.com/aldebogdanov/irij
 ;; Package-Requires: ((emacs "27.1"))
 
 ;;; Commentary:
@@ -13,9 +13,11 @@
 ;;
 ;; Features:
 ;;   • Syntax highlighting — keywords, type names, operators, literals, comments
-;;   • 2-space indentation enforcement
+;;   • Indentation for Irij's offside-rule blocks (TAB cycles valid levels)
 ;;   • Comment toggling with `;;`
+;;   • imenu index of top-level declarations
 ;;   • REPL integration — send region or buffer to a running `irij` process
+;;   • LSP — registers `irij lsp' with eglot and lsp-mode when they load
 ;;
 ;; Installation:
 ;;   (add-to-list 'load-path "/path/to/editors/emacs")
@@ -24,11 +26,17 @@
 ;; Or with use-package:
 ;;   (use-package irij-mode
 ;;     :load-path "path/to/editors/emacs"
-;;     :mode "\\.irj\\'")
+;;     :mode "\\.irj\\'"
+;;     :hook (irij-mode . eglot-ensure))
+;;
+;; Keyword and builtin lists below are checked against the lexer and
+;; the compiler's intrinsic set by EditorGrammarSyncTest — keep them
+;; in sync with editors/textmate/irij.tmLanguage.json.
 
 ;;; Code:
 
 (require 'comint)
+(require 'subr-x)
 
 
 ;; ── Customisation group ────────────────────────────────────────────────
@@ -44,7 +52,7 @@
   :group 'irij)
 
 (defcustom irij-executable "irij"
-  "Path to the `irij` executable used for the REPL."
+  "Path to the `irij` executable used for the REPL and the language server."
   :type 'string
   :group 'irij)
 
@@ -61,17 +69,17 @@
     ;; `;;` line comments  (first `;` starts, second is comment-start-second)
     (modify-syntax-entry ?\; ". 12" st)
     (modify-syntax-entry ?\n ">" st)
-    ;; String literals
+    ;; String literals, with `\` escapes
     (modify-syntax-entry ?\" "\"" st)
+    (modify-syntax-entry ?\\ "\\" st)
     ;; Operators — treat as punctuation
-    (dolist (c '(?| ?< ?> ?! ?@ ?# ?/ ?* ?+ ?- ?= ?& ?~ ?. ?^ ?%))
+    (dolist (c '(?| ?< ?> ?@ ?# ?/ ?* ?+ ?= ?& ?~ ?. ?^ ?% ?:))
       (modify-syntax-entry c "." st))
-    ;; Underscore is part of identifiers
-    (modify-syntax-entry ?_ "w" st)
-    ;; Hyphens are part of identifiers (kebab-case)
-    (modify-syntax-entry ?- "w" st)
-    ;; $VAR / $ROLE names
-    (modify-syntax-entry ?$ "w" st)
+    ;; Identifier characters beyond letters/digits: kebab-case `-`,
+    ;; snake `_`, predicate/bang suffixes `?` `!`, party sigil `$`.
+    ;; Symbol constituents, so `\\_<…\\_>' brackets a whole name.
+    (dolist (c '(?- ?_ ?? ?! ?$))
+      (modify-syntax-entry c "_" st))
     st)
   "Syntax table for `irij-mode'.")
 
@@ -81,209 +89,411 @@
 (defconst irij-keywords
   '("fn" "do" "if" "else" "match" "spec" "newtype"
     "mod" "use" "pub" "with" "scope" "effect"
-    "party" "cap" "handler" "model" "impl" "proto"
+    "party" "cap" "handler" "impl" "proto"
     "pre" "post" "contract" "select"
     "enclave" "par-each" "on-failure"
-    "in" "out")
-  "Reserved words in Irij.")
+    "in" "out" "for" "proof")
+  "Reserved words in Irij.
+`model' is not here: it is a soft keyword, highlighted only where a
+declaration starts (see `irij-font-lock-keywords').")
 
 (defconst irij-builtin-values
   '("true" "false")
   "Built-in value names in Irij.")
 
 (defconst irij-builtin-fns
-  '("print" "println" "to-str" "dbg"
-    "div" "mod" "abs" "min" "max"
-    "head" "tail" "length" "reverse" "sort"
-    "concat" "conj" "take" "drop" "to-vec"
-    "contains?" "keys" "vals" "get"
-    "nth" "last" "fold" "flip"
-    "identity" "const" "not" "empty?"
+  '(;; constants
     "pi" "e"
-    "spawn" "sleep" "try" "apply"
-    "await" "timeout" "par" "race"
-    "error" "type-of"
-    "assoc" "dissoc" "merge"
+    ;; console / debug
+    "print" "println" "to-str" "dbg" "type-of" "error" "read-line"
+    ;; numbers
+    "abs" "min" "max" "quo" "rem" "sqrt" "floor" "ceil" "round"
+    "sin" "cos" "tan" "log" "exp" "pow"
+    "parse-int" "parse-float" "random-int" "random-float"
+    ;; collections
+    "head" "tail" "length" "reverse" "sort" "concat" "conj"
+    "take" "drop" "to-vec" "to-set" "to-tuple" "nth" "last" "fold"
+    "contains?" "empty?" "keys" "vals" "get" "assoc" "dissoc" "merge"
+    ;; functions
+    "identity" "const" "flip" "not"
+    ;; strings
     "split" "join" "trim" "upper-case" "lower-case"
     "starts-with?" "ends-with?" "replace" "substring" "char-at" "index-of"
-    "sqrt" "floor" "ceil" "round" "sin" "cos" "tan" "log" "exp" "pow"
-    "random-int" "random-float"
-    "parse-int" "parse-float" "char-code" "from-char-code"
-    "read-file" "write-file" "append-file" "delete-file" "list-dir" "make-dir"
-    "file-exists?" "get-env" "env" "now-ms" "read-line"
+    "char-code" "from-char-code"
+    ;; data formats
     "json-parse" "json-encode" "json-encode-pretty"
     "url-encode" "url-decode" "toml-parse"
+    ;; crypto
+    "sha256-hex" "hmac-sha256-hex" "pbkdf2-sha256-hex"
+    "random-token" "constant-time-eq?"
+    ;; concurrency
+    "spawn" "sleep" "await" "timeout" "par" "race" "try"
+    ;; environment
+    "env" "get-env" "now-ms" "program-args"
+    ;; specs
     "validate" "validate!"
-    ;; raw-* primitives (effects layer)
-    "raw-http-request" "raw-http-serve"
-    "raw-db-open" "raw-db-query" "raw-db-exec" "raw-db-close" "raw-db-transaction"
-    "raw-sse-response" "raw-sse-send" "raw-sse-close" "raw-sse-closed?"
-    "raw-multipart-field" "raw-multipart-save"
-    "raw-session-create" "raw-session-eval" "raw-session-destroy"
-    "raw-session-subscribe" "raw-session-unsubscribe" "raw-session-cleanup"
-    ;; std.time / std.random / std.env wrappers + handlers
-    "time-now" "time-sleep" "default-time" "fixed-clock"
-    "rand-int" "rand-float" "default-random" "fixed-random"
-    "env-var" "default-env" "mock-env")
-  "Built-in functions in Irij.")
+    ;; implicit in handler clauses
+    "resume")
+  "Names an Irij file reaches without an import.
+Mirrors `IntrinsicsEmitter.NAMES' plus the constants `pi' and `e'
+and the handler-clause `resume'.")
 
-;; Emacs 29+ introduced `font-lock-number-face'.  On older versions
-;; the symbol doesn't exist (neither as face nor variable), which
-;; causes "Symbol's value as variable is void" when font-lock tries
-;; to use it.  We define it as a variable pointing to the real face
-;; so that font-lock can resolve it in all Emacs versions.
-(unless (boundp 'font-lock-number-face)
-  (defvar font-lock-number-face 'font-lock-constant-face
-    "Compatibility shim: points to `font-lock-constant-face' on Emacs < 29."))
+(defun irij--face (face fallback)
+  "Return FACE if it is defined in this Emacs, else FALLBACK."
+  (if (facep face) face fallback))
+
+(defconst irij--ident-re
+  "[a-z][a-z0-9]*\\(?:[-_][a-z0-9]+\\)*[?!]?"
+  "Regexp for an Irij lowercase identifier (lexer rule IDENT).")
 
 (defconst irij-font-lock-keywords
-  (let ((kw-re    (regexp-opt irij-keywords      'words))
-        (bool-re  (regexp-opt irij-builtin-values 'words))
-        (fn-re    (regexp-opt irij-builtin-fns    'words)))
+  (let ((kw-re    (regexp-opt irij-keywords       'symbols))
+        (bool-re  (regexp-opt irij-builtin-values 'symbols))
+        (fn-re    (regexp-opt irij-builtin-fns    'symbols))
+        (num-face (irij--face 'font-lock-number-face 'font-lock-constant-face))
+        (esc-face (irij--face 'font-lock-escape-face 'font-lock-builtin-face))
+        (op-face  (irij--face 'font-lock-operator-face 'font-lock-keyword-face)))
     `(
+      ;; String escapes and ${…} interpolation (override string face)
+      ("\\\\[nrte\"\\\\$]" 0 ',esc-face t)
+      ("\\${[^}\n]*}" 0 'font-lock-preprocessor-face t)
+      ;; `model' — soft keyword, only at the start of a declaration
+      (,(concat "^[ \t]*\\(?:pub[ \t]+\\)?\\(model\\)[ \t]+\\(" irij--ident-re "\\)")
+       (1 'font-lock-keyword-face) (2 'font-lock-function-name-face))
+      ;; Declaration names — fn / handler / cap <ident>
+      (,(concat "\\_<\\(?:fn\\|handler\\|cap\\)[ \t]+\\(" irij--ident-re "\\)")
+       1 'font-lock-function-name-face)
+      ;; Declaration names — spec / newtype / effect / proto / impl / contract <Name>
+      ("\\_<\\(?:spec\\|newtype\\|effect\\|proto\\|impl\\|contract\\)[ \t]+\\([A-Z][A-Za-z0-9]*\\)"
+       1 'font-lock-type-face)
+      ;; Java interop — Class/member, java.pkg.Class/member
+      ("\\_<[A-Za-z_][A-Za-z0-9_]*\\(?:\\.[A-Za-z_][A-Za-z0-9_]*\\)*/[A-Za-z_][A-Za-z0-9_]*"
+       . 'font-lock-builtin-face)
       ;; Keywords
-      (,kw-re    . font-lock-keyword-face)
+      (,kw-re    . 'font-lock-keyword-face)
       ;; Boolean literals
-      (,bool-re  . font-lock-constant-face)
+      (,bool-re  . 'font-lock-constant-face)
       ;; Built-in functions
-      (,fn-re    . font-lock-builtin-face)
+      (,fn-re    . 'font-lock-builtin-face)
       ;; Type names — PascalCase
-      ("\\<[A-Z][A-Za-z0-9]*\\>" . font-lock-type-face)
-      ;; Role names — $ALLCAPS
-      ("\\$[A-Z][A-Z0-9_]*" . font-lock-type-face)
-      ;; Keyword atoms — :ident (not ::)
-      ("\\(?:^\\|[^:]\\)\\(:[a-z][a-z0-9-]*\\)" 1 font-lock-constant-face)
-      ;; Effect row marker — ::: Eff (must match before ::)
-      (":::" . font-lock-keyword-face)
-      ;; Type annotations — :: Type
-      ("::" . font-lock-keyword-face)
-      ;; Bind operators
-      (":=" . font-lock-keyword-face)
-      (":!" . font-lock-keyword-face)
-      ;; Arrow operators
-      ("->" . font-lock-keyword-face)
-      ("=>" . font-lock-keyword-face)
-      ("|>" . font-lock-keyword-face)
-      ("<|" . font-lock-keyword-face)
-      (">>" . font-lock-keyword-face)
-      ("<<"  . font-lock-keyword-face)
-      ;; Apply-to-rest (lowest precedence apply): f ~ rest ≡ f(rest)
-      ("\\(?:^\\|[^~<]\\)\\(~\\)\\(?:[^>*/]\\|$\\)" 1 font-lock-keyword-face)
+      ("\\_<[A-Z][A-Za-z0-9]*\\_>" . 'font-lock-type-face)
+      ;; Party names — $ALLCAPS
+      ("\\$[A-Z][A-Z0-9_-]*" . 'font-lock-type-face)
+      ;; Keyword atoms — :ident (not ::, not attr:ident)
+      ("\\(?:^\\|[^:[:alnum:]_-]\\)\\(:[a-z][a-z0-9_-]*\\)" 1 'font-lock-constant-face)
+      ;; Structural operators — longest first
+      (,(regexp-opt '(":::" "::" ":=" ":!" "<-" "->" "=>" "|>" "<|" ">>" "<<"
+                      "~*>" "~>" "<~" "~/" "..." "..<" ".."))
+       . 'font-lock-keyword-face)
+      ;; Apply-to-rest: f ~ rest ≡ f(rest)
+      ("\\(?:^\\|[^~<]\\)\\(~\\)\\(?:[^>*/]\\|$\\)" 1 'font-lock-keyword-face)
       ;; Seq operators: /+ /* /# /& /| /? /! /^ /$ @ @i
-      ("\\(?:/[+*#&|!?^$]\\|@i?\\)" . font-lock-builtin-face)
-      ;; Numeric literals (int, float, hex, rational)
-      ("\\<\\([0-9][0-9_]*\\(?:\\.[0-9][0-9_]*\\)?\\(?:[eE][+-]?[0-9]+\\)?\\)\\>" 1 font-lock-number-face)
-      ("\\<0x[0-9A-Fa-f][0-9A-Fa-f_]*\\>" . font-lock-number-face)
-      ("\\<[0-9]+/[0-9]+\\>"               . font-lock-number-face)
-      ;; String interpolation markers  ${…}
-      ("\\${[^}]*}" . font-lock-preprocessor-face)
-      ;; Function definitions — fn <name>
-      ("\\bfn\\s-+\\([a-z][a-z0-9-]*\\)" 1 font-lock-function-name-face)
-      ;; Spec/type definitions — spec/newtype <Name>
-      ("\\b\\(?:spec\\|newtype\\)\\s-+\\([A-Z][A-Za-z0-9]*\\)" 1 font-lock-type-face)
+      ("/[+*#&|!?^$]\\|@i?" . 'font-lock-builtin-face)
+      ;; Collection openers #[ #{ #(
+      ("#[[{(]" . ',op-face)
+      ;; Numeric literals (hex, rational, float, int)
+      ("\\_<0[xX][0-9A-Fa-f]\\(?:[0-9A-Fa-f_]*[0-9A-Fa-f]\\)?\\_>" . ',num-face)
+      ("\\_<[0-9]+/[0-9]+\\_>"                                     . ',num-face)
+      ("\\_<[0-9][0-9_]*\\.[0-9][0-9_]*\\_>"                       . ',num-face)
+      ("\\_<[0-9]\\(?:[0-9_]*[0-9]\\)?\\_>"                        . ',num-face)
       ;; Binding names — name :=   name :!
-      ("\\([a-z][a-z0-9-]*\\)\\s-*:\\(?:=\\|!\\)" 1 font-lock-variable-name-face)
+      (,(concat "\\_<\\(" irij--ident-re "\\)[ \t]*:[=!]")
+       1 'font-lock-variable-name-face)
       ))
   "Font-lock keywords for `irij-mode'.")
 
 
 ;; ── Indentation ───────────────────────────────────────────────────────
+;;
+;; Irij blocks follow the offside rule: a header line (`fn f`, `if c`,
+;; `match x`, `pat =>`, …) is followed by a body indented one level.
+;; Where a body ends cannot be inferred, so the computed column is the
+;; *deepest* valid one; TAB pressed repeatedly cycles down through the
+;; shallower levels, and `indent-region' keeps an existing dedent.
 
-(defun irij-indent-line ()
-  "Indent the current Irij line.
-Uses a simple heuristic: increase indent after lines ending in a
-context-opening construct (fn/match/if/else/with/do/type bodies),
-and decrease after a line that is less indented than its predecessor."
-  (interactive)
-  (let* ((pos        (- (point-max) (point)))
-         (indent-col (irij--compute-indent)))
+(defconst irij--block-head-re
+  (concat
+   "\\`[ \t]*\\(?:pub[ \t]+\\)?"
+   "\\(?:\\(?:" irij--ident-re "\\)[ \t]*\\(?::=\\|:!\\|<-\\)[ \t]*\\)?"
+   "\\(fn\\|if\\|else\\|match\\|with\\|scope\\(?:\\.[a-z-]+\\)?\\|do\\|effect\\|handler"
+   "\\|spec\\|proto\\|impl\\|model\\|select\\|enclave\\|par-each\\|on-failure\\|for\\|contract\\)"
+   "\\_>")
+  "Regexp for a logical line that may open an indented block.
+Group 1 is the block keyword.")
+
+(defun irij--strip-comment (line)
+  "Return LINE without a trailing `;;' comment (strings respected)."
+  (let ((i 0) (len (length line)) (in-str nil) (cut nil))
+    (while (and (< i len) (not cut))
+      (let ((c (aref line i)))
+        (cond
+         (in-str (cond ((eq c ?\\) (setq i (1+ i)))
+                       ((eq c ?\") (setq in-str nil))))
+         ((eq c ?\") (setq in-str t))
+         ((and (eq c ?\;) (< (1+ i) len) (eq (aref line (1+ i)) ?\;))
+          (setq cut i))))
+      (setq i (1+ i)))
+    (string-trim-right (if cut (substring line 0 cut) line))))
+
+(defun irij--line-text ()
+  "Current line's code, without comment or trailing whitespace."
+  (irij--strip-comment
+   (buffer-substring-no-properties (line-beginning-position) (line-end-position))))
+
+(defun irij--blank-or-comment-line-p ()
+  "Non-nil if the current line is blank or only a comment."
+  (save-excursion
+    (beginning-of-line)
+    (looking-at-p "[ \t]*\\(?:;;.*\\)?$")))
+
+(defun irij--prev-code-line ()
+  "Move to the previous non-blank, non-comment line; return point or nil."
+  (let ((found nil))
+    (while (and (not found) (= 0 (forward-line -1)))
+      (unless (irij--blank-or-comment-line-p)
+        (setq found (point))))
+    found))
+
+(defun irij--logical-line-start (depth)
+  "Move to the line where the logical line containing point begins.
+Climbs out of brackets opened deeper than DEPTH and over `\\'
+continuations.  Returns point at that line's beginning."
+  (beginning-of-line)
+  (let ((moved t))
+    (while moved
+      (setq moved nil)
+      (let ((ppss (syntax-ppss)))
+        (when (> (nth 0 ppss) depth)
+          ;; Outermost opener deeper than DEPTH
+          (goto-char (nth depth (nth 9 ppss)))
+          (beginning-of-line)
+          (setq moved t)))
+      (when (save-excursion
+              (and (= 0 (forward-line -1))
+                   (looking-at-p ".*\\\\[ \t]*$")))
+        (forward-line -1)
+        (setq moved t))))
+  (point))
+
+(defun irij--opens-block-p (logical last &optional required)
+  "Non-nil if a block follows a logical line.
+LOGICAL is the logical line's text from its first line to the end of
+LAST, its final physical line (both without comments).  With REQUIRED,
+only blocks that must have a body count — not `fn', `effect',
+`handler' or `model', whose bodies are optional."
+  (or
+   ;; Arm / lambda / binding / assignment left open at end of line —
+   ;; but not a leading `=> params' imperative-body marker, whose body
+   ;; stays at the marker's level
+   (and (string-match-p "\\(?:=>\\|->\\|:=\\|:!\\|<-\\|=\\)\\'" last)
+        (not (string-match-p "\\`[ \t]*=>" last)))
+   (and (string-match irij--block-head-re logical)
+        (let ((kw   (match-string 1 logical))
+              (rest (substring logical (match-end 0))))
+          (pcase kw
+            ((guard (and required (member kw '("fn" "effect" "handler" "model")))) nil)
+            ;; Inline `if c a else b' is an expression, not a block
+            ("if"   (not (string-match-p "\\_<else\\_>" rest)))
+            ;; `else' alone, or `else if c' without its own else
+            ("else" (or (string-match-p "\\`[ \t]*\\'" rest)
+                        (and (string-match-p "\\`[ \t]*if\\_>" rest)
+                             (not (string-match-p "\\_<else\\_>" rest)))))
+            ;; `fn f (x -> …)' carries its body inline
+            ("fn"   (not (irij--inline-lambda-body-p rest)))
+            ;; `with h do (…)' and `do (a) (b)' are inline
+            ("with" (not (string-match-p "\\_<do\\_>" rest)))
+            ("do"   (string-match-p "\\`[ \t]*\\'" rest))
+            ;; `spec :: T' annotation, not a declaration
+            ("spec" (not (string-match-p "\\`[ \t]*::" rest)))
+            (_ t))))))
+
+(defun irij--inline-lambda-body-p (rest)
+  "Non-nil if REST, the text after `fn', ends with a lambda body.
+A trailing `(params -> …)' group; with a `::' spec on the line, the
+group must start with a lowercase parameter so `(_ -> Bool)' or
+`(Int -> Int)' spec types do not count."
+  (with-temp-buffer
+    (set-syntax-table irij-mode-syntax-table)
+    (insert rest)
+    (and (eq (char-before) ?\))
+         (condition-case nil
+             (progn (backward-sexp)
+                    (looking-at-p (if (string-match-p "::" rest)
+                                      "([ \t]*[a-z][^()]*->"
+                                    "([^()]*->")))
+           (scan-error nil)))))
+
+(defconst irij--leading-infix-re
+  "\\`[ \t]*\\(?:|>\\|<|\\|>>\\|<<\\|\\+\\+\\|&&\\|||\\|==\\|/=\\|[-+*/%]\\s-\\)"
+  "Regexp for a line that continues the previous one with an infix operator.")
+
+(defun irij--block-if-line-p (text)
+  "Non-nil if TEXT is a line that opens an `if' block (no inline else)."
+  (and (string-match irij--block-head-re text)
+       (equal (match-string 1 text) "if")
+       (not (string-match-p "\\_<else\\_>" (substring text (match-end 0))))))
+
+(defun irij--else-indent ()
+  "Column of the `if' that an `else' on the current line closes, or nil.
+Walks back along the indentation frontier: the nearest block `if' not
+already closed by an `else' at its own column."
+  (save-excursion
+    (let ((frontier most-positive-fixnum) (closed nil) (col nil))
+      (while (and (not col) (> frontier 0) (irij--prev-code-line))
+        (let ((ind (current-indentation)) (text (irij--line-text)))
+          (when (<= ind frontier)
+            (cond
+             ((string-match-p "\\`[ \t]*else\\_>" text) (push ind closed))
+             ((irij--block-if-line-p text)
+              (if (memq ind closed)
+                  (setq closed (delq ind closed))
+                (setq col ind))))
+            (setq frontier ind))))
+      col)))
+
+(defun irij--compute-indent ()
+  "Return the deepest valid indentation column for the current line."
+  (save-excursion
+    (beginning-of-line)
+    (let* ((ppss      (syntax-ppss))
+           (depth     (nth 0 ppss))
+           (opener    (nth 1 ppss))
+           (this-line (irij--line-text)))
+      (cond
+       ;; Inside a string: leave alone
+       ((nth 3 ppss) (current-indentation))
+       ;; Line starts with a closing bracket: line of its opener
+       ((and opener (string-match-p "\\`[ \t]*[])}]" this-line))
+        (save-excursion (goto-char opener) (current-indentation)))
+       ;; `else' aligns with its `if'
+       ((and (string-match-p "\\`[ \t]*else\\_>" this-line)
+             (irij--else-indent)))
+       ;; `|> f' / `++ x' continues the expression above
+       ((and (string-match-p irij--leading-infix-re this-line)
+             (let ((prev (save-excursion (irij--prev-code-line))))
+               (and prev (not (and opener (>= opener prev))))))
+        (save-excursion
+          (irij--prev-code-line)
+          (irij--logical-line-start depth)
+          ;; Siblings align; the first continuation goes one level in
+          (if (string-match-p irij--leading-infix-re (irij--line-text))
+              (current-indentation)
+            (+ (current-indentation) irij-indent-offset))))
+       (t
+        (let ((prev (save-excursion (irij--prev-code-line))))
+          (cond
+           ((not prev) 0)
+           ;; First line after a bracket opened on the previous line
+           ((and opener (>= opener prev)) (irij--indent-after-opener opener))
+           (t
+            (goto-char prev)
+            (let* ((last    (irij--line-text))
+                   (start   (irij--logical-line-start depth))
+                   (base    (current-indentation))
+                   (logical (irij--strip-comment
+                             (buffer-substring-no-properties
+                              start (save-excursion (goto-char prev)
+                                                    (line-end-position))))))
+              (cond
+               ((irij--opens-block-p logical last) (+ base irij-indent-offset))
+               ;; `\' continuation
+               ((string-match-p "\\\\\\'" last) (+ base irij-indent-offset))
+               (t base)))))))))))
+
+(defun irij--indent-after-opener (opener)
+  "Indent column for the first line after the bracket at OPENER."
+  (save-excursion
+    (goto-char opener)
+    (let ((after (irij--strip-comment
+                  (buffer-substring-no-properties (1+ opener) (line-end-position))))
+          (col   (current-column)))
+      (cond
+       ;; Nothing after the opener, or a lambda head `(x ->'
+       ((or (string-match-p "\\`[ \t]*\\'" after)
+            (string-match-p "\\(?:->\\|=>\\)\\'" after))
+        (+ (progn (irij--logical-line-start (nth 0 (syntax-ppss)))
+                  (current-indentation))
+           irij-indent-offset))
+       ;; Align with the first element after the opener
+       (t (1+ col))))))
+
+(defun irij--indent-to (col)
+  "Indent the current line to COL, keeping point relative to the text."
+  (let ((pos (- (point-max) (point))))
     (beginning-of-line)
     (skip-chars-forward " \t")
-    (unless (= (current-column) indent-col)
+    (unless (= (current-column) col)
       (delete-region (line-beginning-position) (point))
-      (indent-to indent-col))
-    ;; Restore cursor position
+      (indent-to col))
     (when (> (- (point-max) pos) (point))
       (goto-char (- (point-max) pos)))))
 
-(defun irij--compute-indent ()
-  "Return the column to indent the current line to.
-Rules, in order:
-  1. Blank line → column 0.
-  2. If this line starts with `else`/`else-if` → align with opener (dedent).
-  3. If the containing paren/bracket/brace on the previous line is still
-     open (unbalanced), indent one level beyond its opener column.
-  4. If the previous line opens a block (ends with `=>`, `->`, `:::`, or
-     begins a fn/match/if/with/handler head) → prev indent + offset.
-  5. Otherwise → same indent as previous non-blank line."
+(defun irij-indent-line ()
+  "Indent the current Irij line.
+The first TAB moves to the deepest valid column; repeated TABs cycle
+one level shallower each time, wrapping back to the deepest."
+  (interactive)
+  (let ((target (irij--compute-indent))
+        (cur    (current-indentation)))
+    (when (and (eq this-command last-command)
+               (memq this-command '(indent-for-tab-command irij-indent-line)))
+      (setq target (if (> cur 0) (max 0 (- cur irij-indent-offset)) target)))
+    (irij--indent-to target)))
+
+(defun irij--after-block-head-p ()
+  "Non-nil if the code line above the current one requires a block body."
   (save-excursion
+    (let ((depth (nth 0 (syntax-ppss (line-beginning-position)))))
+      (when (irij--prev-code-line)
+        (let* ((last  (irij--line-text))
+               (eol   (line-end-position))
+               (start (irij--logical-line-start depth)))
+          (irij--opens-block-p
+           (irij--strip-comment (buffer-substring-no-properties start eol))
+           last t))))))
+
+(defun irij--indentation-valid-p (cur target)
+  "Non-nil if column CUR is a defensible indentation for the current line.
+TARGET is the computed (deepest block) column.  A shallower multiple of
+the offset closes blocks; a deeper column continues the expression
+above or hand-aligns inside brackets.  Only a body left at or left of
+its block head, or a dedent off the offset grid, is wrong."
+  (or (= cur target)
+      (and (< cur target)
+           (= 0 (% cur irij-indent-offset))
+           (not (irij--after-block-head-p)))
+      (> cur target)))
+
+(defun irij-indent-region (beg end)
+  "Re-indent lines between BEG and END whose indentation is wrong.
+Indentation is semantic in Irij and a block's end cannot be inferred,
+so a line keeps its column when `irij--indentation-valid-p' accepts it;
+only clearly wrong lines move to the computed column."
+  (save-excursion
+    (goto-char beg)
     (beginning-of-line)
-    (let* ((current-line (buffer-substring (line-beginning-position)
-                                           (line-end-position)))
-           (current-blank (string-match-p "\\`[ \t]*\\'" current-line))
-           (starts-with-else
-            (string-match-p "\\`[ \t]*else\\b" current-line)))
-      (cond
-       (current-blank 0)
-       (t
-        (forward-line -1)
-        (while (and (not (bobp))
-                    (or (looking-at "^[ \t]*$")
-                        (looking-at "^[ \t]*;;")))
-          (forward-line -1))
-        (let* ((prev-indent (current-indentation))
-               (prev-line   (buffer-substring (line-beginning-position)
-                                              (line-end-position)))
-               (unbalanced-open (irij--unbalanced-open-col prev-line))
-               (opens-block (irij--line-opens-block prev-line)))
-          (cond
-           ;; `else` dedents one level from its current hypothetical indent
-           (starts-with-else
-            (max 0 (if opens-block prev-indent
-                     (- prev-indent irij-indent-offset))))
-           ;; Inside an open collection/paren: align to column after opener
-           (unbalanced-open (1+ unbalanced-open))
-           (opens-block (+ prev-indent irij-indent-offset))
-           (t prev-indent))))))))
+    (let ((end-marker (copy-marker end)))
+      (while (< (point) end-marker)
+        (unless (irij--blank-or-comment-line-p)
+          (let ((target (irij--compute-indent))
+                (cur    (current-indentation)))
+            (unless (irij--indentation-valid-p cur target)
+              (irij--indent-to target))))
+        (forward-line 1))
+      (set-marker end-marker nil))))
 
-(defun irij--unbalanced-open-col (line)
-  "If LINE has an unclosed (/ [ / { (ignoring strings and comments),
-return the column of the rightmost such opener. Otherwise nil."
-  (let ((i 0) (len (length line))
-        (stack nil)
-        (in-str nil))
-    (while (< i len)
-      (let ((c (aref line i)))
-        (cond
-         ;; String handling (double-quote). Skip escapes.
-         (in-str
-          (cond ((eq c ?\\) (setq i (1+ i)))
-                ((eq c ?\") (setq in-str nil))))
-         ((eq c ?\") (setq in-str t))
-         ;; Line comment — stop scanning.
-         ((and (eq c ?\;) (< (1+ i) len) (eq (aref line (1+ i)) ?\;))
-          (setq i len))
-         ((memq c '(?\( ?\[ ?\{)) (push i stack))
-         ((memq c '(?\) ?\] ?\})) (pop stack)))
-        (setq i (1+ i))))
-    (car stack)))
 
-(defun irij--line-opens-block (line)
-  "Return non-nil if LINE ends with a block-opening construct."
-  (string-match-p
-   (concat
-    "\\(?:"
-    ;; fn / type / newtype declarations without inline body
-    "\\bfn\\b.*[^=>]$"
-    "\\|\\bspec\\b.*$"
-    "\\|\\bnewtype\\b.*$"
-    ;; match / if / else / with / do end of line
-    "\\|\\b\\(?:match\\|if\\|else\\|with\\|do\\|scope\\|handler\\|model\\|effect\\|impl\\|proto\\)\\b.*$"
-    ;; Arrow at end of line:  =>  or  ->
-    "\\|=>[ \t]*$"
-    "\\|:::.*$"
-    "\\)")
-   (string-trim-right line)))
+;; ── imenu ─────────────────────────────────────────────────────────────
+
+(defvar irij-imenu-generic-expression
+  `(("Functions" ,(concat "^\\(?:pub[ \t]+\\)?fn[ \t]+\\(" irij--ident-re "\\)") 1)
+    ("Specs"     "^\\(?:pub[ \t]+\\)?\\(?:spec\\|newtype\\)[ \t]+\\([A-Z][A-Za-z0-9]*\\)" 1)
+    ("Effects"   "^\\(?:pub[ \t]+\\)?\\(?:effect\\|proto\\)[ \t]+\\([A-Z][A-Za-z0-9]*\\)" 1)
+    ("Impls"     "^impl[ \t]+\\([A-Z][A-Za-z0-9]*[ \t]+for[ \t]+[A-Z][A-Za-z0-9]*\\)" 1)
+    ("Handlers"  ,(concat "^\\(?:pub[ \t]+\\)?\\(?:handler\\|cap\\|model\\)[ \t]+\\("
+                          irij--ident-re "\\)")
+     1))
+  "`imenu' index of top-level Irij declarations.")
 
 
 ;; ── Comment toggling ──────────────────────────────────────────────────
@@ -344,7 +554,31 @@ return the column of the rightmost such opener. Otherwise nil."
   "Major mode for the Irij REPL buffer."
   :syntax-table irij-mode-syntax-table
   (setq-local font-lock-defaults '(irij-font-lock-keywords))
-  (setq comint-prompt-regexp "^ℑ> \\|^  | "))
+  ;; Primary prompt `ℑ> ', continuation prompt ` | ' (IrijRepl.java)
+  (setq comint-prompt-regexp "^ℑ> \\|^ | "))
+
+
+;; ── Language server ───────────────────────────────────────────────────
+
+(defun irij--lsp-command (&rest _)
+  "Command line that starts the Irij language server."
+  (list irij-executable "lsp"))
+
+(with-eval-after-load 'eglot
+  (defvar eglot-server-programs)
+  (add-to-list 'eglot-server-programs '(irij-mode . irij--lsp-command)))
+
+(declare-function lsp-register-client "lsp-mode" (client))
+(declare-function make-lsp-client "lsp-mode" (&rest args))
+(declare-function lsp-stdio-connection "lsp-mode" (command &optional test-command))
+(declare-function lsp-activate-on "lsp-mode" (&rest languages))
+(with-eval-after-load 'lsp-mode
+  (defvar lsp-language-id-configuration)
+  (add-to-list 'lsp-language-id-configuration '(irij-mode . "irij"))
+  (lsp-register-client
+   (make-lsp-client :new-connection (lsp-stdio-connection #'irij--lsp-command)
+                    :activation-fn (lsp-activate-on "irij")
+                    :server-id 'irij-lsp)))
 
 
 ;; ── Keymap ────────────────────────────────────────────────────────────
@@ -375,6 +609,9 @@ return the column of the rightmost such opener. Otherwise nil."
 (define-derived-mode irij-mode prog-mode "Irij"
   "Major mode for editing Irij (ℑ) source files.
 
+Indentation: TAB indents to the deepest valid column; repeat TAB to
+cycle to shallower block levels.
+
 Comint subprocess REPL:
   \\[irij-repl]              Start / switch to REPL
   \\[irij-send-region]       Send region to REPL
@@ -388,17 +625,23 @@ nREPL client (requires `irij --nrepl-server` running):
   \\[irij-nrepl-eval-defun]         Eval top-level declaration
   \\[irij-nrepl-eval-buffer]        Eval entire buffer
   \\[irij-nrepl-eval-region]        Eval selected region
-  \\[irij-nrepl-show-result-buffer] Show nREPL output buffer"
+  \\[irij-nrepl-show-result-buffer] Show nREPL output buffer
+
+Language server: `eglot' and `lsp-mode' start `irij lsp' for this
+mode once they are loaded, e.g. via (add-hook \\='irij-mode-hook
+#\\='eglot-ensure)."
   :syntax-table irij-mode-syntax-table
   (setq-local font-lock-defaults         '(irij-font-lock-keywords))
   (setq-local indent-line-function       #'irij-indent-line)
+  (setq-local indent-region-function     #'irij-indent-region)
   (setq-local comment-start             ";; ")
   (setq-local comment-end               "")
   (setq-local comment-start-skip        ";;+\\s-*")
   (setq-local tab-width                 irij-indent-offset)
   (setq-local indent-tabs-mode          nil)
   (setq-local electric-indent-inhibit   t)
-  (font-lock-ensure))
+  (setq-local imenu-generic-expression  irij-imenu-generic-expression)
+  (setq-local imenu-case-fold-search    nil))
 
 ;;;###autoload
 (add-to-list 'auto-mode-alist '("\\.irj\\'" . irij-mode))
