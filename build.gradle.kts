@@ -106,24 +106,81 @@ tasks.test {
 
     inputs.files("editors/emacs", "editors/textmate")   // read by EditorGrammarSyncTest
 
+    // Test output. `./gradlew test` prints one line per test, grouped
+    // under its class; `./gradlew test -Pverbose` prints a block per
+    // test (start, the test's stdout/stderr, result, full stack trace on
+    // failure) with a blank line between blocks. Gradle's own event
+    // logger is off: it puts a blank line before every event. Lines go
+    // through the task logger, so `-q` keeps only failures and the summary.
     val verbose = project.hasProperty("verbose")
+    val log = logger
+    fun line(s: String) = log.lifecycle(s)
 
     testLogging {
-        events("passed", "failed", "skipped")
-        showStandardStreams = verbose
-        showExceptions = true
-        showCauses = true
-        showStackTraces = verbose
-        displayGranularity = 2   // class + method (nested class names visible)
-        if (verbose) {
-            events("passed", "failed", "skipped", "started")
-        }
+        events = emptySet()      // no built-in per-event lines,
+        showExceptions = false   // failures included
+        showStandardStreams = false
     }
 
-    // Summary line after all tests
+    // `ReplInputTest`; a nested class reads `Outer > Inner`
+    fun className(d: TestDescriptor) =
+        d.className?.substringAfterLast('.')?.replace("$", " > ") ?: ""
+
+    addTestOutputListener { _, out ->
+        if (verbose) out.message.trimEnd('\n').lines().forEach { line("      $it") }
+    }
+
     addTestListener(object : TestListener {
-        private var passed = 0; private var failed = 0; private var skipped = 0
+        private var lastClass: String? = null
+
         override fun beforeSuite(s: TestDescriptor) {}
+
+        override fun beforeTest(d: TestDescriptor) {
+            if (verbose) line("${className(d)} > ${d.displayName}  STARTED")
+        }
+
+        override fun afterTest(d: TestDescriptor, r: TestResult) {
+            val mark = when (r.resultType) {
+                TestResult.ResultType.SUCCESS -> "✓"
+                TestResult.ResultType.FAILURE -> "✗"
+                else -> "○"
+            }
+            val ms = r.endTime - r.startTime
+            val failed = r.resultType == TestResult.ResultType.FAILURE
+            // Under -q only failures print, with the class in the line
+            val out: (String) -> Unit = if (failed) log::quiet else ::line
+            if (verbose) {
+                out("${className(d)} > ${d.displayName}  $mark ${r.resultType} ($ms ms)")
+            } else if (!log.isLifecycleEnabled) {
+                if (failed) out("$mark ${className(d)} > ${d.displayName}")
+            } else {
+                val cls = className(d)
+                if (cls != lastClass) { line(cls); lastClass = cls }
+                out("  $mark ${d.displayName}")
+            }
+            for (e in r.exceptions) {
+                // Exceptions cross from the test JVM as Gradle placeholders;
+                // getExceptionClassName() has the original class.
+                val name = runCatching {
+                    e.javaClass.getMethod("getExceptionClassName").invoke(e) as String
+                }.getOrDefault(e.javaClass.name).substringAfterLast('.')
+                log.quiet("      $name: ${e.message?.lines()?.firstOrNull() ?: ""}")
+                // Normal: the first frame in Irij code. Verbose: the trace up
+                // to the last Irij frame, without the JUnit/JDK tail.
+                val trace = e.stackTrace.toList()
+                val lastOwn = trace.indexOfLast { it.className.startsWith("dev.irij") }
+                val frames = when {
+                    !verbose -> trace.filter { it.className.startsWith("dev.irij") }.take(1)
+                    lastOwn >= 0 -> trace.take(lastOwn + 1)
+                    else -> trace
+                }
+                frames.forEach {
+                    log.quiet("          at ${it.className}.${it.methodName}(${it.fileName}:${it.lineNumber})")
+                }
+            }
+            if (verbose) line("")
+        }
+
         override fun afterSuite(s: TestDescriptor, r: TestResult) {
             if (s.parent == null) {
                 println("\n┌─ Test Results ──────────────────────────────────────")
@@ -136,61 +193,8 @@ tasks.test {
                 println("└─────────────────────────────────────────────────────")
             }
         }
-        override fun beforeTest(d: TestDescriptor) {}
-        override fun afterTest(d: TestDescriptor, r: TestResult) {}
     })
 }
-
-// ── Shadow JAR (fat JAR with all dependencies) ──────────────────────
-
-tasks.shadowJar {
-    archiveBaseName.set("irij")
-    archiveClassifier.set("")
-    archiveVersion.set("")
-    manifest {
-        attributes("Main-Class" to "dev.irij.cli.IrijCli")
-    }
-    mergeServiceFiles()
-}
-
-// ── Run task (development) ──────────────────────────────────────────
-
-tasks.register<JavaExec>("run") {
-    dependsOn("compileJava")
-    mainClass = "dev.irij.interpreter.IrijRunner"
-    classpath = sourceSets["main"].runtimeClasspath
-    standardInput = System.`in`
-    jvmArgs("--enable-native-access=ALL-UNNAMED")
-}
-
-// ── Install task ────────────────────────────────────────────────────
-
-tasks.register("install") {
-    dependsOn("shadowJar")
-    doLast {
-        val home = System.getProperty("user.home")
-        val libDir = file("$home/.local/lib").also { it.mkdirs() }
-        val binDir = file("$home/.local/bin").also { it.mkdirs() }
-        copy {
-            from("build/libs/irij.jar")
-            into(libDir)
-        }
-        val script = file("$binDir/irij")
-        script.writeText("#!/bin/bash\nexec java --enable-native-access=ALL-UNNAMED -jar \"$home/.local/lib/irij.jar\" \"\$@\"\n")
-        script.setExecutable(true)
-        println("Installed: $binDir/irij")
-    }
-}
-
-// ── Debug ────────────────────────────────────────────────────
-
-tasks.withType<JavaCompile>().configureEach {
-    options.isIncremental = true
-    // options.debugOptions.debugLevel = "source,lines,vars"
-    options.compilerArgs.add("-g") // Forces all debug information
-    // No --enable-preview needed: unnamed patterns standard since JDK 22
-}
-
 tasks.test {
     // no extra jvmArgs needed
 }
