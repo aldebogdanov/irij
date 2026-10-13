@@ -13,6 +13,16 @@ npm run package          # → irij-0.1.0.vsix
 code --install-extension irij-0.1.0.vsix
 ```
 
+`code: command not found` means the `code` CLI isn't on your `PATH`;
+on macOS VS Code doesn't add it by default (and `sudo` won't find it
+either). Any of these works:
+
+- run **Shell Command: Install 'code' command in PATH** from the
+  Command Palette (`Cmd+Shift+P`), then open a new terminal;
+- call it by its full path:
+  `"/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code" --install-extension irij-0.1.0.vsix`;
+- skip the terminal: Extensions view → `…` menu → **Install from VSIX…**.
+
 For development, open `editors/vscode` in VS Code and press F5 after
 `npm run build` (or keep `npm run watch` running).
 
