@@ -812,7 +812,7 @@ Full design and the recorded Quint behaviour it rests on:
   - `irij build` AOT'd as second slice — output JARs still execute
     on JVM, only the build pipeline goes native.
 - [ ] Channels: `send`, `recv`, `select`
-- [ ] LSP server
+- [x] LSP server — `irij lsp`: diagnostics, hover, definition, completion, `selectionRange` (expand/shrink selection; `docs/internals/lsp.md`)
 - [x] Dynamic/variable map keys in map literals `{(expr)= val}` — Done (PR4, 2026-07); key must evaluate to Str; also works in `{...base (k)= v}` record updates
 
 ---

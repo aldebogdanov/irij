@@ -77,6 +77,7 @@ public final class IrijLspServer implements LanguageServer,
         caps.setTextDocumentSync(TextDocumentSyncKind.Full);
         caps.setHoverProvider(true);
         caps.setDefinitionProvider(true);
+        caps.setSelectionRangeProvider(true);
         caps.setCompletionProvider(new CompletionOptions(false, java.util.List.of(".", " ")));
         ServerInfo info = new ServerInfo("Irij Language Server",
                 dev.irij.cli.IrijCli.VERSION);
@@ -188,6 +189,15 @@ public final class IrijLspServer implements LanguageServer,
                 LspText.zeroWidthAt(sym.loc().line(), sym.loc().col() + 1));
         return CompletableFuture.completedFuture(
                 org.eclipse.lsp4j.jsonrpc.messages.Either.forLeft(List.of(loc)));
+    }
+
+    // ── Selection range: expand/shrink along the parse tree ─────────
+
+    @Override
+    public CompletableFuture<List<SelectionRange>> selectionRange(SelectionRangeParams params) {
+        String src = docs.get(params.getTextDocument().getUri());
+        if (src == null) return CompletableFuture.completedFuture(List.of());
+        return CompletableFuture.completedFuture(LspSelection.compute(src, params.getPositions()));
     }
 
     // ── Completion: keywords + in-scope identifiers ─────────────────
