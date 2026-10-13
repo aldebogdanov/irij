@@ -3,7 +3,7 @@ use std.fs :as fs
 use std.fs {FileIO}
 use std.quint.itf :as itf
 
-;; ITF decoding, against traces recorded from Quint 0.32.0 into
+;; ITF decoding, against traces recorded from Quint 0.33.0 into
 ;; tests/quint/. Recordings, not hand-written fixtures: every claim
 ;; here is one the tool actually produced.
 
@@ -49,7 +49,7 @@ r44 := test "a leading capital does not lead with a hyphen" (-> assert-eq "accou
 ;; ── Traces ──────────────────────────────────────────────────────
 
 ;; Fixtures are recordings: every trace under tests/quint/ came out of
-;; Quint 0.32.0, not out of a text editor.
+;; Quint 0.33.0, not out of a text editor.
 
 bank := itf.parse-trace {} (with fs.default-fs do (fs-read "tests/quint/bank_run_0.itf.json"))
 shapes-json := with fs.default-fs do (fs-read "tests/quint/shapes_0.itf.json")

@@ -117,7 +117,7 @@ past 64 bits instead of wrapping — `stdlib.md` § Numbers), so every
 
 `quint run --mbt` adds `mbt::actionTaken` and `mbt::nondetPicks` to
 every state. **`quint test` and `quint verify` add neither** — verified
-against 0.32.0, not read from documentation. So a scripted run and an
+against 0.32.0 and again on 0.33.0, not read from documentation. So a scripted run and an
 Apalache counterexample can only drive an implementation if the spec
 records its own action in an ordinary variable:
 
@@ -380,12 +380,35 @@ non-zero exit into a diagnosis, where the message can be read and
 changed without recompiling the runtime.
 
 Quint is not bundled. It is `npm i -g @informalsystems/quint`, and the
-decoder was verified against **0.32.0** (`QuintCapability.TESTED_VERSION`).
+decoder was verified against **0.33.0** (`QuintCapability.TESTED_VERSION`).
+
+### Versions: 0.33.0 tested, 0.32.0 still safe for replay
+
+Another version is a warning in `irij quint doctor`, not a refusal.
+Moving from 0.32.0 to 0.33.0 (2026-10-14), every fixture was
+re-recorded and compared with its 0.32.0 recording: identical but for
+the `#meta` timestamps, the Apalache counterexample included (Apalache
+0.56.1 → 0.62.1).
+
+quint-connect-clj, the Clojure sibling, makes 0.33.0 a *floor*
+(its decision 0014) because of Quint #2012: 0.32.0's rust evaluator
+records `mbt::actionTaken` / `mbt::nondetPicks` first-write-wins, so
+after a sample dead-ends, state 0 of the next trace keeps the failed
+step's label and picks (`"step"` instead of `"init"`). The trace
+decodes cleanly and is wrong. A replayer that dispatches state 0 by its
+label is handed the initial state as if a step had produced it.
+
+`std.quint` is not exposed: state 0 is never dispatched by its label.
+`begin` runs the model's `start` / `init`, and state 0 is compared to
+the result; only states after it are dispatched by their action, and
+the bug touches state 0 alone (its *values* are correct). So Irij
+needs no floor — a 0.32.0 trace replays correctly — and 0.33.0 is
+simply the tested version.
 
 ## Fixtures are recordings
 
 Everything under `tests/quint/` came out of the tool, not out of a text
 editor. The `.qnt` files are the specs; the `.itf.json` files are what
-Quint 0.32.0 wrote when run against them, including the Apalache
+Quint 0.33.0 wrote when run against them, including the Apalache
 counterexample. A fixture that looks about right would test the
 decoder against our idea of the format rather than against the format.
