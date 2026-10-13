@@ -4,9 +4,6 @@ import dev.irij.compiler.BytecodeSession;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.IrijRuntimeError;
 import dev.irij.runtime.Values;
-import dev.irij.parser.IrijLexer;
-import dev.irij.parser.IrijParseDriver;
-import org.antlr.v4.runtime.Token;
 import org.jline.reader.*;
 import org.jline.reader.impl.history.DefaultHistory;
 import org.jline.terminal.Terminal;
@@ -101,7 +98,7 @@ public class IrijRepl {
 
             pending.append(line).append("\n");
 
-            if (isBlockOpen(pending.toString())) {
+            if (ReplInput.isIncomplete(pending.toString())) {
                 continue;
             }
 
@@ -172,35 +169,6 @@ public class IrijRepl {
             String preview = Values.toIrijString(value);
             if (preview.length() > 60) preview = preview.substring(0, 57) + "...";
             out.printf("  %-20s : %-12s = %s%n", entry.getKey(), typeName, preview);
-        }
-    }
-
-    // ── Incomplete-input detection ────────────────────────────────────────
-
-    private boolean isBlockOpen(String input) {
-        try {
-            List<Token> tokens = IrijParseDriver.tokenize(input);
-            int depth = 0;
-            for (var tok : tokens) {
-                String name = tokenName(tok);
-                if ("INDENT".equals(name)) depth++;
-                else if ("DEDENT".equals(name)) depth--;
-            }
-            return depth > 0;
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private static String tokenName(Token tok) {
-        int type = tok.getType();
-        if (type == Token.EOF) return "<EOF>";
-        try {
-            var vocab = IrijLexer.VOCABULARY;
-            String name = vocab.getSymbolicName(type);
-            return name != null ? name : String.valueOf(type);
-        } catch (Exception e) {
-            return String.valueOf(type);
         }
     }
 

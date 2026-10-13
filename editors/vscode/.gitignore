@@ -1,0 +1,7 @@
+node_modules/
+dist/
+out/
+*.vsix
+# copied from ../textmate by `npm run sync-grammar`
+syntaxes/irij.tmLanguage.json
+.vscode-test/

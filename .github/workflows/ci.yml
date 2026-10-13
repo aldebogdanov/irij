@@ -97,3 +97,23 @@ jobs:
         with:
           files: build/libs/irij.jar
           generate_release_notes: true
+
+  # VS Code extension: grammar (via vscode-textmate), indentation rules,
+  # form detection, typecheck and packaging. The end-to-end suite
+  # (`npm run test:e2e`) launches VS Code, so it runs locally only.
+  vscode:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run package

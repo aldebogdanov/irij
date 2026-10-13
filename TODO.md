@@ -18,6 +18,15 @@ Source of truth: `docs/irij-lang-spec.org`
   - [x] `irij lsp` registered with eglot and lsp-mode
   - [x] ERT suite — `editors/emacs/test/irij-mode-test.el`
 - [x] **TextMate grammar** — `editors/textmate/irij.tmLanguage.json` (VS Code, Shiki, Linguist, Zed)
+
+## Tooling — VS Code Extension
+
+- [x] **`editors/vscode/`** — highlighting (shared TextMate grammar, also in Markdown code blocks), language configuration (`;;` comments, brackets, offside indentation and folding), `irij lsp` client
+- [x] REPL in the integrated terminal: send selection / top-level form (`Cmd/Ctrl+Enter`), send file (`:load`), run file
+- [x] Tests: grammar via `vscode-textmate`, indentation rules, form detection (`npm test`, in CI); end to end in VS Code (`npm run test:e2e`)
+- [x] `irij repl` reads multi-line input by the offside rule (`ReplInput`) — pasted forms used to be evaluated line by line
+- [ ] Publish to the VS Code Marketplace and Open VSX (needs a publisher account and a license for the repo)
+- [ ] Inline results via nREPL (like the Emacs client)
 - [x] **irij-nrepl** — `editors/emacs/irij-nrepl.el`
   - [x] Bencode encoder/decoder (pure Elisp, zero external deps)
   - [x] Async TCP transport (`make-network-process`, partial-frame buffering)

@@ -1,0 +1,72 @@
+{
+  "comments": {
+    "lineComment": ";;"
+  },
+  "brackets": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "{",
+      "}"
+    ]
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\"",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    }
+  ],
+  "surroundingPairs": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "[",
+      "]"
+    ],
+    [
+      "{",
+      "}"
+    ],
+    [
+      "\"",
+      "\""
+    ]
+  ],
+  "autoCloseBefore": ";:.,=}])> \n\t",
+  "wordPattern": "(-?\\d[\\d_]*(?:\\.\\d[\\d_]*)?)|(\\$?[A-Za-z_][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*[?!]?)",
+  "folding": {
+    "offSide": true,
+    "markers": {
+      "start": "^\\s*;;\\s*#?region\\b",
+      "end": "^\\s*;;\\s*#?endregion\\b"
+    }
+  },
+  "indentationRules": {
+    "increaseIndentPattern": "^(?!\\s*=>).*(?:=>|->|:=|:!|<-|=)\\s*(?:;;.*)?$|^\\s*(?:pub\\s+)?(?:(?:fn|effect|handler|proto|impl|model|contract|for|select|enclave|par-each|on-failure)(?![\\w?!-])|spec(?![\\w?!-])(?!\\s*::))|^\\s*(?:[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*[?!]?\\s*(?::=|:!|<-)\\s*)?(?:if(?![\\w?!-])(?!.*\\belse(?![\\w?!-]))|else\\s*(?:;;.*)?$|else\\s+if(?![\\w?!-])(?!.*\\belse(?![\\w?!-]))|match(?![\\w?!-])|scope(?:\\.[a-z-]+)?(?![\\w?!-])|with(?![\\w?!-])(?!.*\\bdo(?![\\w?!-]))|do\\s*(?:;;.*)?$)",
+    "decreaseIndentPattern": "^\\s*else(?![\\w?!-])"
+  }
+}

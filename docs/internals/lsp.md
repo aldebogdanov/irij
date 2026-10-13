@@ -69,7 +69,8 @@ goto-def via `M-.`.
 
 ## Editor integration — VS Code
 
-A separate extension package (not in this repo) would do:
+The extension in `editors/vscode/` (see `docs/vscode.md`) starts the
+server with `vscode-languageclient`; the core of it is:
 
 ```ts
 const serverOptions: ServerOptions = {
@@ -83,6 +84,10 @@ const clientOptions: LanguageClientOptions = {
 const client = new LanguageClient("irij", "Irij", serverOptions, clientOptions);
 client.start();
 ```
+
+`irij.executable` sets the command; `irij.languageServer.enabled`
+turns it off. Expand Selection (Shift+Alt+→) uses `selectionRange`
+with no extension code.
 
 ## Why FULL sync (not incremental)
 
