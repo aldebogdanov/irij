@@ -1,0 +1,34 @@
+mod std.resource
+
+;; Resource effect module: read-only access to the program's own
+;; resources/ directory, bundled into the jar by `irij build` or read
+;; from resources/ under the working directory when run from source.
+;; Nothing outside resources/ is reachable, so a program that needs its
+;; own data files does not need FileIO.
+;;
+;; Usage:
+;;   use std.resource :as resource
+;;   use std.resource {Resource}
+;;
+;;   fn banner :: Str ::: Resource
+;;     _ => resource-read "banner.txt"
+;;
+;;   with resource.default-resource
+;;     banner ()
+;;
+;;   ;; Mock in tests:
+;;   handler mock-resource :: Resource
+;;     resource-read path => resume "hello"
+;;     resource-exists? path => resume true
+
+pub effect Resource
+  resource-read :: Str Str
+  resource-exists? :: Str Bool
+
+;; Capability binding. `resources` resolves only inside Resource-handler
+;; clauses (lint-enforced by EffectRowChecker).
+cap resources :: Resource = "dev.irij.runtime.ResourceCapability"
+
+pub handler default-resource :: Resource ::: JVM
+  resource-read path => resume (resources.read path)
+  resource-exists? path => resume (resources.existsQ path)

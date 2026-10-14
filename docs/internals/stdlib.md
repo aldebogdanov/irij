@@ -144,6 +144,7 @@ Real Irij code, parsed + compiled like user code:
 | `std.env` | `Env` effect + handler: `env-var`, and `env-args` (the arguments after the program, from the `program-args` builtin) |
 | `std.log` | `Log` effect — leveled logging; `default-log`/`silent-log` handlers |
 | `std.fs` | `FileIO` effect + handlers |
+| `std.resource` | `Resource` effect — `resource-read`, `resource-exists?`: read-only access to the program's own `resources/` (bundled into the jar by `irij build`, else `resources/` under the working directory), nothing else; `default-resource` handler |
 | `std.http` | HTTP client (`http-get`, `http-post`, `http-request` — the latter takes an optional `timeout-ms`) |
 | `std.db` | `Db` effect + SQLite handler |
 | `std.serve` | Web server framework (routes, middleware, request/response); serves the app's `resources/` directory as static files, nothing else |

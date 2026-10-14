@@ -516,6 +516,9 @@ Effect-based I/O operations, mockable via handlers in tests.
   - Fully mockable: `handler mock-fs :: FileIO` for tests
   - Additional raw builtins: `list-dir`, `delete-file`, `make-dir`, `append-file`
   - 7 integration tests (5 mock + 2 real FS)
+- [x] **Bundled resources** — `std.resource` module with `Resource` effect (`ResourceCapability`)
+  - Ops: `resource-read`, `resource-exists?` — the program's own `resources/`, from the jar or from disk
+  - 5 Java tests (`ResourceCapabilityTest`) + 4 integration tests (`tests/test-resource.irj`)
 - [x] **HTTP client** — `std.http` module with `Http` effect
   - Ops: `http-get`, `http-post`, `http-put`, `http-delete`, `http-request`
   - `default-http` handler wraps `_http-request` builtin (java.net.http.HttpClient)

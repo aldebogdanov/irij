@@ -1,0 +1,48 @@
+use std.test {assert-eq assert-false assert-true summarize test}
+use std.resource :as resource
+use std.resource {Resource}
+
+;; ── Mock handler for testing ──────────────────────────────────────
+
+handler mock-resource :: Resource
+  resource-read path => resume ("contents of " ++ path)
+  resource-exists? path => resume (path == "version.txt")
+
+fn version-or-dev :: Str ::: Resource
+  _ =>
+    if (resource-exists? "version.txt")
+      resource-read "version.txt"
+    else
+      "dev"
+
+fn run-mock-read
+  =>
+  with mock-resource
+    version-or-dev ()
+
+r1 := test "reads through the handler" (-> assert-eq "contents of version.txt" (run-mock-read ()))
+
+fn run-mock-absent
+  =>
+  with mock-resource
+    resource-exists? "banner.txt"
+
+r2 := test "absent through the handler" (-> assert-false (run-mock-absent ()))
+
+;; ── Real handler: nothing outside resources/ is reachable ─────────
+
+fn run-real-absent
+  =>
+  with resource.default-resource
+    resource-exists? "no-such-resource.txt"
+
+r3 := test "real handler: a missing resource is absent" (-> assert-false (run-real-absent ()))
+
+fn run-real-outside
+  =>
+  with resource.default-resource
+    resource-exists? "irij.toml"
+
+r4 := test "real handler: irij.toml is not a resource" (-> assert-false (run-real-outside ()))
+
+summarize #[r1 r2 r3 r4]

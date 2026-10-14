@@ -98,6 +98,13 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
   raw-multipart-* names + their RuntimeSupport / Builtins / emit-
   table entries are all gone; sandbox's forbidden-list is empty
   (the dangerous names just no longer exist).
+- **Resource (shipped)**: `ResourceCapability` for std.resource —
+  read-only access to the program's own `resources/`, looked up where
+  `serve` looks up static files (`__irij_resources/` on the classpath,
+  else `resources/` under the working directory) and refusing `..`,
+  `.`, absolute and backslashed paths. A separate effect, not a
+  FileIO op, so a program can read its own data files (a stamped
+  version, templates) without being granted the disk.
 - **3e — Session (shipped)**: `SessionCapability` (thin shim over
   the existing `dev.irij.compiler.RuntimeSessions`, which can't
   move to the runtime package because it instantiates
