@@ -1448,6 +1448,7 @@
   std.func        ;; combinators (identity, const, compose, ...)
   std.convert     ;; conversions between core value types
   std.fs          ;; FileIO effect + default handler
+  std.resource    ;; Resource effect — read-only, the program's own resources/
   std.http        ;; Http client effect
   std.serve       ;; Serve effect — HTTP server, SSE, multipart
   std.db          ;; Db effect (SQLite via JDBC)

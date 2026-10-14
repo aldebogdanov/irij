@@ -395,6 +395,7 @@ manifested as `Unbound variable` at runtime in nested-with bodies.
 | `std.http` | Http | `HttpClientCapability` |
 | `std.serve` | Serve | `ServeCapability` (server + SSE + multipart) |
 | `std.fs` | FileIO | `FsCapability` |
+| `std.resource` | Resource | `ResourceCapability` |
 | `std.session` | Session | `SessionCapability` |
 | `std.auth` | — | crypto builtins only |
 
