@@ -291,6 +291,10 @@ final class SmClassifier implements Opcodes {
                             && b.target() instanceof Stmt.BindTarget.Simple sm) {
                         liftName(sm.name());
                     }
+                    if (s instanceof Stmt.MutBind mb
+                            && mb.target() instanceof Stmt.BindTarget.Simple sm) {
+                        liftName(sm.name());
+                    }
                     pureAcc.get(cur).add(s);
                     if (isLast && exitJump == null) {
                         // Fallthrough last stmt: if it's an ExprStmt, its expr
@@ -692,6 +696,8 @@ final class SmClassifier implements Opcodes {
             case Stmt.MutBind b -> containsOpCallExpr(b.value());
             case Stmt.Assign a -> containsOpCallExpr(a.value());
             case Stmt.MatchStmt ms -> matchContainsOp(ms.scrutinee(), ms.arms());
+            // Emitted whole, never a step state — see containsOpCall.
+            case Stmt.Scope sc -> false;
             default -> true;
         };
     }
@@ -884,7 +890,8 @@ final class SmClassifier implements Opcodes {
         // Sequence path: collect lifted-local names.
         //   - Every Simple-Bind in any non-final segment
         //   - Every resume-bind (Segment.bindName) of non-final segments
-        //   - Destructure/MutBind in non-final segments → Unsupported (3a scope)
+        //   - Every Simple MutBind in a non-final segment
+        //   - Destructure in non-final segments → Unsupported (3a scope)
         // Then assign slots for inner-with continuations beyond the named
         // lifted entries (synthetic "$with$N" names so emitVarLoad never
         // resolves to them).
@@ -900,8 +907,15 @@ final class SmClassifier implements Opcodes {
                     } else if (nonFinal) {
                         return new WithBodyShape.Unsupported();
                     }
-                } else if (st instanceof Stmt.MutBind && nonFinal) {
-                    return new WithBodyShape.Unsupported();
+                } else if (st instanceof Stmt.MutBind mb && nonFinal) {
+                    // Lifted like `:=`: emitMutBind and emitAssign read and
+                    // write k.fields for a lifted name, so the value
+                    // survives the performs that follow.
+                    if (mb.target() instanceof Stmt.BindTarget.Simple sm) {
+                        if (seen.add(sm.name())) lifted.add(sm.name());
+                    } else {
+                        return new WithBodyShape.Unsupported();
+                    }
                 }
             }
             if (nonFinal && seg.opName() != null && seg.bindName() != null
@@ -973,6 +987,12 @@ final class SmClassifier implements Opcodes {
             // gate above already routed if-with-op-in-branches to EffIR.
             case Stmt.IfStmt ifs -> stmtContainsOpRecursive(ifs);
             case Stmt.MatchStmt ms -> matchContainsOp(ms.scrutinee(), ms.arms());
+            // A scope is emitted whole, as an ordinary statement of the
+            // segment: its forks run on their own fibers, which reach this
+            // `with`'s handler through the inherited SM_STACK, and an op
+            // its own body performs is dispatched synchronously — as one
+            // performed by a fn the body calls. Neither is a step state.
+            case Stmt.Scope sc -> false;
             // Step 8: nested `with` would require the outer continuation to
             // resume INSIDE the inner with rather than at its start, plus
             // bridging PerformSignal across nested dispatch loops — not

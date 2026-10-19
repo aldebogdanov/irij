@@ -114,6 +114,9 @@ final class EffectEmitter implements Opcodes {
             }
             clauseParams.add(new Pattern.VarPat("resume", null));
 
+            // `resume` must be the clause's last step (spec §3.2).
+            checkResumeIsLast(c.body(), "handler " + h.name() + " clause " + c.opName());
+
             // Tier-c: clause body performs a foreign effect. Compile body
             // as an SM continuation so the foreign perform throws a
             // PerformSignal that escapes to an enclosing SM frame.
@@ -151,6 +154,163 @@ final class EffectEmitter implements Opcodes {
 
         mv.visitMaxs(0, 0);
         mv.visitEnd();
+    }
+
+
+    // ── `resume` is a clause's last step ────────────────────────────────
+    //
+    // `resume v` hands v back to the perform site and the body carries on
+    // from there; it doesn't come back to the clause (spec §3.2). The
+    // dispatch loop's trampoline relies on that: a `resume` throws
+    // TailResume, which unwinds the clause's frames, so a tight perform
+    // loop runs in constant stack. Code after it would never run, so it's
+    // refused here rather than silently skipped. `resume` may end the
+    // clause, or end a branch of an `if` / `match` that ends the clause;
+    // anywhere else — followed by more statements, bound to a name,
+    // inside an expression — is a compile error.
+
+    void checkResumeIsLast(Expr body, String where) {
+        List<Stmt> stmts = body instanceof Expr.Block b
+                ? b.stmts() : List.of(new Stmt.ExprStmt(body, null));
+        checkStmts(stmts, where);
+    }
+
+    private void checkStmts(List<Stmt> stmts, String where) {
+        for (int i = 0; i < stmts.size(); i++) {
+            Stmt s = stmts.get(i);
+            if (!mentionsResume(s)) continue;
+            if (i == stmts.size() - 1) {
+                checkTail(s, where);
+                return;
+            }
+            if (s instanceof Stmt.Bind b && isResumeCall(b.value())) {
+                throw new IrijCompiler.CompileException(where + ": `resume` doesn't return"
+                        + " to the clause, so its value can't be bound — `resume` must be"
+                        + " the last step of a clause" + at(b.value()));
+            }
+            boolean resumesHere = s instanceof Stmt.IfStmt || s instanceof Stmt.MatchStmt
+                    || (s instanceof Stmt.ExprStmt es && (isResumeCall(es.expr())
+                            || es.expr() instanceof Expr.IfExpr || es.expr() instanceof Expr.MatchExpr));
+            if (!resumesHere) rejectResumeIn(where);
+            throw new IrijCompiler.CompileException(where + ": code after `resume` never runs"
+                    + " — `resume` must be the last step of a clause"
+                    + (s instanceof Stmt.ExprStmt es ? at(es.expr()) : ""));
+        }
+    }
+
+    /** The last statement of a clause (or of a tail branch). */
+    private void checkTail(Stmt s, String where) {
+        switch (s) {
+            case Stmt.ExprStmt es -> checkTailExpr(es.expr(), where);
+            case Stmt.IfStmt is -> {
+                if (mentionsResume(is.cond())) rejectResumeIn(where);
+                checkStmts(is.thenBranch(), where);
+                if (is.elseBranch() != null) checkStmts(is.elseBranch(), where);
+            }
+            case Stmt.MatchStmt ms -> {
+                if (mentionsResume(ms.scrutinee())) rejectResumeIn(where);
+                checkArms(ms.arms(), where);
+            }
+            case Stmt.Bind b when isResumeCall(b.value()) ->
+                    throw new IrijCompiler.CompileException(where + ": `resume` doesn't return"
+                            + " to the clause, so its value can't be bound — end the clause"
+                            + " with `resume v`" + at(b.value()));
+            default -> rejectResumeIn(where);
+        }
+    }
+
+    private void checkTailExpr(Expr e, String where) {
+        if (isResumeCall(e)) return;
+        switch (e) {
+            case Expr.IfExpr ie -> {
+                if (mentionsResume(ie.cond())) rejectResumeIn(where);
+                checkTailExpr(ie.thenBranch(), where);
+                checkTailExpr(ie.elseBranch(), where);
+            }
+            case Expr.MatchExpr me -> {
+                if (mentionsResume(me.scrutinee())) rejectResumeIn(where);
+                checkArms(me.arms(), where);
+            }
+            case Expr.Block blk -> checkStmts(blk.stmts(), where);
+            default -> { if (mentionsResume(e)) rejectResumeIn(where); }
+        }
+    }
+
+    private void checkArms(List<Expr.MatchArm> arms, String where) {
+        for (Expr.MatchArm arm : arms) {
+            if (mentionsResume(arm.guard())) rejectResumeIn(where);
+            checkTailExpr(arm.body(), where);
+        }
+    }
+
+    private static void rejectResumeIn(String where) {
+        throw new IrijCompiler.CompileException(where + ": `resume` must be the last step"
+                + " of a clause — `resume v` on its own, or ending a branch of an `if` /"
+                + " `match` that ends the clause — not part of an expression");
+    }
+
+    private static String at(Expr e) {
+        return e instanceof Expr.App a && a.loc() != null
+                ? " (line " + a.loc().line() + ")" : "";
+    }
+
+    private static boolean isResumeCall(Expr e) {
+        if (!(e instanceof Expr.App app && app.fn() instanceof Expr.Var v && v.name().equals("resume"))) {
+            return false;
+        }
+        for (Expr a : app.args()) if (mentionsResume(a)) return false;
+        return true;
+    }
+
+    /** Whether `resume` is referenced, outside any lambda (a lambda's
+     *  body runs whenever it's called, not as part of the clause). */
+    static boolean mentionsResume(Object node) {
+        if (node == null) return false;
+        return switch (node) {
+            case Expr.Var v -> v.name().equals("resume");
+            case Expr.Lambda l -> false;
+            case Expr.App a -> mentionsResume(a.fn()) || a.args().stream().anyMatch(EffectEmitter::mentionsResume);
+            case Expr.BinaryOp b -> mentionsResume(b.left()) || mentionsResume(b.right());
+            case Expr.UnaryOp u -> mentionsResume(u.operand());
+            case Expr.Pipe p -> mentionsResume(p.left()) || mentionsResume(p.right());
+            case Expr.Compose c -> mentionsResume(c.left()) || mentionsResume(c.right());
+            case Expr.SeqOp so -> mentionsResume(so.arg());
+            case Expr.IfExpr ie -> mentionsResume(ie.cond()) || mentionsResume(ie.thenBranch())
+                    || mentionsResume(ie.elseBranch());
+            case Expr.MatchExpr me -> mentionsResume(me.scrutinee())
+                    || me.arms().stream().anyMatch(a -> mentionsResume(a.guard()) || mentionsResume(a.body()));
+            case Expr.VectorLit vl -> vl.elements().stream().anyMatch(EffectEmitter::mentionsResume);
+            case Expr.SetLit sl -> sl.elements().stream().anyMatch(EffectEmitter::mentionsResume);
+            case Expr.TupleLit tl -> tl.elements().stream().anyMatch(EffectEmitter::mentionsResume);
+            case Expr.DoExpr de -> de.exprs().stream().anyMatch(EffectEmitter::mentionsResume);
+            case Expr.MapLit ml -> ml.entries().stream().anyMatch(en -> switch (en) {
+                case Expr.MapEntry.Field f -> mentionsResume(f.value());
+                case Expr.MapEntry.DynField df -> mentionsResume(df.keyExpr()) || mentionsResume(df.value());
+                default -> false;
+            });
+            case Expr.RecordUpdate ru -> ru.updates().stream().anyMatch(en -> switch (en) {
+                case Expr.MapEntry.Field f -> mentionsResume(f.value());
+                case Expr.MapEntry.DynField df -> mentionsResume(df.keyExpr()) || mentionsResume(df.value());
+                default -> false;
+            });
+            case Expr.Range r -> mentionsResume(r.from()) || mentionsResume(r.to());
+            case Expr.StringInterp si -> si.parts().stream().anyMatch(pt ->
+                    pt instanceof Expr.StringPart.Interpolation in && mentionsResume(in.expr()));
+            case Expr.DotAccess da -> mentionsResume(da.target());
+            case Expr.Block blk -> blk.stmts().stream().anyMatch(EffectEmitter::mentionsResume);
+            case Stmt.ExprStmt es -> mentionsResume(es.expr());
+            case Stmt.Bind b -> mentionsResume(b.value());
+            case Stmt.MutBind mb -> mentionsResume(mb.value());
+            case Stmt.Assign as -> mentionsResume(as.value());
+            case Stmt.IfStmt is -> mentionsResume(is.cond())
+                    || is.thenBranch().stream().anyMatch(EffectEmitter::mentionsResume)
+                    || (is.elseBranch() != null && is.elseBranch().stream().anyMatch(EffectEmitter::mentionsResume));
+            case Stmt.MatchStmt ms -> mentionsResume(ms.scrutinee())
+                    || ms.arms().stream().anyMatch(a -> mentionsResume(a.guard()) || mentionsResume(a.body()));
+            case Stmt.With w -> w.body().stream().anyMatch(EffectEmitter::mentionsResume);
+            case Stmt.Scope sc -> sc.body().stream().anyMatch(EffectEmitter::mentionsResume);
+            default -> false;
+        };
     }
 
 

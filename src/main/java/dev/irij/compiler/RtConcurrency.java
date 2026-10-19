@@ -125,8 +125,17 @@ public final class RtConcurrency {
         }
         try { return f.result.join(); }
         catch (java.util.concurrent.CompletionException ce) {
-            throw RuntimeSupport.runtimeFrom(ce.getCause(), "Fiber failed");
+            throw fiberFailure(ce.getCause());
         }
+    }
+
+
+    /** What awaiting or joining a failed fiber raises. A handler that
+     *  ended its `with` from the fiber (an AbortSignal) carries on to
+     *  that `with` — its dispatch loop runs on this thread — unchanged. */
+    static RuntimeException fiberFailure(Throwable cause) {
+        if (cause instanceof AbortSignal abort) return abort;
+        return RuntimeSupport.runtimeFrom(cause, "Fiber failed");
     }
 
 

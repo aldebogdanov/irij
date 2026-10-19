@@ -1,0 +1,88 @@
+use std.test {assert-eq summarize test}
+
+;; ── resume is a clause's last step ─────────────────────────────────
+
+effect Ask
+  ask :: Str -> Str
+
+handler polite :: Ask
+  ask q =>
+    answer := if (q == "name?") "Ada" else "?"
+    resume answer
+
+fn greet ::: Ask
+  =>
+  name := ask "name?"
+  "Hello, " ++ name
+
+handler by-branch :: Ask
+  ask q =>
+    if (q == "loud")
+      v := "ADA"
+      resume v
+    else
+      resume "ada"
+
+effect Log
+  log :: Str -> ()
+
+handler collect :: Log
+  seen :! #[]
+  log msg =>
+    seen <- seen ++ #[msg]
+    resume ()
+
+fn work ::: Log
+  =>
+  log "a"
+  log "b"
+  "done"
+
+r1 := test "resume answers the perform" (-> assert-eq "Hello, Ada" (with polite do (greet ())))
+r2 := test "resume ends an if branch" (-> assert-eq #["ADA" "ada"] (with by-branch do #[(ask "loud") (ask "quiet")]))
+r3 := test "the body's value is the with's" (-> assert-eq "done" (with collect do (work ())))
+r4 := test "code before resume ran" (-> assert-eq #["a" "b"] collect.seen)
+
+;; ── A clause that doesn't resume, for an op in a called fn ──────────
+
+effect Abort
+  abort :: Str -> ()
+
+handler to-err :: Abort
+  abort msg => Err msg
+
+fn checked ::: Abort
+  => n
+  if (n < 0)
+    abort "negative"
+  Ok (n * 10)
+
+fn via-try
+  => n
+  with to-err
+    r := try (-> checked n)
+    Ok r
+
+r5 := test "no abort" (-> assert-eq (Ok 50) (with to-err do (checked 5)))
+r6 := test "abort in a called fn ends the with" (-> assert-eq (Err "negative") (with to-err do (checked (-5))))
+r7 := test "try doesn't catch an abort" (-> assert-eq (Err "negative") (via-try (-1)))
+
+;; ── scope and :! in a with body that performs ───────────────────────
+
+handler quiet :: Log
+  log _ => resume ()
+
+fn with-scope
+  =>
+  with quiet
+    log "before"
+    n :! 0
+    scope s
+      f := s.fork (-> log "in a fiber"; 21)
+      n <- await f
+    log "after"
+    n * 2
+
+r8 := test "scope in a performing with body" (-> assert-eq 42 (with-scope ()))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8]

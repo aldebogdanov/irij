@@ -646,11 +646,28 @@
    handler writes to real stdout; test handler collects strings into a
    list. The function under test doesn't know the difference.
 
+   *Resuming:* a clause ends in one of two ways. =resume v= hands =v=
+   back to the perform site as the operation's result, and the body
+   carries on from there. =resume= does not return to the clause, so it
+   is the clause's *last step*: on its own, or ending a branch of an
+   =if= / =match= that ends the clause. Code after it, binding its value
+   (=r := resume v=), or =resume= inside an expression is a compile error
+   ("code after =resume= never runs"). A clause that doesn't resume ends
+   the =with= instead: the clause's value becomes the =with='s and the
+   rest of the body is abandoned — how a handler turns an operation into
+   an early exit (=abort msg => Err msg=). Code that should see the
+   body's result goes after the =with=.
+
+   *Why:* every clause either answers the operation or ends the =with=;
+   there is no third phase running after the body. A handler reads top
+   to bottom, and the runtime resumes without growing the stack, so a
+   loop that performs a million times runs in constant space.
+
    #+begin_example
    ;; handler definition: provides concrete behavior for an effect
    handler console-to-stdout :: Console
-     print msg => io.stdout.write msg       ;; "print" means write to stdout
-     read-line () => io.stdin.read-line ()  ;; "read-line" means read stdin
+     print msg => resume (io.stdout.write msg)       ;; "print" means write to stdout
+     read-line () => resume (io.stdin.read-line ())  ;; "read-line" means read stdin
 
    ;; using a handler: wraps a block, intercepts its effects
    with console-to-stdout
@@ -659,11 +676,13 @@
    ;; test handler: same effect, completely different behavior (pure!)
    handler mock-console :: Console
      state :! #["Alice"]    ;; mutable binding within handler
-     print msg => state <- state ++ #[msg]   ;; "print" appends to list
+     print msg =>                             ;; "print" appends to list
+       state <- state ++ #[msg]
+       resume ()
      read-line () =>                          ;; "read-line" pops from list
        result := head state                  ;; read mutable by name
        state <- tail state                   ;; write with <-
-       result
+       resume result                         ;; always the last step
 
    ;; now test greet without any real IO:
    with mock-console

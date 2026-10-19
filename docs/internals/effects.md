@@ -118,9 +118,17 @@ work first.
   handler bound to a local, tier-c clauses crossing composed chains,
   tier-c resume-value flow-through) are all closed as of v0.7.0 —
   zero `@Disabled` SM tests remain. Still unsupported: a `match` guard
-  that performs, a `with` inside a branch or arm that performs, and a
-  `scope` in a body that performs (TODO.md). A call to a fn or lambda
-  that performs is fine anywhere.
+  that performs and a `with` inside a branch or arm that performs
+  (TODO.md). A call to a fn or lambda that performs is fine anywhere.
+
+A `scope` in a `with` body is an ordinary statement of its segment,
+never a step state (`SmClassifier.containsOpCall` /
+`stmtContainsOpRecursive` say it performs nothing): its forks run on
+fibers that inherit `SM_STACK` and reach the handler synchronously, and
+an op its own body performs is dispatched synchronously, like one a
+called fn performs. A `:!` binding is lifted into `k.fields` like a
+`:=` one (Sequence and EffIR shapes); `emitMutBind` and `emitAssign`
+already read and write the field for a lifted name.
 
 A lambda or nested `with` built inside a step is a method of its own:
 it captures the lifted locals it reads (`LambdaEmitter.collectFreeVars`
@@ -160,6 +168,62 @@ For each shape, the emitter:
 2. Builds an `IrijFn` wrapper via `LambdaMetafactory`.
 3. Calls `RtEffects.runWithSM(handler, step, nFields)` at the
    `with` site.
+
+## Frames: `SM_STACK` entries
+
+Each dispatch loop pushes an `RtEffects.SmFrame` — its handlers plus
+the **root continuation** of the `with` body it runs. It is a
+`List<CompiledHandler>`, so fiber snapshots and the fallback search read
+it as before. The root continuation is what an abort from outside the
+step targets (`AbortSignal`, below); it identifies the `with` rather than
+the dispatch-loop call because a nested `with` is re-entered by several
+`runWithSM` calls.
+
+## `resume` is a clause's last step
+
+`resume v` hands `v` back to the perform site and the body carries on
+from there; it does not come back to the clause (spec §3.2). The
+trampoline depends on it: `resume` throws `TailResume`, which unwinds
+the clause's frames, and that is what keeps a million-perform loop in
+constant stack. So `resume` may only end the clause, or end a branch of
+an `if` / `match` that ends the clause; `EffectEmitter.checkResumeIsLast`
+refuses every other place at compile time:
+
+```
+handler late :: Log ::: Console
+  log msg =>
+    resume ()
+    println "never"      ;; code after `resume` never runs
+handler wrap :: Ask
+  ask q =>
+    r := resume "Ada"    ;; `resume` doesn't return … can't be bound
+    "[" ++ r ++ "]"
+```
+
+and `resume` inside a larger expression or an `if` condition / `match`
+scrutinee or guard. A lambda's body is not checked: it runs whenever it
+is called, not as a step of the clause.
+
+Before this was a compile error, the code was silently skipped on the
+step path (the `TailResume` throw unwound it) and ran *before* the body
+continued on the synchronous path (`fireOpToSM`, an op performed in a
+called fn), where `resume` returns normally. To post-process the
+body's result, or do something after it, write it after the `with`.
+
+## Aborting from outside the step
+
+A clause that doesn't `resume` makes its value the `with`'s, abandoning
+the body. When the op was performed in the step itself, the dispatch
+loop simply returns the clause value. When it was performed further
+down — in a fn the body called, so through `RtEffects.perform` and
+`fireOpToSM` — the body's frames are below the clause on the JVM stack.
+`fireOpToSM` throws an `AbortSignal` targeting the frame's root
+continuation; it unwinds to the dispatch loop running that `with`
+(which catches only its own) and that loop returns the value. `try`
+and `on-failure` re-throw it: an abort is control flow, not a failure.
+A clause of an *outer* `with`, reached through the fallback search,
+aborts that outer `with` the same way. This used to fail with "SM
+clause aborted from synchronous-perform context".
 
 ## Nested `with` (native dual-SM)
 
