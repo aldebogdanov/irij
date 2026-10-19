@@ -22,6 +22,13 @@ At fn-emit time:
      `GOTO currentFnEntry`.
    - `Expr.IfExpr` → cond non-tail, branches tail (recurse with
      `emitTailExpr`).
+   - `Expr.MatchExpr` → `PatternEmitter.emitTailMatch`: scrutinee and
+     guards non-tail, every arm's body tail. Each arm returns or jumps,
+     so there's no join label. A match-arms fn body
+     (`n => loop (n - 1)`) and a `match` statement ending an imperative
+     body go through it too; before, both emitted an ordinary match and
+     returned its value, so a self-call in an arm was a JVM call and
+     overflowed past ~10K deep.
    - `Expr.Block` → earlier stmts non-tail, last expr tail.
    - Otherwise → `emitExpr` + `ARETURN`.
 

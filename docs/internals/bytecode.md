@@ -128,7 +128,7 @@ elimination at hot sites.
 | Method | Handles |
 |---|---|
 | `emitFn` | Top-level `Decl.FnDecl`. Sets up TCO entry label, dispatches by `FnBody` variant. |
-| `emitTailExpr` | Expression at tail position — lowers self-tail-calls to GOTO. Falls through to `emitExpr + ARETURN`. |
+| `emitTailExpr` | Expression at tail position — lowers self-tail-calls to GOTO. Propagates tail position through `do`, `if`, `match` (`PatternEmitter.emitTailMatch`) and blocks; otherwise `emitExpr + ARETURN`. |
 | `emitExpr` | Big switch over `Expr` variants. The main workhorse. |
 | `emitStmt` | Statements: bind, mut-bind, assign, with, scope, if-stmt, match-stmt. |
 | `emitApp` | Function calls. Decides between built-in, effect op, constructor, local lambda value, lifted slot, or user-fn `invokestatic`. |

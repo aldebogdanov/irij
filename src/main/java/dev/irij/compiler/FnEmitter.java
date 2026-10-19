@@ -407,14 +407,9 @@ final class FnEmitter implements Opcodes {
         try {
             switch (fn.body()) {
                 case Decl.FnBody.LambdaBody lb -> ce.exprEm.emitTailExpr(lb.body(), mv, locals);
-                case Decl.FnBody.MatchArmsBody mab -> {
-                    Expr.MatchExpr me = new Expr.MatchExpr(
-                            new Expr.Var("$scrut", null),
-                            mab.arms(),
-                            null);
-                    ce.patEm.emitMatchExpr(me, mv, locals);
-                    emitTailReturn(mv);
-                }
+                case Decl.FnBody.MatchArmsBody mab -> ce.patEm.emitTailMatch(
+                        new Expr.MatchExpr(new Expr.Var("$scrut", null), mab.arms(), null),
+                        mv, locals);
                 case Decl.FnBody.ImperativeBody ib -> emitImperativeTail(ib.stmts(), mv, locals);
                 default -> throw new IrijCompiler.CompileException(
                         "MVP: unsupported fn body: " + fn.body().getClass().getSimpleName());
@@ -496,11 +491,10 @@ final class FnEmitter implements Opcodes {
         } else if (last instanceof Stmt.IfStmt ifs) {
             emitTailIfStmt(ifs, mv, locals);
         } else if (last instanceof Stmt.MatchStmt ms) {
-            // Match in tail position: emit as expression so each
-            // arm's last expression bubbles out.
-            ce.patEm.emitMatchExpr(new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc()),
+            // Match in tail position: each arm's last expression is the
+            // fn's result, and a self-call there is a tail call.
+            ce.patEm.emitTailMatch(new Expr.MatchExpr(ms.scrutinee(), ms.arms(), ms.loc()),
                     mv, locals);
-            emitTailReturn(mv);
         } else {
             ce.exprEm.emitStmt(last, mv, locals);
             mv.visitInsn(ACONST_NULL);

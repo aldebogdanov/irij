@@ -80,6 +80,40 @@ final class PatternEmitter implements Opcodes {
     }
 
 
+    /** A {@code match} in tail position: like {@link #emitMatchExpr},
+     *  but each arm's body is itself in tail position, so a self-call
+     *  there becomes a GOTO to the fn's entry instead of a JVM call.
+     *  Every arm returns (or jumps), so there's no join label. This is
+     *  what lets a match-arms body — {@code n => loop (n + 1)} — run
+     *  in constant stack, as lambda and imperative bodies already did. */
+    void emitTailMatch(Expr.MatchExpr me, MethodVisitor mv, Locals locals) {
+        ce.exprEm.emitExpr(me.scrutinee(), mv, locals);
+        int scrut = locals.allocateAnon();
+        mv.visitVarInsn(ASTORE, scrut);
+
+        Label noMatch = new Label();
+        for (int i = 0; i < me.arms().size(); i++) {
+            Expr.MatchArm arm = me.arms().get(i);
+            Label nextArm = (i == me.arms().size() - 1) ? noMatch : new Label();
+            Locals armLocals = locals.childScope();
+            emitPatternTest(arm.pattern(), scrut, mv, armLocals, nextArm);
+            if (arm.guard() != null) {
+                ce.exprEm.emitExpr(arm.guard(), mv, armLocals);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("truthy"), "truthy", "(Ljava/lang/Object;)Z", false);
+                mv.visitJumpInsn(IFEQ, nextArm);
+            }
+            ce.exprEm.emitTailExpr(arm.body(), mv, armLocals);
+            if (nextArm != noMatch) mv.visitLabel(nextArm);
+        }
+
+        mv.visitLabel(noMatch);
+        mv.visitVarInsn(ALOAD, scrut);
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("noMatch"), "noMatch",
+                "(Ljava/lang/Object;)Ljava/lang/IllegalStateException;", false);
+        mv.visitInsn(ATHROW);
+    }
+
+
     /**
      * Emit code that tests whether `scrutSlot` matches `pattern`, binding any
      * variables into `locals`. On failure, jump to `failL`. On success, falls

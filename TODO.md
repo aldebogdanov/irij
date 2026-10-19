@@ -907,6 +907,7 @@ Full design and the recorded Quint behaviour it rests on:
       program leaves a module's own `helper` alone (checked on v0.9.279).
       Found when a test file's `tracked := …` broke `std.quint.itf`'s own
       private `tracked`.
+- [x] **A self-call in a match arm wasn't a tail call** — Fixed (2026-10), found writing the irij.online `/learn` course. `fn down` / `0 => "done"` / `n => down (n - 1)` overflowed the stack past ~10K: a match-arms body, and a `match` ending an imperative body, emitted an ordinary match and returned its value, so only lambda and imperative bodies got self-TCO. `PatternEmitter.emitTailMatch` emits each arm's body in tail position. 5 tests in `TcoTest`, `tests/test-tco.irj`.
 - [x] **std, examples and tests imported with `:open`** — Converted
       (2026-10): 69 `use … :open` lines in 38 files (5 std modules, 30
       tests, 3 examples) are `:as` aliases (`str` for std.text, the last
