@@ -1,0 +1,111 @@
+use std.test {assert-eq assert-true assert-throws summarize test}
+
+;; ── Lambda parameters may be patterns ───────────────────────────────
+
+sum-pair := (#(a b) -> a + b)
+name-of := ({name= n} -> n)
+rest-of := (#[_ ...r] -> r)
+both := (#(a b) #(c d) -> a + b + c + d)
+add-three := both #(1 2)
+pairs := #[#(1 "one") #(2 "two")]
+
+r1 := test "tuple param" (-> assert-eq 3 (sum-pair #(1 2)))
+r2 := test "map param" (-> assert-eq "Ada" (name-of {name= "Ada" age= 36}))
+r3 := test "vector param with rest" (-> assert-eq #[2 3] (rest-of #[1 2 3]))
+r4 := test "two pattern params, curried" (-> assert-eq 10 (add-three #(3 4)))
+r5 := test "pattern lambda in a pipeline" (-> assert-eq #["one" "two"] (pairs |> @ (#(_ w) -> w)))
+r6 := test "a param that doesn't fit raises" (-> assert-throws (-> sum-pair 5))
+
+;; ── A keyword pattern takes no argument ─────────────────────────────
+
+fn outcome
+  #(:ok v) => "ok " ++ to-str v
+  #(:error e) => "error " ++ e
+  _ => "?"
+
+r7 := test "keyword then variable" (-> assert-eq "ok 42" (outcome #(:ok 42)))
+r8 := test "second keyword arm" (-> assert-eq "error boom" (outcome #(:error "boom")))
+r9 := test "keyword alone" (-> assert-eq "?" (outcome :ok))
+
+;; ── Constructors take exactly their declared fields ─────────────────
+
+spec Light
+  Red
+  Green
+
+spec Shape
+  Circle Float
+  Rect Float Float
+
+spec Pair
+  Pair Light Light
+
+fn lights
+  #(Red Green) => "red-green"
+  _ => "other"
+
+fn circle-first
+  #(Circle r 1) => r
+  _ => 0.0
+
+fn red-tail
+  #[Red ...rest] => length rest
+  _ => -1
+
+fn pair-name
+  (Pair Red Green) => "rg"
+  _ => "?"
+
+fn ok-then-red
+  #(Ok x Red) => x
+  _ => 0
+
+fn area
+  (Rect w h) => w * h
+  (Circle r) => 3.0 * r * r
+
+r10 := test "nullary constructors in a tuple" (-> assert-eq "red-green" (lights #(Red Green)))
+r11 := test "order still matters" (-> assert-eq "other" (lights #(Green Red)))
+r12 := test "constructor then a literal" (-> assert-eq 2.0 (circle-first #((Circle 2.0) 1)))
+r13 := test "constructor then a rest" (-> assert-eq 2 (red-tail #[Red Green Green]))
+r14 := test "nullary constructors as fields" (-> assert-eq "rg" (pair-name (Pair Red Green)))
+r15 := test "Ok in a tuple" (-> assert-eq 5 (ok-then-red #((Ok 5) Red)))
+r16 := test "two-field variant" (-> assert-eq 6.0 (area (Rect 2.0 3.0)))
+
+;; ── true and false match only themselves ────────────────────────────
+
+fn yes-no
+  true => "yes"
+  false => "no"
+
+fn shipping
+  {express= true} => "express"
+  _ => "standard"
+
+r17 := test "false is not true" (-> assert-eq "no" (yes-no false))
+r18 := test "true" (-> assert-eq "yes" (yes-no true))
+r19 := test "bool field pattern" (-> assert-eq "standard" (shipping {express= false}))
+r20 := test "bool field pattern matches" (-> assert-eq "express" (shipping {express= true}))
+
+;; ── Record update on a product-spec value ───────────────────────────
+
+spec User
+  name :: Str
+  age :: Int
+
+fn greeting :: User Str
+  (u -> "hi " ++ u.name)
+
+ada := User "Ada" 36
+older := {...ada age= 37}
+renamed := {...ada name= "Augusta"}
+with-nick := {...ada nick= "A"}
+
+r21 := test "update keeps the spec" (-> assert-eq "User" (type-of older))
+r22 := test "updated field" (-> assert-eq 37 older.age)
+r23 := test "updated record passes the spec" (-> assert-eq "hi Augusta" (greeting renamed))
+r24 := test "a bad field value is rejected" (-> assert-throws (-> {...ada age= "old"}))
+r25 := test "adding a field gives a map" (-> assert-eq "Map" (type-of with-nick))
+r26 := test "the original is untouched" (-> assert-eq 36 ada.age)
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21 r22 r23 r24 r25 r26]

@@ -44,6 +44,62 @@ final class PatternEmitter implements Opcodes {
     }
 
 
+    // ── Constructor arity regrouping ────────────────────────────────────
+    //
+    // The grammar reads `Name pattern*` greedily, so in a list of sibling
+    // patterns a constructor swallows everything after it: `#(Red Green)`
+    // parses as a one-element tuple holding `Red` applied to `Green`, and
+    // `#(Circle r 1)` as `Circle` applied to `r` and `1`. The parser can't
+    // know arities; the emitter can. regroup() flattens such greedy chains
+    // into a run of sibling patterns and re-reads it, giving each
+    // constructor exactly the number of fields its spec declares. A
+    // parenthesised constructor (GroupedPat) is left as written.
+
+    /** Declared field count of a constructor, or null if unknown. */
+    Integer ctorArity(String name) {
+        if (name.equals("Ok") || name.equals("Err")) return 1;
+        List<String> fields = ce.productFields.get(name);
+        if (fields != null) return fields.size();
+        for (var variants : ce.sumVariants.values()) {
+            Integer a = variants.get(name);
+            if (a != null) return a;
+        }
+        int dot = name.lastIndexOf('.');
+        return dot >= 0 ? ctorArity(name.substring(dot + 1)) : null;
+    }
+
+    List<Pattern> regroup(List<Pattern> siblings) {
+        List<Pattern> run = new ArrayList<>();
+        for (Pattern p : siblings) linearize(p, run);
+        List<Pattern> out = new ArrayList<>();
+        int[] pos = {0};
+        while (pos[0] < run.size()) out.add(takeGrouped(run, pos));
+        return out;
+    }
+
+    private void linearize(Pattern p, List<Pattern> run) {
+        if (p instanceof Pattern.ConstructorPat cp && ctorArity(cp.name()) != null) {
+            run.add(new Pattern.ConstructorPat(cp.name(), List.of(), cp.loc()));
+            for (Pattern a : cp.args()) linearize(a, run);
+        } else {
+            run.add(p);
+        }
+    }
+
+    private Pattern takeGrouped(List<Pattern> run, int[] pos) {
+        Pattern head = run.get(pos[0]++);
+        if (head instanceof Pattern.ConstructorPat cp && cp.args().isEmpty()) {
+            Integer n = ctorArity(cp.name());
+            if (n != null && n > 0) {
+                List<Pattern> args = new ArrayList<>();
+                for (int i = 0; i < n && pos[0] < run.size(); i++) args.add(takeGrouped(run, pos));
+                return new Pattern.ConstructorPat(cp.name(), args, cp.loc());
+            }
+        }
+        return head;
+    }
+
+
     // ── Match / pattern matching ────────────────────────────────────────
 
     void emitMatchExpr(Expr.MatchExpr me, MethodVisitor mv, Locals locals) {
@@ -113,10 +169,6 @@ final class PatternEmitter implements Opcodes {
                 mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isKeyword"), "isKeyword",
                         "(Ljava/lang/Object;Ljava/lang/String;)Z", false);
                 mv.visitJumpInsn(IFEQ, failL);
-                if (kp.arg() != null) {
-                    throw new IrijCompiler.CompileException(
-                            "MVP: keyword patterns with arguments not supported");
-                }
             }
             case Pattern.ConstructorPat cp -> emitConstructorPatternTest(cp, scrutSlot, mv, locals, failL);
             case Pattern.VectorPat vp -> emitVectorPatternTest(vp, scrutSlot, mv, locals, failL);
@@ -130,6 +182,15 @@ final class PatternEmitter implements Opcodes {
 
     void emitConstructorPatternTest(Pattern.ConstructorPat cp, int scrutSlot,
                                              MethodVisitor mv, Locals locals, Label failL) {
+        List<Pattern> args = regroup(cp.args());
+        Integer declared = ctorArity(cp.name());
+        if (declared != null && args.size() > declared) {
+            throw new IrijCompiler.CompileException(
+                    "pattern " + ClassEmitter.displayName(cp.name()) + " takes "
+                            + declared + (declared == 1 ? " field" : " fields")
+                            + ", but is given " + args.size()
+                            + (cp.loc() != null ? " at " + cp.loc() : ""));
+        }
         mv.visitVarInsn(ALOAD, scrutSlot);
         mv.visitLdcInsn(cp.name());
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isTag"), "isTag",
@@ -139,17 +200,17 @@ final class PatternEmitter implements Opcodes {
         // Arity check
         mv.visitVarInsn(ALOAD, scrutSlot);
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("taggedArity"), "taggedArity", "(Ljava/lang/Object;)I", false);
-        ce.exprEm.pushIconst(mv, cp.args().size());
+        ce.exprEm.pushIconst(mv, args.size());
         mv.visitJumpInsn(IF_ICMPNE, failL);
 
-        for (int i = 0; i < cp.args().size(); i++) {
+        for (int i = 0; i < args.size(); i++) {
             int fieldSlot = locals.allocateAnon();
             mv.visitVarInsn(ALOAD, scrutSlot);
             ce.exprEm.pushIconst(mv, i);
             mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("taggedField"), "taggedField",
                     "(Ljava/lang/Object;I)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, fieldSlot);
-            emitPatternTest(cp.args().get(i), fieldSlot, mv, locals, failL);
+            emitPatternTest(args.get(i), fieldSlot, mv, locals, failL);
         }
     }
 
@@ -160,7 +221,8 @@ final class PatternEmitter implements Opcodes {
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("isVector"), "isVector", "(Ljava/lang/Object;)Z", false);
         mv.visitJumpInsn(IFEQ, failL);
 
-        int fixed = vp.elements().size();
+        List<Pattern> elements = regroup(vp.elements());
+        int fixed = elements.size();
         Pattern.SpreadPat spread = vp.spread();
 
         // Size check
@@ -183,7 +245,7 @@ final class PatternEmitter implements Opcodes {
             mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("vecGet"), "vecGet",
                     "(Ljava/lang/Object;I)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, elSlot);
-            emitPatternTest(vp.elements().get(i), elSlot, mv, locals, failL);
+            emitPatternTest(elements.get(i), elSlot, mv, locals, failL);
         }
 
         if (spread != null && !spread.name().equals("_")) {
@@ -206,17 +268,18 @@ final class PatternEmitter implements Opcodes {
 
         mv.visitVarInsn(ALOAD, scrutSlot);
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("tupleSize"), "tupleSize", "(Ljava/lang/Object;)I", false);
-        ce.exprEm.pushIconst(mv, tp.elements().size());
+        List<Pattern> elements = regroup(tp.elements());
+        ce.exprEm.pushIconst(mv, elements.size());
         mv.visitJumpInsn(IF_ICMPNE, failL);
 
-        for (int i = 0; i < tp.elements().size(); i++) {
+        for (int i = 0; i < elements.size(); i++) {
             int elSlot = locals.allocateAnon();
             mv.visitVarInsn(ALOAD, scrutSlot);
             ce.exprEm.pushIconst(mv, i);
             mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("tupleGet"), "tupleGet",
                     "(Ljava/lang/Object;I)Ljava/lang/Object;", false);
             mv.visitVarInsn(ASTORE, elSlot);
-            emitPatternTest(tp.elements().get(i), elSlot, mv, locals, failL);
+            emitPatternTest(elements.get(i), elSlot, mv, locals, failL);
         }
     }
 

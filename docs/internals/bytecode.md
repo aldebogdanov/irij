@@ -136,6 +136,8 @@ elimination at hot sites.
 | `emitLambda` | Lambda literal → private static method + LambdaMetafactory indy at call site. |
 | `DoExpr` (in `emitExpr`/`emitTailExpr`) | `do e1 … en` — emit each, POP all but last; last is tail-position (self-calls become GOTO). |
 | `emitMatchExpr` | Pattern match → if-chain + bind on success. |
+| `PatternEmitter.regroup` | Re-reads a list of sibling patterns (tuple/vector elements, constructor arguments) by each constructor's declared arity (`ctorArity`: product field count, sum variant arity, 1 for `Ok`/`Err`): the parser lets a constructor swallow what follows it, so `#(Red Green)` arrives as `Red` applied to `Green`. Greedy chains are flattened into a run and regrouped; a parenthesized constructor is left as written. A constructor given more fields than it declares is a compile error. |
+| `emitRecordUpdate` | `{...base k= v}` → `recordUpdateBegin(base)` copies the base's fields (a map's entries or a record's named fields), each field is `put`, then `recordUpdateEnd(base, map, owner)`: a map base gives a map; a record base stays a record of its spec — re-certified with `certifyProduct`, as its constructor does — when only declared fields were replaced, and becomes a map when a field was added (a product spec is closed). |
 | `emitWith` | `Stmt.With` — runs `smCanHandle` + `classifyWithBody`, then `emitWithSM`. Unsupported shapes are compile-time errors. |
 | `emitWithSM` | The (sole) effect lowering. See `effects.md`. |
 | `emitTierCClauseLambda` | Compile a clause body as an SM continuation. |

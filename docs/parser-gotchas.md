@@ -31,7 +31,7 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 ## Expressions & lambdas
 
 - **Lambda body is an `exprSeq`:** `(x -> body)` accepts only expressions — no `:=`, no statements. For anything with local bindings or control flow, use `fn name => args` imperative form.
-- **Chained lambdas must nest:** `(a -> b -> body)` fails. Write `(a -> (b -> body))`.
+- **Lambda parameters may be patterns:** `(#(a b) -> a + b)`, `({name= n} -> n)`. The builder desugars them to plain parameters and a `match`; an argument that doesn't fit raises "Pattern match failure in lambda parameter". Chained lambdas `(a -> b -> body)` nest right.
 - **`fn name (x -> ...)` on one line** fails — body must start on the next indented line.
 - **Inline `if`:** `if cond then else other` — each part is a single postfix expression (an atom plus any `.field`s). A bare inline `if` can't be applied (`if c a else f x`) or be an operator's operand (`if c 1 else n + 1`) — that's a compile error, because it would mean `(if …) x` / `(if …) + 1`. Write `if c a else (f x)`, `(if c f else g) x`, `if c f else g ~ x`, or `(if c 1 else n) + 1`. For complex branches use the block-form (usable as an expression: `x := if cond\n  a\nelse\n  b`).
 - **Block-form `with`, `scope`, `if`, `match`** are all valid in expression position (wrapped by the AST builder into an `Expr.Block`). E.g. `n := with default-fs\n  fs-read path` works.
@@ -67,7 +67,6 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 
 - **String keys in map literals:** `{"content-type"= val}` is now supported (as of 0.2.7). Dot access with string keys (`m."content-type"`) is NOT — use `get m "content-type"` or destructuring.
 - **Map literals inside `if` branches:** parser sometimes confused by `{k= v}` in a branch. Wrap: `(if cond ({a= 1}) else ({b= 2}))`.
-- **`bindTarget` accepts only `IDENT` or `{field= name}`** patterns — vector destructuring in `:=` needs `match`.
 - **A map literal cannot span lines by indentation.** A continuation line starts an INDENT and the parse fails on the second field. Backslash-continue instead:
   ```
   driver := {spec-file= "spec/bank.qnt" \
@@ -102,6 +101,12 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 - **`\${}` suppresses interpolation** (fixed 0.8.x — it used to interpolate
   anyway and leave the backslash behind). A bare `${}` still always
   interpolates.
+
+## Patterns
+
+- **A keyword pattern takes no argument.** `#(:ok v)` is a tuple of the keyword `:ok` and a variable — the shape to use for tagged results without declaring a spec.
+- **Constructors take exactly their declared fields.** The grammar lets a constructor pattern swallow what follows it (`Name pattern*`), so `#(Red Green)` parses as `Red` applied to `Green`; the emitter re-reads sibling patterns by each constructor's arity, so it means a tuple of two nullary variants, and `#(Circle r 1)` is `#((Circle r) 1)`. Giving a constructor more fields than it declares is a compile error. Parenthesize to be explicit: `#((Circle r) 1)`.
+- **`true` and `false` are literal patterns**, matching only themselves (they used to bind a variable and match anything).
 
 ## Contracts & types
 

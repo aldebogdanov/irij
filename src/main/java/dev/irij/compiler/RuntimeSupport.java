@@ -275,15 +275,43 @@ public final class RuntimeSupport {
     }
 
     /** `validate! spec-name value` — returns value on pass, throws on fail. */
-    /** Start a record-update: clone base IrijMap's entries into a new
-     *  LinkedHashMap, returning that. Bytecode emitter then puts each
-     *  updated field and wraps in IrijMap. */
+    /** Start a record-update `{...base k= v}`: copy the base's fields
+     *  into a new LinkedHashMap, returning that. The base is a map, or
+     *  a record built by a product spec's constructor. The emitter then
+     *  puts each updated field and finishes with {@link #recordUpdateEnd}. */
     public static java.util.LinkedHashMap<String, Object> recordUpdateBegin(Object base) {
-        if (!(base instanceof dev.irij.runtime.Values.IrijMap bm)) {
-            throw new dev.irij.IrijRuntimeError(
-                    "Record update requires a Map, got " + typeTag(base));
+        if (base instanceof dev.irij.runtime.Values.IrijMap bm) {
+            return new java.util.LinkedHashMap<>(bm.entries());
         }
-        return new java.util.LinkedHashMap<>(bm.entries());
+        if (base instanceof dev.irij.runtime.Values.Tagged t && t.namedFields() != null) {
+            return new java.util.LinkedHashMap<>(t.namedFields());
+        }
+        throw new dev.irij.IrijRuntimeError(
+                "Record update requires a Map or a record, got " + typeTag(base));
+    }
+
+    /** Finish a record-update. A map base gives a map. A record base
+     *  stays a record of its spec when the update only replaced fields
+     *  it declares — re-certified against the spec, as its constructor
+     *  would — and becomes a plain map when the update added a field:
+     *  a product spec is closed, so a record with an extra field is no
+     *  longer that spec's shape. */
+    public static Object recordUpdateEnd(Object base,
+                                         java.util.LinkedHashMap<String, Object> updated,
+                                         Class<?> owner) {
+        if (base instanceof dev.irij.runtime.Values.Tagged t && t.namedFields() != null
+                && updated.keySet().equals(t.namedFields().keySet())) {
+            var named = new java.util.LinkedHashMap<String, Object>();
+            var fields = new java.util.ArrayList<Object>(t.namedFields().size());
+            for (String k : t.namedFields().keySet()) {
+                Object v = updated.get(k);
+                named.put(k, v);
+                fields.add(v);
+            }
+            var rec = new dev.irij.runtime.Values.Tagged(t.tag(), fields, named, t.specName());
+            return t.specName() == null ? rec : SpecValidator.certifyProduct(rec, t.specName(), owner);
+        }
+        return new dev.irij.runtime.Values.IrijMap(updated);
     }
 
     public static Object validateBang(Object specNameArg, Object value) {

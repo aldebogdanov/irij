@@ -694,7 +694,8 @@ parEachExpr
 
 pattern
     : typeName pattern*                        // Constructor Pat1 Pat2 (or m.Constructor …)
-    | KEYWORD pattern?                         // :ok value
+    | KEYWORD                                  // :ok — takes no arguments, so
+                                               // #(:ok v) is a two-element tuple
     | IDENT                                    // variable binding
     | UNDERSCORE                               // wildcard _
     | literal                                  // literal pattern

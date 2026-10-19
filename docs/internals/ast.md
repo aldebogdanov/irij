@@ -20,7 +20,7 @@ implementations are `record`s. This gives:
 | `Decl` | `Decl.java` | Top-level declarations: `fn`, `effect`, `handler`, `mod`, `use`, `impl`, `proto`, `cap`, `party`, `spec`, bindings, pubs |
 | `Stmt` | `Stmt.java` | Statements: `:= bind`, `:! mut-bind`, `<- assign`, `with`, `scope`, expression-as-statement, block-level `if`, block-level `match` |
 | `Expr` | `Expr.java` | Expressions: literals, vars, App, Lambda, If, Match, Block, JavaRef, OpSection, Compose, DotAccess, ... Number literals: `IntLit(long)`; `BigIntLit(BigInteger)` for an integer literal past 64 bits; `RationalLit(BigInteger num, BigInteger den)` for `2/3` (emitted as `RtNum.ratioLiteral`, which reduces it — `4/2` is the Int 2); `FloatLit`, `HexLit`. |
-| `Pattern` | `Pattern.java` | Patterns: VarPat, WildcardPat, UnitPat, LiteralPat, ConstructorPat, VectorPat, TuplePat, DestructurePat, SpreadPat |
+| `Pattern` | `Pattern.java` | Patterns: VarPat, WildcardPat, UnitPat, LitPat, KeywordPat, ConstructorPat, GroupedPat, VectorPat, TuplePat, DestructurePat, SpreadPat. `true`/`false` in a pattern are built as a `LitPat` of a `BoolLit` (they lex as identifiers, and a `VarPat` would bind and match anything). A `KeywordPat` has no argument: `#(:ok v)` is a two-element tuple. |
 | `SpecExpr` | `SpecExpr.java` | Spec annotations: primitives, composites, arrows, enums |
 
 ## Some shapes worth highlighting
@@ -116,7 +116,37 @@ Most AST decisions assume runtime checking:
 4. Add a `case X(...) ->` in every `switch` over the sealed root —
    the compiler will tell you which ones are missing.
 
+## Patterns the grammar reads greedily
+
+`pattern : typeName pattern*` lets a constructor take the patterns that
+follow it, and the parser can't know how many fields a constructor has.
+So `#(Red Green)` builds `TuplePat[ConstructorPat(Red, [ConstructorPat(Green)])]`
+and `#[Red ...rest]` hands `...rest` to `Red`. Three places put it right:
+
+- **Vector patterns** (`AstBuilder.visitVectorPattern`) take a `...rest`
+  that a constructor swallowed back as the vector's spread.
+- **Sibling lists** — tuple and vector elements, a constructor's
+  arguments — are re-read by arity at emit time
+  (`PatternEmitter.regroup`, see `bytecode.md`). The AST keeps the
+  parser's grouping; only the variable names a pattern binds matter to
+  the other passes, and regrouping doesn't change them.
+- **Variant arity** (`Decl.Variant.arity`) counts spec atoms, not
+  `specExpr`s: `Rect Float Float` reads as one application `Float Float`,
+  so counting expressions gave every multi-field variant arity 1. A
+  field that applies a spec is parenthesized: `Node (Tree a) a (Tree a)`.
+
 ## Forms with no node of their own
+
+**Lambda parameter patterns.** `(#(a b) {name= n} c -> body)` is built
+as a lambda with plain parameters whose body matches them:
+`(__lp0 __lp1 c -> match #(__lp0 __lp1)  #(#(a b) {name= n}) => body
+_ => error "Pattern match failure in lambda parameter at …")`; a single
+pattern parameter is matched directly, without the tuple
+(`AstBuilder.destructureLambdaParams`). Every later pass — free-variable
+capture, the effect checker, state-machine lowering — sees an ordinary
+lambda and match. `__` can't start a source identifier (`_` is its own
+token), so the synthetic names never collide with a user's.
+
 
 Not every syntax form earns an AST node. The `model` declaration
 (`docs/internals/quint.md`) is lowered by `AstBuilder` into a
