@@ -622,6 +622,12 @@ public final class EffectRowChecker {
                     requireEffect(eff, "method '" + da.field() + "' on " + shown(v.name()),
                             ctx, avail, da.loc());
                 }
+                // A member of a string literal is a Java method — no
+                // record has that receiver. Other receivers are only known
+                // at run time, where RtInterop.javaInstanceRef checks JVM.
+                if (da.target() instanceof Expr.StrLit || da.target() instanceof Expr.StringInterp) {
+                    requireEffect("JVM", "java-interop:." + da.field(), ctx, avail, da.loc());
+                }
                 walkExpr(da.target(), avail, ctx);
             }
             case Expr.Var v -> {

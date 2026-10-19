@@ -37,6 +37,32 @@ current effect-row stack (`AVAILABLE_EFFECTS`). Top-level scripts get
 `AMBIENT_EFFECTS` (everything available), so scripts work. Annotated
 fns must declare `::: JVM` to touch Java.
 
+### Instance calls: checked at run time
+
+`Class/member` is a `JavaRef` node, so the compile-time checker sees it.
+A dot call is a `DotAccess` like any field read, and whether `x.trim`
+is a Java method or a record's `trim` field depends on what `x` holds
+at run time. So `RtInterop.javaInstanceRef` — the fallthrough every
+non-handler-state dot access goes through — checks it there: a map or
+record field is returned as before; anything else is a Java object, and
+the call needs `JVM` in the runtime effect row (`RtEffects.checkPerformEffect`,
+the same check every `perform` runs). The row is the one the enclosing
+fn pushed on entry — empty for an unannotated fn, ambient at top level —
+so the result matches the static rule:
+
+```
+fn shout
+  => s
+  s.toUpperCase ()      ;; Err: Effect 'JVM' not declared: 'java-interop:.toUpperCase'
+```
+
+Two refinements: a member of a string literal (`"x".toUpperCase ()`) can
+only be Java, so `EffectRowChecker` rejects it at compile time; and a
+scope handle's `s.fork` is Irij's own concurrency syntax, exempt.
+
+Before this, only `Class/member` sites were checked, and any fn could
+call methods on a Java object it was handed.
+
 ## Default handler
 
 `std.jvm` ships:
@@ -60,7 +86,7 @@ opted out of Irij's effect-tracking guarantees within this block.
 | Form | Java interop in body? |
 |---|---|
 | Top-level script (no fn) | ✅ ambient — works |
-| `fn f (...)` | ❌ rejected at the Java site |
+| `fn f (...)` | ❌ rejected at the Java site (`Class/member`, a string literal's method: compile time; a method on any other Java object: run time) |
 | `fn f ::: JVM (...)` | ✅ explicit |
 | `fn f ::: Console JVM (...)` | ✅ row-combined |
 | `with unsafe-jvm body` (inline) | ✅ for the body's anonymous code |

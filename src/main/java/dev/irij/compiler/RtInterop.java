@@ -35,6 +35,16 @@ public final class RtInterop {
             throw new dev.irij.IrijRuntimeError(
                     "No field '" + member + "' on " + t.tag());
         }
+        // A Java object: this is interop, which is the JVM effect. The
+        // static checker can't tell `s.trim` on a Java string from
+        // `r.trim` on a record, so it's enforced here, against the
+        // runtime row the enclosing fn pushed (empty for a pure fn,
+        // ambient at top level) — as every perform is. A scope handle is
+        // the exception: `s.fork` is Irij's own concurrency syntax that
+        // happens to be a Java method underneath.
+        if (!(recv instanceof CompiledScopeHandle)) {
+            RtEffects.checkPerformEffect("JVM", "java-interop:." + member);
+        }
         return dev.irij.runtime.JavaInterop.resolveInstanceRef(recv, member);
     }
 }

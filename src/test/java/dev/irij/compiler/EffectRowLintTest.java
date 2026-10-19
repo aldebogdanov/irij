@@ -492,4 +492,21 @@ class EffectRowLintTest {
         assertTrue(e.getMessage().contains("Time"),
                 () -> "expected Time-effect error, got: " + e.getMessage());
     }
+
+    // ── String-literal receivers are Java at compile time ─────────────
+
+    @Test
+    void methodOnStringLiteralNeedsJvm() {
+        IrijCompiler.CompileException e = expectFail("""
+            fn shout
+              =>
+              "x".toUpperCase ()
+            """);
+        assertTrue(e.getMessage().contains("java-interop:.toUpperCase"), e.getMessage());
+        assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+            fn shout ::: JVM
+              =>
+              "x".toUpperCase ()
+            """, "irij.Program"));
+    }
 }

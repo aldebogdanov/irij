@@ -68,4 +68,48 @@ class JavaInteropTest {
                 "println code");
         assertEquals("hi\n0", run(src).replace("\r", ""));
     }
+
+    // ── A method call on a Java object is the JVM effect ────────────────
+    // `s.toUpperCase ()` in a fn without `::: JVM` used to run: only
+    // `Class/member` sites were checked. The receiver's kind is known only
+    // at run time, so javaInstanceRef checks the fn's runtime row.
+
+    @Test void pureFnCallingAJavaMethodIsRejected() throws Exception {
+        String src = String.join("\n",
+                "fn shout",
+                "  => s",
+                "  s.toUpperCase ()",
+                "match (try (-> shout \"x\"))",
+                "  Err msg => println msg",
+                "  Ok v => println v");
+        assertTrue(run(src).contains("Effect 'JVM' not declared: 'java-interop:.toUpperCase'"));
+    }
+
+    @Test void jvmRowAllowsAJavaMethod() throws Exception {
+        String src = String.join("\n",
+                "fn shout ::: JVM",
+                "  => s",
+                "  s.toUpperCase ()",
+                "println (shout \"x\")");
+        assertEquals("X", run(src));
+    }
+
+    @Test void recordFieldsAndScopeForksStayPure() throws Exception {
+        String src = String.join("\n",
+                "fn user-id",
+                "  (m -> m.userId)",
+                "println (user-id (json-parse \"{\\\"userId\\\": 7}\"))",
+                "fn name-of",
+                "  (r -> r.name)",
+                "println (name-of {name= \"Ada\"})",
+                "fn twice",
+                "  =>",
+                "  n :! 0",
+                "  scope s",
+                "    f := s.fork (-> 21)",
+                "    n <- await f",
+                "  n * 2",
+                "println (twice ())");
+        assertEquals("7\nAda\n42", run(src).replace("\r", ""));
+    }
 }
