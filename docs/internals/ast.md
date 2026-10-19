@@ -128,3 +128,18 @@ and a case for it in the emitter, the effect checker and hot-redef.
 The test for whether a form deserves a node: does anything downstream
 of the parser need to tell it apart from what it desugars to? For
 `model`, nothing does.
+
+**`cond` and `case`** (spec §2.3a) pass the same test:
+
+- `cond` is built as a block-form `if` / `else if` chain
+  (`AstBuilder.visitCondExpr`), the `_ =>` arm as its last `else`. An
+  `if` condition may perform inside a `with` body; a match guard may
+  not (`effects.md`), so an `if` chain, not a match on guards. With no
+  `_` arm the last `else` raises "cond: no condition held at L:C".
+- `case x` is built as a `match x` whose arms bind the scrutinee to
+  `__case` and test it in the guard: values `a b` and guard `g` give
+  `__case | __case == a || __case == b && g => …`, so a name in a value
+  position is looked up, never bound. `_` stands alone. With no `_` arm
+  one raising "case: no arm for <value> at L:C" is added.
+
+Both are expressions; in statement position they sit in an `ExprStmt`.

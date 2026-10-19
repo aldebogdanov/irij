@@ -8,6 +8,7 @@
     { "include": "#string" },
     { "include": "#declaration" },
     { "include": "#model-decl" },
+    { "include": "#arms-head" },
     { "include": "#keyword" },
     { "include": "#constant" },
     { "include": "#keyword-atom" },
@@ -80,6 +81,19 @@
         "2": { "name": "keyword.declaration.model.irij" },
         "3": { "name": "entity.name.function.irij" }
       }
+    },
+    "arms-head": {
+      "comment": "`cond` and `case` are soft keywords: only where an expression starts and opens arms",
+      "patterns": [
+        {
+          "match": "(?:^\\s*|(?<=:=|:!|<-|=>|~)\\s*)(cond)(?=\\s*(?:;;.*)?$)",
+          "captures": { "1": { "name": "keyword.control.soft.irij" } }
+        },
+        {
+          "match": "(?:^\\s*|(?<=:=|:!|<-|=>|~)\\s*)(case)(?=\\s+[^\\s:=<|+*/-])",
+          "captures": { "1": { "name": "keyword.control.soft.irij" } }
+        }
+      ]
     },
     "keyword": {
       "patterns": [

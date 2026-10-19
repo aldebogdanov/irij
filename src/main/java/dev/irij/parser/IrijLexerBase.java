@@ -85,6 +85,81 @@ public abstract class IrijLexerBase extends Lexer {
         return in.LA(k) == ':' && in.LA(k + 1) == ':';
     }
 
+    // ── `cond` and `case` are soft keywords ─────────────────────────────
+
+    /**
+     * Whether the {@code cond} / {@code case} just matched opens a block of
+     * arms. Three things must hold, or it lexes as an ordinary IDENT — so a
+     * variable called {@code cond} (a condition, say: {@code if cond}) or
+     * {@code case} keeps working:
+     * <ul>
+     *   <li>it stands where an expression starts: first on its line, or
+     *       right after {@code :=}, {@code :!}, {@code <-}, {@code =>} or
+     *       {@code ~};</li>
+     *   <li>{@code cond} ends its line; {@code case} is followed by a
+     *       scrutinee that does;</li>
+     *   <li>the next non-blank line is indented deeper and has a
+     *       {@code =>} — the first arm.</li>
+     * </ul>
+     */
+    protected boolean atArmsForm(boolean wantsScrutinee) {
+        CharStream in = getInputStream();
+        int start = _tokenStartCharIndex;
+        int lineStart = start;
+        while (lineStart > 0 && charAt(in, lineStart - 1) != '\n' && charAt(in, lineStart - 1) != '\r') {
+            lineStart--;
+        }
+        String before = lineStart < start
+                ? in.getText(org.antlr.v4.runtime.misc.Interval.of(lineStart, start - 1)) : "";
+        String lead = before.strip();
+        if (!(lead.isEmpty() || lead.endsWith(":=") || lead.endsWith(":!") || lead.endsWith("<-")
+                || lead.endsWith("=>") || lead.endsWith("~"))) {
+            return false;
+        }
+        int indent = 0;
+        while (indent < before.length() && before.charAt(indent) == ' ') indent++;
+
+        // The rest of this line: nothing (cond) or a scrutinee (case).
+        int k = 1;
+        StringBuilder rest = new StringBuilder();
+        while (in.LA(k) != CharStream.EOF && in.LA(k) != '\n' && in.LA(k) != '\r') {
+            rest.appendCodePoint(in.LA(k));
+            k++;
+        }
+        String tail = stripComment(rest.toString());
+        if (wantsScrutinee ? !(rest.length() > 0 && rest.charAt(0) == ' ' && !tail.isBlank())
+                           : !tail.isBlank()) {
+            return false;
+        }
+
+        // The next non-blank line: deeper, with an arm's `=>`.
+        while (in.LA(k) == '\n' || in.LA(k) == '\r') {
+            k++;
+            int spaces = 0;
+            while (in.LA(k) == ' ') { k++; spaces++; }
+            StringBuilder line = new StringBuilder();
+            while (in.LA(k) != CharStream.EOF && in.LA(k) != '\n' && in.LA(k) != '\r') {
+                line.appendCodePoint(in.LA(k));
+                k++;
+            }
+            String text = stripComment(line.toString());
+            if (text.isBlank()) continue;
+            return spaces > indent && text.contains("=>");
+        }
+        return false;
+    }
+
+    private static int charAt(CharStream in, int i) {
+        return in.getText(org.antlr.v4.runtime.misc.Interval.of(i, i)).charAt(0);
+    }
+
+    /** A line's text before a `;;` comment (strings can't hold one here
+     *  that matters: a `=>` in a string is still on an arm line). */
+    private static String stripComment(String line) {
+        int c = line.indexOf(";;");
+        return c >= 0 ? line.substring(0, c) : line;
+    }
+
     private static boolean isNameChar(int c) {
         return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '?' || c == '!';
     }

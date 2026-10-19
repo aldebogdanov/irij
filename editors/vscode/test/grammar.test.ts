@@ -46,6 +46,13 @@ test('declarations', async () => {
   assert.notEqual(await scopeOf('x := model', 'model'), 'keyword.declaration.model.irij');
 });
 
+test('cond and case are keywords only where they open arms', async () => {
+  assert.equal(await scopeOf('  cond', 'cond'), 'keyword.control.soft.irij');
+  assert.equal(await scopeOf('  r := case cmd', 'case'), 'keyword.control.soft.irij');
+  assert.notEqual(await scopeOf('if cond', 'cond'), 'keyword.control.soft.irij');
+  assert.notEqual(await scopeOf('x := case + 1', 'case'), 'keyword.control.soft.irij');
+});
+
 test('strings, atoms, operators, interop', async () => {
   assert.equal(await scopeOf('s := "hi ${name}"', 'name'), 'source.irij.embedded');
   assert.equal(await scopeOf('x := :not_found', ':not_found'), 'constant.other.keyword-atom.irij');

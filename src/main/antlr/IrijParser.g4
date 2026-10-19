@@ -59,7 +59,7 @@ nameListItem
     | FN | DO | IF | ELSE | MATCH | SPEC | NEWTYPE | MOD | USE | PUB
     | WITH | SCOPE | EFFECT | PARTY | CAP | HANDLER | IMPL | PROTO
     | PRE | POST | CONTRACT | SELECT | ENCLAVE
-    | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF | MODEL
+    | PAR_EACH | ON_FAILURE | IN | OUT | FOR | PROOF | MODEL | COND | CASE
     ;
 
 pubDecl
@@ -179,7 +179,7 @@ specField
 // fields freely (`cand.spec`, `{with= …}`), and a program has to be able
 // to write them.
 fieldName
-    : IDENT | MODEL
+    : IDENT | MODEL | COND | CASE
     | FN | DO | IF | ELSE | MATCH | SPEC | NEWTYPE | MOD | USE | PUB
     | WITH | SCOPE | EFFECT | PARTY | CAP | HANDLER | IMPL | PROTO
     | PRE | POST | CONTRACT | SELECT | ENCLAVE
@@ -521,6 +521,8 @@ atomExpr
     | ifExpr
     | ifStmt                                  // block-form if as expression
     | matchExpr
+    | condExpr
+    | caseExpr
     | withExpr                                // block-form with as expression
     | scopeExpr                               // block-form scope as expression
     | lambdaExpr
@@ -539,6 +541,38 @@ atomExpr
 matchExpr
     : MATCH expr (MAP_AT PARTY_NAME)?
       NEWLINE INDENT matchArms NEWLINE* DEDENT
+    ;
+
+// ── cond / case ──────────────────────────────────────────────────────
+//
+// Both are soft keywords (IrijLexerBase.atArmsForm) and both desugar to
+// `match` in AstBuilder — see docs/internals/ast.md.
+//
+//   cond                         case cmd
+//     n < 0 => "negative"          "run" => run ()
+//     n == 0 => "zero"             "q" "quit" => stop ()
+//     _ => "positive"              "go" | ready? => go ()
+//                                  _ => usage ()
+//
+// A `cond` arm is a condition; the first that holds wins. A `case` arm is
+// one or more values (each a postfix expression, as an inline `if`'s
+// parts are) compared with `==` against the scrutinee, plus an optional
+// guard. `_ =>` is the fallback; without one, falling through is an error.
+
+condExpr
+    : COND NEWLINE INDENT condArm (NEWLINE condArm)* NEWLINE* DEDENT
+    ;
+
+condArm
+    : expr FAT_ARROW armBody
+    ;
+
+caseExpr
+    : CASE expr NEWLINE INDENT caseArm (NEWLINE caseArm)* NEWLINE* DEDENT
+    ;
+
+caseArm
+    : postfixExpr+ guard? FAT_ARROW armBody
     ;
 
 // ── Unit value ───────────────────────────────────────────────────────

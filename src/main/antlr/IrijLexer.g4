@@ -23,6 +23,8 @@ PARTY       : 'party' ;
 CAP         : 'cap' ;
 HANDLER     : 'handler' ;
 MODEL       : 'model' {atModelDecl()}? ;   // keyword only where a declaration starts
+COND        : 'cond' {atArmsForm(false)}? ;  // keyword only where it opens arms
+CASE        : 'case' {atArmsForm(true)}? ;   // (IrijLexerBase.atArmsForm)
 IMPL        : 'impl' ;
 PROTO       : 'proto' ;
 PRE         : 'pre' ;

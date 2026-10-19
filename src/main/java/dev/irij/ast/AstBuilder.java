@@ -935,6 +935,114 @@ public class AstBuilder {
         return new Expr.MatchArm(pattern, guard, body);
     }
 
+    // ── cond / case: both desugar to match ─────────────────────────────
+
+    /**
+     * {@code cond} arms are conditions, tried in order. It is an
+     * {@code if}/{@code else if} chain:
+     * <pre>
+     *   cond                 ⇒   if a > 0
+     *     a > 0 => x               x
+     *     b => y                 else if b
+     *     _ => z                   y
+     *                            else
+     *                              z
+     * </pre>
+     * — not a match on guards, because an `if` condition may perform
+     * inside a `with` body and a guard may not (effects.md). Without a
+     * {@code _} arm the last {@code else} raises "cond: no condition held",
+     * as falling through every arm of a match is an error.
+     */
+    private Expr visitCondExpr(CondExprContext ctx) {
+        var loc = loc(ctx);
+        var conds = new ArrayList<Expr>();
+        var bodies = new ArrayList<List<Stmt>>();
+        List<Stmt> otherwise = null;
+        for (var arm : ctx.condArm()) {
+            Expr cond = visitExpr(arm.expr());
+            List<Stmt> body = armStmts(visitArmBody(arm.armBody()));
+            if (cond instanceof Expr.Wildcard) {
+                otherwise = body;
+                break;
+            }
+            conds.add(cond);
+            bodies.add(body);
+        }
+        if (otherwise == null) {
+            otherwise = List.of(new Stmt.ExprStmt(
+                    raise(new Expr.StrLit("cond: no condition held at " + loc, loc), loc), loc));
+        }
+        if (conds.isEmpty()) return new Expr.Block(otherwise, loc);
+        List<Stmt> chain = otherwise;
+        for (int i = conds.size() - 1; i >= 0; i--) {
+            chain = List.of(new Stmt.IfStmt(conds.get(i), bodies.get(i), chain, loc));
+        }
+        return new Expr.Block(chain, loc);
+    }
+
+    private static List<Stmt> armStmts(Expr body) {
+        return body instanceof Expr.Block b ? b.stmts() : List.of(new Stmt.ExprStmt(body, null));
+    }
+
+    /** Name a {@code case} binds its scrutinee to. {@code __} can't start
+     *  a source identifier, so no program meets it. */
+    private static final String CASE_SCRUTINEE = "__case";
+
+    /**
+     * {@code case} arms are values compared with {@code ==}, never
+     * patterns — a name is looked up, not bound:
+     * <pre>
+     *   case cmd                     ⇒   match cmd
+     *     "q" "quit" => stop ()            __case | __case == "q" || __case == "quit" => stop ()
+     *     limit | ready? => go ()          __case | __case == limit && ready? => go ()
+     *     _ => usage ()                    _ => usage ()
+     * </pre>
+     * Without a {@code _} arm, one raising "case: no arm for <value>" is
+     * added.
+     */
+    private Expr visitCaseExpr(CaseExprContext ctx) {
+        var loc = loc(ctx);
+        Expr scrutinee = visitExpr(ctx.expr());
+        var arms = new ArrayList<Expr.MatchArm>();
+        boolean fallback = false;
+        for (var arm : ctx.caseArm()) {
+            var aloc = loc(arm);
+            var values = new ArrayList<Expr>();
+            for (var v : arm.postfixExpr()) values.add(visitPostfixExpr(v));
+            Expr guard = arm.guard() != null ? visitExpr(arm.guard().expr()) : null;
+            Expr body = visitArmBody(arm.armBody());
+            boolean wildcard = values.stream().anyMatch(v -> v instanceof Expr.Wildcard);
+            if (wildcard) {
+                if (values.size() > 1) {
+                    throw new IllegalStateException("case arm at " + aloc
+                            + ": `_` matches anything, so it stands alone");
+                }
+                arms.add(new Expr.MatchArm(new Pattern.WildcardPat(aloc), guard, body));
+                if (guard == null) { fallback = true; break; }
+                continue;
+            }
+            Expr test = null;
+            for (Expr v : values) {
+                Expr eq = new Expr.BinaryOp("==", new Expr.Var(CASE_SCRUTINEE, aloc), v, aloc);
+                test = test == null ? eq : new Expr.BinaryOp("||", test, eq, aloc);
+            }
+            if (guard != null) test = new Expr.BinaryOp("&&", test, guard, aloc);
+            arms.add(new Expr.MatchArm(new Pattern.VarPat(CASE_SCRUTINEE, aloc), test, body));
+        }
+        if (!fallback) {
+            Expr message = new Expr.BinaryOp("++", new Expr.StrLit("case: no arm for ", loc),
+                    new Expr.App(new Expr.Var("to-str", loc),
+                            List.of(new Expr.Var(CASE_SCRUTINEE, loc)), loc), loc);
+            arms.add(new Expr.MatchArm(new Pattern.VarPat(CASE_SCRUTINEE, loc), null,
+                    raise(new Expr.BinaryOp("++", message, new Expr.StrLit(" at " + loc, loc), loc), loc)));
+        }
+        return new Expr.MatchExpr(scrutinee, arms, loc);
+    }
+
+    private static Expr raise(Expr message, SourceLoc loc) {
+        return new Expr.App(new Expr.Var("error", loc), List.of(message), loc);
+    }
+
     private Expr visitArmBody(ArmBodyContext ctx) {
         if (ctx.expr() != null) {
             return visitExpr(ctx.expr());
@@ -1187,6 +1295,8 @@ public class AstBuilder {
             return new Expr.Block(java.util.List.of(ifStmt), loc(ctx));
         }
         if (ctx.matchExpr() != null) return visitMatchExpr(ctx.matchExpr());
+        if (ctx.condExpr() != null) return visitCondExpr(ctx.condExpr());
+        if (ctx.caseExpr() != null) return visitCaseExpr(ctx.caseExpr());
         if (ctx.withExpr() != null) {
             var withStmt = visitWithExpr(ctx.withExpr());
             return new Expr.Block(java.util.List.of(withStmt), loc(ctx));

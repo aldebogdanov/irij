@@ -66,7 +66,7 @@
     }
   },
   "indentationRules": {
-    "increaseIndentPattern": "^(?!\\s*=>).*(?:=>|->|:=|:!|<-|=)\\s*(?:;;.*)?$|^\\s*(?:pub\\s+)?(?:(?:fn|effect|handler|proto|impl|model|contract|for|select|enclave|par-each|on-failure)(?![\\w?!-])|spec(?![\\w?!-])(?!\\s*::))|^\\s*(?:[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*[?!]?\\s*(?::=|:!|<-)\\s*)?(?:if(?![\\w?!-])(?!.*\\belse(?![\\w?!-]))|else\\s*(?:;;.*)?$|else\\s+if(?![\\w?!-])(?!.*\\belse(?![\\w?!-]))|match(?![\\w?!-])|scope(?:\\.[a-z-]+)?(?![\\w?!-])|with(?![\\w?!-])(?!.*\\bdo(?![\\w?!-]))|do\\s*(?:;;.*)?$)",
+    "increaseIndentPattern": "^(?!\\s*=>).*(?:=>|->|:=|:!|<-|=)\\s*(?:;;.*)?$|^\\s*(?:pub\\s+)?(?:(?:fn|effect|handler|proto|impl|model|contract|for|select|enclave|par-each|on-failure)(?![\\w?!-])|spec(?![\\w?!-])(?!\\s*::))|^\\s*(?:[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*[?!]?\\s*(?::=|:!|<-)\\s*)?(?:if(?![\\w?!-])(?!.*\\belse(?![\\w?!-]))|else\\s*(?:;;.*)?$|else\\s+if(?![\\w?!-])(?!.*\\belse(?![\\w?!-]))|match(?![\\w?!-])|cond\\s*(?:;;.*)?$|case\\s+[^\\s:=<|+*/-]|scope(?:\\.[a-z-]+)?(?![\\w?!-])|with(?![\\w?!-])(?!.*\\bdo(?![\\w?!-]))|do\\s*(?:;;.*)?$)",
     "decreaseIndentPattern": "^\\s*else(?![\\w?!-])"
   }
 }

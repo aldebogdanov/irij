@@ -68,7 +68,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 - **Structured concurrency** &mdash; `scope`, `fork`, `par`, `race`, `timeout`
 - **Child processes** &mdash; `std.proc`'s `Proc` effect: run a command to completion (stdin, timeout, both streams) or start one and talk to it a line at a time; mockable like every effect
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
-- **Pattern matching** &mdash; destructuring, guards, spread, ADTs
+- **Pattern matching** &mdash; destructuring, guards, spread, ADTs; `cond` (first condition that holds) and `case` (equality dispatch) for multi-way choices without `else if` chains
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)
 - **Bytecode compiler** &mdash; the only execution model since v0.6.20: ASM-emitted JVM classfiles with state-machine effect lowering, self-TCO, invokedynamic hot-redef; `irij build` packages self-contained runnable JARs

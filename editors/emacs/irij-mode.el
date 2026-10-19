@@ -94,8 +94,9 @@
     "enclave" "par-each" "on-failure"
     "in" "out" "for" "proof")
   "Reserved words in Irij.
-`model' is not here: it is a soft keyword, highlighted only where a
-declaration starts (see `irij-font-lock-keywords').")
+`model', `cond' and `case' are not here: they are soft keywords,
+highlighted only where they start their form (see
+`irij-font-lock-keywords').")
 
 (defconst irij-builtin-values
   '("true" "false")
@@ -160,6 +161,12 @@ and the handler-clause `resume'.")
       ;; `model' — soft keyword, only at the start of a declaration
       (,(concat "^[ \t]*\\(?:pub[ \t]+\\)?\\(model\\)[ \t]+\\(" irij--ident-re "\\)")
        (1 'font-lock-keyword-face) (2 'font-lock-function-name-face))
+      ;; `cond' / `case' — soft keywords, only where an expression starts
+      ;; and opens arms: `cond' ends its line, `case' takes a scrutinee
+      ("\\(?:^[ \t]*\\|\\(?::=\\|:!\\|<-\\|=>\\|~\\)[ \t]*\\)\\(cond\\)[ \t]*\\(?:;;.*\\)?$"
+       1 'font-lock-keyword-face)
+      ("\\(?:^[ \t]*\\|\\(?::=\\|:!\\|<-\\|=>\\|~\\)[ \t]*\\)\\(case\\)[ \t]+[^ \t\n:=<|+*/-]"
+       1 'font-lock-keyword-face)
       ;; Declaration names — fn / handler / cap <ident>
       (,(concat "\\_<\\(?:fn\\|handler\\|cap\\)[ \t]+\\(" irij--ident-re "\\)")
        1 'font-lock-function-name-face)
@@ -215,7 +222,7 @@ and the handler-clause `resume'.")
   (concat
    "\\`[ \t]*\\(?:pub[ \t]+\\)?"
    "\\(?:\\(?:" irij--ident-re "\\)[ \t]*\\(?::=\\|:!\\|<-\\)[ \t]*\\)?"
-   "\\(fn\\|if\\|else\\|match\\|with\\|scope\\(?:\\.[a-z-]+\\)?\\|do\\|effect\\|handler"
+   "\\(fn\\|if\\|else\\|match\\|cond\\|case\\|with\\|scope\\(?:\\.[a-z-]+\\)?\\|do\\|effect\\|handler"
    "\\|spec\\|proto\\|impl\\|model\\|select\\|enclave\\|par-each\\|on-failure\\|for\\|contract\\)"
    "\\_>")
   "Regexp for a logical line that may open an indented block.
@@ -305,6 +312,10 @@ only blocks that must have a body count — not `fn', `effect',
             ("do"   (string-match-p "\\`[ \t]*\\'" rest))
             ;; `spec :: T' annotation, not a declaration
             ("spec" (not (string-match-p "\\`[ \t]*::" rest)))
+            ;; soft keywords: `cond' alone on its line; `case' and a
+            ;; scrutinee — not a variable called `case' in an expression
+            ("cond" (string-match-p "\\`[ \t]*\\'" rest))
+            ("case" (string-match-p "\\`[ \t]+[^ \t:=<|+*/-]" rest))
             (_ t))))))
 
 (defun irij--inline-lambda-body-p (rest)

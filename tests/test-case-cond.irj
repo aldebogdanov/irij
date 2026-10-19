@@ -1,0 +1,49 @@
+use std.test {assert-eq assert-throws summarize test}
+
+;; ── cond: the first condition that holds ────────────────────────────
+
+fn sign
+  => n
+  cond
+    n < 0 => "negative"
+    n == 0 => "zero"
+    _ => "positive"
+
+fn huge?
+  => n
+  cond
+    n > 100 => true
+
+r1 := test "cond, first arm" (-> assert-eq "negative" (sign (-3)))
+r2 := test "cond, middle arm" (-> assert-eq "zero" (sign 0))
+r3 := test "cond, fallback" (-> assert-eq "positive" (sign 9))
+r4 := test "cond without a fallback raises" (-> assert-throws (-> huge? 5))
+
+;; ── case: equality dispatch ─────────────────────────────────────────
+
+limit := 10
+
+fn route
+  => cmd args
+  case cmd
+    "run" => "running"
+    "q" "quit" => "bye"
+    "hallmark" | length args > 2 => "hallmark"
+    limit => "limit"
+    _ => "usage"
+
+r5 := test "case, a value" (-> assert-eq "running" (route "run" #[]))
+r6 := test "case, second of two values" (-> assert-eq "bye" (route "quit" #[]))
+r7 := test "case, guard holds" (-> assert-eq "hallmark" (route "hallmark" #[1 2 3]))
+r8 := test "case, guard fails" (-> assert-eq "usage" (route "hallmark" #[1]))
+r9 := test "case, a name is looked up" (-> assert-eq "limit" (route 10 #[]))
+r10 := test "case, fallback" (-> assert-eq "usage" (route "nope" #[]))
+
+;; ── still ordinary names elsewhere ──────────────────────────────────
+
+cond := 3
+case := 4
+
+r11 := test "cond and case as bindings" (-> assert-eq 7 (cond + case))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11]

@@ -85,6 +85,13 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 - **Multi-line call arguments must line up on a multiple of two.** Continuation lines under a call (`fold f\n     acc\n     v`) are an indentation error at 5 or 7 spaces. Bind the intermediates instead.
 - **A record spread wants a bare name.** `{...r.failure k= v}` does not parse; bind `f := r.failure` first.
 
+## cond and case
+
+- **`cond` and `case` are soft keywords** — keywords only where they open arms (first on the line or after `:=`, `:!`, `<-`, `=>`, `~`; `cond` ends its line, `case` takes a scrutinee; the next line is a deeper arm with `=>`). Elsewhere they are names: `cond := ready?` then `if cond` is fine.
+- **A `case` value is one term.** `"q" "quit" => …` is two values; write a computed value or a negative number in parentheses: `(limit + 1) => …`, `(-1) => …`.
+- **A name in a `case` value is compared, not bound** — the difference from `match`, where `limit => …` would bind anything to `limit`.
+- **Like `match`, neither fits inside parentheses** (no INDENT there): bind it, `kind := case x` / `  …`.
+
 ## Pipelines & seq-ops
 
 - **Seq-op direct-form:** `@ f xs`, `/? pred xs`, `@i f xs`, `/^ f xs` all parse as `(seq-op f) xs` (the first postfix becomes the seq-op's argument, subsequent postfixes apply to the resulting partial). Both pipe and direct forms work:
