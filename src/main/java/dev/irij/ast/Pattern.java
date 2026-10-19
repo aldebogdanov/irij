@@ -19,8 +19,9 @@ public sealed interface Pattern extends Node {
     /** Constructor pattern: Ok value, Leaf 1, Node left x right. */
     record ConstructorPat(String name, List<Pattern> args, SourceLoc loc) implements Pattern {}
 
-    /** Keyword pattern: :ok, :error value. arg may be null. */
-    record KeywordPat(String name, Pattern arg, SourceLoc loc) implements Pattern {}
+    /** Keyword pattern: :ok. Matches that keyword only; a keyword takes
+     *  no arguments, so in `#(:ok v)` the `v` is the tuple's next element. */
+    record KeywordPat(String name, SourceLoc loc) implements Pattern {}
 
     /** Unit pattern: (). */
     record UnitPat(SourceLoc loc) implements Pattern {}

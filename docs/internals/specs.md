@@ -414,7 +414,11 @@ validated field *presence* only.
    `SpecValidator.certifyProduct` call: the constructor is the one
    place a product value is built, so validating there means a
    certified value is genuinely valid. Skip it and `Point "str" 2`
-   satisfies `x :: Int` at every boundary forever after.
+   satisfies `x :: Int` at every boundary forever after. A record
+   update `{...p x= 3}` builds one too, so `RT.recordUpdateEnd`
+   certifies the result the same way — it keeps the spec only while
+   the update replaced declared fields, and gives a plain map once it
+   adds one (a closed spec can't carry an extra field).
 2. Otherwise dispatches by descriptor:
    - **Product**: requires `Tagged` with all required named fields,
      or `IrijMap` with those keys (auto-certifies into Tagged).
@@ -426,7 +430,8 @@ validated field *presence* only.
      result with the matching `specName`.
    - **Sum**: requires `Tagged` whose tag is a known variant of the
      spec, and whose positional-field count matches the declared
-     arity. Re-certifies the result.
+     arity — one field per spec atom of the variant (`Rect Float
+     Float` has two; see `ast.md`). Re-certifies the result.
 
 This mirrors `Interpreter.validateProduct` /
 `Interpreter.validateSum` (including the O(1) tag-match

@@ -172,7 +172,6 @@ final class ModuleScope {
             case Pattern.VarPat vp -> out.add(vp.name());
             case Pattern.SpreadPat sp -> { if (!"_".equals(sp.name())) out.add(sp.name()); }
             case Pattern.ConstructorPat cp -> { for (Pattern a : cp.args()) binders(a, out); }
-            case Pattern.KeywordPat kp -> binders(kp.arg(), out);
             case Pattern.GroupedPat gp -> binders(gp.inner(), out);
             case Pattern.VectorPat vp -> {
                 for (Pattern e : vp.elements()) binders(e, out);
@@ -181,6 +180,7 @@ final class ModuleScope {
             case Pattern.TuplePat tp -> { for (Pattern e : tp.elements()) binders(e, out); }
             case Pattern.DestructurePat dp -> { for (var f : dp.fields()) binders(f.value(), out); }
             case Pattern.LitPat lp -> { }
+            case Pattern.KeywordPat kp -> { }
             case Pattern.WildcardPat wp -> { }
             case Pattern.UnitPat up -> { }
         }
@@ -654,7 +654,7 @@ final class ModuleScope {
             return switch (p) {
                 case Pattern.ConstructorPat cp -> new Pattern.ConstructorPat(typeName(cp.name(), cp.loc()),
                         pats(cp.args()), cp.loc());
-                case Pattern.KeywordPat kp -> new Pattern.KeywordPat(kp.name(), pat(kp.arg()), kp.loc());
+                case Pattern.KeywordPat kp -> kp;
                 case Pattern.GroupedPat gp -> new Pattern.GroupedPat(pat(gp.inner()), gp.loc());
                 case Pattern.VectorPat vp -> new Pattern.VectorPat(pats(vp.elements()), vp.spread(), vp.loc());
                 case Pattern.TuplePat tp -> new Pattern.TuplePat(pats(tp.elements()), tp.loc());

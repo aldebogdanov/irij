@@ -768,8 +768,10 @@ final class ExprEmitter implements Opcodes {
 
     /** `{...base k1= v1 k2= v2}` — clone base map, overwrite keys. */
     void emitRecordUpdate(Expr.RecordUpdate ru, MethodVisitor mv, Locals locals) {
-        // Push the base value, call RT.recordUpdateBegin → LinkedHashMap.
+        // Push the base twice (one copy stays for recordUpdateEnd), then
+        // RT.recordUpdateBegin → LinkedHashMap of its fields.
         emitVarLoad(ru.base(), mv, locals);
+        mv.visitInsn(DUP);
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("recordUpdateBegin"), "recordUpdateBegin",
                 "(Ljava/lang/Object;)Ljava/util/LinkedHashMap;", false);
         // For each Field entry, DUP map, push key/value, put, pop result.
@@ -794,12 +796,11 @@ final class ExprEmitter implements Opcodes {
                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", true);
             mv.visitInsn(POP);
         }
-        // Wrap the LinkedHashMap in IrijMap.
-        mv.visitTypeInsn(NEW, ClassEmitter.VALUES + "$IrijMap");
-        mv.visitInsn(DUP_X1);
-        mv.visitInsn(SWAP);
-        mv.visitMethodInsn(INVOKESPECIAL, ClassEmitter.VALUES + "$IrijMap", "<init>",
-                "(Ljava/util/Map;)V", false);
+        // Stack: base, map. A map base gives a map; a record base stays a
+        // record of its spec unless the update added a field.
+        mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
+        mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("recordUpdateEnd"), "recordUpdateEnd",
+                "(Ljava/lang/Object;Ljava/util/LinkedHashMap;Ljava/lang/Class;)Ljava/lang/Object;", false);
     }
 
 

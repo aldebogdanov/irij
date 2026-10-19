@@ -376,7 +376,6 @@ public final class EffectRowChecker {
         switch (p) {
             case Pattern.VarPat v -> into.add(v.name());
             case Pattern.ConstructorPat c -> { for (Pattern a : c.args()) bindNames(a, into); }
-            case Pattern.KeywordPat k -> { if (k.arg() != null) bindNames(k.arg(), into); }
             case Pattern.GroupedPat g -> bindNames(g.inner(), into);
             case Pattern.VectorPat v -> {
                 for (Pattern e : v.elements()) bindNames(e, into);

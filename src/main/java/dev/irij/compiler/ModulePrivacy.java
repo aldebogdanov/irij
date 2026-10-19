@@ -321,7 +321,7 @@ final class ModulePrivacy {
             return switch (p) {
                 case Pattern.VarPat vp -> new Pattern.VarPat(id(vp.name()), vp.loc());
                 case Pattern.ConstructorPat cp -> new Pattern.ConstructorPat(cp.name(), pats(cp.args()), cp.loc());
-                case Pattern.KeywordPat kp -> new Pattern.KeywordPat(kp.name(), pat(kp.arg()), kp.loc());
+                case Pattern.KeywordPat kp -> kp;
                 case Pattern.GroupedPat gp -> new Pattern.GroupedPat(pat(gp.inner()), gp.loc());
                 case Pattern.VectorPat vp -> new Pattern.VectorPat(pats(vp.elements()),
                         (Pattern.SpreadPat) pat(vp.spread()), vp.loc());

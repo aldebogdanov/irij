@@ -498,7 +498,14 @@ public class AstBuilder {
             var variants = new ArrayList<Decl.Variant>();
             for (var v : ctx.specVariant()) {
                 String name = v.UPPER_NAME().getText();
-                int arity = v.specExpr().size();
+                // One field per spec atom: `Rect Float Float` has two.
+                // specApp reads atoms greedily (`Float Float` as one
+                // application), so counting specExprs gave 1; a field
+                // that applies a spec is parenthesized, `Node (Tree a) a`.
+                int arity = 0;
+                for (var se : v.specExpr()) {
+                    arity += se.ARROW() != null ? 1 : se.specApp().specAtom().size();
+                }
                 variants.add(new Decl.Variant(name, arity));
             }
             return new Decl.SpecBody.SumSpec(variants);
@@ -1327,7 +1334,51 @@ public class AstBuilder {
         Expr body = ctx.lambdaChain() != null
                 ? visitLambdaChain(ctx.lambdaChain())
                 : visitExprSeq(ctx.exprSeq());
-        return new Expr.Lambda(params, restParam, body, loc(ctx));
+        return destructureLambdaParams(params, restParam, body, loc(ctx));
+    }
+
+    /**
+     * A lambda whose parameters are patterns — {@code (#(a b) -> a + b)},
+     * {@code ({name= n} -> n)} — desugars to one taking plain parameters
+     * and matching them:
+     * <pre>
+     *   (#(a b) c {name= n} -> body)
+     *   ⇒ (__lp0 c __lp2 -> match #(__lp0 __lp2)
+     *                         #(#(a b) {name= n}) => body
+     *                         _ => error "…")
+     * </pre>
+     * (a single pattern parameter is matched directly, not through a
+     * tuple). Every later pass sees an ordinary lambda and match. The
+     * {@code __} prefix can't be written in source ({@code _} lexes as
+     * its own token), so the synthetic names never meet a user's.
+     */
+    private static Expr destructureLambdaParams(List<Pattern> params, String restParam,
+                                                Expr body, SourceLoc loc) {
+        var plain = new ArrayList<Pattern>(params.size());
+        var scrutinees = new ArrayList<Expr>();
+        var patterns = new ArrayList<Pattern>();
+        for (int i = 0; i < params.size(); i++) {
+            Pattern p = params.get(i);
+            if (p instanceof Pattern.VarPat || p instanceof Pattern.WildcardPat) {
+                plain.add(p);
+            } else {
+                String name = "__lp" + i;
+                plain.add(new Pattern.VarPat(name, p.loc()));
+                scrutinees.add(new Expr.Var(name, p.loc()));
+                patterns.add(p);
+            }
+        }
+        if (patterns.isEmpty()) return new Expr.Lambda(params, restParam, body, loc);
+        Expr scrutinee = scrutinees.size() == 1
+                ? scrutinees.get(0) : new Expr.TupleLit(scrutinees, loc);
+        Pattern pattern = patterns.size() == 1
+                ? patterns.get(0) : new Pattern.TuplePat(patterns, loc);
+        Expr mismatch = new Expr.App(new Expr.Var("error", loc),
+                List.of(new Expr.StrLit("Pattern match failure in lambda parameter at " + loc, loc)), loc);
+        Expr match = new Expr.MatchExpr(scrutinee, List.of(
+                new Expr.MatchArm(pattern, null, body),
+                new Expr.MatchArm(new Pattern.WildcardPat(loc), null, mismatch)), loc);
+        return new Expr.Lambda(plain, restParam, match, loc);
     }
 
     private List<Pattern> visitLambdaParams(LambdaParamsContext ctx) {
@@ -1528,14 +1579,9 @@ public class AstBuilder {
             return new Pattern.ConstructorPat(name, args, loc);
         }
 
-        // Keyword pattern: :ok  or  :ok value
+        // Keyword pattern: :ok
         if (ctx.KEYWORD() != null) {
-            String name = ctx.KEYWORD().getText().substring(1);
-            Pattern arg = null;
-            if (!ctx.pattern().isEmpty()) {
-                arg = visitPattern(ctx.pattern().get(0));
-            }
-            return new Pattern.KeywordPat(name, arg, loc);
+            return new Pattern.KeywordPat(ctx.KEYWORD().getText().substring(1), loc);
         }
 
         // Spread pattern: ...rest or ..._ (MUST be checked before IDENT/UNDERSCORE)
@@ -1547,6 +1593,14 @@ public class AstBuilder {
                 return new Pattern.SpreadPat("_", loc);
             }
             return new Pattern.SpreadPat("_", loc);
+        }
+
+        // `true` and `false` lex as identifiers (the emitter resolves them
+        // as values), so in a pattern they must be turned into literals
+        // here — as a VarPat they would bind a variable and match anything.
+        if (ctx.IDENT() != null && (ctx.IDENT().getText().equals("true")
+                || ctx.IDENT().getText().equals("false"))) {
+            return new Pattern.LitPat(new Expr.BoolLit(ctx.IDENT().getText().equals("true"), loc), loc);
         }
 
         // Variable pattern
@@ -1609,6 +1663,13 @@ public class AstBuilder {
                 if (pat instanceof Pattern.SpreadPat sp) {
                     spread = sp;
                 } else {
+                    // `#[Red ...rest]`: the constructor's `pattern*` swallowed
+                    // the rest; give it back to the vector.
+                    Pattern.SpreadPat swallowed = trailingSpread(pat);
+                    if (swallowed != null) {
+                        spread = swallowed;
+                        pat = withoutTrailingSpread(pat);
+                    }
                     elements.add(pat);
                 }
             }
@@ -1623,6 +1684,24 @@ public class AstBuilder {
             }
         }
         return new Pattern.VectorPat(elements, spread, loc(ctx));
+    }
+
+    /** The `...rest` a constructor pattern's greedy argument list ended
+     *  with (possibly through nested constructors), or null. */
+    private static Pattern.SpreadPat trailingSpread(Pattern p) {
+        if (p instanceof Pattern.ConstructorPat cp && !cp.args().isEmpty()) {
+            Pattern last = cp.args().get(cp.args().size() - 1);
+            return last instanceof Pattern.SpreadPat sp ? sp : trailingSpread(last);
+        }
+        return null;
+    }
+
+    private static Pattern withoutTrailingSpread(Pattern p) {
+        var cp = (Pattern.ConstructorPat) p;
+        var args = new ArrayList<>(cp.args());
+        Pattern last = args.remove(args.size() - 1);
+        if (!(last instanceof Pattern.SpreadPat)) args.add(withoutTrailingSpread(last));
+        return new Pattern.ConstructorPat(cp.name(), args, cp.loc());
     }
 
     private Pattern visitTuplePattern(TuplePatternContext ctx) {
