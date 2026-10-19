@@ -1,0 +1,36 @@
+use std.test {assert-eq summarize test}
+
+;; Self-calls in tail position run in constant stack — in every body
+;; form, including match arms and a match ending an imperative body.
+
+fn sum-to
+  (acc n -> if (n == 0) acc else (sum-to (acc + n) (n - 1)))
+
+fn count-down
+  => n
+  if (n == 0)
+    "done"
+  else
+    count-down (n - 1)
+
+fn down
+  0 => "done"
+  n => down (n - 1)
+
+fn count-to
+  #(n limit) | n >= limit => n
+  #(n limit) => count-to #((n + 1) limit)
+
+fn sum-list
+  => acc xs
+  match xs
+    #[] => acc
+    #[x ...rest] => sum-list (acc + x) rest
+
+r1 := test "lambda body, 1M deep" (-> assert-eq 500000500000 (sum-to 0 1000000))
+r2 := test "imperative body, 1M deep" (-> assert-eq "done" (count-down 1000000))
+r3 := test "match arms, 1M deep" (-> assert-eq "done" (down 1000000))
+r4 := test "guarded arm, 1M deep" (-> assert-eq 1000000 (count-to #(0 1000000)))
+r5 := test "tail match statement" (-> assert-eq 20000100000 (sum-list 0 (to-vec (1..200000))))
+
+summarize #[r1 r2 r3 r4 r5]

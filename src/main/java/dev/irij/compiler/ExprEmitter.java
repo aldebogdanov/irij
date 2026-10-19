@@ -96,6 +96,12 @@ final class ExprEmitter implements Opcodes {
             return;
         }
 
+        // 2b. Tail-propagating shape: match — every arm's body is tail.
+        if (e instanceof Expr.MatchExpr me) {
+            ce.patEm.emitTailMatch(me, mv, locals);
+            return;
+        }
+
         // 3. Block: earlier stmts non-tail, last expr tail. Its own
         // scope, as in emitBlock — `if c (x := 1; x) else x` must not
         // hand the then-branch's x to the else.
