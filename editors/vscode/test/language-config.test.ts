@@ -14,6 +14,7 @@ test('block heads indent the next line', () => {
     'effect Ask', 'spec Color', '  if c', '  else', '  else if c', '  match x',
     '  r := match x', '  with mock-fs', '  scope s', '  scope.race s', '  do',
     '  n =>', '  (n ->', 'x :=', '  xs <-', 'model m :: "b.qnt" :pure',
+    '  cond', '  label := cond', '  case cmd', '  r := case x.kind',
   ]) assert.match(line, increase, line);
 });
 
@@ -22,6 +23,7 @@ test('inline forms do not indent the next line', () => {
     '  y := if (a > b) a else b', 'r := with fs.default-fs do (f 1)', 'r := do (a) (b)',
     '  spec :: Int', 'use std.list', 'do-stuff 1', 'x := 1', '  =>', '  => tag',
     'cap db :: Db = "dev.Db"', 'iffy := 2', 'matcher x', 'fn-name := 1',
+    'cond := true', 'case := 7', '  println (case + 1)', 'conditional x', 'cases xs',
   ]) assert.doesNotMatch(line, increase, line);
 });
 

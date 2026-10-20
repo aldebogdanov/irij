@@ -50,9 +50,10 @@
      =handler=, =impl=, =proto=, =pre=, =post=, =contract=,
      =select=, =enclave=, =par-each=, =on-failure=) are
      2–10 characters each —
-     plus =model= (§6.4a), which is *soft*: it is a keyword only where
-     it heads a declaration and an ordinary name everywhere else, since
-     a word that common has to stay usable. Every keyword is also a
+     plus =model= (§6.4a), =cond= and =case= (§2.3a), which are
+     *soft*: each is a keyword only where it starts its form and an
+     ordinary name everywhere else, since words that common have to
+     stay usable. Every keyword is also a
      valid *field name* — after =.=, before === in a map or a
      destructuring pattern, and as a product spec's field — because
      data decoded from JSON or a Quint spec names its fields freely —
@@ -510,6 +511,51 @@
    distinct from =..= (two dots) which is the range operator in
    expressions. This avoids the ambiguity of using the same symbol
    for both purposes.
+
+** 2.3a Multi-way Choice: =cond= and =case=
+
+   A long =if … else if … else= chain repeats itself; =cond= and
+   =case= write the same choice as a column of arms. Both are
+   expressions, take arm bodies like =match= (one line, or an indented
+   block), and use =_ => …= for the fallback. With no =_= arm, falling
+   through every arm is an error, as in =match=.
+
+   *=cond=* tries conditions in order and takes the first that holds:
+
+   #+begin_example
+   fn main :: Vec () ::: Console
+     => args
+     cmd := if (empty? args) "help" else (head args)
+     cond
+       cmd == "run" => run-cmd args
+       cmd == "hallmark" && length args > 2 => hallmark-cmd args
+       cmd == "version" => println version-text
+       _ => say usage
+   #+end_example
+
+   *=case=* compares one value with ~==~ against each arm's values. An
+   arm lists one or more values and may add a guard. The values are
+   expressions — a name is looked up, never bound — and each is a
+   single term, as an inline =if='s parts are: write =(n + 1)= or
+   =(-1)= in parentheses.
+
+   #+begin_example
+   case cmd
+     "run" => run-cmd args
+     "q" "quit" => stop ()                    ;; either value
+     "hallmark" | length args > 2 => hallmark-cmd args
+     default-cmd => run-default ()            ;; equal to the value of default-cmd
+     _ => say usage
+   #+end_example
+
+   Use =match= to take a value apart; =case= when the arms are values
+   to compare against, including ones held in names.
+
+   Both are *soft* keywords. =cond= is one where an expression starts
+   (first on its line, or after ~:=~, ~:!~, ~<-~, ~=>~ or =~=), ends its
+   line, and the next line is an arm; =case= is one in the same place
+   when a scrutinee follows it. Elsewhere — =if cond=, =case := 7=,
+   =m.case= — each is an ordinary name.
 
 ** 2.4 Module System
 

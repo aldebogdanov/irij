@@ -45,6 +45,27 @@ label := match 75
   _           => "needs-work"
 println label    ;; good
 
+;; ── cond and case: multi-way choice without else-if chains ──────────────
+
+fn temperature-word
+  => degrees
+  cond
+    degrees < 0 => "freezing"
+    degrees < 15 => "cold"
+    degrees < 25 => "mild"
+    _ => "hot"
+
+println (temperature-word 18)   ;; mild
+
+fn command
+  => cmd
+  case cmd
+    "run" => "running"
+    "q" "quit" => "bye"         ;; either value
+    _ => "unknown command"
+
+println (command "quit")        ;; bye
+
 ;; ── Data types (sum types) ────────────────────────────────────────────────
 
 spec Shape

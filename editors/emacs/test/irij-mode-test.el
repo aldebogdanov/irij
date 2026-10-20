@@ -88,7 +88,10 @@
   (should (= 4 (irij-test--indent "fn f\n  match x\nx")))
   (should (= 4 (irij-test--indent "fn f\n  r := match x\nx")))
   (should (= 2 (irij-test--indent "fn f\n  r := match x\n  y\nx")))
-  (should (= 4 (irij-test--indent "fn fact\n  0 => 1\n  n =>\nx"))))
+  (should (= 4 (irij-test--indent "fn fact\n  0 => 1\n  n =>\nx")))
+  (should (= 4 (irij-test--indent "fn f\n  cond\nx")))
+  (should (= 4 (irij-test--indent "fn f\n  label := cond\nx")))
+  (should (= 4 (irij-test--indent "fn f\n  case cmd\nx"))))
 
 (ert-deftest irij-indent-inline-forms-do-not-open ()
   (should (= 2 (irij-test--indent "fn f\n  y := if (a > b) a else b\nx")))
@@ -99,6 +102,8 @@
   (should (= 0 (irij-test--indent "do-stuff 1\nx")))
   (should (= 0 (irij-test--indent "r := with fs.default-fs do (f 1)\nx")))
   (should (= 0 (irij-test--indent "r := do (note 1) (note 2)\nx")))
+  (should (= 0 (irij-test--indent "cond := true\nx")))
+  (should (= 0 (irij-test--indent "case := 7\nx")))
   (should (= 2 (irij-test--indent "fn f\n  =>\nx")))
   (should (= 2 (irij-test--indent "fn f\n  => tag\nx"))))
 

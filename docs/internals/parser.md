@@ -205,3 +205,22 @@ parameter, map field (`{model= "opus"}`) and dot-access field
 called `model` (uzor's `=> model ev`). The general fix for the other
 keywords is the soft-keyword work TODO.md tracks under the
 `party`/`quo` rename.
+
+`COND` and `CASE` (spec §2.3a) are soft the same way, through
+`IrijLexerBase.atArmsForm`. The word is a keyword only when all three
+hold, else an IDENT:
+
+- it stands where an expression starts — first on its line, or after
+  `:=`, `:!`, `<-`, `=>` or `~` (so `if cond` and `m.case` are names);
+- `cond` ends its line (ignoring a comment); `case` is followed by a
+  scrutinee that does;
+- the next non-blank line is indented deeper and contains `=>` — the
+  first arm.
+
+The rules are `condExpr : COND NEWLINE INDENT condArm …` with
+`condArm : expr FAT_ARROW armBody`, and `caseExpr : CASE expr NEWLINE
+INDENT caseArm …` with `caseArm : postfixExpr+ guard? FAT_ARROW
+armBody` — a case value is one term, as an inline `if`'s parts are, so
+`"q" "quit"` is two values, not an application. Both desugar in the
+builder (`ast.md`). Like the other block forms they can't sit inside
+parentheses, where the lexer emits no INDENT.

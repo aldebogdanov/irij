@@ -280,6 +280,7 @@ The universal joint. Everything interesting depends on this.
   - Does NOT trigger: `-` (ambiguous with unary negation), `/` (ambiguous with seq ops)
   - Lexer-level: `nextLineStartsWithBinaryOp()` in `IrijLexerBase.java`
   - Parser and interpreter: zero changes needed
+- [x] **`cond` and `case`** — Added (2026-10). A long `if … else if …` chain (invar's `main`) repeats the scrutinee and the `else if`s. Spec §2.3a: `cond` takes the first condition that holds; `case x` compares `x` with `==` against each arm's values (several per arm, a name looked up not bound, an optional guard). `_ =>` is the fallback; falling through is an error. Soft keywords (`IrijLexerBase.atArmsForm`), so `cond`/`case` stay usable as names. `cond` desugars to an `if` chain (its conditions may perform inside a `with` body), `case` to a `match` with equality guards. Emacs, TextMate and VS Code highlight and indent them. `CaseCondTest` (12), `tests/test-case-cond.irj` (11), editor tests.
 - [x] **`!` identifier suffix** — confirmed working (ANTLR longest-match resolves correctly)
 - [x] **`std.test` module** — Irij-native test framework
   - `assert-eq`, `assert-neq`, `assert-true`, `assert-false`, `assert-throws`

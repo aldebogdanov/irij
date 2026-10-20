@@ -68,6 +68,8 @@ class EditorGrammarSyncTest {
     @Test void emacsKeywordsMatchLexer() throws Exception {
         Set<String> kw = elispList(Files.readString(EMACS), "irij-keywords");
         kw.add("model");   // soft keyword, matched only at a declaration start
+        kw.add("cond");    // soft keywords, matched only where they open arms
+        kw.add("case");
         assertEquals(lexerKeywords(), kw);
     }
 
@@ -81,6 +83,8 @@ class EditorGrammarSyncTest {
         kw.addAll(tmAlternatives(json, "\"keyword.control.irij\""));
         kw.addAll(tmAlternatives(json, "\"keyword.other.declaration.irij\""));
         kw.add("model");   // `model-decl` rule
+        kw.add("cond");    // `arms-head` rule
+        kw.add("case");
         assertEquals(lexerKeywords(), kw);
     }
 
