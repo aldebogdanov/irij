@@ -838,6 +838,8 @@ Full design and the recorded Quint behaviour it rests on:
 
 ## Known Issues / Bugs
 
+- [x] **Effect rows weren't checked through `|>`, `@`, string interpolation, ranges or record updates** — Fixed (2026-10), found adding method references. `EffectRowChecker.walkExpr` had no case for `Pipe`, `SeqOp`, `StringInterp`, `Range`, `RecordUpdate` or `ChoreoExpr`, so `n => n |> say` in a pure fn compiled and printed, as did `n |> Math/abs` and `"${Math/abs n}"`. A pipe is now checked as the call it is (`x |> f a` as `f a x`), a seq-op's function as called, and the others' parts are walked; `collectInto` (row-variable inference) covers the same shapes. 5 tests in `EffectRowLintTest`.
+
 - [x] **Adversarial audit (2026-10)** — security, correctness and performance
       pass over the whole engine. Fixed: `serve` handed out every file under
       the working directory (`.env`, source, the DB; a system service's CWD is

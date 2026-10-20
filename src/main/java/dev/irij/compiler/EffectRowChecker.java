@@ -678,6 +678,32 @@ public final class EffectRowChecker {
                 }
             }
             case Expr.Compose c -> { walkExpr(c.left(), avail, ctx); walkExpr(c.right(), avail, ctx); }
+            // `x |> f a` is the call `f a x`, `f <| x` is `f x`: checked as
+            // that App, so a pipe can't reach an effect the row lacks.
+            case Expr.Pipe p -> walkExpr(p.forward()
+                    ? new Expr.App(p.right(), List.of(p.left()), p.loc())
+                    : new Expr.App(p.left(), List.of(p.right()), p.loc()), avail, ctx);
+            // `@ f`, `/? f`, … call their function on each element.
+            case Expr.SeqOp so -> walkExpr(new Expr.App(so.arg(), List.of(), so.loc()), avail, ctx);
+            case Expr.StringInterp si -> {
+                for (var part : si.parts()) {
+                    if (part instanceof Expr.StringPart.Interpolation in) walkExpr(in.expr(), avail, ctx);
+                }
+            }
+            case Expr.RecordUpdate ru -> {
+                for (var me : ru.updates()) {
+                    switch (me) {
+                        case Expr.MapEntry.Field f -> walkExpr(f.value(), avail, ctx);
+                        case Expr.MapEntry.DynField df -> {
+                            walkExpr(df.keyExpr(), avail, ctx);
+                            walkExpr(df.value(), avail, ctx);
+                        }
+                        default -> {}
+                    }
+                }
+            }
+            case Expr.Range r -> { walkExpr(r.from(), avail, ctx); walkExpr(r.to(), avail, ctx); }
+            case Expr.ChoreoExpr ch -> { walkExpr(ch.left(), avail, ctx); walkExpr(ch.right(), avail, ctx); }
             default -> {}
         }
     }
@@ -1067,6 +1093,26 @@ public final class EffectRowChecker {
             }
             case Expr.Pipe p -> { collectInto(p.left(), out); collectInto(p.right(), out); }
             case Expr.Compose c -> { collectInto(c.left(), out); collectInto(c.right(), out); }
+            case Expr.SeqOp so -> collectInto(so.arg(), out);
+            case Expr.StringInterp si -> {
+                for (var part : si.parts()) {
+                    if (part instanceof Expr.StringPart.Interpolation in) collectInto(in.expr(), out);
+                }
+            }
+            case Expr.RecordUpdate ru -> {
+                for (var me : ru.updates()) {
+                    switch (me) {
+                        case Expr.MapEntry.Field f -> collectInto(f.value(), out);
+                        case Expr.MapEntry.DynField df -> {
+                            collectInto(df.keyExpr(), out);
+                            collectInto(df.value(), out);
+                        }
+                        default -> {}
+                    }
+                }
+            }
+            case Expr.Range r -> { collectInto(r.from(), out); collectInto(r.to(), out); }
+            case Expr.ChoreoExpr ch -> { collectInto(ch.left(), out); collectInto(ch.right(), out); }
             default -> {}
         }
     }
