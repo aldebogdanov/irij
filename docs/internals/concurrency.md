@@ -68,6 +68,18 @@ with `inheritSMStack(...)` and `inheritEffectRow(...)` at the top of its
 run. A perform outside any SM body (`RtEffects.perform`) dispatches
 synchronously to the innermost matching `SM_STACK` frame.
 
+That is also why a `scope` may sit in a `with` body that performs:
+the state-machine lowering emits it as an ordinary statement, its forks
+reach the `with`'s handler through the inherited frames, and an op the
+scope body itself performs is dispatched synchronously (`effects.md`).
+A clause that doesn't resume, for an op performed on a fork, ends the
+fork with an `AbortSignal`; `await` and the scope's join re-raise it
+unchanged on the parent's thread (`RtConcurrency.fiberFailure`), where
+the `with` it targets is running, so that `with` ends with the clause's
+value just as for an op performed on the parent.
+Handler state shared by concurrent forks is a plain data race (spec
+§3.2); keep a stateful handler's ops on one fiber.
+
 ## Capability callbacks on foreign executor threads
 
 Same inheritance need shows up outside `spawn`: any Java capability
@@ -120,11 +132,11 @@ A fiber spawned inside an SM `with` performs an op:
    value, invoke the clause on the calling (fiber) thread.
 4. Returns the resume value to the perform site.
 
-Trade-off: fiber-side performs work with synchronous-resume
-semantics (post-resume clause stmts run on the calling thread before
-the value propagates). Same property as the on-thread trampoline.
-Acceptable for idiomatic tail-position `resume v`; pathological
-non-tail clauses might surprise.
+Fiber-side performs work with synchronous-resume semantics: the
+clause runs on the calling thread and `resume v` hands `v` back. Since
+`resume` must be a clause's last step (a compile error otherwise,
+`effects.md`), no clause code is left to run after it, on this path or
+the trampoline's.
 
 ## Cancellation
 

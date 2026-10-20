@@ -5,13 +5,10 @@ package dev.irij.compiler;
  * a clause invokes {@code resume v} so the dispatch loop unwinds the
  * clause's JVM frames and continues iteratively. Stack-trace-free.
  *
- * <p><b>Semantic note:</b> idiomatic Irij clauses put {@code resume} in
- * tail position ({@code "stmt; stmt; resume v"}). For those, this throw
- * is purely a control-flow shortcut and behaviour is unchanged. For
- * non-tail clauses ({@code "resume v; postStmt"}) the trampoline causes
- * post-resume statements to be skipped — a deliberate trade-off so that
- * tight perform-loops scale beyond the JVM stack. The same shape can be
- * expressed by moving post-resume code outside the clause.
+ * <p>Every {@code resume} is a clause's last step — anything else is a
+ * compile error ({@code EffectEmitter.checkResumeIsLast}, spec §3.2) — so
+ * this throw never skips clause code, and tight perform-loops run in
+ * constant stack.
  */
 public final class TailResume extends RuntimeException {
     public Object value;

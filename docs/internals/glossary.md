@@ -7,6 +7,7 @@ Terms used throughout the internals docs.
 | **A-normalization** | Pass that lifts nested effect-op calls to top-level binds with fresh `$anf$N` names. Pre-classification step for SM body shaping. |
 | **AMBIENT_EFFECTS** | Special sentinel `Set<String>` whose `contains()` always returns true. Pushed for top-level scripts and `with` body re-entries that should see everything. |
 | **AVAILABLE_EFFECTS** | Thread-local stack of `Set<String>`; top is current effect row. Effect ops and capability-gated calls consult `.peek()` for legality. |
+| **AbortSignal** | Stack-trace-free `RuntimeException` thrown by `fireOpToSM` when a clause doesn't `resume` an op performed outside the step (in a called fn). Carries the clause value and the root continuation of the `with` it ends; that `with`'s dispatch loop catches it and returns the value. `try` and `on-failure` re-throw it. See `effects.md`. |
 | **Aardvark-DNS / Netavark** | Podman's networking stack — not relevant to Irij internals; mentioned only in deploy docs. |
 | **Blame** | In the spec system, the source location attributed for a spec or contract violation. Caller-side for input failures, callee-side for output failures (Findler/Felleisen 2002). |
 | **BuiltinFn** | Java-implemented function value (lives in `dev.irij.runtime`, referenced from the bytecode runtime). Effect-transparent — callback runs in caller's row. |
@@ -41,7 +42,8 @@ Terms used throughout the internals docs.
 | **Sequence** | SM body shape: linear list of segments separated by performs and/or inner-withs. N-state tableswitch. |
 | **SingleOp** | SM body shape: exactly one top-level perform. Two states. |
 | **SM** | Short for "state machine" — the 14c.3 effect-lowering style. |
-| **SM_STACK** | Thread-local stack of `List<CompiledHandler>` — every active SM dispatch frame. Used for cross-frame dispatch when an inner loop doesn't match a signal. |
+| **SmFrame** | An entry of `SM_STACK`: a dispatch loop's handlers (it is a `List<CompiledHandler>`) plus the root continuation of the `with` body it runs. |
+| **SM_STACK** | Thread-local stack of `SmFrame`s (each a `List<CompiledHandler>`) — every active SM dispatch frame. Used for cross-frame dispatch when an inner loop doesn't match a signal, and by `fireOpToSM` to find the `with` a clause belongs to. |
 | **Spec** | Runtime predicate validating a value's shape. Malli-inspired. |
 | **SpecContractFn** | Wrapper applied to fn values at definition time when specs are declared. Validates args on entry, return on exit. |
 | **Tagged** | `Values.Tagged(constructorName, args)` — discriminated-union representation for `Maybe.Some v`, etc. |

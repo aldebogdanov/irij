@@ -34,13 +34,13 @@ public final class CompiledScopeHandle {
     }
 
     public Object joinAll(Object bodyResult) {
-        dev.irij.IrijRuntimeError firstErr = null;
+        RuntimeException firstErr = null;
         for (Fiber f : fibers) {
             try { f.result.join(); }
             catch (java.util.concurrent.CompletionException ce) {
                 if (firstErr == null) {
                     for (Fiber g : fibers) g.thread.interrupt();
-                    firstErr = RuntimeSupport.runtimeFrom(ce.getCause(), "Fiber failed");
+                    firstErr = RtConcurrency.fiberFailure(ce.getCause());
                 }
             }
         }

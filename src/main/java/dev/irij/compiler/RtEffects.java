@@ -109,6 +109,7 @@ public final class RtEffects {
             for (int i = hs.size() - 1; i >= 0; i--) {
                 CompiledHandler h = hs.get(i);
                 if (h.effectName.equals(effectName)) {
+                    IrijContinuation owner = hs instanceof SmFrame f ? f.root : null;
                     RuntimeSupport.IrijFn clause = h.clauses.get(opName);
                     if (clause == null) {
                         throw new dev.irij.IrijRuntimeError(
@@ -133,13 +134,13 @@ public final class RtEffects {
                     clauseArgs[args.size()] = resumeFn;
                     Object clauseRet = clause.apply(clauseArgs);
                     if (resumed[0]) return resumeBox[0];
-                    // Abort path: clause never resumed. Best we can do
-                    // synchronously is propagate the abort value as a
-                    // RuntimeException so the calling fn (or fiber)
-                    // can decide what to do.
+                    // Abort: the clause never resumed, so its value is the
+                    // `with`'s and the body is abandoned from here — unwind
+                    // to the dispatch loop running that `with`.
+                    if (owner != null) throw AbortSignal.of(clauseRet, owner);
                     throw new dev.irij.IrijRuntimeError(
-                            "SM clause aborted from synchronous-perform context: "
-                                    + clauseRet);
+                            "handler " + h.name + " ended " + opName
+                                    + " without resume, outside its with: " + clauseRet);
                 }
             }
         }
@@ -197,12 +198,33 @@ public final class RtEffects {
                                          IrijContinuation k,
                                          Object reentryValue) {
         var stack = RuntimeSupport.SM_STACK.get();
-        stack.push(hs);
+        stack.push(new SmFrame(hs, k));
         try {
             return dispatchLoopSMImpl(hs, k, reentryValue, stack);
         } finally {
             stack.pollFirst(); // never throws — see exitFn
         }
+    }
+
+
+    /**
+     * An entry of {@link RuntimeSupport#SM_STACK}: the handlers one dispatch
+     * loop runs, plus the root continuation of the {@code with} body it
+     * runs — what an {@link AbortSignal} targets. A List so the stack's
+     * other readers (snapshots for fibers, the fallback search) see
+     * handlers as before.
+     */
+    static final class SmFrame extends java.util.AbstractList<CompiledHandler> {
+        final java.util.List<CompiledHandler> hs;
+        final IrijContinuation root;
+
+        SmFrame(java.util.List<CompiledHandler> hs, IrijContinuation root) {
+            this.hs = hs;
+            this.root = root;
+        }
+
+        @Override public CompiledHandler get(int i) { return hs.get(i); }
+        @Override public int size() { return hs.size(); }
     }
 
 
@@ -222,6 +244,11 @@ public final class RtEffects {
                 return result; // body finished
             } catch (PerformSignal s) {
                 sig = s;
+            } catch (AbortSignal a) {
+                // A clause of this `with` aborted an op performed outside
+                // the step (in a fn the body called): its value is ours.
+                if (a.target != k) throw a;
+                return a.value;
             }
 
             // Snapshot the pooled signal's fields immediately. The pool is
@@ -236,6 +263,7 @@ public final class RtEffects {
 
             // Find the innermost matching SM handler — own hs first.
             CompiledHandler h = findHandler(hs, sigEffectName);
+            IrijContinuation owner = k;
             // Fallback: walk other frames in SM_STACK (innermost-first,
             // skipping our own frame which is on top). Lets a tier-c
             // clause's perform reach the next-outer SM with's handler.
@@ -244,7 +272,10 @@ public final class RtEffects {
                 for (var frame : stack) {
                     if (!skippedSelf) { skippedSelf = true; continue; }
                     h = findHandler(frame, sigEffectName);
-                    if (h != null) break;
+                    if (h != null) {
+                        owner = frame instanceof SmFrame f ? f.root : null;
+                        break;
+                    }
                 }
             }
             if (h == null) throw sig; // truly unhandled
@@ -280,7 +311,10 @@ public final class RtEffects {
             try {
                 Object clauseReturn = clause.apply(clauseArgs);
                 // Clause returned without calling resume — abort path; this
-                // value is what the `with` evaluates to.
+                // value is what the `with` evaluates to. A clause of an
+                // outer `with` (reached through the fallback) aborts that
+                // one, so unwind to it.
+                if (owner != null && owner != k) throw AbortSignal.of(clauseReturn, owner);
                 return clauseReturn;
             } catch (TailResume tr) {
                 if (tr.target != expectedTarget) throw tr; // not for me

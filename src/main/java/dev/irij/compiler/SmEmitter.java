@@ -76,6 +76,7 @@ final class SmEmitter implements Opcodes {
             mv.visitLabel(catchL);
             int teSlot = outer.allocateAnon();
             mv.visitVarInsn(ASTORE, teSlot);
+            emitRethrowAbort(mv, teSlot);
             Locals ofLocals = outer.childScope();
             int errorSlot = ofLocals.allocate("error");
             mv.visitVarInsn(ALOAD, teSlot);
@@ -94,6 +95,19 @@ final class SmEmitter implements Opcodes {
             mv.visitLabel(end);
         }
         mv.visitVarInsn(ALOAD, resultSlot);
+    }
+
+
+    /** In an `on-failure` catch: an {@link AbortSignal} is a handler of
+     *  an enclosing `with` ending it early, not a failure — re-throw it. */
+    private void emitRethrowAbort(MethodVisitor mv, int slot) {
+        mv.visitVarInsn(ALOAD, slot);
+        mv.visitTypeInsn(INSTANCEOF, "dev/irij/compiler/AbortSignal");
+        Label notAbort = new Label();
+        mv.visitJumpInsn(IFEQ, notAbort);
+        mv.visitVarInsn(ALOAD, slot);
+        mv.visitInsn(ATHROW);
+        mv.visitLabel(notAbort);
     }
 
 
@@ -432,6 +446,7 @@ final class SmEmitter implements Opcodes {
             sm.visitVarInsn(ALOAD, teSlot);
             sm.visitInsn(ATHROW);
             sm.visitLabel(notTailResume);
+            emitRethrowAbort(sm, teSlot);
 
             // Genuine failure → run on-failure block.
             Locals ofLocals = inner.childScope();

@@ -552,6 +552,9 @@ public final class RuntimeSupport {
         try {
             Object r = callAny(thunk, new Object[0]);
             return new dev.irij.runtime.Values.Tagged("Ok", java.util.List.of(r));
+        } catch (AbortSignal abort) {
+            // A handler ending its `with` early is control flow, not an error.
+            throw abort;
         } catch (Throwable ex) {
             // Re-raise thread interruption — `try` mustn't swallow cancellation.
             if (ex instanceof InterruptedException
