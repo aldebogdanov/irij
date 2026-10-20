@@ -306,6 +306,11 @@ The checker rejects three patterns:
    compile rather than throwing at runtime — the static check
    subsumes interp's `BuiltinFn.requiredEffects` runtime gate.
 
+A pipe is checked as the call it is (`x |> f a` as `f a x`, `f <| x`
+as `f x`) and a seq-op's function as called (`@ say` calls `say`), so
+none of the three can be reached through `|>`, `@`, a string
+interpolation, a range or a record update.
+
 All three look the callee up by name, so the checker tracks the names
 bound inside the fn it is checking — parameters, `:=` and `:!`
 bindings, lambda parameters and pattern variables, each for the extent

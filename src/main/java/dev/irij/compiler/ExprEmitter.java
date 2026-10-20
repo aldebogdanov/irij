@@ -418,6 +418,18 @@ final class ExprEmitter implements Opcodes {
                 }
             }
             case Expr.DotAccess da -> emitDotAccess(da, mv, locals);
+            case Expr.JavaMember jm -> {
+                emitExpr(jm.target(), mv, locals);
+                mv.visitLdcInsn(jm.member());
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("javaMember"), "javaMember",
+                        "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;", false);
+            }
+            case Expr.JavaMemberRef jr -> {
+                mv.visitLdcInsn(jr.member());
+                pushObjectList(jr.args(), mv, locals);
+                mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("javaMemberRef"), "javaMemberRef",
+                        "(Ljava/lang/String;Ljava/util/List;)Ljava/lang/Object;", false);
+            }
             case Expr.JavaRef jr -> {
                 mv.visitLdcInsn(jr.ref());
                 mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("javaStaticRef"), "javaStaticRef",
@@ -663,7 +675,8 @@ final class ExprEmitter implements Opcodes {
                 }
             }
         }
-        // Interop fallthrough: evaluate target, delegate to JavaInterop.
+        // Fields of maps and records at run time; `.` on a Java object is
+        // an error naming `#` (RtInterop).
         emitExpr(da.target(), mv, locals);
         mv.visitLdcInsn(da.field());
         mv.visitMethodInsn(INVOKESTATIC, RtOwners.of("javaInstanceRef"), "javaInstanceRef",

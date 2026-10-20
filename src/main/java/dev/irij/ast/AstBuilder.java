@@ -1258,13 +1258,17 @@ public class AstBuilder {
         for (int i = 1; i < postfixes.size(); i++) {
             args.add(visitPostfixExpr(postfixes.get(i)));
         }
+        // `#plusDays 30` — the method's arguments, not its receiver.
+        if (fn instanceof Expr.JavaMemberRef ref && ref.args().isEmpty()) {
+            return new Expr.JavaMemberRef(ref.member(), args, loc(ctx));
+        }
         return new Expr.App(fn, args, loc(ctx));
     }
 
     private Expr visitPostfixExpr(PostfixExprContext ctx) {
         Expr result = visitAtomExpr(ctx.atomExpr());
-        // Dot access chain: walk children after atomExpr
-        // Grammar: atomExpr (DOT (fieldName | UPPER_NAME | CAMEL_IDENT))* (MAP_AT PARTY_NAME)?
+        // Dot / Java-member chain: walk children after atomExpr
+        // Grammar: atomExpr (DOT (fieldName | UPPER_NAME | CAMEL_IDENT) | JAVA_MEMBER)* (MAP_AT PARTY_NAME)?
         boolean afterDot = false;
         for (var child : ctx.children) {
             if (child instanceof FieldNameContext fn && afterDot) {
@@ -1274,6 +1278,8 @@ public class AstBuilder {
                 int type = tn.getSymbol().getType();
                 if (type == IrijParser.DOT) {
                     afterDot = true;
+                } else if (type == IrijParser.JAVA_MEMBER) {
+                    result = new Expr.JavaMember(result, tn.getText().substring(1), loc(ctx));
                 } else if (afterDot && (type == IrijParser.UPPER_NAME || type == IrijParser.CAMEL_IDENT)) {
                     result = new Expr.DotAccess(result, tn.getText(), loc(ctx));
                     afterDot = false;
@@ -1291,6 +1297,9 @@ public class AstBuilder {
     private Expr visitAtomExpr(AtomExprContext ctx) {
         if (ctx.literal() != null) return visitLiteral(ctx.literal());
         if (ctx.JAVA_REF() != null) return new Expr.JavaRef(ctx.JAVA_REF().getText(), loc(ctx));
+        if (ctx.JAVA_MEMBER_REF() != null) {
+            return new Expr.JavaMemberRef(ctx.JAVA_MEMBER_REF().getText().substring(1), List.of(), loc(ctx));
+        }
         if (ctx.IDENT() != null) return new Expr.Var(ctx.IDENT().getText(), loc(ctx));
         if (ctx.UPPER_NAME() != null) return new Expr.TypeRef(ctx.UPPER_NAME().getText(), loc(ctx));
         if (ctx.PARTY_NAME() != null) return new Expr.PartyRef(ctx.PARTY_NAME().getText(), loc(ctx));

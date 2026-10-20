@@ -1425,8 +1425,10 @@
 ** 9.1 Java Interop
 
    *Implemented in v0.3.0 (Phase 13).* Clojure-style `Class/member` access
-   to the JVM. No `use` declarations for Java classes — every class is
-   reachable via reflection. java.lang.* auto-imported.
+   to the JVM's statics, and `obj#member` (Javadoc's =String#trim=
+   notation) to a Java object's methods and fields. No `use`
+   declarations for Java classes — every class is reachable via
+   reflection. java.lang.* auto-imported.
 
    #+begin_example
    ;; Static methods + fields (java.lang auto-imported)
@@ -1438,13 +1440,18 @@
    stamp := java.time.Instant/now ()
    uuid  := java.util.UUID/randomUUID ()
 
-   ;; Instance methods via dot-access
-   println ("hello".toUpperCase ())   ;; "HELLO"
-   println ("  hi  ".trim ())         ;; "hi"
+   ;; Instance members with #
+   println ("hello"#toUpperCase ())   ;; "HELLO"
+   println ("  hi  "#trim ())         ;; "hi"
+   later := (java.time.LocalDate/now ())#plusDays 30
 
    ;; Constructors
    rnd := java.util.Random/new 42
-   println (rnd.nextInt 100)
+   println (rnd#nextInt 100)
+
+   ;; Method references: a function of the receiver
+   names |> @ #toUpperCase            ;; #["ANN" "BO"]
+   dates |> @ (#plusDays 30)
 
    ;; Every Java call requires the JVM effect
    fn now-ms :: _ Int ::: JVM
@@ -1455,13 +1462,34 @@
    - =Class/staticMethod= — callable dispatching on arg count + coercion
    - =Class/STATIC_FIELD= — static field value
    - =Class/new= — constructor (callable)
-   - =obj.instanceMethod= — bound instance method (via dot-access)
-   - =obj.field= — instance field value
+   - =obj#instanceMethod= — bound instance method
+   - =obj#field= — instance field value
+   - =#instanceMethod args…= — method reference, the function
+     =x -> x#instanceMethod args…=; its args are the method's, evaluated
+     once where it is written. With none, a method is called with no
+     arguments and a public field is read.
+
+   =.= is for Irij only — a record or map field (=user.name=, also a
+   camelCase key decoded from JSON, =m.userId=), a module alias member
+   (=str.words=), a handler's state (=h.state=), a scope's =s.fork=, a
+   capability's operation (=fs-files.read=). =#= is for Java only. A
+   reader therefore sees every place a program touches Java, and the
+   effect checker requires =JVM= at each one at compile time, as for
+   =Class/member=. =#= on an Irij value (a vector, map, record) is an
+   error, not reflection into Irij's own classes, and =.= on a Java
+   object is an error naming the =#= spelling. A chain needs
+   parentheses: =(s#trim ())#length ()=.
+
+   =#name= right after an atom, with no space (=s#trim=, =(f x)#size=,
+   ="x"#length=), is a member of that atom; after a space, an opening
+   bracket or at the start of a line it is a method reference. So
+   =f s#trim= passes the bound method and =f s #trim= passes =s= and
+   the reference.
 
    *Coercion:* Irij primitives auto-convert to Java primitives and their
    boxed equivalents. =IrijVector= ↔ =List=, =IrijMap= ↔ =Map=, arrays
    round-trip. Opaque Java objects (=Random=, =Instant=, =StringBuilder=)
-   are returned unchanged; dot-access still works via reflection.
+   are returned unchanged, and =#= reaches their members via reflection.
 
    *Overload resolution* scores each candidate per-argument: exact type
    match (=0=), near match (=Long → int= = 1), cross-family numeric

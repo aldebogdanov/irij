@@ -595,7 +595,7 @@ Clojure-style `Class/member` access to the JVM. No imports, no type declarations
 - [x] `CAMEL_IDENT` lexer token for camelCase method names after DOT
 - [x] `Expr.JavaRef` AST node + AstBuilder
 - [x] `JavaInterop` resolver (class lookup, static/instance dispatch, overload scoring)
-- [x] Dot-access fallthrough to reflection for opaque Java receivers
+- [x] Instance members via `obj#member`, method references via `#member` (2026-10; was dot-access fallthrough to reflection, now an error on a Java object)
 - [x] Argument coercion (Irij ↔ Java) with numeric family preference
 - [x] `JVM` effect tag on every Java call (threaded through BuiltinFn effect check)
 - [x] `java.lang.*` auto-import for unqualified class names
@@ -778,6 +778,8 @@ Full design and the recorded Quint behaviour it rests on:
 
 ## Near-term (high priority)
 
+- [x] **Java members are `obj#member`; method references `#member`** — DONE (2026-10, spec §9.1). `s#trim ()`, `d#plusDays 30`, `p#x`; `names |> @ #toUpperCase`, `@ (#plusDays 30)`. `.` is Irij's own (fields, module members, cap ops) and an error on a Java object, naming the `#` form — no transition release. Every `#` site needs `::: JVM`, checked at compile time; `JAVA_MEMBER` vs `JAVA_MEMBER_REF` is decided by the character before `#` (`IrijLexerBase.afterAtom`). See `docs/internals/jvm-capability.md`.
+
 - [x] **Primitives as sum-spec variants (proper union types)** — DONE (PR4, 2026-07; see docs/internals/specs.md; spec text update batched into the PR5 spec reconciliation). A
   `spec` sum must be able to mix named record/constructor variants
   with primitive specs:
@@ -838,6 +840,8 @@ Full design and the recorded Quint behaviour it rests on:
 ---
 
 ## Known Issues / Bugs
+
+- [x] **Effect rows weren't checked through `|>`, `@`, string interpolation, ranges or record updates** — Fixed (2026-10), found adding method references. `EffectRowChecker.walkExpr` had no case for `Pipe`, `SeqOp`, `StringInterp`, `Range`, `RecordUpdate` or `ChoreoExpr`, so `n => n |> say` in a pure fn compiled and printed, as did `n |> Math/abs` and `"${Math/abs n}"`. A pipe is now checked as the call it is (`x |> f a` as `f a x`), a seq-op's function as called, and the others' parts are walked; `collectInto` (row-variable inference) covers the same shapes. 5 tests in `EffectRowLintTest`.
 
 - [x] **Adversarial audit (2026-10)** — security, correctness and performance
       pass over the whole engine. Fixed: `serve` handed out every file under

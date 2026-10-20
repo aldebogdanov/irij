@@ -164,6 +164,24 @@ public abstract class IrijLexerBase extends Lexer {
         return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '?' || c == '!';
     }
 
+    // ── `#member`: a postfix or a reference ─────────────────────────────
+
+    /**
+     * Whether the {@code #name} just matched follows an atom with nothing
+     * in between — {@code s#trim}, {@code (f x)#size}, {@code "x"#length} —
+     * and so reaches that atom's Java member. After a space, an opening
+     * bracket or at the start of input it is a method reference instead
+     * ({@code @ #toUpperCase}), lexed as JAVA_MEMBER_REF.
+     */
+    protected boolean afterAtom() {
+        int start = _tokenStartCharIndex;
+        if (start == 0) return false;
+        CharStream in = getInputStream();
+        int c = in.getText(org.antlr.v4.runtime.misc.Interval.of(start - 1, start - 1)).charAt(0);
+        return isNameChar(c) || (c >= 'A' && c <= 'Z')
+                || c == ')' || c == ']' || c == '}' || c == '"';
+    }
+
     @Override
     public Token nextToken() {
         // Drain pending tokens first.

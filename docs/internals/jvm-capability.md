@@ -1,8 +1,11 @@
 # JVM capability
 
 Every Java interop site — `Class/method`, `Class/staticField`,
-`Class/new`, dot-access on a Java reference — requires `JVM` in the
-surrounding fn's effect row.
+`Class/new`, `obj#member`, a method reference `#member` — requires
+`JVM` in the surrounding fn's effect row. The forms are lexically
+distinct (`JAVA_REF`, `JAVA_MEMBER`, `JAVA_MEMBER_REF`), so
+`EffectRowChecker` checks every one at compile time; `.` is for Irij
+fields and never Java.
 
 ## Why
 
@@ -141,7 +144,7 @@ effect Random
 fn use-rnd :: Int Int ::: JVM Random
   => seed
   rnd := java.util.Random/new seed :: Random
-  rnd.nextInt 100
+  rnd#nextInt 100
 ```
 
 Without `:: Random` on the bind, only `JVM` is required. With it,
@@ -155,9 +158,33 @@ Implementation (`EffectRowChecker`):
 - Per-fn `varCap: Map<String, String>` is reset on entry.
 - `Stmt.Bind` walker records `target → effectName` when
   `b.specAnnotation()` is a `SpecExpr.Name` matching an effect.
-- `Expr.DotAccess` walker, if its target is a `Var` present in
+- The `Expr.JavaMember` walker, if its target is a `Var` present in
   `varCap`, calls `requireEffect(effect, ..., avail, loc)` before
-  recursing.
+  recursing (`Expr.DotAccess` keeps the same check for a capability-typed
+  var that holds an Irij value).
+
+## Instance members: `#`, and `.`
+
+`obj#member` is an `Expr.JavaMember`. The checker requires `JVM` at the
+site (`java-interop:#member`); the emitter calls
+`RtInterop.javaMember(recv, member)`, which re-checks `JVM` against the
+runtime row — the backstop for a lambda written where `JVM` was
+available and called inside a pure fn — and refuses a receiver of one of
+Irij's own runtime classes (vector, map, record, rational…): those
+aren't Java objects to the program, and `.` or a builtin is meant.
+
+A method reference, `#member args…` with no receiver, is an
+`Expr.JavaMemberRef`: the checker requires `JVM` where it is written,
+and `RtInterop.javaMemberRef(member, args)` builds a one-argument
+`BuiltinFn` that re-checks `JVM` and the receiver each time it is
+applied, then calls `JavaInterop.invokeMember`.
+
+Before `#`, a Java call was spelled `obj.method`, a `DotAccess` like any
+field read, so the static checker couldn't tell `s.trim` on a string
+from `r.trim` on a record and only `Class/member` was checked. `.` at
+run time (`RtInterop.javaInstanceRef`) now reads a map or record field,
+or reaches one of Irij's runtime objects (a scope handle's `s.fork`);
+on any other Java object it is an error naming the `#` spelling.
 
 The check is purely lexical — no flow analysis. Reassigning the var
 or aliasing through another bind drops the capability. Adequate for

@@ -24,6 +24,7 @@ Terms used throughout the internals docs.
 | **Hot redef** | Swap a fn's implementation at runtime via `MutableCallSite.setTarget`. |
 | **IndentRewriter** | ANTLR4 token-stream filter that emits `INDENT`/`DEDENT` tokens around lines based on indentation. Pre-parse pass. |
 | **IrijContinuation** | Concrete struct (`int state, Object[] fields, IrijFn step`) used by SM-mode bodies. Holds machine state across perform throws. |
+| **Java member / method reference** | `obj#member` (`Expr.JavaMember`) reaches a Java object's method or field; `#member args…` with no receiver (`Expr.JavaMemberRef`) is the function `x -> x#member args…`. `.` is Irij's own field access. See `jvm-capability.md`. |
 | **IrijFn** | SAM interface `(Object[]) -> Object` representing a first-class function value. `invokeBuiltin` + `LambdaMetafactory` produce these. |
 | **Lifted local** | A local variable that must survive a SM perform. Stored in `k.fields[idx]` instead of a JVM local slot. |
 | **Int** | Irij's integer: arbitrary precision, never wraps. A `Long` while it fits in 64 bits, a `BigInteger` only beyond (canonical). See `stdlib.md` § Numbers. |

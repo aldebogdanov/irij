@@ -2,15 +2,16 @@
 ;; Java interop — Clojure-style access to the JVM
 ;; ═══════════════════════════════════════════════════════════════════
 ;;
-;; Irij runs on the JVM. With Java interop (introduced in 0.3.0),
-;; every Java class is reachable via `Class/member` syntax.
+;; Irij runs on the JVM. Every Java class is reachable via
+;; `Class/member`, and every Java object's members via `obj#member`
+;; (Javadoc's `String#trim` notation). `.` is for Irij fields only.
 ;;
 ;; Forms:
 ;;   Class/staticMethod     → callable (auto-coerces args)
 ;;   Class/STATIC_FIELD     → field value
 ;;   Class/new              → constructor
-;;   obj.instanceMethod     → bound method via dot-access
-;;   obj.field              → field value
+;;   obj#instanceMethod     → bound method
+;;   obj#field              → field value
 ;;
 ;; java.lang.* classes auto-resolve without a package prefix.
 ;; Every JVM call is tagged with the ::: JVM effect.
@@ -32,24 +33,24 @@ println (Long/MAX_VALUE)             ;; 9223372036854775807
 stamp := java.time.Instant/now ()
 println stamp                        ;; 2026-04-18T…Z
 
-uuid := (java.util.UUID/randomUUID ()).toString ()
+uuid := (java.util.UUID/randomUUID ())#toString ()
 println uuid                         ;; 3fa85f64-5717-4562-b3fc-2c963f66afa6
 
-;; ── Instance methods via dot-access ─────────────────────────
+;; ── Instance methods: obj#method ────────────────────────────
 
-println ("hello".toUpperCase ())     ;; HELLO
-println ("  hi  ".trim ())           ;; hi
-println ("foo-bar".startsWith "foo") ;; true
+println ("hello"#toUpperCase ())     ;; HELLO
+println ("  hi  "#trim ())           ;; hi
+println ("foo-bar"#startsWith "foo") ;; true
 
 ;; ── Constructors ────────────────────────────────────────────
 
 rnd := java.util.Random/new 42       ;; seeded for reproducibility
-println (rnd.nextInt 100)            ;; 63
+println (rnd#nextInt 100)            ;; 63
 
 sb := java.lang.StringBuilder/new ()
-r1 := sb.append "Hello, "
-r2 := sb.append "world!"
-println (sb.toString ())             ;; Hello, world!
+r1 := sb#append "Hello, "
+r2 := sb#append "world!"
+println (sb#toString ())             ;; Hello, world!
 
 ;; ── Parsing / formatting ────────────────────────────────────
 
@@ -58,15 +59,28 @@ println (java.lang.Integer/toHexString 255)   ;; "ff"
 
 ;; ── Chained calls need parens or |> ─────────────────────────
 
-trimmed := "  padded  ".trim ()
-println (trimmed.length ())          ;; 6
+trimmed := "  padded  "#trim ()
+println (trimmed#length ())          ;; 6
 
 ;; Or via pipeline:
-println ("   x   " |> (s -> s.trim ()))
+println ("   x   " |> (s -> s#trim ()))
+
+;; ── Method references ───────────────────────────────────────
+;; `#method` with no receiver is a function of one: `x -> x#method`.
+;; Arguments after the name go to the method.
+
+println (#["ann" "bo"] |> @ #toUpperCase)              ;; #["ANN" "BO"]
+println ("   x   " |> #trim)                            ;; x
+day := java.time.LocalDate/of 2026 1 1
+println (#[day] |> @ (#plusDays 30))                    ;; #[2026-01-31]
 
 ;; ── Gotchas ─────────────────────────────────────────────────
 ;;
-;;  • Every `obj.methodName ()` requires explicit `()` (zero args).
+;;  • Every `obj#methodName ()` requires explicit `()` (zero args).
+;;  • A chain needs parentheses: `(s#trim ())#length ()` — without
+;;    them `#length` would attach to the `()` argument.
+;;  • `.` reaches Irij fields only; `.` on a Java object is an error
+;;    that names the `#` spelling.
 ;;  • Method overloads resolve by arity + arg type. When ambiguous,
 ;;    Long → long is preferred over Long → double.
 ;;  • java.util.List / java.util.Map / arrays returned from Java

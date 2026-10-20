@@ -725,6 +725,8 @@ final class ModuleScope {
                     }
                     yield new Expr.DotAccess(expr(da.target(), sc), da.field(), da.loc());
                 }
+                case Expr.JavaMember jm -> new Expr.JavaMember(expr(jm.target(), sc), jm.member(), jm.loc());
+                case Expr.JavaMemberRef jr -> new Expr.JavaMemberRef(jr.member(), exprs(jr.args(), sc), jr.loc());
                 case Expr.App a -> new Expr.App(expr(a.fn(), sc), exprs(a.args(), sc), a.loc());
                 case Expr.Lambda l -> new Expr.Lambda(pats(l.params()), l.restParam(),
                         lambdaBody(l, sc), l.loc());
