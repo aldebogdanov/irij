@@ -121,6 +121,39 @@ class EffectRowLintTest {
                 () -> "expected JVM-effect error, got: " + e.getMessage());
     }
 
+    @Test
+    void javaMemberRequiresJvmInCallerRow() {
+        String src = """
+            fn clean :: Str Str
+              (s -> s#trim ())
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("JVM") && e.getMessage().contains("#trim"),
+                () -> "expected JVM-effect error, got: " + e.getMessage());
+    }
+
+    @Test
+    void methodReferenceRequiresJvmWhereWritten() {
+        String src = """
+            fn shout :: (Vec Str) (Vec Str)
+              (names -> names |> @ #toUpperCase)
+            """;
+        IrijCompiler.CompileException e = expectFail(src);
+        assertTrue(e.getMessage().contains("JVM") && e.getMessage().contains("#toUpperCase"),
+                () -> "expected JVM-effect error, got: " + e.getMessage());
+    }
+
+    @Test
+    void methodReferenceAcceptedWithJvm() {
+        String src = """
+            fn shout :: (Vec Str) (Vec Str) ::: JVM
+              (names -> names |> @ #toUpperCase)
+            fn later :: _ _ ::: JVM
+              (ds -> ds |> @ (#plusDays 30))
+            """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
+    }
+
     // ── (2b) effects reached through |>, @ and interpolation ─────────
 
     @Test
@@ -190,10 +223,10 @@ class EffectRowLintTest {
     // ── (3) per-ref capability propagation ──────────────────────────
 
     @Test
-    void dotAccessOnEffectTaggedRefRequiresEffect() {
+    void memberOnEffectTaggedRefRequiresEffect() {
         // `Random` is a declared effect. The bind `rnd :: Random := ...`
         // marks `rnd` as carrying the Random capability. Calling
-        // `rnd.nextInt` from a fn lacking ::: Random must fail even
+        // `rnd#nextInt` from a fn lacking ::: Random must fail even
         // though ::: JVM is declared.
         String src = """
             effect Random
@@ -201,7 +234,7 @@ class EffectRowLintTest {
             fn use-rnd :: Int Int ::: JVM
               => seed
               rnd := java.util.Random/new seed :: Random
-              rnd.nextInt 100
+              rnd#nextInt 100
             """;
         IrijCompiler.CompileException e = expectFail(src);
         assertTrue(e.getMessage().contains("Random"),
@@ -209,7 +242,7 @@ class EffectRowLintTest {
     }
 
     @Test
-    void dotAccessOnEffectTaggedRefAcceptedWithEffectDeclared() {
+    void memberOnEffectTaggedRefAcceptedWithEffectDeclared() {
         // Same code but caller declares ::: JVM Random → accepted.
         String src = """
             effect Random
@@ -217,20 +250,20 @@ class EffectRowLintTest {
             fn use-rnd :: Int Int ::: JVM Random
               => seed
               rnd := java.util.Random/new seed :: Random
-              rnd.nextInt 100
+              rnd#nextInt 100
             """;
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
     }
 
     @Test
-    void plainDotAccessWithoutEffectSpecJustNeedsJvm() {
-        // No `:: Random` annotation on bind → just regular JVM dot-access.
+    void plainMemberWithoutEffectSpecJustNeedsJvm() {
+        // No `:: Random` annotation on bind → just a regular Java member.
         // Caller declaring ::: JVM is enough.
         String src = """
             fn use-rnd :: Int Int ::: JVM
               => seed
               rnd := java.util.Random/new seed
-              rnd.nextInt 100
+              rnd#nextInt 100
             """;
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
     }

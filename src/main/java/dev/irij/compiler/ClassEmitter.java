@@ -319,6 +319,8 @@ final class ClassEmitter implements Opcodes {
             case Expr.MatchExpr n -> n.loc();
             case Expr.Block n -> n.loc();
             case Expr.DotAccess n -> n.loc();
+            case Expr.JavaMember n -> n.loc();
+            case Expr.JavaMemberRef n -> n.loc();
             case Expr.VectorLit n -> n.loc();
             case Expr.DoExpr n -> n.loc();
             case Expr.SetLit n -> n.loc();

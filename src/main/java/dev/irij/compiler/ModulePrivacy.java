@@ -278,6 +278,8 @@ final class ModulePrivacy {
                                     new Expr.StringPart.Interpolation(expr(in.expr()));
                         }).toList(), si.loc());
                 case Expr.DotAccess da -> new Expr.DotAccess(expr(da.target()), da.field(), da.loc());
+                case Expr.JavaMember jm -> new Expr.JavaMember(expr(jm.target()), jm.member(), jm.loc());
+                case Expr.JavaMemberRef jr -> new Expr.JavaMemberRef(jr.member(), exprs(jr.args()), jr.loc());
                 case Expr.DoExpr de -> new Expr.DoExpr(exprs(de.exprs()), de.loc());
                 case Expr.Block bl -> new Expr.Block(stmts(bl.stmts()), bl.loc());
                 case Expr.ChoreoExpr ce -> new Expr.ChoreoExpr(ce.op(), expr(ce.left()), expr(ce.right()), ce.loc());

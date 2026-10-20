@@ -605,6 +605,13 @@ final class SmClassifier implements Opcodes {
                         normalizeExpr(u.operand(), out), u.loc());
                 case Expr.DotAccess da -> new Expr.DotAccess(
                         normalizeExpr(da.target(), out), da.field(), da.loc());
+                case Expr.JavaMember jm -> new Expr.JavaMember(
+                        normalizeExpr(jm.target(), out), jm.member(), jm.loc());
+                case Expr.JavaMemberRef jr -> {
+                    List<Expr> xs = new ArrayList<>();
+                    for (Expr x : jr.args()) xs.add(normalizeExpr(x, out));
+                    yield new Expr.JavaMemberRef(jr.member(), xs, jr.loc());
+                }
                 case Expr.Pipe p -> new Expr.Pipe(
                         normalizeExpr(p.left(), out),
                         normalizeExpr(p.right(), out), p.forward(), p.loc());
@@ -1008,6 +1015,8 @@ final class SmClassifier implements Opcodes {
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
             case Expr.SetLit sl -> { for (Expr x : sl.elements()) if (containsOpCallExpr(x)) yield true; yield false; }
             case Expr.DotAccess da -> containsOpCallExpr(da.target());
+            case Expr.JavaMember jm -> containsOpCallExpr(jm.target());
+            case Expr.JavaMemberRef jr -> { for (Expr x : jr.args()) if (containsOpCallExpr(x)) yield true; yield false; }
             case Expr.MatchExpr me -> {
                 if (containsOpCallExpr(me.scrutinee())) yield true;
                 for (Expr.MatchArm arm : me.arms()) {

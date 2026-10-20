@@ -131,9 +131,18 @@ PARTY_NAME  : '$' [A-Z] [A-Z0-9_-]* ;   // $BUYER  $DB-PRIMARY
 // so it never collides with seq-ops (/?  /^  …) which start with `/`.
 JAVA_REF    : [A-Za-z_] [A-Za-z_0-9]* ('.' [A-Za-z_] [A-Za-z_0-9]*)* '/' [A-Za-z_] [A-Za-z_0-9]* ;
 
-// camelCase identifier — used for Java method names in dot-access
-// (e.g. `.toUpperCase`, `.getBytes`). Requires at least one uppercase letter
-// so it never shadows IDENT (which is lowercase-only).
+// A Java instance member: `s#trim ()`, `date#plusDays 30` (the Javadoc
+// `String#trim` notation). `#` followed by a letter is used by nothing
+// else — the collection literals are `#[`, `#{`, `#(`. Written right
+// after an atom it reaches that atom's member; anywhere else (after a
+// space or an opening bracket) it is a method reference, a function of
+// the receiver: `names |> @ #toUpperCase`, `@ (#plusDays 30) dates`.
+JAVA_MEMBER     : '#' [A-Za-z_$] [A-Za-z_0-9$]* {afterAtom()}? ;
+JAVA_MEMBER_REF : '#' [A-Za-z_$] [A-Za-z_0-9$]* ;
+
+// camelCase identifier after `.`: a field name decoded from JSON
+// (`m.userId`). Requires at least one uppercase letter so it never
+// shadows IDENT (which is lowercase-only).
 CAMEL_IDENT : [a-z] [a-z0-9]* [A-Z] [a-zA-Z0-9]* ;
 
 // ── Identifiers ──────────────────────────────────────────────────────

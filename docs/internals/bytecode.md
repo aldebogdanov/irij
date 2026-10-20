@@ -143,6 +143,8 @@ elimination at hot sites.
 | `emitTierCClauseLambda` | Compile a clause body as an SM continuation. |
 | `emitHandlerBuilder` | `handler X :: Eff` → static method building a `CompiledHandler`. |
 | `emitScope` | `scope { fork ... }` → `CompiledScopeHandle` allocation + body. |
+| `emitDotAccess` | `.field` → a handler's state field (`GETSTATIC`), else `RtInterop.javaInstanceRef(recv, field)`: a map or record field, an Irij runtime object's member (`s.fork`); on a Java object, an error naming `#field`. |
+| `JavaMember` / `JavaMemberRef` (in `emitExpr`) | `obj#m` → `RtInterop.javaMember(recv, "m")` (the bound method or field value; the enclosing `App` calls it). `#m args` → args into a `List`, `RtInterop.javaMemberRef("m", args)`, a one-argument `BuiltinFn`. Both re-check `JVM` at run time. |
 
 ## Variable resolution at emit time
 

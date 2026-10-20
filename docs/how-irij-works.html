@@ -416,9 +416,10 @@ whose clauses call <code>raw-*</code> builtins backed by Java capability
 classes (<code>JdbcCapability</code>, <code>ServeCapability</code>, …). Tests
 swap the handler; production code never changes.</p>
 
-<p>Java interop is reflective and unified: <code>Class/member</code> resolves
-statics, <code>obj.method args</code> falls through dot-access to instance
-reflection, both via <code>JavaInterop</code>'s coercion/overload resolution.
+<p>Java interop is reflective and visible: <code>Class/member</code> resolves
+statics, <code>obj#method args</code> an object's members, both via
+<code>JavaInterop</code>'s coercion/overload resolution; <code>.</code> stays
+for Irij fields.
 Calling arbitrary Java is impure by definition, so it demands the
 <code>::: JVM</code> row — purity stays honest at the boundary.</p>
 

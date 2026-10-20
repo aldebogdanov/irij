@@ -70,7 +70,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
-- **Java interop** &mdash; Clojure-style `Class/method`, `obj.method` (auto-reflection, java.lang auto-imported)
+- **Java interop** &mdash; Clojure-style `Class/method` for statics, `obj#method` for instance members (auto-reflection, java.lang auto-imported); every Java site needs `::: JVM`, checked at compile time
 - **Bytecode compiler** &mdash; the only execution model since v0.6.20: ASM-emitted JVM classfiles with state-machine effect lowering, self-TCO, invokedynamic hot-redef; `irij build` packages self-contained runnable JARs
 - **nREPL** &mdash; Emacs integration via `editors/emacs/irij-nrepl.el`
 - **Editors** &mdash; Emacs `irij-mode` (highlighting, offside indentation, LSP wiring; see `docs/emacs.md`) a VS Code extension in `editors/vscode/` (highlighting, LSP, REPL; see `docs/vscode.md`), and a TextMate grammar for Shiki / Linguist / Zed in `editors/textmate/`

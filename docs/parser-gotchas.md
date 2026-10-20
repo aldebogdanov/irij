@@ -117,9 +117,11 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
 ## Java interop (0.3.0+)
 
 - **`foo/bar` (no spaces) is always a Java class reference.** The lexer's `JAVA_REF` token (alpha start, contains `/`, alpha continuation) outranks seq-ops and IDENT/SLASH/IDENT. For integer division write `a / b` with spaces, or `(/) a b`.
-- **`CAMEL_IDENT` only appears after `.`** — identifiers like `toUpperCase` lex as `CAMEL_IDENT` (at least one internal uppercase) and are grammar-restricted to dot-access positions. Bare `toUpperCase` used as a variable is a parse error.
-- **Chained instance method calls need parens or `|>`.** Grammar is `atomExpr (DOT field)*` — each postfix is a single dot-access chain, not an applied-call chain. Write `(("x".trim ()).length ())` or pipeline.
-- **`()` means zero args, including to Java.** `obj.m ()` calls the 0-arg overload, not the 1-arg `m(null)` variant. A lone UNIT arg is stripped by `JavaInterop.normalizeArgs` before reflection dispatch.
+- **Java members are `obj#member`, not `obj.member`.** `#` + a name lexes as one token (`#[`, `#{`, `#(` are the collection literals). `.` reads Irij fields; on a Java object it is a run-time error naming the `#` form.
+- **Whitespace before `#name` decides what it is.** Right after an atom (`s#trim`, `(f x)#size`, `"x"#length`) it is `JAVA_MEMBER`, a postfix on that atom; after a space, an opening bracket or at the start of input it is `JAVA_MEMBER_REF`, a method reference (`@ #toUpperCase`). The lexer decides with `IrijLexerBase.afterAtom()`, looking at the character before the `#`.
+- **`CAMEL_IDENT` only appears after `.`** — a camelCase field name decoded from JSON (`m.userId`). Bare `toUpperCase` used as a variable is a parse error.
+- **Chained instance method calls need parens or `|>`.** Grammar is `atomExpr (DOT field | JAVA_MEMBER)*` — each postfix is a member chain, not an applied-call chain, so in `s#trim ()#length ()` the `#length` attaches to `()`. Write `(s#trim ())#length ()` or pipeline.
+- **`()` means zero args, including to Java.** `obj#m ()` calls the 0-arg overload, not the 1-arg `m(null)` variant. A lone UNIT arg is stripped by `JavaInterop.normalizeArgs` before reflection dispatch.
 
 ## Standard library arg order (not parser, but commonly confused)
 

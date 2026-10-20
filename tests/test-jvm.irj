@@ -9,28 +9,28 @@ r4 := test "System/getenv returns Str" (-> assert-eq true (not (System/getenv "H
 
 ;; ── Fully-qualified classes ──────────────────────────
 
-uuid-str := (java.util.UUID/randomUUID ()).toString ()
+uuid-str := (java.util.UUID/randomUUID ())#toString ()
 r5 := test "UUID toString length is 36" (-> assert-eq 36 (length uuid-str))
 r6 := test "Long/parseLong" (-> assert-eq 42 (java.lang.Long/parseLong "42"))
 
-;; ── Instance methods via dot-access ───────────────────
+;; ── Instance methods: obj#method ──────────────────────
 
-r7  := test "String.toUpperCase" (-> assert-eq "HELLO" ("hello".toUpperCase ()))
-r8  := test "String.length"      (-> assert-eq 5       ("hello".length ()))
-r9  := test "String.trim"        (-> assert-eq "x"     ("   x   ".trim ()))
-r10 := test "String.startsWith"  (-> assert-eq true    ("hello".startsWith "he"))
+r7  := test "String#toUpperCase" (-> assert-eq "HELLO" ("hello"#toUpperCase ()))
+r8  := test "String#length"      (-> assert-eq 5       ("hello"#length ()))
+r9  := test "String#trim"        (-> assert-eq "x"     ("   x   "#trim ()))
+r10 := test "String#startsWith"  (-> assert-eq true    ("hello"#startsWith "he"))
 
 ;; ── Constructors via Class/new ───────────────────────
 
 sb := java.lang.StringBuilder/new ()
-ra := sb.append "a"
-rb := sb.append "b"
-rc := sb.append "c"
-r11 := test "StringBuilder chain" (-> assert-eq "abc" (sb.toString ()))
+ra := sb#append "a"
+rb := sb#append "b"
+rc := sb#append "c"
+r11 := test "StringBuilder chain" (-> assert-eq "abc" (sb#toString ()))
 
 rnd := java.util.Random/new 42
 rnd2 := java.util.Random/new 42
-r12 := test "Random seeded is deterministic" (-> assert-eq (rnd.nextInt 1000) (rnd2.nextInt 1000))
+r12 := test "Random seeded is deterministic" (-> assert-eq (rnd#nextInt 1000) (rnd2#nextInt 1000))
 
 ;; ── Coercion edge cases ───────────────────────────────
 
@@ -42,11 +42,20 @@ r14 := test "static field read Math/PI"  (-> assert-eq true ((Math/PI) > 3.0))
 ;; in java.base; its methods are reached through Process.
 
 pb := java.lang.ProcessBuilder/new (java.util.List/of "echo" "hi")
-child := pb.start ()
-child-out := child.getInputStream ()
-child-text := String/new (child-out.readAllBytes ())
-child-code := child.waitFor ()
-r15 := test "Process methods on ProcessImpl" (-> assert-eq "hi" (child-text.trim ()))
+child := pb#start ()
+child-out := child#getInputStream ()
+child-text := String/new (child-out#readAllBytes ())
+child-code := child#waitFor ()
+r15 := test "Process methods on ProcessImpl" (-> assert-eq "hi" (child-text#trim ()))
 r16 := test "Process exit code" (-> assert-eq 0 child-code)
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16]
+;; ── Method references: #method ───────────────────────
+
+day := java.time.LocalDate/of 2026 1 1
+r17 := test "@ #method"          (-> assert-eq #["ANN" "BO"] (#["ann" "bo"] |> @ #toUpperCase))
+r18 := test "|> #method"         (-> assert-eq "x" ("   x   " |> #trim))
+r19 := test "reference with args" (-> assert-eq "2026-01-31" ((day |> #plusDays 30)#toString ()))
+r20 := test "@ (#method args)"   (-> assert-eq #[3 4] (#["abc" "abcd"] |> @ #length))
+r21 := test "reference as value" (-> assert-eq #[true false] (#["hello" "bye"] |> @ (#startsWith "he")))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11 r12 r13 r14 r15 r16 r17 r18 r19 r20 r21]

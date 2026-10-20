@@ -94,7 +94,7 @@ public final class JavaInterop {
                 args -> invokeStatic(cls, member, normalizeArgs(args)));
     }
 
-    // ── Instance ref (from dot-access fallthrough) ──────────────────────
+    // ── Instance ref (`x#member`) ──────────────────────────────────────
 
     public static Object resolveInstanceRef(Object recv, String member) {
         var cls = recv.getClass();
@@ -111,6 +111,23 @@ public final class JavaInterop {
         // Otherwise: bound instance method callable.
         return new BuiltinFn(cls.getSimpleName() + "." + member, -1, List.of("JVM"),
                 args -> invokeInstance(recv, member, normalizeArgs(args)));
+    }
+
+    /**
+     * A method reference applied to its receiver ({@code @ #trim},
+     * {@code @ (#plusDays 30)}): with no arguments a public instance field
+     * reads its value; otherwise the method is called with {@code args}.
+     */
+    public static Object invokeMember(Object recv, String member, List<Object> args) {
+        var normalized = normalizeArgs(args);
+        if (normalized.isEmpty()) {
+            for (var f : recv.getClass().getFields()) {
+                if (f.getName().equals(member) && !Modifier.isStatic(f.getModifiers())) {
+                    return resolveInstanceRef(recv, member);
+                }
+            }
+        }
+        return invokeInstance(recv, member, normalized);
     }
 
     // ── Invocation (overload-resolved at call time) ─────────────────────

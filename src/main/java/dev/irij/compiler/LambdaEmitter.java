@@ -222,6 +222,8 @@ final class LambdaEmitter implements Opcodes {
             case Expr.TupleLit tl -> { for (Expr x : tl.elements()) collectFreeVars(x, bound, outer, out, seen); }
             case Expr.SetLit sl -> { for (Expr x : sl.elements()) collectFreeVars(x, bound, outer, out, seen); }
             case Expr.DotAccess da -> collectFreeVars(da.target(), bound, outer, out, seen);
+            case Expr.JavaMember jm -> collectFreeVars(jm.target(), bound, outer, out, seen);
+            case Expr.JavaMemberRef jr -> { for (Expr x : jr.args()) collectFreeVars(x, bound, outer, out, seen); }
             case Expr.Block blk -> {
                 Set<String> bound2 = new HashSet<>(bound);
                 for (Stmt st : blk.stmts()) collectFreeVarsStmt(st, bound2, outer, out, seen);

@@ -121,6 +121,17 @@ public sealed interface Expr extends Node {
     /** Dot access: expr.field. */
     record DotAccess(Expr target, String field, SourceLoc loc) implements Expr {}
 
+    /** Java instance member: {@code target#member} — a method (applied by
+     *  the enclosing App) or a field of the Java object {@code target}
+     *  evaluates to. Spec §9.1. */
+    record JavaMember(Expr target, String member, SourceLoc loc) implements Expr {}
+
+    /** Method reference: {@code #member} with no receiver, optionally with
+     *  the method's arguments ({@code #plusDays 30}) — a one-argument
+     *  function {@code x -> x#member args…}, the args evaluated once where
+     *  the reference is written. Spec §9.1. */
+    record JavaMemberRef(String member, List<Expr> args, SourceLoc loc) implements Expr {}
+
     /** do expression: do (e1) (e2) ... */
     record DoExpr(List<Expr> exprs, SourceLoc loc) implements Expr {}
 

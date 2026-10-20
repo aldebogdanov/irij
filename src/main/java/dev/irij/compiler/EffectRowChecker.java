@@ -584,6 +584,21 @@ public final class EffectRowChecker {
             }
             case Expr.JavaRef jr ->
                     requireEffect("JVM", "java-interop:" + jr.ref(), ctx, avail, jr.loc());
+            case Expr.JavaMember jm -> {
+                // `x#method` is Java interop wherever it is written.
+                requireEffect("JVM", "java-interop:#" + jm.member(), ctx, avail, jm.loc());
+                if (jm.target() instanceof Expr.Var v && varCap.containsKey(v.name())) {
+                    requireEffect(varCap.get(v.name()), "method '" + jm.member() + "' on " + shown(v.name()),
+                            ctx, avail, jm.loc());
+                }
+                walkExpr(jm.target(), avail, ctx);
+            }
+            case Expr.JavaMemberRef jr -> {
+                // `@ #trim`: the reference calls Java whenever it is applied,
+                // so it is Java interop where it is written, like `Math/abs`.
+                requireEffect("JVM", "java-interop:#" + jr.member(), ctx, avail, jr.loc());
+                for (Expr a : jr.args()) walkExpr(a, avail, ctx);
+            }
             case Expr.DotAccess da -> {
                 // Capability dot-access: `cap-name.method args` is the only
                 // legal way to use a cap. Three checks:
@@ -1048,6 +1063,17 @@ public final class EffectRowChecker {
                 }
             }
             case Expr.JavaRef jr -> out.add("JVM");
+            case Expr.JavaMember jm -> {
+                out.add("JVM");
+                collectInto(jm.target(), out);
+                if (jm.target() instanceof Expr.Var v && varCap.containsKey(v.name())) {
+                    out.add(varCap.get(v.name()));
+                }
+            }
+            case Expr.JavaMemberRef jr -> {
+                out.add("JVM");
+                for (Expr a : jr.args()) collectInto(a, out);
+            }
             case Expr.DotAccess da -> {
                 collectInto(da.target(), out);
                 if (da.target() instanceof Expr.Var v

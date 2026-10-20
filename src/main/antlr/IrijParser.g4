@@ -502,8 +502,10 @@ appExpr
     ;
 
 // Postfix: dot access, located-at
+// `.field` reads an Irij field; `#member` reaches a Java object's method
+// or field (spec §9.1).
 postfixExpr
-    : atomExpr (DOT (fieldName | UPPER_NAME | CAMEL_IDENT))* (MAP_AT PARTY_NAME)?
+    : atomExpr (DOT (fieldName | UPPER_NAME | CAMEL_IDENT) | JAVA_MEMBER)* (MAP_AT PARTY_NAME)?
     ;
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -513,6 +515,7 @@ postfixExpr
 atomExpr
     : literal
     | JAVA_REF                                // Java interop: Class/member
+    | JAVA_MEMBER_REF                         // method reference: @ #toUpperCase
     | IDENT
     | UPPER_NAME
     | PARTY_NAME

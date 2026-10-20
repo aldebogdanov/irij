@@ -67,7 +67,9 @@
   (should (eq (irij-test--face-at "x <- 1" "<-") 'font-lock-keyword-face))
   (should (eq (irij-test--face-at "$A ~> $B" "~>") 'font-lock-keyword-face))
   (should (eq (irij-test--face-at "r := 1 ..< 10" "..<") 'font-lock-keyword-face))
-  (should (eq (irij-test--face-at "x := Math/sqrt 2.0" "Math/sqrt") 'font-lock-builtin-face)))
+  (should (eq (irij-test--face-at "x := Math/sqrt 2.0" "Math/sqrt") 'font-lock-builtin-face))
+  (should (eq (irij-test--face-at "x := s#trim ()" "#trim") 'font-lock-builtin-face))
+  (should (eq (irij-test--face-at "ys := xs |> @ #toUpperCase" "#toUpperCase") 'font-lock-builtin-face)))
 
 (ert-deftest irij-face-string-interpolation ()
   (should (eq (irij-test--face-at "s := \"hi ${name}!\"" "${") 'font-lock-preprocessor-face))

@@ -169,6 +169,8 @@ and the handler-clause `resume'.")
       ;; Java interop — Class/member, java.pkg.Class/member
       ("\\_<[A-Za-z_][A-Za-z0-9_]*\\(?:\\.[A-Za-z_][A-Za-z0-9_]*\\)*/[A-Za-z_][A-Za-z0-9_]*"
        . 'font-lock-builtin-face)
+      ;; Java interop — obj#member, and the method reference #member
+      ("#[A-Za-z_$][A-Za-z0-9_$]*" . 'font-lock-builtin-face)
       ;; Keywords
       (,kw-re    . 'font-lock-keyword-face)
       ;; Boolean literals

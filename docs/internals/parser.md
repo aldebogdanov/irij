@@ -41,6 +41,16 @@ no special-cased layout rules in `.g4`.
   `EFFECT_SEP`).
 - **`:=` vs `:!` vs `<-`**: immutable bind, mutable bind, mutable
   assign. All distinct tokens.
+- **`#name` is two tokens, told apart by what precedes it.** Java
+  members (spec §9.1): `JAVA_MEMBER : '#' NAME {afterAtom()}?` matches
+  only when the character before `#` ends an atom — a name character,
+  `)`, `]`, `}` or `"` — so `s#trim`, `(f x)#size`, `"x"#length` are
+  postfixes (`postfixExpr : atomExpr (DOT … | JAVA_MEMBER)*`).
+  Otherwise the same text lexes as `JAVA_MEMBER_REF`, an `atomExpr` —
+  the method reference in `@ #toUpperCase`. `#[`, `#{`, `#(` are the
+  collection literals, so `#` + letter is free. `AstBuilder.visitAppExpr`
+  folds the arguments of an application headed by a reference into it:
+  `#plusDays 30` is one `JavaMemberRef("plusDays", [30])`, not an App.
 
 ## Parse tree → AST
 

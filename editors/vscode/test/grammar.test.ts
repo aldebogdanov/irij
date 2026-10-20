@@ -52,6 +52,9 @@ test('strings, atoms, operators, interop', async () => {
   assert.equal(await scopeOf('x <- 1', '<-'), 'keyword.operator.assign.irij');
   assert.equal(await scopeOf('$A ~> $B', '~>'), 'keyword.operator.choreography.irij');
   assert.equal(await scopeOf('x := Math/sqrt 2.0', 'Math/sqrt'), 'support.function.interop.irij');
+  assert.equal(await scopeOf('x := s#trim ()', '#trim'), 'support.function.interop.irij');
+  assert.equal(await scopeOf('ys := xs |> @ #toUpperCase', '#toUpperCase'), 'support.function.interop.irij');
+  assert.equal(await scopeOf('v := #[1 2]', '#['), 'punctuation.definition.collection.irij');
   assert.equal(await scopeOf('x := 1 ;; note', ';; note'), 'comment.line.double-semicolon.irij');
 });
 

@@ -15,6 +15,7 @@
     { "include": "#number" },
     { "include": "#operator" },
     { "include": "#java-ref" },
+    { "include": "#java-member" },
     { "include": "#type-name" },
     { "include": "#builtin" },
     { "include": "#binding" },
@@ -136,6 +137,11 @@
       "comment": "Class/member, java.pkg.Class/member, Class/new",
       "name": "support.function.interop.irij",
       "match": "(?<![\\w-])[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*/[A-Za-z_]\\w*"
+    },
+    "java-member": {
+      "comment": "obj#member, and the method reference #member",
+      "name": "support.function.interop.irij",
+      "match": "#[A-Za-z_$][\\w$]*"
     },
     "type-name": {
       "name": "entity.name.type.irij",
