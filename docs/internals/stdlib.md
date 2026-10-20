@@ -165,6 +165,7 @@ Real Irij code, parsed + compiled like user code:
 | `std.func` | `flip`, `compose`, `identity`, `const`, `pipe`, `repeat-n`, ... |
 | `std.text` | `trim`, `pad-left`, `pad-right`, `split`, `join`, `starts-with?`, `ends-with?`, `substring`, ... |
 | `std.math` | Math helpers (some delegate to `java.lang.Math` via `::: JVM`) |
+| `std.time` | `Time` effect (`time-now`, `time-sleep`) + `default-time` handler. The builtins `now-ms` and `sleep` perform these ops: a handler with the clause answers them (a fixed or virtual clock; a `sleep` that doesn't wait), else the real clock does — see effects.md § Builtins that perform an effect |
 | `std.random` | `Random` effect (`rand-int`, `rand-float`, `rand-token`) + `default-random` handler. The builtins `random-int`, `random-float` and `random-token` perform these ops: a handler with the clause answers them (a test's fixed values), else the real source does — see effects.md § Builtins that perform an effect |
 | `std.env` | `Env` effect + handler: `env-var`, and `env-args` (the arguments after the program, from the `program-args` builtin) |
 | `std.log` | `Log` effect — leveled logging; `default-log`/`silent-log` handlers |

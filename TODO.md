@@ -530,7 +530,7 @@ Effect-based I/O operations, mockable via handlers in tests.
   - `pub effect` exports effect name + all op names
   - `pub handler` exports handler name
 - [x] **Time/Random/Env** — `std.time`, `std.random`, `std.env` modules
-  - `Time`: `time-now`, `time-sleep` (wraps `now-ms`, `sleep` builtins, tagged `::: Time`)
+  - `Time`: `time-now`, `time-sleep`. The builtins `now-ms`, `sleep` perform them, so a handler fixes direct builtin calls too (2026-10)
   - `Random`: `rand-int`, `rand-float`, `rand-token`. The builtins `random-int`, `random-float`, `random-token` perform them, so a handler fixes direct builtin calls too (2026-10)
   - `Env`: `env-var` (wraps `env` builtin, tagged `::: Env`)
   - All fully mockable: `handler fixed-clock :: Time`, `handler fixed-random :: Random`, `handler mock-env :: Env`
@@ -857,11 +857,23 @@ Full design and the recorded Quint behaviour it rests on:
       `parse-int`/`parse-float` read Unicode digits, `1.5f`, `NaN`, hex.
       New builtin `percent-encode` (RFC 3986). See docs/internals/stdlib.md,
       capabilities.md, effects.md § Builtins that perform an effect.
-- [ ] **`Time` and `Console` builtins ignore handlers** — `now-ms` / `sleep`
-      and `println` & co. need their effect in the row but never reach an
-      installed handler, as `random-int` didn't before 2026-10. The
-      `performBuiltinOp` path `Random` uses would carry them (`now-ms` as
-      std.time's `time-now`, `sleep` as `time-sleep`).
+- [x] **`Time` builtins ignored handlers** — Fixed (2026-10). `now-ms` and
+      `sleep` needed `::: Time` but never reached an installed handler, so
+      a test couldn't fix the clock of code calling them directly. They
+      perform std.time's `time-now` / `time-sleep` through
+      `performBuiltinOp`, as `random-int` does `rand-int`; fibers under the
+      `with` see the handler too. `sleep` now refuses a Float (`sleep 1.5`
+      slept 1 ms), a non-number (`sleep "10"` slept 0 ms) and a negative
+      count (leaked a Java exception). tests/test-time-random-env.irj.
+- [ ] **`Console` builtins ignore handlers** — `print` / `println` /
+      `read-line` need `::: Console` but never reach an installed handler:
+      a `handler h :: Console` with a `println` clause compiles and is
+      never called. A program declaring its own `effect Console` (spec
+      §3.1–3.2) shadows the builtins and works. Open design question
+      before the `performBuiltinOp` path carries them: which ops the
+      builtin `Console` has (`print`, `println`, `read-line`; the spec's
+      example declares only `print` and `read-line`) and where they are
+      declared (a `std.console` module like std.time, or built in).
 
 - [x] **Effect rows weren't checked through `|>`, `@`, string interpolation, ranges or record updates** — Fixed (2026-10), found adding method references. `EffectRowChecker.walkExpr` had no case for `Pipe`, `SeqOp`, `StringInterp`, `Range`, `RecordUpdate` or `ChoreoExpr`, so `n => n |> say` in a pure fn compiled and printed, as did `n |> Math/abs` and `"${Math/abs n}"`. A pipe is now checked as the call it is (`x |> f a` as `f a x`), a seq-op's function as called, and the others' parts are walked; `collectInto` (row-variable inference) covers the same shapes. 5 tests in `EffectRowLintTest`.
 

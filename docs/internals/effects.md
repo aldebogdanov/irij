@@ -227,29 +227,49 @@ clause aborted from synchronous-perform context".
 
 ## Builtins that perform an effect
 
-`random-int`, `random-float` and `random-token` perform the `Random`
-effect's `rand-int`, `rand-float` and `rand-token` (std.random). Each
-checks its argument, then calls `RtEffects.performBuiltinOp("Random",
-op, args)`, which hands the op to the innermost `SM_STACK` handler of
-that effect *that has a clause for it*, on the synchronous path
-`fireOpToSM` uses (`resume` returns the value; a clause that doesn't
-resume aborts its `with`). On `SM_NO_MATCH` — no such handler — the
-builtin draws from the real source itself. Two differences from a
-user op's perform:
+| Builtin | Performs | Real thing on `SM_NO_MATCH` |
+|---|---|---|
+| `random-int n` | `Random.rand-int n` (std.random) | `ThreadLocalRandom` |
+| `random-float` | `Random.rand-float` | `ThreadLocalRandom` |
+| `random-token n` | `Random.rand-token n` | `SecureRandom` |
+| `now-ms` | `Time.time-now` (std.time) | `System.currentTimeMillis` |
+| `sleep ms` | `Time.time-sleep ms` | `Thread.sleep` (a cancellation point) |
+
+Each builtin checks its argument, then calls
+`RtEffects.performBuiltinOp(effect, op, args)`, which hands the op to
+the innermost `SM_STACK` handler of that effect *that has a clause for
+it*, on the synchronous path `fireOpToSM` uses (`resume` returns the
+value; a clause that doesn't resume aborts its `with`). On
+`SM_NO_MATCH` — no such handler — the builtin does the real thing
+itself. The argument check comes first so a mocked call keeps the
+contract: `sleep` refuses a Float, a non-number or a negative count
+under a `Time` handler too. Two differences from a user op's perform:
 
 - A handler without the clause is passed by, not an error. A `Random`
   handler written before `rand-token` existed still fixes `rand-int`,
-  and tokens stay real.
+  and tokens stay real; a `Time` handler with only `time-sleep` makes
+  `sleep` return at once while `now-ms` reads the real clock.
 - While a clause runs, builtin performs on that thread pass its handler
   by (`BUILTIN_CLAUSES`, an identity set). `default-random`'s
-  `rand-int n => resume (random-int n)` reaches the next handler out, or
-  the real source, rather than itself forever; a clause built on an
-  outer handler (`resume (2 * (random-int n))`) composes with it.
+  `rand-int n => resume (random-int n)` and `default-time`'s
+  `time-now => resume (now-ms ())` reach the next handler out, or the
+  real source, rather than themselves forever; a clause built on an
+  outer handler (`resume (2 * (random-int n))`,
+  `resume ((now-ms ()) + 5)`) composes with it.
 
-Before this the builtins needed `::: Random` but ignored every handler,
-so code calling `random-int` couldn't be given fixed values in a test.
-The `Time` builtins (`now-ms`, `sleep`) and the `Console` ones still go
-straight to the JVM.
+A fiber started under the `with` (`spawn`, `par`, `race`, `timeout`,
+`scope`) inherits `SM_STACK`, so its `sleep` reaches the handler too:
+under a `time-sleep ms => resume ()` handler, `timeout 1000 (-> sleep
+5000; "done")` is `"done"` at once.
+
+Before this the builtins needed `::: Random` / `::: Time` but ignored
+every handler, so code calling `random-int` or `now-ms` couldn't be
+given fixed values in a test (`Random` fixed 2026-10, `Time` after it).
+The `Console` builtins (`print`, `println`, `read-line`) still go
+straight to the JVM: a `handler h :: Console` with a `println` clause
+compiles and is never called. A program that declares its own `effect
+Console` (spec §3.1) shadows the builtins with its ops, so that form
+works.
 
 ## Nested `with` (native dual-SM)
 

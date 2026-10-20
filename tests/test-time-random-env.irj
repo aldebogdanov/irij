@@ -52,6 +52,102 @@ fn wrap-time-mock ::: Time
 
 test "Time handler is mockable" (-> wrap-time-mock ())
 
+;; now-ms and sleep perform time-now and time-sleep: under a handler
+;; they get its answers, so code calling them directly is mockable.
+handler virtual-clock :: Time
+  clock :! 1000
+  time-now       => resume clock
+  time-sleep ms  =>
+    clock <- clock + ms
+    resume ()
+
+fn run-builtin-clock ::: Time
+  =>
+  start := now-ms ()
+  sleep 5000
+  assert-eq 5000 ((now-ms ()) - start)
+
+fn wrap-builtin-clock ::: Time
+  =>
+  with virtual-clock
+    run-builtin-clock ()
+
+test "now-ms and sleep answer from the handler" (-> wrap-builtin-clock ())
+
+handler no-wait :: Time
+  time-sleep ms => resume ()
+
+fn run-no-wait ::: Time
+  =>
+  t := now-ms ()
+  assert-true (t > 1700000000000)
+  sleep 5000
+  assert-true (((now-ms ()) - t) < 4000)
+
+fn wrap-no-wait ::: Time
+  =>
+  with no-wait
+    run-no-wait ()
+
+;; no-wait has no time-now clause: now-ms reads the real clock.
+test "a Time handler answers the ops it has clauses for" (-> wrap-no-wait ())
+
+;; default-time's clauses call the builtins they stand in for, which
+;; reach the real clock rather than the clause again.
+fn run-default-time-builtins ::: Time
+  =>
+  t := now-ms ()
+  assert-true (t > 1700000000000)
+  sleep 20
+  assert-true (((now-ms ()) - t) >= 20)
+  assert-true ((time-now ()) >= t)
+
+fn wrap-default-time-builtins ::: Time
+  =>
+  with time.default-time
+    run-default-time-builtins ()
+
+test "default-time reads the real clock" (-> wrap-default-time-builtins ())
+
+handler offset-clock :: Time ::: Time
+  time-now => resume ((now-ms ()) + 5)
+
+fn run-offset ::: Time
+  =>
+  assert-eq 1700000000005 (now-ms ())
+
+fn wrap-offset ::: Time
+  =>
+  with fixed-clock
+    with offset-clock
+      run-offset ()
+
+test "a clause's own now-ms goes to the next handler out" (-> wrap-offset ())
+
+fn negative-sleep ::: Time
+  (-> sleep (0 - 1))
+
+fn float-sleep ::: Time
+  (-> sleep 1.5)
+
+fn str-sleep ::: Time
+  (-> sleep "10")
+
+fn run-bad-sleep ::: Time
+  =>
+  assert-throws negative-sleep
+  assert-throws float-sleep
+  assert-throws str-sleep
+
+fn wrap-bad-sleep ::: Time
+  =>
+  with fixed-clock
+    run-bad-sleep ()
+
+;; Checked before the handler sees it. sleep "10" used to sleep 0 ms and
+;; sleep 1.5 to sleep 1; a negative count leaked a Java exception.
+test "sleep needs a non-negative Int, mocked or not" (-> wrap-bad-sleep ())
+
 ;; ── std.random ────────────────────────────────────────────
 
 fn run-rand-int ::: Random

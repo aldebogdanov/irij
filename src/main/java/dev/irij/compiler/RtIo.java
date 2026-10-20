@@ -61,7 +61,12 @@ public final class RtIo {
     }
 
 
+    /** {@code now-ms} performs the Time effect's {@code time-now}: a
+     *  handler with that clause answers (a test's fixed clock), else the
+     *  real clock does. See {@link RtEffects#performBuiltinOp}. */
     public static Object nowMs() {
+        Object handled = RtEffects.performBuiltinOp("Time", "time-now");
+        if (handled != RuntimeSupport.SM_NO_MATCH) return handled;
         return System.currentTimeMillis();
     }
 
