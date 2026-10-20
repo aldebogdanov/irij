@@ -1,4 +1,4 @@
-use std.test {assert-eq assert-false assert-true summarize test}
+use std.test {assert-eq assert-false assert-throws assert-true summarize test}
 use std.math :as math
 
 ;; ── Builtin re-exports ───────────────────────────────
@@ -81,3 +81,20 @@ fn halve :: Rational Rational
   (q -> q / 2)
 
 rq12 := test "Rational specs" (-> assert-eq 1/6 (halve 1/3))
+
+;; parse-int and parse-float read ASCII decimal only. The JDK parsers
+;; behind them also took any Unicode digit (`１２３`, `٤٢`) and `1.5f`,
+;; `NaN`, `Infinity`, hex floats.
+test "parse-int takes a sign and surrounding space" (-> assert-eq (0 - 7) (parse-int " -7 "))
+test "parse-int refuses fullwidth digits" (-> assert-throws (-> parse-int "１２３"))
+test "parse-int refuses Arabic-Indic digits" (-> assert-throws (-> parse-int "٤٢"))
+test "parse-float reads decimals and exponents" (-> assert-eq 1500.0 (parse-float "1.5e3"))
+test "parse-float reads .5 and 5." (-> assert-true (((parse-float ".5") == 0.5) && ((parse-float "5.") == 5.0)))
+test "parse-float refuses a type suffix" (-> assert-throws (-> parse-float "1.5f"))
+test "parse-float refuses NaN" (-> assert-throws (-> parse-float "NaN"))
+test "parse-float refuses Infinity" (-> assert-throws (-> parse-float "Infinity"))
+test "parse-float refuses hex floats" (-> assert-throws (-> parse-float "0x1p4"))
+
+;; An Int argument is an Int: a Float used to be truncated.
+test "char-at refuses a Float index" (-> assert-throws (-> char-at "abc" 1.99))
+test "pbkdf2-sha256-hex refuses Float iterations" (-> assert-throws (-> pbkdf2-sha256-hex "p" "s" 1.5))

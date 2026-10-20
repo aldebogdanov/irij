@@ -64,15 +64,27 @@ pub fn pbkdf2-iterations :: Int
 ;; `hash-password salt password` →
 ;; "pbkdf2-sha256$<iterations>$<salt>$<pbkdf2(password, salt)>".
 ;; The returned string is opaque; pass it to `verify-password` as-is.
+;; The salt sits between `$` separators, so one holding a `$` is refused
+;; (`new-salt` never makes one): its hash could never verify.
 pub fn hash-password :: Str Str Str
   (salt password -> hash-password-with salt password (pbkdf2-iterations ()))
 
 fn hash-password-with :: Str Str Int Str
-  (salt password iters ->
-    "pbkdf2-sha256$" ++ (to-str iters) ++ "$" ++ salt ++ "$" ++ (pbkdf2-sha256-hex password salt iters))
+  => salt password iters
+  if (index-of salt "$") >= 0
+    error "hash-password: the salt must not contain `$`"
+  else
+    "pbkdf2-sha256$" ++ (to-str iters) ++ "$" ++ salt ++ "$" ++ (pbkdf2-sha256-hex password salt iters)
+
+;; The most iterations `pbkdf2-sha256-hex` runs. A stored hash asking for
+;; more isn't one this module made.
+fn max-pbkdf2-iterations :: Int
+  (-> 100000000)
 
 ;; Re-derive `password` under the stored salt and parameters and compare.
-;; Returns false for any `stored` that isn't a hash this module made.
+;; Returns false for any `stored` that isn't a hash this module made, and
+;; for a password that has no UTF-8 encoding (an unpaired surrogate):
+;; `hash-password` refuses those, so none can be right.
 pub fn verify-password :: Str Str Bool
   => stored password
   parts := split stored "$"
@@ -97,15 +109,24 @@ pub fn password-needs-rehash? :: Str Bool
 
 fn verify-pbkdf2 :: Str Int Str Str Str Bool
   (scheme iters salt digest password ->
-    if ((scheme /= "pbkdf2-sha256") || (iters < 1) || (salt == ""))
+    if ((scheme /= "pbkdf2-sha256") || (iters < 1) || (iters > (max-pbkdf2-iterations ())) || (salt == ""))
       false
     else
-      (constant-time-eq? digest (pbkdf2-sha256-hex password salt iters)))
+      (digest-matches? digest (-> pbkdf2-sha256-hex password salt iters)))
 
 ;; Pre-v0.9 hashes: "<salt>$<sha256(salt ++ password)>".
 fn verify-legacy :: Str Str Str Bool
   (salt digest password ->
-    constant-time-eq? digest (sha256-hex (salt ++ password)))
+    digest-matches? digest (-> sha256-hex (salt ++ password)))
+
+;; `digest` equals what `make` computes, compared in constant time; false
+;; when `make` fails — a Str the hash refuses (an unpaired surrogate)
+;; matches nothing, rather than throwing out of a Bool check.
+fn digest-matches? :: Str Fn Bool
+  => digest make
+  match (try make)
+    (Ok d) => constant-time-eq? digest d
+    _ => false
 
 ;; The iteration field, or 0 when it isn't a number.
 fn parse-iterations :: Str Int
@@ -121,7 +142,8 @@ pub fn new-session-token :: Str ::: Random
   (-> random-token (session-token-bytes ()))
 
 ;; HMAC-signed session ID — for stateless signed cookies. Output is
-;; "<token>.<sig>" where sig is HMAC-SHA-256(secret, token).
+;; "<token>.<sig>" where sig is HMAC-SHA-256(secret, token), in hex. The
+;; token may itself contain `.`: the signature is what follows the last.
 pub fn sign-token :: Str Str Str
   (secret token -> token ++ "." ++ (hmac-sha256-hex secret token))
 
@@ -132,12 +154,13 @@ pub fn sign-token :: Str Str Str
 pub fn verify-signed-token :: Str Str Str
   => secret signed
   parts := split signed "."
-  if ((length parts) /= 2)
+  n := length parts
+  if n < 2
     ""
   else
-    verify-signed-token-parts secret (nth 0 parts) (nth 1 parts)
+    verify-signed-token-parts secret (join "." (take (n - 1) parts)) (nth (n - 1) parts)
 
 fn verify-signed-token-parts :: Str Str Str Str
   (secret token sig ->
-    if (constant-time-eq? sig (hmac-sha256-hex secret token)) (token)
+    if (digest-matches? sig (-> hmac-sha256-hex secret token)) (token)
     else (""))

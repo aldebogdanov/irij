@@ -50,3 +50,14 @@ fn port-of :: Map Int
   (server -> server.port)
 
 r11 := test "a private cap name is free for the program" (-> assert-eq (port-of {port= 8080}) 8080)
+
+;; A prefix route matches whole path segments: "/admin" used to serve
+;; "/adminpanel-public/x" too.
+fn admin-area :: _ Map
+  (r -> serve.text-response "admin")
+
+admin-app := serve.router #[(serve.route-prefix "GET" "/admin" admin-area)]
+
+r12 := test "route-prefix matches its own path" (-> assert-eq (admin-app (req "GET" "/admin")).body "admin")
+r13 := test "route-prefix matches paths below it" (-> assert-eq (admin-app (req "GET" "/admin/users")).body "admin")
+r14 := test "route-prefix stops at a segment boundary" (-> assert-eq (admin-app (req "GET" "/adminpanel-public/x")).status 404)

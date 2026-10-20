@@ -110,41 +110,93 @@ public final class RtEffects {
                 CompiledHandler h = hs.get(i);
                 if (h.effectName.equals(effectName)) {
                     IrijContinuation owner = hs instanceof SmFrame f ? f.root : null;
-                    RuntimeSupport.IrijFn clause = h.clauses.get(opName);
-                    if (clause == null) {
-                        throw new dev.irij.IrijRuntimeError(
-                                "Handler " + h.name + " has no clause for " + opName);
-                    }
-                    final Object[] resumeBox = {null};
-                    final boolean[] resumed = {false};
-                    RuntimeSupport.IrijFn resumeFn = (resumeArgs) -> {
-                        if (resumed[0]) {
-                            throw new dev.irij.IrijRuntimeError(
-                                    "resume called twice (one-shot)");
-                        }
-                        resumed[0] = true;
-                        Object v = resumeArgs.length > 0
-                                ? resumeArgs[0]
-                                : dev.irij.runtime.Values.UNIT;
-                        resumeBox[0] = v;
-                        return v;
-                    };
-                    Object[] clauseArgs = new Object[args.size() + 1];
-                    for (int j = 0; j < args.size(); j++) clauseArgs[j] = args.get(j);
-                    clauseArgs[args.size()] = resumeFn;
-                    Object clauseRet = clause.apply(clauseArgs);
-                    if (resumed[0]) return resumeBox[0];
-                    // Abort: the clause never resumed, so its value is the
-                    // `with`'s and the body is abandoned from here — unwind
-                    // to the dispatch loop running that `with`.
-                    if (owner != null) throw AbortSignal.of(clauseRet, owner);
-                    throw new dev.irij.IrijRuntimeError(
-                            "handler " + h.name + " ended " + opName
-                                    + " without resume, outside its with: " + clauseRet);
+                    return callClauseSync(h, owner, opName, args);
                 }
             }
         }
         return RuntimeSupport.SM_NO_MATCH;
+    }
+
+
+    /** Handlers whose clause a builtin's perform is running on this
+     *  thread. A nested builtin perform passes them by, so a clause that
+     *  calls the builtin it stands in for ({@code rand-int n => resume
+     *  (random-int n)}) reaches the next handler out, or the builtin's own
+     *  source — not itself again. */
+    private static final ThreadLocal<java.util.Set<CompiledHandler>> BUILTIN_CLAUSES =
+            ThreadLocal.withInitial(() ->
+                    java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+
+
+    /**
+     * A builtin performing its effect: {@code random-int n} is
+     * {@code Random.rand-int n}. The op goes to the innermost installed
+     * handler of {@code effectName} that has a clause for {@code opName},
+     * as an op performed from a plain fn does ({@link #fireOpToSM}).
+     * Returns {@link RuntimeSupport#SM_NO_MATCH} when no handler takes it;
+     * the builtin then does the real thing itself. A handler lacking the
+     * clause is passed by rather than refused: a {@code Random} handler
+     * written before {@code rand-token} existed still mocks
+     * {@code rand-int} without making every token an error.
+     */
+    public static Object performBuiltinOp(String effectName, String opName, Object... args) {
+        var busy = BUILTIN_CLAUSES.get();
+        for (var hs : RuntimeSupport.SM_STACK.get()) {
+            for (int i = hs.size() - 1; i >= 0; i--) {
+                CompiledHandler h = hs.get(i);
+                if (h.effectName.equals(effectName) && h.clauses.containsKey(opName)
+                        && !busy.contains(h)) {
+                    IrijContinuation owner = hs instanceof SmFrame f ? f.root : null;
+                    busy.add(h);
+                    try {
+                        return callClauseSync(h, owner, opName, java.util.Arrays.asList(args));
+                    } finally {
+                        busy.remove(h);
+                    }
+                }
+            }
+        }
+        return RuntimeSupport.SM_NO_MATCH;
+    }
+
+
+    /** Run {@code h}'s clause for {@code opName} on this thread and return
+     *  the value it resumes with. A clause that ends without resuming
+     *  ends its {@code with}: unwind to that {@code with}'s dispatch loop
+     *  ({@code owner}). */
+    private static Object callClauseSync(CompiledHandler h, IrijContinuation owner,
+                                         String opName, java.util.List<Object> args) {
+        RuntimeSupport.IrijFn clause = h.clauses.get(opName);
+        if (clause == null) {
+            throw new dev.irij.IrijRuntimeError(
+                    "Handler " + h.name + " has no clause for " + opName);
+        }
+        final Object[] resumeBox = {null};
+        final boolean[] resumed = {false};
+        RuntimeSupport.IrijFn resumeFn = (resumeArgs) -> {
+            if (resumed[0]) {
+                throw new dev.irij.IrijRuntimeError(
+                        "resume called twice (one-shot)");
+            }
+            resumed[0] = true;
+            Object v = resumeArgs.length > 0
+                    ? resumeArgs[0]
+                    : dev.irij.runtime.Values.UNIT;
+            resumeBox[0] = v;
+            return v;
+        };
+        Object[] clauseArgs = new Object[args.size() + 1];
+        for (int j = 0; j < args.size(); j++) clauseArgs[j] = args.get(j);
+        clauseArgs[args.size()] = resumeFn;
+        Object clauseRet = clause.apply(clauseArgs);
+        if (resumed[0]) return resumeBox[0];
+        // Abort: the clause never resumed, so its value is the
+        // `with`'s and the body is abandoned from here — unwind
+        // to the dispatch loop running that `with`.
+        if (owner != null) throw AbortSignal.of(clauseRet, owner);
+        throw new dev.irij.IrijRuntimeError(
+                "handler " + h.name + " ended " + opName
+                        + " without resume, outside its with: " + clauseRet);
     }
 
 

@@ -21,6 +21,7 @@ Terms used throughout the internals docs.
 | **EffIR** | SM body shape for bodies with branching that contain effect ops. CFG of blocks with `Return`/`Perform`/`Branch`/`Jump` terminators. |
 | **perform (runtime)** | `RtEffects.perform(eff, op, args)` — synchronous effect-op entry for a perform outside any SM body (a fiber, a plain fn reached from a `with`): `fireOpToSM` against the innermost matching `SM_STACK` frame, else "Unhandled effect". |
 | **fireOpToSM** | Synchronous SM-dispatch from `RtEffects.perform` — lets a fiber (running outside any SM dispatch loop) reach an inherited SM handler via `SM_STACK`. |
+| **performBuiltinOp** | `RtEffects.performBuiltinOp(eff, op, args)` — a builtin performing its effect (`random-int` is `Random.rand-int`): the innermost `SM_STACK` handler with a clause for the op answers, skipping handlers whose clause a builtin perform is running on this thread; `SM_NO_MATCH` means the builtin does the real thing. See `effects.md`. |
 | **Hot redef** | Swap a fn's implementation at runtime via `MutableCallSite.setTarget`. |
 | **IndentRewriter** | ANTLR4 token-stream filter that emits `INDENT`/`DEDENT` tokens around lines based on indentation. Pre-parse pass. |
 | **IrijContinuation** | Concrete struct (`int state, Object[] fields, IrijFn step`) used by SM-mode bodies. Holds machine state across perform throws. |

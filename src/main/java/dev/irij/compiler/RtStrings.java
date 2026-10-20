@@ -99,18 +99,39 @@ public final class RtStrings {
     }
 
 
+    // url-encode / url-decode are the form encoding of a query string or
+    // form body (a space is `+`); percent-encode is RFC 3986's, for a path
+    // segment or anywhere a `+` must stay a plus. All three refuse what
+    // has no exact encoding (an unpaired surrogate, %-escapes that aren't
+    // UTF-8) instead of substituting `?` or U+FFFD — which made different
+    // strings encode, or decode, alike.
+
     public static Object urlEncode(Object s) {
-        return java.net.URLEncoder.encode(asStr(s, "url-encode"),
-                java.nio.charset.StandardCharsets.UTF_8);
+        String str = asStr(s, "url-encode");
+        try {
+            return dev.irij.runtime.TextCodec.percentEncode(str, true);
+        } catch (IllegalArgumentException e) {
+            throw new dev.irij.IrijRuntimeError("url-encode: " + e.getMessage());
+        }
     }
 
 
     public static Object urlDecode(Object s) {
+        String str = asStr(s, "url-decode");
         try {
-            return java.net.URLDecoder.decode(asStr(s, "url-decode"),
-                    java.nio.charset.StandardCharsets.UTF_8);
+            return dev.irij.runtime.TextCodec.percentDecode(str, true);
         } catch (IllegalArgumentException e) {
-            throw new dev.irij.IrijRuntimeError("url-decode: malformed %-escape in '" + s + "'");
+            throw new dev.irij.IrijRuntimeError("url-decode: " + e.getMessage() + " in '" + str + "'");
+        }
+    }
+
+
+    public static Object percentEncode(Object s) {
+        String str = asStr(s, "percent-encode");
+        try {
+            return dev.irij.runtime.TextCodec.percentEncode(str, false);
+        } catch (IllegalArgumentException e) {
+            throw new dev.irij.IrijRuntimeError("percent-encode: " + e.getMessage());
         }
     }
 

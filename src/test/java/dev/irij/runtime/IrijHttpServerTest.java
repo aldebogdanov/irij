@@ -165,6 +165,64 @@ class IrijHttpServerTest {
         assertEquals("q=[1]|x&r=A", ex.getRequestURI().getQuery());
     }
 
+    private static IrijExchange parseRaw(byte[] request) throws IOException {
+        return IrijHttpServer.parse(new java.io.ByteArrayInputStream(request),
+                new java.io.ByteArrayOutputStream());
+    }
+
+    private static IrijExchange parseRaw(String request) throws IOException {
+        return parseRaw(request.getBytes(StandardCharsets.ISO_8859_1));
+    }
+
+    private static int refusedWith(String request) {
+        return assertThrows(IrijHttpServer.BadRequest.class, () -> parseRaw(request), request).status;
+    }
+
+    @Test void rawUtf8InTheTargetDecodesTheSameWhateverElseIsThere() throws Exception {
+        // Raw UTF-8 bytes used to decode as Latin-1 (`cafÃ©`), unless the
+        // target also held a char java.net.URI refuses, when they decoded
+        // as UTF-8.
+        byte[] cafe = "GET /caf\u00c3\u00a9 HTTP/1.1\r\nHost: t\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1);
+        byte[] cafePipe = "GET /caf\u00c3\u00a9| HTTP/1.1\r\nHost: t\r\n\r\n".getBytes(StandardCharsets.ISO_8859_1);
+        assertEquals("/caf\u00e9", parseRaw(cafe).getPath());
+        assertEquals("/caf\u00e9|", parseRaw(cafePipe).getPath());
+        assertEquals("/caf\u00e9", parseRaw("GET /caf%C3%A9 HTTP/1.1\r\nHost: t\r\n\r\n").getPath());
+    }
+
+    @Test void anEscapedSlashCannotAddAPathSegment() throws Exception {
+        assertEquals(400, refusedWith("GET /files/a%2Fb HTTP/1.1\r\n\r\n"));
+        assertEquals(400, refusedWith("GET /files/a%2fb HTTP/1.1\r\n\r\n"));
+        assertEquals(400, refusedWith("GET /a%00b HTTP/1.1\r\n\r\n"));
+        assertEquals(400, refusedWith("GET /a/%2E%2E/b HTTP/1.1\r\n\r\n"));
+        assertEquals(400, refusedWith("GET /a\tb HTTP/1.1\r\n\r\n"));
+        // `?` and `#` escaped are data in a segment, and `+` is a plus.
+        assertEquals("/a?b#c+d", parseRaw("GET /a%3Fb%23c+d HTTP/1.1\r\n\r\n").getPath());
+    }
+
+    @Test void escapesThatArentUtf8AreRefused() throws Exception {
+        // %FF and %FE both decoded to U+FFFD: two paths, one string.
+        assertEquals(400, refusedWith("GET /%FF HTTP/1.1\r\n\r\n"));
+        assertEquals(400, refusedWith("GET /%C0%AF HTTP/1.1\r\n\r\n"));
+        assertEquals(400, refusedWith("GET /%ED%A0%80 HTTP/1.1\r\n\r\n"));
+        assertEquals(400, refusedWith("GET /x?q=%FE HTTP/1.1\r\n\r\n"));
+    }
+
+    @Test void framingNumbersAreDigitsOnly() throws Exception {
+        assertEquals(400, refusedWith("POST / HTTP/1.1\r\nContent-Length: +5\r\n\r\nhello"));
+        assertEquals(400, refusedWith("POST / HTTP/1.1\r\nContent-Length: -0\r\n\r\n"));
+        assertEquals(400, refusedWith("POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 6\r\n\r\nhello!"));
+        assertEquals(400, refusedWith("POST / HTTP/1.1\r\nContent-Length: 5, 6\r\n\r\nhello!"));
+        assertEquals("hello", new String(parseRaw(
+                "POST / HTTP/1.1\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nhello")
+                .getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+        String chunked = "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n";
+        assertEquals(400, refusedWith(chunked + "+5\r\nhello\r\n0\r\n\r\n"));
+        assertEquals(400, refusedWith(chunked + "5\r\nhello\r\n-0\r\n\r\n"));
+        assertEquals(400, refusedWith(chunked + "0x5\r\nhello\r\n0\r\n\r\n"));
+        assertEquals("hello", new String(parseRaw(chunked + "0000000000000005 ;x=1\r\nhello\r\n0\r\n\r\n")
+                .getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+    }
+
     @Test void headerValuesCannotSplitTheResponse() throws Exception {
         int port = freePort();
         startServer(port);

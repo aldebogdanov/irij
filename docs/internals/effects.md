@@ -225,6 +225,32 @@ A clause of an *outer* `with`, reached through the fallback search,
 aborts that outer `with` the same way. This used to fail with "SM
 clause aborted from synchronous-perform context".
 
+## Builtins that perform an effect
+
+`random-int`, `random-float` and `random-token` perform the `Random`
+effect's `rand-int`, `rand-float` and `rand-token` (std.random). Each
+checks its argument, then calls `RtEffects.performBuiltinOp("Random",
+op, args)`, which hands the op to the innermost `SM_STACK` handler of
+that effect *that has a clause for it*, on the synchronous path
+`fireOpToSM` uses (`resume` returns the value; a clause that doesn't
+resume aborts its `with`). On `SM_NO_MATCH` — no such handler — the
+builtin draws from the real source itself. Two differences from a
+user op's perform:
+
+- A handler without the clause is passed by, not an error. A `Random`
+  handler written before `rand-token` existed still fixes `rand-int`,
+  and tokens stay real.
+- While a clause runs, builtin performs on that thread pass its handler
+  by (`BUILTIN_CLAUSES`, an identity set). `default-random`'s
+  `rand-int n => resume (random-int n)` reaches the next handler out, or
+  the real source, rather than itself forever; a clause built on an
+  outer handler (`resume (2 * (random-int n))`) composes with it.
+
+Before this the builtins needed `::: Random` but ignored every handler,
+so code calling `random-int` couldn't be given fixed values in a test.
+The `Time` builtins (`now-ms`, `sleep`) and the `Console` ones still go
+straight to the JVM.
+
 ## Nested `with` (native dual-SM)
 
 Top-level nested `with` is treated specially. Outer body's emit

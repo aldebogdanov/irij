@@ -156,6 +156,8 @@ public final class Builtins {
 
         env.define("url-decode", new BuiltinFn("url-decode", 1, args -> dev.irij.compiler.RtStrings.urlDecode(args.get(0))));
 
+        env.define("percent-encode", new BuiltinFn("percent-encode", 1, args -> dev.irij.compiler.RtStrings.percentEncode(args.get(0))));
+
         env.define("substring", new BuiltinFn("substring", 3, args -> dev.irij.compiler.RtStrings.substring(args.get(0), args.get(1), args.get(2))));
 
         env.define("char-at", new BuiltinFn("char-at", 2, args -> dev.irij.compiler.RtStrings.charAt(args.get(0), args.get(1))));

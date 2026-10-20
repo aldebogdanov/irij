@@ -47,10 +47,10 @@ irij examples/quint.irj       # model-based testing against a Quint spec — nee
 ## Tests
 
 ```sh
-./gradlew test                # 700 Java unit tests, one line per test
+./gradlew test                # 773 Java unit tests, one line per test
 ./gradlew test -Pverbose      # a block per test: its output, full stack traces
 ./gradlew test -q             # only failures and the summary
-irij test                     # 517 integration tests (tests/*.irj)
+irij test                     # 627 integration tests (tests/*.irj)
 irij test -v                  # … listing every test, not only failures
 ```
 
@@ -420,14 +420,19 @@ updated. No behaviour change.
 - `new-salt ()` — per-credential SecureRandom salt (gated by `Random`).
 - `hash-password salt password` —
   `"pbkdf2-sha256$<iterations>$<salt>$<pbkdf2(password, salt)>"`
-  (PBKDF2-HMAC-SHA256, 600 000 iterations).
+  (PBKDF2-HMAC-SHA256, 600 000 iterations); a salt holding `$` is
+  refused.
 - `verify-password stored password` — re-derive + constant-time compare;
   also accepts the pre-v0.9 `"<salt>$<sha256>"` format, which
   `password-needs-rehash? stored` flags for upgrading at next login.
 - `new-session-token ()` — 256-bit URL-safe session ID.
 - `sign-token secret token` / `verify-signed-token secret signed` —
   HMAC-SHA-256 envelope for stateless signed cookies, verified in
-  constant time.
+  constant time; the signature follows the token's last `.`.
+
+The crypto builtins refuse a Str with no UTF-8 encoding (an unpaired
+surrogate) rather than hash it as `?`; the verify functions answer
+false / `""` for one.
 
 A memory-hard KDF (Argon2/scrypt) would resist GPU cracking better than
 PBKDF2; it can replace it behind the same `scheme$…` format once one

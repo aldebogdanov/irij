@@ -1,4 +1,4 @@
-use std.test {assert-eq assert-false assert-true summarize test}
+use std.test {assert-eq assert-false assert-throws assert-true summarize test}
 use std.text :as str
 
 r1 := test "chars" (-> assert-eq #["h" "e" "l" "l" "o"] (str.chars "hello"))
@@ -34,3 +34,21 @@ test "upper-case is locale-independent" (-> assert-eq (upper-case "title") "TITL
 test "lower-case is locale-independent" (-> assert-eq (lower-case "TITLE") "title")
 
 test "from-char-code round-trips an emoji" (-> assert-eq (from-char-code (char-code "😀")) "😀")
+
+;; ── URL encoding ──────────────────────────────────────────
+;;
+;; url-encode / url-decode are the form encoding of a query string (a
+;; space is `+`); percent-encode is RFC 3986's, for a path segment. None
+;; substitutes for what has no exact encoding, so different strings never
+;; encode or decode alike.
+
+test "url-encode is form encoding" (-> assert-eq (url-encode "a b+c/é~") "a+b%2Bc%2F%C3%A9%7E")
+test "url-decode reads + as a space" (-> assert-eq (url-decode "a+b%2Bc%2F%C3%A9") "a b+c/é")
+test "percent-encode keeps only unreserved chars" (-> assert-eq (percent-encode "a b+c/é~-._") "a%20b%2Bc%2F%C3%A9~-._")
+test "percent-encode round-trips through a path segment" (-> assert-eq (url-decode (percent-encode "x y")) "x y")
+test "url-encode refuses an unpaired surrogate" (-> assert-throws (-> url-encode (from-char-code 55296)))
+test "percent-encode refuses one too" (-> assert-throws (-> percent-encode (from-char-code 56320)))
+test "url-decode refuses escapes that aren't UTF-8" (-> assert-throws (-> url-decode "%FF"))
+test "url-decode refuses an overlong /" (-> assert-throws (-> url-decode "%C0%AF"))
+test "url-decode refuses an encoded surrogate" (-> assert-throws (-> url-decode "%ED%A0%80"))
+test "url-decode refuses a stray %" (-> assert-throws (-> url-decode "100%"))

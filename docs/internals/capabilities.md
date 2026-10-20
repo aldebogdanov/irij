@@ -66,8 +66,20 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
     sends when the client's length is unknown), buffered whole and capped
     at `irij.http.max.body` (256 MiB — concurrent uploads multiply it);
     `Expect: 100-continue` gets its interim response. A request the
-    server refuses gets a bare 400 / 413 / 431 / 501. Unescaped `{ } | [ ]`
-    in the target are escaped, not refused (browsers send them).
+    server refuses gets a bare 400 / 413 / 431 / 501. A `Content-Length`
+    is digits only, and repeated ones must agree; a chunk size is hex
+    digits only (`Long.parseLong` took `+5` and `-0`, RFC 9112 doesn't).
+  - **Request target.** Unescaped `{ } | [ ]` and raw non-ASCII bytes
+    are always %-escaped before `java.net.URI` parses the target (they
+    used to be escaped only when the plain parse failed, so a raw
+    `café` decoded as UTF-8 or as Latin-1 depending on whether something
+    else in the line was illegal); a control character is refused. The
+    path is then decoded one segment at a time (`decodePath`), and
+    refused (400) when an escape decodes to `/` — `/files/a%2Fb` reached
+    the router as three segments — or NUL, when a segment is `.` or `..`
+    (literal or escaped; browsers resolve them before sending), or when
+    escapes in the path or query aren't UTF-8 (`%FF` and `%FE` both
+    decoded to U+FFFD). `IrijExchange.getPath()` is that decoded path.
   - **Response safety.** A header name or value holding CR, LF or NUL is
     refused (500) — handlers copy request data into headers, and a line
     break there would let the client write its own headers or a second
@@ -84,9 +96,12 @@ surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
     file under the working directory and the bundled app source, so
     `GET /.env` or `GET /data/app.db` returned the file; a system
     service's working directory is `/`.)
-  - **Query params** are split from the *raw* query, then form-decoded,
-    keys included; `URI.getQuery()` has already decoded `%26` / `%2B`, so
-    splitting it cut values at escaped `&`s. A stray `%` stays literal.
+  - **The request map.** `path` is the decoded path; `query` is the raw
+    query, as sent (a decoded one can't be split: an escaped `&` or `=`
+    looks like a separator — and std.datastar decoded it a second time);
+    `params` is the raw query split, then each key and value
+    form-decoded. A stray `%` arrives escaped as `%25`, so it stays
+    literal.
   - **SSE streams** a handler returns are held open until the writer
     closes; a heartbeat comment every `irij.sse.heartbeat.ms` (5 s)
     detects a vanished client, and `close` wakes the holder at once.

@@ -2,29 +2,41 @@ mod std.random
 
 ;; Random effect module.
 ;;
+;; The builtins random-int, random-float and random-token perform this
+;; effect's rand-int, rand-float and rand-token. Under a handler with the
+;; clause, the handler answers; with none, they draw from the real source
+;; (ThreadLocalRandom; SecureRandom for tokens).
+;;
 ;; Usage:
-;;   use std.random :open
+;;   use std.random :as random
 ;;
 ;;   fn roll-d6 :: Int ::: Random
-;;     (-> 1 + (rand-int 6))
+;;     (-> 1 + (random-int 6))
 ;;
-;;   with default-random
+;;   with random.default-random
 ;;     roll-d6 ()
 ;;
 ;;   ;; Mock in tests (seeded/deterministic):
-;;   handler fixed-random :: Random
-;;     rand-int bound   => resume 3
-;;     rand-float       => resume 0.5
+;;   handler fixed-random :: random.Random
+;;     rand-int bound => resume 3
+;;     rand-float => resume 0.5
+;;     rand-token n => resume "test-token"
 ;;
 ;;   with fixed-random
 ;;     roll-d6 ()   ;; => 4
+;;
+;; A handler may leave a clause out: that op then goes on to the next
+;; handler out, or to the real source.
 
 pub effect Random
   rand-int :: Int -> Int
   rand-float :: Float
+  rand-token :: Int -> Str
 
 pub handler default-random :: Random ::: Random
   rand-int bound =>
     resume (random-int bound)
   rand-float =>
     resume (random-float ())
+  rand-token n =>
+    resume (random-token n)

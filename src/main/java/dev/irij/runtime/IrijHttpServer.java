@@ -54,7 +54,7 @@ public final class IrijHttpServer {
 
     /** A request the server refuses before any handler runs; carries
      *  the status the client is told. */
-    private static final class BadRequest extends IOException {
+    static final class BadRequest extends IOException {
         final int status;
         BadRequest(int status, String msg) { super(msg); this.status = status; }
     }
@@ -140,26 +140,32 @@ public final class IrijHttpServer {
         }
         if (line == null) throw new BadRequest(400, "truncated header section");
 
+        for (int i = 0; i < target.length(); i++) {
+            char c = target.charAt(i);
+            if (c < 0x21 || c == 0x7F) throw new BadRequest(400, "control character in request target");
+        }
+        // Escape what java.net.URI won't take (browsers leave `{ } | [ ] ^`
+        // unescaped) and every non-ASCII byte, always. Escaping only when
+        // the plain parse failed decoded a raw `café` as UTF-8 or as
+        // Latin-1 depending on whether something else in the target was
+        // illegal.
         URI uri;
-        try { uri = new URI(target); }
-        catch (URISyntaxException e) {
-            // Browsers leave `{ } | [ ] ^` and the like unescaped, which
-            // java.net.URI refuses; escape them rather than refuse the page.
-            try { uri = new URI(escapeIllegal(target)); }
-            catch (URISyntaxException e2) { throw new BadRequest(400, "malformed request target"); }
+        try { uri = new URI(escapeIllegal(target)); }
+        catch (URISyntaxException e) { throw new BadRequest(400, "malformed request target"); }
+        String path = decodePath(uri.getRawPath());
+        if (uri.getRawQuery() != null) {
+            try { TextCodec.percentDecode(uri.getRawQuery(), true); }
+            catch (IllegalArgumentException e) { throw new BadRequest(400, "bad query: " + e.getMessage()); }
         }
 
         String te = headers.getFirst("Transfer-Encoding");
-        String cl = headers.getFirst("Content-Length");
         boolean chunked = te != null && !te.equalsIgnoreCase("identity");
         if (chunked && !te.equalsIgnoreCase("chunked")) {
             throw new BadRequest(501, "unsupported transfer-encoding");
         }
         long len = 0;
-        if (!chunked && cl != null) {
-            try { len = Long.parseLong(cl.trim()); }
-            catch (NumberFormatException e) { throw new BadRequest(400, "bad content-length"); }
-            if (len < 0) throw new BadRequest(400, "bad content-length");
+        if (!chunked && headers.has("Content-Length")) {
+            len = contentLength(headers.get("Content-Length"));
             if (len > MAX_BODY) throw new BadRequest(413, "body too large");
         }
         // curl and most clients hold large bodies back until the server
@@ -176,7 +182,72 @@ public final class IrijHttpServer {
             body = in.readNBytes((int) len);
             if (body.length != len) throw new BadRequest(400, "truncated body");
         }
-        return new IrijExchange(method, uri, headers, body, out);
+        return new IrijExchange(method, uri, path, headers, body, out);
+    }
+
+    /**
+     * The request path, %-decoded one segment at a time. Refused with a
+     * 400: an escape decoding to {@code /} — {@code /files/a%2Fb} would
+     * reach the router and {@code path-segments} as three segments, not
+     * two — or to NUL; a {@code .} or {@code ..} segment, literal or
+     * escaped, which browsers resolve before sending; and escapes that
+     * aren't UTF-8 ({@code %FF} and {@code %FE} both decoded to U+FFFD).
+     */
+    static String decodePath(String rawPath) throws BadRequest {
+        if (rawPath == null) throw new BadRequest(400, "request target has no path");
+        if (rawPath.isEmpty()) return "/"; // absolute-form `http://host`
+        String[] segs = rawPath.split("/", -1);
+        StringBuilder sb = new StringBuilder(rawPath.length());
+        for (int i = 0; i < segs.length; i++) {
+            String seg;
+            try { seg = TextCodec.percentDecode(segs[i], false); }
+            catch (IllegalArgumentException e) { throw new BadRequest(400, "bad path: " + e.getMessage()); }
+            if (seg.indexOf('/') >= 0 || seg.indexOf('\0') >= 0) {
+                throw new BadRequest(400, "escaped / or NUL in path");
+            }
+            if (seg.equals(".") || seg.equals("..")) throw new BadRequest(400, "dot segment in path");
+            if (i > 0) sb.append('/');
+            sb.append(seg);
+        }
+        return sb.toString();
+    }
+
+    /** RFC 9112 §6.3: a Content-Length is {@code 1*DIGIT} — no sign, no
+     *  space — and repeated ones (separate headers or a list) must agree.
+     *  {@code Long.parseLong} alone took {@code +5}. */
+    private static long contentLength(List<String> values) throws BadRequest {
+        long len = -1;
+        for (String v : values) {
+            for (String item : v.split(",", -1)) {
+                String t = item.strip();
+                if (t.isEmpty() || t.length() > 18 || !isDigits(t, 10)) {
+                    throw new BadRequest(400, "bad content-length");
+                }
+                long n = Long.parseLong(t);
+                if (len >= 0 && n != len) throw new BadRequest(400, "conflicting content-length");
+                len = n;
+            }
+        }
+        return len;
+    }
+
+    /** RFC 9112 §7.1: a chunk size is {@code 1*HEXDIG}; {@code +5} and
+     *  {@code -0} are not sizes. Leading zeros are allowed (any number). */
+    private static long chunkSize(String hex) throws BadRequest {
+        if (hex.isEmpty() || !isDigits(hex, 16)) throw new BadRequest(400, "bad chunk size");
+        int i = 0;
+        while (i < hex.length() - 1 && hex.charAt(i) == '0') i++;
+        if (hex.length() - i > 15) throw new BadRequest(413, "chunk too large");
+        return Long.parseLong(hex.substring(i), 16);
+    }
+
+    /** Every char an ASCII digit of {@code radix} (10 or 16). */
+    private static boolean isDigits(String s, int radix) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c > 0x7F || Character.digit(c, radix) < 0) return false;
+        }
+        return true;
     }
 
     private static final String URI_SAFE =
@@ -210,12 +281,9 @@ public final class IrijHttpServer {
         while (true) {
             String sizeLine = readLine(in, MAX_LINE);
             if (sizeLine == null) throw new BadRequest(400, "truncated chunked body");
-            int semi = sizeLine.indexOf(';'); // chunk extensions
-            String hex = (semi >= 0 ? sizeLine.substring(0, semi) : sizeLine).trim();
-            long size;
-            try { size = Long.parseLong(hex, 16); }
-            catch (NumberFormatException e) { throw new BadRequest(400, "bad chunk size"); }
-            if (size < 0) throw new BadRequest(400, "bad chunk size");
+            int semi = sizeLine.indexOf(';'); // chunk extensions, after optional whitespace
+            String hex = semi >= 0 ? sizeLine.substring(0, semi).stripTrailing() : sizeLine;
+            long size = chunkSize(hex);
             if (size == 0) break;
             if (body.size() + size > MAX_BODY) throw new BadRequest(413, "body too large");
             byte[] chunk = in.readNBytes((int) size);
@@ -302,6 +370,7 @@ public final class IrijHttpServer {
     public static final class IrijExchange {
         private final String method;
         private final URI uri;
+        private final String path;
         private final IrijHeaders reqHeaders;
         private final byte[] body;
         private final OutputStream out;
@@ -309,9 +378,11 @@ public final class IrijHttpServer {
         private final Map<String, Object> attrs = new HashMap<>();
         private boolean committed = false;
 
-        IrijExchange(String method, URI uri, IrijHeaders reqHeaders, byte[] body, OutputStream out) {
+        IrijExchange(String method, URI uri, String path, IrijHeaders reqHeaders, byte[] body,
+                     OutputStream out) {
             this.method = method;
             this.uri = uri;
+            this.path = path;
             this.reqHeaders = reqHeaders;
             this.body = body;
             this.out = out;
@@ -319,6 +390,8 @@ public final class IrijHttpServer {
 
         public String getRequestMethod() { return method; }
         public URI getRequestURI() { return uri; }
+        /** The path, %-decoded per segment; see {@link #decodePath}. */
+        public String getPath() { return path; }
         public IrijHeaders getRequestHeaders() { return reqHeaders; }
         public InputStream getRequestBody() { return new ByteArrayInputStream(body); }
         public IrijHeaders getResponseHeaders() { return respHeaders; }

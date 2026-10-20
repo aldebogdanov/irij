@@ -123,7 +123,7 @@ highlighted only where they start their form (see
     "char-code" "from-char-code"
     ;; data formats
     "json-parse" "json-encode" "json-encode-pretty"
-    "url-encode" "url-decode" "toml-parse"
+    "url-encode" "url-decode" "percent-encode" "toml-parse"
     ;; crypto
     "sha256-hex" "hmac-sha256-hex" "pbkdf2-sha256-hex"
     "random-token" "constant-time-eq?"

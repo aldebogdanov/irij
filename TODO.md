@@ -531,7 +531,7 @@ Effect-based I/O operations, mockable via handlers in tests.
   - `pub handler` exports handler name
 - [x] **Time/Random/Env** — `std.time`, `std.random`, `std.env` modules
   - `Time`: `time-now`, `time-sleep` (wraps `now-ms`, `sleep` builtins, tagged `::: Time`)
-  - `Random`: `rand-int`, `rand-float` (wraps `random-int`, `random-float` builtins, tagged `::: Random`)
+  - `Random`: `rand-int`, `rand-float`, `rand-token`. The builtins `random-int`, `random-float`, `random-token` perform them, so a handler fixes direct builtin calls too (2026-10)
   - `Env`: `env-var` (wraps `env` builtin, tagged `::: Env`)
   - All fully mockable: `handler fixed-clock :: Time`, `handler fixed-random :: Random`, `handler mock-env :: Env`
   - 8 integration tests (`tests/test-time-random-env.irj`)
@@ -840,6 +840,28 @@ Full design and the recorded Quint behaviour it rests on:
 ---
 
 ## Known Issues / Bugs
+
+- [x] **Stdlib / HTTP hardening (blind audit 2026-10, round 2)** — Fixed (2026-10).
+      Hashes, MACs, PBKDF2 and `url-encode` hashed an unpaired surrogate as
+      `?` ("alice" + U+DC00 carried the signature of "alice?"); they refuse it
+      now, and `constant-time-eq?` compares UTF-16 code units like `==`.
+      Datastar helpers keyed only a payload's first line, so user text could
+      add `selector` / `mode` directives; every line is keyed now. The server
+      routed on a decoded path (`%2F` added a segment), decoded raw non-ASCII
+      inconsistently, merged invalid UTF-8 escapes into U+FFFD and took
+      `Content-Length: +5` and chunk sizes `+5` / `-0`: all refused (400) now,
+      and `req.query` is raw. `route-prefix "/admin"` served `/adminpanel…`.
+      Float Int-args were truncated (`random-token 1.9`); `random-int` and
+      friends ignored a `Random` handler; std.auth locked out salts with `$`,
+      never verified dotted tokens, threw on big stored iteration counts;
+      `parse-int`/`parse-float` read Unicode digits, `1.5f`, `NaN`, hex.
+      New builtin `percent-encode` (RFC 3986). See docs/internals/stdlib.md,
+      capabilities.md, effects.md § Builtins that perform an effect.
+- [ ] **`Time` and `Console` builtins ignore handlers** — `now-ms` / `sleep`
+      and `println` & co. need their effect in the row but never reach an
+      installed handler, as `random-int` didn't before 2026-10. The
+      `performBuiltinOp` path `Random` uses would carry them (`now-ms` as
+      std.time's `time-now`, `sleep` as `time-sleep`).
 
 - [x] **Effect rows weren't checked through `|>`, `@`, string interpolation, ranges or record updates** — Fixed (2026-10), found adding method references. `EffectRowChecker.walkExpr` had no case for `Pipe`, `SeqOp`, `StringInterp`, `Range`, `RecordUpdate` or `ChoreoExpr`, so `n => n |> say` in a pure fn compiled and printed, as did `n |> Math/abs` and `"${Math/abs n}"`. A pipe is now checked as the call it is (`x |> f a` as `f a x`), a seq-op's function as called, and the others' parts are walked; `collectInto` (row-variable inference) covers the same shapes. 5 tests in `EffectRowLintTest`.
 
