@@ -230,7 +230,8 @@ class HandlerGapsTest {
 
     @Test
     void scopeInAPerformingWithBody() throws Exception {
-        assertEquals("42\n#[after before fiber]", run("""
+        // `await f` waits for the fiber, so its log lands between the two.
+        assertEquals("42\n#[before fiber after]", run("""
                 effect Log
                   log :: Str -> ()
                 handler rec :: Log
@@ -247,7 +248,7 @@ class HandlerGapsTest {
                   log "after"
                   n * 2
                 println v
-                println (sort rec.lines)
+                println rec.lines
                 """));
     }
 
