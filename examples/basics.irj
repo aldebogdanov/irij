@@ -6,6 +6,13 @@ x := 42
 greeting := "Hello"
 println (greeting ++ ", the answer is " ++ (to-str x))
 
+;; ── Numbers ─────────────────────────────────────────────────────────────
+
+println (2/3 + 1/3)      ;; 1        — Rational, exact
+println 1.5e3            ;; 1500.0   — Float, with an exponent
+println (1e-3 * 2)       ;; 0.002
+println (2 ** 70)        ;; 1180591620717411303424 — Int never overflows
+
 ;; ── Functions (lambda body form) ─────────────────────────────────────────
 
 fn square

@@ -1112,6 +1112,18 @@ final class ExprEmitter implements Opcodes {
     }
 
 
+    static String builtinArityMessage(String name, int arity, int given, Expr.SourceLoc loc) {
+        String at = loc != null ? loc + ": " : "";
+        String takes = name + " takes " + arity + " argument" + (arity == 1 ? "" : "s")
+                + ", given " + given;
+        if (given < arity) {
+            return at + takes + ". A direct call to a builtin isn't partially applied;"
+                    + " write a lambda for the missing argument: `(v -> " + name + " … v)`";
+        }
+        return at + takes + ". Parenthesize an argument that is itself a call: `"
+                + name + " (f x)`";
+    }
+
     void emitApp(Expr.App app, MethodVisitor mv, Locals locals) {
         if (app.fn() instanceof Expr.TypeRef tr) {
             emitConstructorApp(tr.name(), app.args(), mv, locals);
@@ -1223,6 +1235,14 @@ final class ExprEmitter implements Opcodes {
             if (ce.options.namespaceMode()) {
                 emitIrijFnCall(app.fn(), app.args(), mv, locals);
                 return;
+            }
+            // A builtin reaches here only when its intrinsic refused the
+            // argument count — say that, not "Unknown function: println".
+            // (`println 1.5 x` is the classic: one argument too many.)
+            Integer builtinArity = ModuleScope.builtinArity(fnName);
+            if (builtinArity != null && builtinArity != app.args().size()) {
+                throw new IrijCompiler.CompileException(
+                        builtinArityMessage(fnName, builtinArity, app.args().size(), app.loc()));
             }
             throw new IrijCompiler.CompileException("Unknown function: " + fnName);
         }

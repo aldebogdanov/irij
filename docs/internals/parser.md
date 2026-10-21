@@ -33,6 +33,12 @@ no special-cased layout rules in `.g4`.
   None of those positions can start a declaration or statement, so the
   keyword is unambiguous there; `AstBuilder` takes the field name from
   `fieldName().getText()`.
+- **A Float literal is a fraction, an exponent, or both.**
+  `FLOAT_LIT` is `digits '.' digits EXPONENT?` or `digits EXPONENT`,
+  with `fragment EXPONENT : [eE] [+-]? [0-9]+`. ANTLR's longest match
+  keeps the old reading wherever the exponent has no digits: `2else`
+  and `2e` are still `2` followed by a name. Before exponents existed,
+  `1.5e3` lexed as `1.5` applied to the name `e3`.
 - **Operators are tokens, not identifiers.** `+`, `-`, `==`, `++`, etc.
   Operator *sections* `(+)` are lifted to `Expr.OpSection` in the AST
   and lowered to runtime constants in the emitter.
