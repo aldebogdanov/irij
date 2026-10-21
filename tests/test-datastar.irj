@@ -1,0 +1,52 @@
+use std.test {assert-eq assert-throws test}
+use std.serve :as serve
+use std.datastar :as ds
+
+;; A Serve handler that keeps each event's data instead of streaming it.
+handler capture :: serve.Serve
+  sent :! #[]
+  sse-send sse evt data =>
+    sent <- sent ++ #[data]
+    resume ()
+
+;; The data `send` sends, under `capture`.
+fn sent-by :: Fn Str
+  => send
+  with capture
+    send ()
+  last capture.sent
+
+;; Datastar reads data line by line, `key value`. Every payload line gets
+;; its key, so a line break in user text can't start a directive.
+test "ds-patch keys every line of the html" (->
+  assert-eq (sent-by (-> ds.ds-patch () "#c" "<p>hi\nselector #admin\nmode remove</p>"))
+            "selector #c\nmode outer\nelements <p>hi\nelements selector #admin\nelements mode remove</p>")
+
+test "ds-patch-mode too" (->
+  assert-eq (sent-by (-> ds.ds-patch-mode () "#c" "append" "a\nb"))
+            "selector #c\nmode append\nelements a\nelements b")
+
+test "CR and CRLF end a line as LF does" (->
+  assert-eq (sent-by (-> ds.ds-signals () "{\r\n\"a\": 1\r}"))
+            "signals {\nsignals \"a\": 1\nsignals }")
+
+test "ds-script keys every line of the script" (->
+  assert-eq (sent-by (-> ds.ds-script () "f()\nselector #x"))
+            "mode append\nselector body\nelements <script data-ds-autoremove>f()\nelements selector #x</script>")
+
+test "a selector with a line break is refused" (->
+  assert-throws (-> sent-by (-> ds.ds-patch () "#c\nmode remove" "x")))
+
+test "a mode with a line break is refused" (->
+  assert-throws (-> sent-by (-> ds.ds-patch-mode () "#c" "outer\rselector #y" "x")))
+
+;; A GET's signals are JSON in the `datastar` query parameter, read from
+;; the decoded `params` (the raw `query` is not decoded twice any more).
+test "ds-read-signals reads a GET's datastar parameter" (->
+  assert-eq (get "a" (ds.ds-read-signals {method= "GET" params= {datastar= "{\"a\":\"x+y%\"}"}})) "x+y%")
+
+test "a GET without one reads as no signals" (->
+  assert-eq (ds.ds-read-signals {method= "GET" params= {}}) {})
+
+test "a POST's signals are its body" (->
+  assert-eq (get "a" (ds.ds-read-signals {method= "POST" body= "{\"a\":2}"})) 2)

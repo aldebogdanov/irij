@@ -20,18 +20,37 @@ pub fn ds-closed? :: _ Bool ::: Serve
   (sse -> sse-closed? sse)
 
 ;; ── Datastar events ─────────────────────────────────────────────────
+;;
+;; Datastar reads an event's data line by line, each line `key value`.
+;; A payload line break would let the text after it be read as a key of
+;; its own (`selector #x`, `mode remove`), so every line of a payload
+;; gets the key (`ds-lines`) and the browser rejoins them; a selector or
+;; mode must be one line, or is refused. HTML-escaping user text doesn't
+;; cover this: it leaves line breaks alone.
 
 pub fn ds-patch :: _ Str Str () ::: Serve
-  (sse selector html -> sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode outer\nelements " ++ html))
+  (sse selector html -> ds-patch-mode sse selector "outer" html)
 
 pub fn ds-patch-mode :: _ Str Str Str () ::: Serve
-  (sse selector mode html -> sse-send sse "datastar-patch-elements" ("selector " ++ selector ++ "\nmode " ++ mode ++ "\nelements " ++ html))
+  (sse selector mode html -> sse-send sse "datastar-patch-elements" ("selector " ++ (ds-one-line "selector" selector) ++ "\nmode " ++ (ds-one-line "mode" mode) ++ "\n" ++ (ds-lines "elements" html)))
 
 pub fn ds-signals :: _ Str () ::: Serve
-  (sse json -> sse-send sse "datastar-patch-signals" ("signals " ++ json))
+  (sse json -> sse-send sse "datastar-patch-signals" (ds-lines "signals" json))
 
 pub fn ds-script :: _ Str () ::: Serve
-  (sse js -> sse-send sse "datastar-patch-elements" ("mode append\nselector body\nelements <script data-ds-autoremove>" ++ js ++ "</script>"))
+  (sse js -> sse-send sse "datastar-patch-elements" ("mode append\nselector body\n" ++ (ds-lines "elements" ("<script data-ds-autoremove>" ++ js ++ "</script>"))))
+
+;; Every line of `text` as a `key line` data line. CR, LF and CRLF all
+;; end a line for the browser, so all three split here.
+fn ds-lines :: Str Str Str
+  (key text -> join "\n" ((split (replace (replace text "\r\n" "\n") "\r" "\n") "\n") |> @ (line -> key ++ " " ++ line)))
+
+fn ds-one-line :: Str Str Str
+  => what s
+  if ((index-of s "\n") >= 0) || ((index-of s "\r") >= 0)
+    error ("datastar: the " ++ what ++ " must be one line")
+  else
+    s
 
 ;; ── Signal reading ──────────────────────────────────────────────────
 
@@ -40,21 +59,16 @@ fn ds-is-get
 
 pub fn ds-read-signals :: Map _
   => request
-  if (ds-is-get request) (ds-parse-query-signals request.query) else (json-parse request.body)
+  if (ds-is-get request) (ds-query-signals request) else (json-parse request.body)
 
-fn ds-has-prefix
-  (prefix s -> starts-with? s prefix)
-
-fn ds-parse-query-signals
-  => query
-  result := try (-> json-parse (url-decode (ds-extract-param query "datastar")))
-  match result
-    Ok v => v
-    Err _ => {}
-
-fn ds-extract-param
-  => query name
-  prefix := name ++ "="
-  parts := split query "&"
-  found := parts |> /? (ds-has-prefix prefix)
-  if (empty? found) ("") else (substring (head found) (length prefix) (length (head found)))
+;; A GET carries the signals as JSON in the `datastar` query parameter,
+;; which `request.params` holds decoded; no signals reads as `{}`.
+fn ds-query-signals
+  => request
+  raw := get "datastar" request.params
+  if (raw == ())
+    {}
+  else
+    match (try (-> json-parse raw))
+      Ok v => v
+      Err _ => {}

@@ -1,4 +1,4 @@
-use std.test {assert-eq assert-true test}
+use std.test {assert-eq assert-throws assert-true test}
 use std.time :as time
 use std.time {Time}
 use std.random :as random
@@ -95,6 +95,86 @@ fn wrap-rand-mock ::: Random
     run-rand-mock ()
 
 test "Random handler is mockable" (-> wrap-rand-mock ())
+
+;; The builtins perform the effect too: under a handler they get its
+;; answers, so code calling random-int directly is mockable.
+fn run-builtin-mock ::: Random
+  =>
+  assert-eq 42 (random-int 6)
+  assert-eq 0.5 (random-float ())
+
+fn wrap-builtin-mock ::: Random
+  =>
+  with fixed-random
+    run-builtin-mock ()
+
+test "random-int and random-float answer from the handler" (-> wrap-builtin-mock ())
+
+handler fixed-token :: Random
+  rand-token n => resume ("tok" ++ (to-str n))
+
+fn run-token-mock ::: Random
+  =>
+  assert-eq "tok16" (random-token 16)
+  n := random-int 1000
+  assert-true ((n >= 0) && (n < 1000))
+
+fn wrap-token-mock ::: Random
+  =>
+  with fixed-token
+    run-token-mock ()
+
+;; fixed-token has no rand-int clause: random-int draws for real.
+test "a handler answers the ops it has clauses for" (-> wrap-token-mock ())
+
+;; default-random's clauses call the builtins they stand in for, which
+;; reach the real source rather than the clause again.
+fn run-default-builtins ::: Random
+  =>
+  n := random-int 10
+  assert-true ((n >= 0) && (n < 10))
+  assert-eq 43 (length (random-token 32))
+
+fn wrap-default-builtins ::: Random
+  =>
+  with random.default-random
+    run-default-builtins ()
+
+test "default-random draws from the real source" (-> wrap-default-builtins ())
+
+handler doubling :: Random ::: Random
+  rand-int bound => resume (2 * (random-int bound))
+
+fn run-nested ::: Random
+  =>
+  assert-eq 84 (random-int 6)
+
+fn wrap-nested ::: Random
+  =>
+  with fixed-random
+    with doubling
+      run-nested ()
+
+test "a clause's own random-int goes to the next handler out" (-> wrap-nested ())
+
+fn zero-bound ::: Random
+  (-> random-int 0)
+
+fn float-bytes ::: Random
+  (-> random-token 1.9)
+
+fn run-bad-args ::: Random
+  =>
+  assert-throws zero-bound
+  assert-throws float-bytes
+
+fn wrap-bad-args ::: Random
+  =>
+  with random.default-random
+    run-bad-args ()
+
+;; A Float used to be truncated: random-token 1.9 made a 1-byte token.
+test "random-int needs a positive Int, random-token an Int" (-> wrap-bad-args ())
 
 ;; ── std.env ───────────────────────────────────────────────
 

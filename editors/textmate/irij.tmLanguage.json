@@ -163,7 +163,7 @@
     },
     "builtin": {
       "name": "support.function.builtin.irij",
-      "match": "(?<![\\w-])(?:json-encode-pretty|constant-time-eq\\?|pbkdf2-sha256-hex|hmac-sha256-hex|from-char-code|program-args|random-float|random-token|starts-with\\?|json-encode|parse-float|ends-with\\?|json-parse|lower-case|random-int|sha256-hex|toml-parse|upper-case|url-decode|url-encode|char-code|contains\\?|parse-int|read-line|substring|validate\\!|identity|index-of|to-tuple|validate|char-at|get-env|println|replace|reverse|timeout|type-of|concat|dissoc|empty\\?|length|now-ms|resume|to-set|to-str|to-vec|assoc|await|const|error|floor|merge|print|round|sleep|spawn|split|ceil|conj|drop|flip|fold|head|join|keys|last|race|sort|sqrt|tail|take|trim|vals|abs|cos|dbg|env|exp|get|log|max|min|not|nth|par|pow|quo|rem|sin|tan|try|pi|e)(?![\\w?!-])"
+      "match": "(?<![\\w-])(?:json-encode-pretty|constant-time-eq\\?|pbkdf2-sha256-hex|hmac-sha256-hex|percent-encode|from-char-code|program-args|random-float|random-token|starts-with\\?|json-encode|parse-float|ends-with\\?|json-parse|lower-case|random-int|sha256-hex|toml-parse|upper-case|url-decode|url-encode|char-code|contains\\?|parse-int|read-line|substring|validate\\!|identity|index-of|to-tuple|validate|char-at|get-env|println|replace|reverse|timeout|type-of|concat|dissoc|empty\\?|length|now-ms|resume|to-set|to-str|to-vec|assoc|await|const|error|floor|merge|print|round|sleep|spawn|split|ceil|conj|drop|flip|fold|head|join|keys|last|race|sort|sqrt|tail|take|trim|vals|abs|cos|dbg|env|exp|get|log|max|min|not|nth|par|pow|quo|rem|sin|tan|try|pi|e)(?![\\w?!-])"
     },
     "binding": {
       "comment": "name := / name :!",

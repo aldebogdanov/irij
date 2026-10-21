@@ -57,19 +57,39 @@ class ServeStaticTest {
     @Test void refusesTraversalOutOfResources() throws Exception {
         Files.createDirectories(work.resolve("resources"));
         Files.writeString(work.resolve("secret.txt"), "s");
-        assertFalse(served("/../secret.txt"));
-        assertFalse(served("/%2e%2e/secret.txt"));
-        assertFalse(served("/resources/../secret.txt"));
-        assertFalse(served("/./secret.txt"));
+        // The server refuses a dot segment, literal or escaped, outright…
+        for (String t : new String[]{"/../secret.txt", "/%2e%2e/secret.txt",
+                "/resources/../secret.txt", "/./secret.txt"}) {
+            var bad = assertThrows(IrijHttpServer.BadRequest.class,
+                    () -> request(t, new ByteArrayOutputStream()), t);
+            assertEquals(400, bad.status);
+        }
+        // …and static serving refuses one on its own, should one get past.
+        var ex = new IrijExchange("GET", java.net.URI.create("/x"), "/../secret.txt",
+                new IrijHttpServer.IrijHeaders(), new byte[0], new ByteArrayOutputStream());
+        assertFalse(ServeCapability.httpServeStatic(ex, work, false));
     }
 
     @Test void queryParamsSplitOnTheRawQuery() {
-        Map<String, Object> p = ServeCapability.parseQueryParams("a=x%26y&b=1%2B1&c+d=e+f&bad=%zz&flag");
+        // `%25zz` is what the server makes of a stray `%zz`.
+        Map<String, Object> p = ServeCapability.parseQueryParams("a=x%26y&b=1%2B1&c+d=e+f&bad=%25zz&flag");
         assertEquals("x&y", p.get("a"));
         assertEquals("1+1", p.get("b"));
         assertEquals("e f", p.get("c d"));
         assertEquals("%zz", p.get("bad"));
         assertEquals("", p.get("flag"));
         assertEquals(5, p.size());
+    }
+
+    @Test void requestMapPathIsDecodedQueryIsRaw() throws Exception {
+        var req = ServeCapability.buildRequestMap(
+                request("/files/caf%C3%A9/a+b?q=a%26b+c&bad=%zz", new ByteArrayOutputStream()));
+        assertEquals("/files/café/a+b", req.entries().get("path"));
+        // Raw, as sent (a stray `%` arrives escaped): decoded, the `%26`
+        // would split the value for code that splits on `&`.
+        assertEquals("q=a%26b+c&bad=%25zz", req.entries().get("query"));
+        var params = (Values.IrijMap) req.entries().get("params");
+        assertEquals("a&b c", params.entries().get("q"));
+        assertEquals("%zz", params.entries().get("bad"));
     }
 }

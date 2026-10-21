@@ -1,4 +1,4 @@
-use std.test {assert-eq assert-true test}
+use std.test {assert-eq assert-throws assert-true test}
 use std.auth :as auth
 use std.random :as random
 
@@ -150,3 +150,57 @@ test "verify-password honours the stored iteration count" (->
 
 test "verify-password rejects a malformed PBKDF2 hash" (->
   assert-true ((! (auth.verify-password "pbkdf2-sha256$lots$abc$00" "pw")) && (! (auth.verify-password "md5$1$abc$00" "pw"))))
+
+;; ── Strs with no UTF-8 encoding ───────────────────────────
+;;
+;; An unpaired surrogate (from json-parse "\udc00", from-char-code, or
+;; half of a split emoji) has no UTF-8 bytes. The hash and MAC builtins
+;; used to hash it as `?`, so "user:alice" plus a lone U+DC00 carried a
+;; valid signature for "user:alice?".
+
+lone := from-char-code 56320
+
+test "sha256-hex refuses an unpaired surrogate" (->
+  assert-throws (-> sha256-hex ("a" ++ lone)))
+
+test "hmac-sha256-hex refuses one in the message" (->
+  assert-throws (-> hmac-sha256-hex "k" ("a" ++ lone)))
+
+test "hmac-sha256-hex refuses one in the key" (->
+  assert-throws (-> hmac-sha256-hex lone "m"))
+
+test "pbkdf2-sha256-hex refuses one in the password" (->
+  assert-throws (-> pbkdf2-sha256-hex lone "salt" 1))
+
+test "constant-time-eq? agrees with ==" (->
+  assert-true ((! (constant-time-eq? lone "?")) && (constant-time-eq? ("a" ++ lone) ("a" ++ lone))))
+
+signed-alice := auth.sign-token "server-secret" "user:alice?"
+alice-sig := last (split signed-alice ".")
+
+test "a lone surrogate can't borrow another token's signature" (->
+  assert-eq (auth.verify-signed-token "server-secret" ("user:alice" ++ lone ++ "." ++ alice-sig)) "")
+
+test "nor one json-parse made" (->
+  assert-eq (auth.verify-signed-token "server-secret" ((json-parse "\"user:alice\\udc00\"") ++ "." ++ alice-sig)) "")
+
+test "verify-password is false for such a password" (->
+  assert-true (! (auth.verify-password ("pbkdf2-sha256$1000$abc$" ++ (pbkdf2-sha256-hex "?" "abc" 1000)) lone)))
+
+test "legacy verify-password too" (->
+  assert-true (! (auth.verify-password ("s$" ++ (sha256-hex "s?")) lone)))
+
+;; ── std.auth edge cases ───────────────────────────────────
+
+test "a signed token may contain dots" (->
+  assert-eq (auth.verify-signed-token "k" (auth.sign-token "k" "a.b.c")) "a.b.c")
+
+test "a dotted token's signature still has to match" (->
+  assert-eq (auth.verify-signed-token "k" "a.b.0000") "")
+
+;; The salt sits between `$`s; with one inside, the hash never verified.
+test "hash-password refuses a salt holding $" (->
+  assert-throws (-> auth.hash-password "salt$x" "pw"))
+
+test "verify-password is false past the iteration cap" (->
+  assert-true ((! (auth.verify-password "pbkdf2-sha256$999999999999$s$abc" "pw")) && (! (auth.verify-password "pbkdf2-sha256$99999999999999999999999$s$abc" "pw"))))

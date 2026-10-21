@@ -46,8 +46,9 @@ final class IntrinsicsEmitter implements Opcodes {
             "get", "get-env", "head", "hmac-sha256-hex", "identity", "index-of", "join",
             "json-encode", "json-encode-pretty", "json-parse", "keys", "last", "length", "log",
             "lower-case", "max", "merge", "min", "not", "now-ms", "nth", "par", "parse-float",
-            "parse-int", "pbkdf2-sha256-hex", "pow", "print", "println", "program-args", "quo",
-            "race", "random-float", "random-int", "random-token", "raw-nrepl-eval-sandboxed",
+            "parse-int", "pbkdf2-sha256-hex", "percent-encode", "pow", "print", "println",
+            "program-args", "quo", "race", "random-float", "random-int", "random-token",
+            "raw-nrepl-eval-sandboxed",
             "read-line", "rem", "replace", "reverse", "round", "sha256-hex", "sin", "sleep",
             "sort", "spawn", "split", "sqrt", "starts-with?", "substring", "tail", "take",
             "tan", "timeout", "to-set", "to-str", "to-tuple", "to-vec", "toml-parse", "trim",
@@ -205,6 +206,7 @@ final class IntrinsicsEmitter implements Opcodes {
             case "index-of"     -> { return emitRT2(args, mv, locals, "indexOf"); }
             case "url-encode"   -> { return emitRT1(args, mv, locals, "urlEncode"); }
             case "url-decode"   -> { return emitRT1(args, mv, locals, "urlDecode"); }
+            case "percent-encode" -> { return emitRT1(args, mv, locals, "percentEncode"); }
             case "get"          -> { return emitRT2(args, mv, locals, "getOp"); }
             case "assoc"        -> { return emitRT3(args, mv, locals, "assoc"); }
             case "dissoc"       -> { return emitRT2(args, mv, locals, "dissoc"); }

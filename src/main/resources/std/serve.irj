@@ -63,7 +63,17 @@ pub fn router :: #[(Route):eff] Fn ::: eff
 
 fn match-route
   => r req
-  if (r.prefix == true) ((r.method == req.method) && (starts-with? req.path r.path)) else ((r.method == req.method) && (r.path == req.path))
+  if (r.prefix == true) ((r.method == req.method) && (prefix-match? r.path req.path)) else ((r.method == req.method) && (r.path == req.path))
+
+;; A prefix matches whole path segments: "/admin" takes "/admin" and
+;; "/admin/x", never "/adminpanel". One ending in "/" ("/api/") takes
+;; the paths that start with it.
+fn prefix-match? :: Str Str Bool
+  => prefix path
+  if (ends-with? prefix "/")
+    starts-with? path prefix
+  else
+    (path == prefix) || (starts-with? path (prefix ++ "/"))
 
 fn apply-action :: (Route):eff _ _ ::: eff
   (r req -> r.action req)

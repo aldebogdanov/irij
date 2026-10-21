@@ -298,10 +298,7 @@ public final class ServeCapability {
     // ── Helpers (file-private — production providers can't share) ───
 
     private static long asLong(Object v, String op) {
-        if (v instanceof Long l) return l;
-        if (v instanceof Integer i) return i.longValue();
-        if (v instanceof Number n) return n.longValue();
-        throw new IrijRuntimeError(op + ": expected Int, got " + v);
+        return dev.irij.compiler.RtNum.longArg(v, op);
     }
 
     private static String asStr(Object v, String op) {
@@ -326,7 +323,7 @@ public final class ServeCapability {
     static boolean httpServeStatic(IrijExchange exchange,
                                    Path workDir,
                                    boolean isBundled) throws IOException {
-        String reqPath = exchange.getRequestURI().getPath();
+        String reqPath = exchange.getPath();
         if (reqPath == null || reqPath.length() <= 1) return false;
         String rel = reqPath.substring(1);
         // `..` as a path segment never names a resource; refuse it before
@@ -379,15 +376,17 @@ public final class ServeCapability {
         return true;
     }
 
-    private static IrijMap buildRequestMap(IrijExchange exchange) throws IOException {
+    static IrijMap buildRequestMap(IrijExchange exchange) throws IOException {
         LinkedHashMap<String, Object> reqMap = new LinkedHashMap<>();
         reqMap.put("method", exchange.getRequestMethod());
         var uri = exchange.getRequestURI();
-        reqMap.put("path", uri.getPath());
-        reqMap.put("query", uri.getQuery() != null ? uri.getQuery() : "");
-        // Params split the *raw* query: getQuery() has already decoded
-        // %26 and %2B, so splitting it would cut a value at an escaped
-        // `&` and turn an escaped `+` into a space.
+        // `path` is decoded per segment (an escaped `/` was refused), so
+        // its `/`s are exactly the request's. `query` is the raw query,
+        // as sent: decoded, an escaped `&` or `=` would look like a
+        // separator to code splitting it. `params` has it split, then
+        // each key and value form-decoded.
+        reqMap.put("path", exchange.getPath());
+        reqMap.put("query", uri.getRawQuery() != null ? uri.getRawQuery() : "");
         reqMap.put("params", new IrijMap(parseQueryParams(uri.getRawQuery())));
         LinkedHashMap<String, Object> headers = new LinkedHashMap<>();
         exchange.getRequestHeaders().forEach((k, v) ->
@@ -413,14 +412,12 @@ public final class ServeCapability {
         return out;
     }
 
-    /** Form-decode one query component; a malformed escape (a stray
-     *  {@code %}) is kept literally rather than failing the request. */
+    /** Form-decode one query component. The server has already refused
+     *  a query whose escapes aren't UTF-8 (and escaped a stray {@code %}
+     *  as {@code %25}), so this only throws for a query that didn't come
+     *  through it. */
     private static String formDecode(String s) {
-        try {
-            return java.net.URLDecoder.decode(s, StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            return s;
-        }
+        return TextCodec.percentDecode(s, true);
     }
 
     private static void writeResponse(IrijExchange exchange, Object resp) throws IOException {

@@ -259,13 +259,18 @@ public final class RtNum {
         return isInt(v) || v instanceof Double || v instanceof Values.Rational;
     }
 
-    /** The long value of an Int argument used as a count or an index. */
+    /** The long value of an Int argument used as a count or an index. A
+     *  Float is refused, not truncated: {@code random-token 1.9} quietly
+     *  making a 1-byte token, or 1.5 PBKDF2 iterations meaning 1, hides
+     *  the caller's bug. An integral Java number (from interop) is fine. */
     public static long longArg(Object v, String op) {
         if (v instanceof Long l) return l;
         if (v instanceof BigInteger b) {
             throw new IrijRuntimeError(op + ": " + b + " is too large here (beyond 64-bit)");
         }
-        if (v instanceof Number n) return n.longValue();
+        if (v instanceof Integer || v instanceof Short || v instanceof Byte) {
+            return ((Number) v).longValue();
+        }
         throw new IrijRuntimeError(op + " expects an Int, got " + RuntimeSupport.typeTag(v));
     }
 }

@@ -64,7 +64,12 @@ the 64-bit fast paths inline.
   Int) and `json-encode`, the `Int` spec, `type-of`, JDBC binding, Java
   interop (a `BigInteger` result becomes an Int). An index or count
   argument past 64 bits is an error ("too large here"), not a silent
-  truncation.
+  truncation, and so is a Float one (`random-token 1.9`, `char-at s
+  1.99`): `RtNum.longArg` used to truncate it.
+- `parse-int` reads ASCII decimal (optional sign, surrounding space),
+  `parse-float` ASCII decimal with an optional exponent (`1.5e3`, `.5`).
+  The JDK parsers under them also took any Unicode digit (`１２３`,
+  `٤٢`) and `1.5f`, `NaN`, `Infinity`, hex floats; those are refused.
 
 ### Persistent Vectors, Maps and Sets
 
@@ -113,6 +118,26 @@ from ~6 s to ~6 ms.
   compares secrets with `constant-time-eq?`; the pre-v0.9 single-SHA-256
   `<salt>$<hex>` format still verifies, and `password-needs-rehash?`
   flags it.
+  - **Bytes are exact.** A Str is UTF-16, and one holding an unpaired
+    surrogate (`json-parse "\udc00"`, `from-char-code 56320`, half a
+    split emoji) has no UTF-8 encoding. `String.getBytes(UTF_8)` writes
+    `?` for it, so the hash builtins hashed "alice" plus a lone U+DC00
+    as "alice?" — a signature for one verified the other. They now go
+    through `TextCodec.utf8`, which refuses it; `constant-time-eq?`
+    compares UTF-16 code units, exactly what `==` compares.
+  - `std.auth`'s checks stay Bool / Str: `verify-password` is false and
+    `verify-signed-token` is `""` for input the hash refuses, and for a
+    stored iteration count past the 100 000 000 `pbkdf2-sha256-hex`
+    allows. `hash-password` refuses a salt holding `$` (the hash would
+    never verify). A signed token may contain `.`: the signature is
+    what follows the last one.
+- URL encoding (`TextCodec`): `url-encode` / `url-decode` are the form
+  encoding of a query string or form body (a space is `+`);
+  `percent-encode` is RFC 3986's, for a path segment (only `A–Z a–z
+  0–9 - . _ ~` stay, a space is `%20`). All refuse what has no exact
+  encoding — an unpaired surrogate, `%`-escapes that aren't UTF-8
+  (`%FF` and `%FE` both decoded to U+FFFD), a `%` without two hex
+  digits — instead of substituting.
 - Effect / handler internals (`raw-*` calls for HTTP, DB, SSE, session)
 
 The capability providers in `dev.irij.runtime` are the other half of
@@ -140,18 +165,18 @@ Real Irij code, parsed + compiled like user code:
 | `std.func` | `flip`, `compose`, `identity`, `const`, `pipe`, `repeat-n`, ... |
 | `std.text` | `trim`, `pad-left`, `pad-right`, `split`, `join`, `starts-with?`, `ends-with?`, `substring`, ... |
 | `std.math` | Math helpers (some delegate to `java.lang.Math` via `::: JVM`) |
-| `std.random` | `Random` effect + `default-random` handler |
+| `std.random` | `Random` effect (`rand-int`, `rand-float`, `rand-token`) + `default-random` handler. The builtins `random-int`, `random-float` and `random-token` perform these ops: a handler with the clause answers them (a test's fixed values), else the real source does — see effects.md § Builtins that perform an effect |
 | `std.env` | `Env` effect + handler: `env-var`, and `env-args` (the arguments after the program, from the `program-args` builtin) |
 | `std.log` | `Log` effect — leveled logging; `default-log`/`silent-log` handlers |
 | `std.fs` | `FileIO` effect + handlers |
 | `std.resource` | `Resource` effect — `resource-read`, `resource-exists?`: read-only access to the program's own `resources/` (bundled into the jar by `irij build`, else `resources/` under the working directory), nothing else; `default-resource` handler |
 | `std.http` | HTTP client (`http-get`, `http-post`, `http-request` — the latter takes an optional `timeout-ms`) |
 | `std.db` | `Db` effect + SQLite handler |
-| `std.serve` | Web server framework (routes, middleware, request/response); serves the app's `resources/` directory as static files, nothing else |
+| `std.serve` | Web server framework (routes, middleware, request/response); serves the app's `resources/` directory as static files, nothing else. `route-prefix "/admin"` matches whole segments (`/admin`, `/admin/x`, not `/adminpanel`). A request's `path` is decoded, `query` raw, `params` decoded — see capabilities.md, *3c — Serve / SSE* |
 | `std.session` | nREPL session effects |
 | `std.proc` | `Proc` effect — child processes: `proc-run` (to completion, with stdin and a timeout) and `proc-start`/`proc-line`/`proc-send`/`proc-close`/`proc-wait`/`proc-kill` (streaming); `default-proc` handler |
 | `std.term` | `Term` effect — raw-mode terminal I/O for TUI apps; `default-term` handler + `esc`/`csi`/`with-term` helpers |
-| `std.datastar` | Datastar SSE protocol |
+| `std.datastar` | Datastar SSE protocol. Every line of a payload gets its key (`elements …`, `signals …`), so a line break in user text can't start a directive of its own; a selector or mode with a line break is refused. A GET's signals come from `request.params` |
 | `std.json` | JSON parser + serialiser |
 | `std.convert` | Type coercions (`to-int`, `to-float`, `to-bool`) |
 | `std.test` | Test runner (`test`, `assert-eq`, `assert-throws`, ...). A failure's message keeps all its lines: the later ones are indented six spaces under `[FAIL]`, and `irij test` prints them (std.quint's divergence report runs over several) |
