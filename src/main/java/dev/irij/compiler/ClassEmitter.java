@@ -403,6 +403,7 @@ final class ClassEmitter implements Opcodes {
             }
             if (inner instanceof Decl.EffectDecl ed) {
                 for (Decl.EffectOp op : ed.ops()) {
+                    if (isBuiltinOp(ed.name(), op.name())) continue;
                     effectOps.put(op.name(), ed.name());
                 }
             }
@@ -689,6 +690,26 @@ final class ClassEmitter implements Opcodes {
         java.util.Map.entry("random-float",     "Random"),
         java.util.Map.entry("random-token",     "Random")
     );
+
+    /** Builtins that perform an op of their own name: {@code println} is
+     *  {@code Console.println} (std.console). Declaring that op — std.console
+     *  does, and so may a program's own {@code effect Console} — doesn't
+     *  make the name an op perform: it stays the builtin, which performs the
+     *  op through {@link RtEffects#performBuiltinOp} and writes / reads for
+     *  real when no handler has the clause. Effect ops are program-wide, so
+     *  otherwise one {@code use std.console} anywhere would leave every
+     *  unhandled {@code println} in the program an error. */
+    static final java.util.Map<String, String> BUILTIN_OPS = java.util.Map.of(
+        "print",     "Console",
+        "println",   "Console",
+        "read-line", "Console"
+    );
+
+    /** True when op {@code opName} of effect {@code effectName} is a
+     *  builtin's ({@link #BUILTIN_OPS}), so it isn't registered as an op. */
+    static boolean isBuiltinOp(String effectName, String opName) {
+        return effectName.equals(BUILTIN_OPS.get(opName));
+    }
 
     static final String SESSIONS = "dev/irij/compiler/RuntimeSessions";
 

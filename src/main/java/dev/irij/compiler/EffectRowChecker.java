@@ -205,7 +205,12 @@ public final class EffectRowChecker {
                 }
             } else if (inner instanceof Decl.EffectDecl ed) {
                 effectNames.add(ed.name());
-                for (var op : ed.ops()) effectOps.put(op.name(), ed.name());
+                for (var op : ed.ops()) {
+                    // println & co. stay builtins (ClassEmitter.BUILTIN_OPS)
+                    if (!ClassEmitter.isBuiltinOp(ed.name(), op.name())) {
+                        effectOps.put(op.name(), ed.name());
+                    }
+                }
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 handlerEffect.put(hd.name(), hd.effectName());
             } else if (inner instanceof Decl.SpecDecl sd

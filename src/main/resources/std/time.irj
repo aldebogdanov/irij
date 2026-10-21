@@ -2,6 +2,10 @@ mod std.time
 
 ;; Time effect module.
 ;;
+;; The builtins now-ms and sleep perform this effect's time-now and
+;; time-sleep. Under a handler with the clause, the handler answers; with
+;; none, they read the real clock and really wait.
+;;
 ;; Usage:
 ;;   use std.time :open
 ;;
@@ -21,6 +25,10 @@ mod std.time
 ;;
 ;;   with fixed-clock
 ;;     bench (-> time-sleep 100)   ;; => 0
+;;     now-ms ()                   ;; => 1700000000000
+;;
+;; A handler may leave a clause out: that op then goes on to the next
+;; handler out, or to the real clock.
 
 pub effect Time
   time-now :: Int

@@ -1,0 +1,100 @@
+use std.test {assert-eq assert-true test}
+use std.console :as console
+use std.log :as log
+use std.log {Log}
+
+;; print, println and read-line perform std.console's Console ops of the
+;; same names: a handler with the clause answers, else they write to
+;; stdout / read stdin. ConsoleHandlerTest checks the real streams.
+
+handler capture :: console.Console
+  lines :! #[]
+  println msg =>
+    lines <- lines ++ #[msg]
+    resume ()
+  print msg =>
+    lines <- lines ++ #[">" ++ (to-str msg)]
+    resume ()
+  read-line () => resume "Alice"
+
+fn greet ::: Console
+  =>
+  name := read-line ()
+  println "Hello, ${name}!"
+  print 42
+
+fn run-capture ::: Console
+  =>
+  with capture
+    greet ()
+  assert-eq #["Hello, Alice!" ">42"] capture.lines
+
+test "a Console handler answers println, print and read-line" (-> run-capture ())
+
+;; Named without the import too: Console is an effect builtins perform.
+handler count-lines :: Console
+  n :! 0
+  println msg =>
+    n <- n + 1
+    resume ()
+
+fn run-unqualified ::: Console
+  =>
+  with count-lines
+    println "one"
+    println "two"
+  assert-eq 2 count-lines.n
+
+test "handler :: Console needs no import" (-> run-unqualified ())
+
+;; read-only has no println clause: println goes on to capture.
+handler read-only :: Console
+  read-line () => resume "Bob"
+
+fn run-partial ::: Console
+  =>
+  before := length capture.lines
+  with capture
+    with read-only
+      println "from ${read-line ()}"
+  assert-eq "from Bob" (nth before capture.lines)
+
+test "a Console handler answers the ops it has clauses for" (-> run-partial ())
+
+;; A clause's own println goes to the next handler out, not itself.
+handler shout :: Console ::: Console
+  println msg =>
+    println (upper-case msg)
+    resume ()
+
+fn run-nested ::: Console
+  =>
+  before := length capture.lines
+  with capture
+    with shout
+      println "quiet"
+  assert-eq "QUIET" (nth before capture.lines)
+
+test "a clause's own println goes to the next handler out" (-> run-nested ())
+
+;; default-console's clauses reach the real stdout, once.
+fn run-default ::: Console
+  =>
+  r := with console.default-console
+    println "default-console reached stdout"
+    7
+  assert-eq 7 r
+
+test "default-console writes for real" (-> run-default ())
+
+;; std.log's default-log prints with println, so a Console handler
+;; captures log lines too.
+fn run-log ::: Console Log
+  =>
+  before := length capture.lines
+  with capture
+    with log.default-log
+      log.log-info "started"
+  assert-eq "[info] started" (nth before capture.lines)
+
+test "default-log's output reaches a Console handler" (-> run-log ())

@@ -214,3 +214,39 @@ fn multi-op-example ::: Console
 
 result := multi-op-example ()
 println ("Multi-op result: " ++ to-str result)
+
+;; ════════════════════════════════════════════════════════════
+;; 11. Builtins perform effects too
+;; ════════════════════════════════════════════════════════════
+;; println, print and read-line perform Console's ops of the same
+;; names (std.console); now-ms and sleep perform Time's time-now and
+;; time-sleep (std.time). A handler with the clause answers, so a test
+;; can capture output or fix the clock of code that calls the
+;; builtins directly. With no handler they do the real thing.
+
+use std.time {Time}
+
+fn report ::: Console Time
+  =>
+  start := now-ms ()
+  sleep 60000
+  println "took ${(now-ms ()) - start} ms"
+
+handler capture-out :: Console
+  lines :! #[]
+  println msg =>
+    lines <- lines ++ #[msg]
+    resume ()
+
+handler virtual-clock :: Time
+  clock :! 0
+  time-now      => resume clock
+  time-sleep ms =>
+    clock <- clock + ms
+    resume ()
+
+with capture-out
+  with virtual-clock
+    report ()
+
+println ("Captured: " ++ to-str capture-out.lines)

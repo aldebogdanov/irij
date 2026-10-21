@@ -140,8 +140,10 @@ public final class RtEffects {
      * {@code rand-int} without making every token an error.
      */
     public static Object performBuiltinOp(String effectName, String opName, Object... args) {
+        var stack = RuntimeSupport.SM_STACK.get();
+        if (stack.isEmpty()) return RuntimeSupport.SM_NO_MATCH;   // println's usual case
         var busy = BUILTIN_CLAUSES.get();
-        for (var hs : RuntimeSupport.SM_STACK.get()) {
+        for (var hs : stack) {
             for (int i = hs.size() - 1; i >= 0; i--) {
                 CompiledHandler h = hs.get(i);
                 if (h.effectName.equals(effectName) && h.clauses.containsKey(opName)

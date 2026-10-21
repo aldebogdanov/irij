@@ -87,11 +87,20 @@ public final class RtConcurrency {
     /** `sleep ms` — blocks the current thread. An interrupted sleep is a
      *  cancellation (a losing `race` fiber, a timed-out eval): it ends the
      *  computation rather than returning early, which would turn a
-     *  cancelled sleep loop into a busy loop. */
+     *  cancelled sleep loop into a busy loop.
+     *
+     *  <p>It performs the Time effect's {@code time-sleep}: a handler with
+     *  that clause answers instead (a test's clock that doesn't wait).
+     *  The argument is checked first, so a mocked call keeps the
+     *  contract: an Int, not negative. */
     public static Object sleep(Object msArg) {
-        long ms = (msArg instanceof Long l) ? l
-                : (msArg instanceof Number n) ? n.longValue()
-                : 0L;
+        long ms = RtNum.longArg(msArg, "sleep");
+        if (ms < 0) {
+            throw new dev.irij.IrijRuntimeError(
+                    "sleep: milliseconds must not be negative, got " + ms);
+        }
+        Object handled = RtEffects.performBuiltinOp("Time", "time-sleep", ms);
+        if (handled != RuntimeSupport.SM_NO_MATCH) return handled;
         try { Thread.sleep(ms); }
         catch (InterruptedException e) {
             Thread.currentThread().interrupt();

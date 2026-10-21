@@ -9,7 +9,7 @@ primitives are inspired by Missionary (Clojure) and Trio (Python).
 |---|---|---|
 | `spawn` | `spawn thunk → Fiber` | Start a fiber. Awaitable; safe to discard (failures print to session out either way — awaiting one also rethrows). |
 | `await` | `await fiber → result` | Block until done. Accepts only `Fiber` values (from `spawn`, `par`/`race` internals, or `scope` forks). |
-| `sleep` | `sleep ms → ()` | Block this thread for ms. |
+| `sleep` | `sleep ms → ()` | Block this thread for ms (an Int, not negative). Performs `Time.time-sleep`: under a handler with that clause, the handler answers instead (effects.md § Builtins that perform an effect). |
 | `par` | `par combiner t1 t2 ... → combiner r1 r2 ...` | Run all in parallel, combine results. |
 | `race` | `race t1 t2 ... → result of first to finish` | Others interrupted. |
 | `timeout` | `timeout ms t → result or error` | Cancel after deadline. |
