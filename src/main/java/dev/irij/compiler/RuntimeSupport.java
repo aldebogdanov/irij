@@ -227,13 +227,20 @@ public final class RuntimeSupport {
         throw new IllegalArgumentException("Not callable: " + display(fn));
     }
 
+    // print, println and read-line perform the Console effect's ops of
+    // the same names (std.console): a handler with the clause answers (a
+    // test capturing output), else they write to stdout / read stdin.
+    // See RtEffects.performBuiltinOp.
+
     public static void print(Object v) {
+        if (RtEffects.performBuiltinOp("Console", "print", v) != SM_NO_MATCH) return;
         java.io.PrintStream out = sessionOut();
         if (out == null) out = System.out;
         out.print(display(v));
     }
 
     public static void println(Object v) {
+        if (RtEffects.performBuiltinOp("Console", "println", v) != SM_NO_MATCH) return;
         java.io.PrintStream out = sessionOut();
         if (out == null) out = System.out;
         out.println(display(v));
@@ -430,8 +437,16 @@ public final class RuntimeSupport {
     private static java.io.InputStream stdinSource;
 
     /** `read-line ()` — the next line of stdin, or () at end of input (it
-     *  returned Java null, which printed as () but was not equal to it). */
-    public static synchronized Object readLine() {
+     *  returned Java null, which printed as () but was not equal to it).
+     *  A Console handler's {@code read-line} clause answers instead; it
+     *  runs outside the stdin lock. */
+    public static Object readLine() {
+        Object handled = RtEffects.performBuiltinOp("Console", "read-line");
+        if (handled != SM_NO_MATCH) return handled;
+        return readStdinLine();
+    }
+
+    private static synchronized Object readStdinLine() {
         try {
             if (stdinReader == null || stdinSource != System.in) {
                 stdinSource = System.in;

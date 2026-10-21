@@ -135,7 +135,10 @@ path dep, `…/uzor`) or the one above it (an installed seed,
      export, then drops the qualifier. As a value, `m.Calm` becomes a
      `TypeRef` and `m.tick` a `Var` of the bare name. Effects that
      builtins perform (`Console`, `Time`, `Env`, `Random`, `JVM`) and
-     builtin specs (`Int`, `Str`, …, `Ok`, `Err`) need no import.
+     builtin specs (`Int`, `Str`, …, `Ok`, `Err`) need no import. An
+     op named like the builtin that performs it (std.console's
+     `println`) is not an exported name: the bare name stays the
+     builtin in every file (`ClassEmitter.BUILTIN_OPS`).
    - Errors, each naming the file and position: a module's pub name the
      file does not import (with the `use` line to add); a module's private
      name; a module naming something only the program defines; a name two
@@ -244,6 +247,8 @@ yet emit the envelope (specs aren't runtime-checked in bytecode) — gap.
 | `std.func` | Function combinators (flip, identity, repeat-n) |
 | `std.text` | String ops (trim, pad, split, join, ...) |
 | `std.math` | Math + math constants |
+| `std.console` | Console effect (`print`, `println`, `read-line` — the builtins perform them) + default-console handler |
+| `std.time` | Time effect (`time-now`, `time-sleep` — `now-ms` / `sleep` perform them) + default-time handler |
 | `std.random` | Random effect + default-random handler |
 | `std.env` | Environment-variable effect |
 | `std.fs` | File-system effect (read-file, write-file, ...) |

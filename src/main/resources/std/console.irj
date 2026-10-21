@@ -1,0 +1,47 @@
+mod std.console
+
+;; Console effect module.
+;;
+;; The builtins print, println and read-line perform this effect's ops of
+;; the same names. Under a handler with the clause, the handler answers;
+;; with none, they write to stdout and read stdin. Console needs no
+;; import to be named in an effect row or a handler's head; import it to
+;; name it qualified (console.Console) or for default-console.
+;;
+;; Usage:
+;;   use std.console :as console
+;;
+;;   fn greet :: Str () ::: Console
+;;     => name
+;;     println "Hello, ${name}!"
+;;
+;;   ;; Capture output in tests:
+;;   handler captured :: console.Console
+;;     lines :! #[]
+;;     println msg =>
+;;       lines <- lines ++ #[msg]
+;;       resume ()
+;;     read-line () => resume "Alice"
+;;
+;;   with captured
+;;     greet "world"
+;;   captured.lines   ;; => #["Hello, world!"]
+;;
+;; A handler may leave a clause out: that op then goes on to the next
+;; handler out, or to the real stdout / stdin. dbg is not an op: it
+;; always writes to stderr.
+
+pub effect Console
+  print :: _ -> ()
+  println :: _ -> ()
+  read-line :: () -> Str
+
+pub handler default-console :: Console ::: Console
+  print x =>
+    print x
+    resume ()
+  println x =>
+    println x
+    resume ()
+  read-line () =>
+    resume (read-line ())

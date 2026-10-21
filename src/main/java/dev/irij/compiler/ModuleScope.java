@@ -119,7 +119,11 @@ final class ModuleScope {
             }
             case Decl.EffectDecl ed -> {
                 g.add(ed.name());
-                for (var op : ed.ops()) g.add(op.name());
+                for (var op : ed.ops()) {
+                    // std.console's println & co. are builtins everywhere
+                    // (ClassEmitter.BUILTIN_OPS), not names it exports.
+                    if (!ClassEmitter.isBuiltinOp(ed.name(), op.name())) g.add(op.name());
+                }
             }
             case Decl.ProtoDecl pd -> {
                 g.add(pd.name());

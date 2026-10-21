@@ -234,6 +234,11 @@ clause aborted from synchronous-perform context".
 | `random-token n` | `Random.rand-token n` | `SecureRandom` |
 | `now-ms` | `Time.time-now` (std.time) | `System.currentTimeMillis` |
 | `sleep ms` | `Time.time-sleep ms` | `Thread.sleep` (a cancellation point) |
+| `print x` | `Console.print x` (std.console) | the session's out, else `System.out` |
+| `println x` | `Console.println x` | the same, with a line break |
+| `read-line ()` | `Console.read-line` | the shared stdin reader (outside its lock while a clause runs) |
+
+`dbg` is not an op: debug output always goes to stderr.
 
 Each builtin checks its argument, then calls
 `RtEffects.performBuiltinOp(effect, op, args)`, which hands the op to
@@ -262,14 +267,31 @@ A fiber started under the `with` (`spawn`, `par`, `race`, `timeout`,
 under a `time-sleep ms => resume ()` handler, `timeout 1000 (-> sleep
 5000; "done")` is `"done"` at once.
 
-Before this the builtins needed `::: Random` / `::: Time` but ignored
-every handler, so code calling `random-int` or `now-ms` couldn't be
-given fixed values in a test (`Random` fixed 2026-10, `Time` after it).
-The `Console` builtins (`print`, `println`, `read-line`) still go
-straight to the JVM: a `handler h :: Console` with a `println` clause
-compiles and is never called. A program that declares its own `effect
-Console` (spec §3.1) shadows the builtins with its ops, so that form
-works.
+`performBuiltinOp` returns at once when `SM_STACK` is empty — no
+`with` on this thread — so an unhandled `println` costs one
+thread-local read.
+
+### Ops named like their builtin (`BUILTIN_OPS`)
+
+Console's ops have the builtins' own names, unlike `rand-int` /
+`time-now`. Effect ops are program-wide (modules.md), so a declared
+`println` op would turn every `println` in the program into an op
+perform — an unhandled-effect error wherever no handler is installed.
+`ClassEmitter.BUILTIN_OPS` lists the ops a builtin of the same name
+performs (`print`, `println`, `read-line` of `Console`);
+`isBuiltinOp(effect, op)` keeps them out of `effectOps` (ClassEmitter
+and `EffectRowChecker`) and out of the names a module exports
+(`ModuleScope.typeGroup`). So the name always compiles to the builtin,
+which performs the op itself. That holds for std.console's declaration
+and for a program's own `effect Console` (spec §3.1): its `print` is
+caught by its handlers and, unhandled, prints rather than failing.
+`use std.console :as console` leaves bare `println` the builtin.
+
+Before this the builtins needed `::: Random` / `::: Time` /
+`::: Console` but ignored every handler (all three fixed 2026-10): code
+calling `random-int` or `now-ms` couldn't be given fixed values in a
+test, and a `handler h :: Console` with a `println` clause compiled and
+was never called.
 
 ## Nested `with` (native dual-SM)
 

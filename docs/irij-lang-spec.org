@@ -649,6 +649,7 @@
    ;; (think: "this is what I might do")
    effect Console
      print :: Str -> ()
+     println :: Str -> ()
      read-line :: () -> Str
 
    effect FileIO
@@ -691,6 +692,15 @@
    different effect implementations without changing its code. Production
    handler writes to real stdout; test handler collects strings into a
    list. The function under test doesn't know the difference.
+
+   *Builtins perform effects too:* =print=, =println= and =read-line=
+   perform =Console='s operations of the same names (declared in
+   =std.console=), as =now-ms= and =sleep= perform =Time='s and
+   =random-int= =Random='s. Under a handler with a clause for the
+   operation, the handler answers; with none, the builtin does the real
+   thing (writes to stdout, reads the clock). So =greet= above, written
+   with the builtin =print=, is captured by =mock-console= below, and a
+   handler that leaves a clause out passes that operation on.
 
    *Resuming:* a clause ends in one of two ways. =resume v= hands =v=
    back to the perform site as the operation's result, and the body
