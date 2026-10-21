@@ -47,10 +47,10 @@ irij examples/quint.irj       # model-based testing against a Quint spec — nee
 ## Tests
 
 ```sh
-./gradlew test                # 778 Java unit tests, one line per test
+./gradlew test                # 791 Java unit tests, one line per test
 ./gradlew test -Pverbose      # a block per test: its output, full stack traces
 ./gradlew test -q             # only failures and the summary
-irij test                     # 638 integration tests (tests/*.irj)
+irij test                     # 643 integration tests (tests/*.irj)
 irij test -v                  # … listing every test, not only failures
 ```
 

@@ -288,6 +288,7 @@ final class ModuleScope {
 
     private static volatile Set<String> builtinValues;
     private static volatile Set<String> builtinEffects;
+    private static volatile Map<String, Integer> builtinArities;
 
     /** Names a file reaches without importing anything. */
     static Set<String> builtinValues() {
@@ -301,6 +302,13 @@ final class ModuleScope {
     static final Set<String> BUILTIN_TYPES = Set.of(
             "Any", "Bool", "Float", "Fn", "Handler", "Int", "Keyword", "Map", "Rational",
             "Set", "Str", "Tuple", "Unit", "Vec", "Vector", "Ok", "Err");
+
+    /** How many arguments a builtin function takes, or null for a name
+     *  that isn't one (or an intrinsic with no fixed arity, like {@code par}). */
+    static Integer builtinArity(String name) {
+        if (builtinArities == null) loadBuiltins();
+        return builtinArities.get(name);
+    }
 
     /** Effects builtins perform: named in rows without an import. */
     static Set<String> builtinEffects() {
@@ -316,13 +324,16 @@ final class ModuleScope {
         values.addAll(ClassEmitter.BUILTIN_CONST_NAMES);
         values.addAll(IntrinsicsEmitter.NAMES);
         Set<String> effects = new HashSet<>(Set.of("Console", "JVM", "Any"));
-        for (Object v : env.getBindings().values()) {
-            if (v instanceof dev.irij.runtime.Values.BuiltinFn bf && bf.requiredEffects() != null) {
-                effects.addAll(bf.requiredEffects());
+        Map<String, Integer> arities = new HashMap<>();
+        for (var e : env.getBindings().entrySet()) {
+            if (e.getValue() instanceof dev.irij.runtime.Values.BuiltinFn bf) {
+                arities.put(e.getKey(), bf.arity());
+                if (bf.requiredEffects() != null) effects.addAll(bf.requiredEffects());
             }
         }
         effects.addAll(EffectRowChecker.builtinEffectNames());
         builtinEffects = Set.copyOf(effects);
+        builtinArities = Map.copyOf(arities);
         builtinValues = Set.copyOf(values);
     }
 

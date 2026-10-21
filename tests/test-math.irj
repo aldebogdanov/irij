@@ -89,6 +89,8 @@ test "parse-int takes a sign and surrounding space" (-> assert-eq (0 - 7) (parse
 test "parse-int refuses fullwidth digits" (-> assert-throws (-> parse-int "１２３"))
 test "parse-int refuses Arabic-Indic digits" (-> assert-throws (-> parse-int "٤٢"))
 test "parse-float reads decimals and exponents" (-> assert-eq 1500.0 (parse-float "1.5e3"))
+test "a float literal takes an exponent" (-> assert-eq 1500.0 1.5e3)
+test "an exponent alone makes a Float literal" (-> assert-eq "Float" (type-of 1e-3))
 test "parse-float reads .5 and 5." (-> assert-true (((parse-float ".5") == 0.5) && ((parse-float "5.") == 5.0)))
 test "parse-float refuses a type suffix" (-> assert-throws (-> parse-float "1.5f"))
 test "parse-float refuses NaN" (-> assert-throws (-> parse-float "NaN"))

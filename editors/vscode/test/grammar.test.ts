@@ -53,6 +53,17 @@ test('cond and case are keywords only where they open arms', async () => {
   assert.notEqual(await scopeOf('x := case + 1', 'case'), 'keyword.control.soft.irij');
 });
 
+test('numbers, including exponent floats', async () => {
+  assert.equal(await scopeOf('x := 3.14', '3.14'), 'constant.numeric.float.irij');
+  assert.equal(await scopeOf('x := 1.5e3', '1.5e3'), 'constant.numeric.float.irij');
+  assert.equal(await scopeOf('x := 1e-9', '1e-9'), 'constant.numeric.float.irij');
+  assert.equal(await scopeOf('x := 2E+10', '2E+10'), 'constant.numeric.float.irij');
+  assert.equal(await scopeOf('x := 42', '42'), 'constant.numeric.integer.irij');
+  const { tokens } = (await grammar).tokenizeLine('x := 1.5e3', INITIAL);
+  const lit = tokens.find((t) => t.scopes.includes('constant.numeric.float.irij'))!;
+  assert.equal('x := 1.5e3'.slice(lit.startIndex, lit.endIndex), '1.5e3');
+});
+
 test('strings, atoms, operators, interop', async () => {
   assert.equal(await scopeOf('s := "hi ${name}"', 'name'), 'source.irij.embedded');
   assert.equal(await scopeOf('x := :not_found', ':not_found'), 'constant.other.keyword-atom.irij');

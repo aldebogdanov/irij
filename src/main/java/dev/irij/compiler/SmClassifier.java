@@ -351,6 +351,11 @@ final class SmClassifier implements Opcodes {
 
         void normalizeStmt(Stmt s, List<Stmt> out) {
             switch (s) {
+                // `with h do (…)` as a statement, performing, is the block
+                // form's nested `with`: a segment of its own
+                // (classifyWithBody). A pure one stays a plain statement.
+                case Stmt.ExprStmt es when singleWith(es.expr()) != null
+                        && containsOpCallExpr(es.expr()) -> out.add(singleWith(es.expr()));
                 case Stmt.ExprStmt es -> {
                     if (isDirectOpCall(es.expr())) {
                         out.add(new Stmt.ExprStmt(
@@ -359,6 +364,9 @@ final class SmClassifier implements Opcodes {
                         out.add(new Stmt.ExprStmt(normalizeExpr(es.expr(), out), es.loc()));
                     }
                 }
+                // `x := with h …` is already a segment (extractTopLevelBindWith).
+                case Stmt.Bind b when b.target() instanceof Stmt.BindTarget.Simple
+                        && singleWith(b.value()) != null -> out.add(b);
                 case Stmt.Bind b -> {
                     if (b.target() instanceof Stmt.BindTarget.Simple
                             && isDirectOpCall(b.value())) {
@@ -583,6 +591,15 @@ final class SmClassifier implements Opcodes {
                 case Expr.MatchExpr me when armsPerform(me.arms()) -> viaResult(me, out);
                 case Expr.MatchExpr me -> new Expr.MatchExpr(normalizeExpr(me.scrutinee(), out),
                         me.arms(), me.loc());
+                // A nested `with` inside an expression — `1 + (with h do …)`,
+                // an op's argument — is lifted to `$anf := with h …`, the
+                // segment extractTopLevelBindWith picks up, in source order
+                // with the ops around it.
+                case Expr.Block blk when singleWith(blk) != null -> {
+                    String name = fresh();
+                    out.add(new Stmt.Bind(new Stmt.BindTarget.Simple(name), blk, blk.loc()));
+                    yield new Expr.Var(name, blk.loc());
+                }
                 // A block holding a nested `with` or `scope` is a segment of
                 // its own (extractTopLevelBindWith), not a value to compute.
                 case Expr.Block blk when blk.stmts().stream()
@@ -951,6 +968,14 @@ final class SmClassifier implements Opcodes {
         return new WithBodyShape.Sequence(segments, lifted);
     }
 
+
+    /** The `with` when {@code e} is a block holding only that `with` — what
+     *  both `with h do body` and a block-form `with` in expression position
+     *  parse to — else null. */
+    static Stmt.With singleWith(Expr e) {
+        return e instanceof Expr.Block blk && blk.stmts().size() == 1
+                && blk.stmts().get(0) instanceof Stmt.With w ? w : null;
+    }
 
     /** Bind whose value is a single nested `with` — e.g. `r := with X body`. */
     TopLevelBindWith extractTopLevelBindWith(Stmt s) {

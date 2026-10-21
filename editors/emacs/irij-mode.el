@@ -203,7 +203,7 @@ and the handler-clause `resume'.")
       ;; Numeric literals (hex, rational, float, int)
       ("\\_<0[xX][0-9A-Fa-f]\\(?:[0-9A-Fa-f_]*[0-9A-Fa-f]\\)?\\_>" . ',num-face)
       ("\\_<[0-9]+/[0-9]+\\_>"                                     . ',num-face)
-      ("\\_<[0-9][0-9_]*\\.[0-9][0-9_]*\\_>"                       . ',num-face)
+      ("\\_<[0-9][0-9_]*\\(?:\\.[0-9][0-9_]*\\(?:[eE][+-]?[0-9]+\\)?\\|[eE][+-]?[0-9]+\\)\\_>" . ',num-face)
       ("\\_<[0-9]\\(?:[0-9_]*[0-9]\\)?\\_>"                        . ',num-face)
       ;; Binding names — name :=   name :!
       (,(concat "\\_<\\(" irij--ident-re "\\)[ \t]*:[=!]")

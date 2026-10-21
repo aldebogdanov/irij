@@ -73,6 +73,44 @@ class PrimitivesTest {
         assertEquals("7", run("println (7/2 * 2)"));
     }
 
+    @Test void floatLiteralsTakeAnExponent() throws Exception {
+        assertEquals("1500.0", run("println 1.5e3"));
+        assertEquals("1000.0", run("println 1e3"));
+        assertEquals("0.0025", run("println 2.5E-3"));
+        assertEquals("100.0", run("println 1e+2"));
+        assertEquals("10005.0", run("println 1_000.5e1"));
+        assertEquals("Float", run("println (type-of 1e3)"));
+        assertEquals("1001.0", run("x := 1e3\nprintln (x + 1)"));
+        assertEquals("#[100.0 0.02]", run("println #[1e2 2e-2]"));
+        assertEquals("1.0E20", run("println (to-str 1.0e20)"));
+        assertEquals("-1500.0", run("println (-1.5e3)"));
+    }
+
+    @Test void anEWithoutExponentDigitsIsStillAName() throws Exception {
+        // `e` is the builtin constant; `2 e` with a space is unaffected,
+        // and a letter after `e` leaves `2` and the name apart as before.
+        assertEquals("true", run("println (2 < e)"));
+        assertEquals("6", run("fn twice\n  (x -> x * 2)\nprintln (twice 3)"));
+    }
+
+    @Test void aBuiltinGivenTheWrongNumberOfArgumentsSaysSo() {
+        var extra = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+                () -> run("println (to-str 1 2)"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                extra.getMessage().contains("to-str takes 1 argument, given 2"), extra.getMessage());
+        var few = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+                () -> run("f := assoc {} \"a\"\nprintln (f 1)"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                few.getMessage().contains("assoc takes 3 arguments, given 2"), few.getMessage());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                few.getMessage().contains("(v -> assoc"), few.getMessage());
+        // A name that is no function at all keeps its own message.
+        var unknown = org.junit.jupiter.api.Assertions.assertThrows(IrijCompiler.CompileException.class,
+                () -> run("println (frobnicate 1)"));
+        org.junit.jupiter.api.Assertions.assertTrue(
+                unknown.getMessage().contains("Unknown function: frobnicate"), unknown.getMessage());
+    }
+
     @Test void intsNeverWrap() throws Exception {
         assertEquals("9223372036854775808", run("println (9223372036854775807 + 1)"));
         assertEquals("-9223372036854775809", run("println (0 - 9223372036854775807 - 2)"));

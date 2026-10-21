@@ -54,10 +54,16 @@ Known edge cases and workarounds for the Irij ANTLR4 grammar. Ordered roughly by
   ```
   Deferred design question: whether to introduce first-class handler values (would require a handler type, op-name reification, and bigger runtime changes). For now, duplicate the `with` block per branch.
 - **`with` block form** uses a newline-indented body: `with h\n  body`.
-- **`with` inline form (0.7.x):** `with handler do body-expr` produces a `with` whose body is the single expression after `do`. Works as a statement or as the RHS of `:=` — `exists := with default-fs do (fs-exists? p)`. Block form remains for multi-statement bodies; inline saves the helper-fn boilerplate when you just want one expression evaluated under the handler.
+- **`with` inline form (0.7.x):** `with handler do body-expr` produces a `with` whose body is the single expression after `do`. Works as a statement, as the RHS of `:=` — `exists := with default-fs do (fs-exists? p)` — inside a larger expression, and nested: `with a do (with b do (op ()))`, also in a performing `with` body. Block form remains for multi-statement bodies; inline saves the helper-fn boilerplate when you just want one expression evaluated under the handler.
 - **Zero-arg effect ops require `()` at call site.** Bare `op-name` inside a function body returns the builtin value, not the invocation result. Write `op-name ()`. This is consistent with zero-arg builtins generally (`now-ms ()`, `rand-float ()`).
 
 ## Vectors and calls
+
+- **A direct call to a builtin takes exactly its arguments.** `assoc {} "a"`
+  is not a partial application, as it would be for a `fn`: it is a compile
+  error, "assoc takes 3 arguments, given 2". Write the lambda,
+  `(v -> assoc {} "a" v)`. One argument too many (`to-str f y`) is the
+  same error; parenthesize the call you meant, `to-str (f y)`.
 
 - **Infix operators inside `#[...]`:** `#[a ++ b]` fails. Wrap: `#[(a ++ b)]`.
 - **Function calls inside `#[...]`:** `#[route "GET" "/" h]` parses as 4 elements. Wrap: `#[(route "GET" "/" h)]`.

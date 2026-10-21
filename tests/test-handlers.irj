@@ -85,4 +85,22 @@ fn with-scope
 
 r8 := test "scope in a performing with body" (-> assert-eq 42 (with-scope ()))
 
-summarize #[r1 r2 r3 r4 r5 r6 r7 r8]
+;; ── inline `with … do` nested in a performing `with` ──────────────
+
+handler shouty :: Ask
+  ask q => resume (upper-case q)
+
+;; Installs handlers around a callback, as a test harness does.
+fn around :: Fn Fn
+  (f -> (-> with polite do (with collect do (f ()))))
+
+fn ask-and-log ::: Ask Log
+  =>
+  log "asked"
+  ask "name?"
+
+r9 := test "nested inline with: innermost answers" (-> assert-eq "NAME?" (with polite do (with shouty do (ask "name?"))))
+r10 := test "nested inline with around a callback" (-> assert-eq "Ada" ((around ask-and-log) ()))
+r11 := test "inline with inside an expression" (-> assert-eq "Ada!" (with shouty do ((with polite do (ask "name?")) ++ "!")))
+
+summarize #[r1 r2 r3 r4 r5 r6 r7 r8 r9 r10 r11]

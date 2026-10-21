@@ -116,7 +116,7 @@
     $DB-PRIMARY
 
     ;; numeric: standard with underscore separators; 2/3 is a Rational
-    42  3.14  0xFF  1_000_000  2/3
+    42  3.14  1.5e3  1e-9  0xFF  1_000_000  2/3
 
     ;; strings: double-quote, interpolation with ${}
     "hello ${name}"
@@ -140,7 +140,11 @@
       around the slash, is a Rational literal; it is always kept in
       lowest terms with a positive denominator, and a whole value is an
       Int (=4/2= is =2=). Rationals print as =2/3=.
-    - =Float= — a 64-bit IEEE double.
+    - =Float= — a 64-bit IEEE double. A literal with a fraction, an
+      exponent or both is a Float: =3.14=, =1.5e3= (=1500.0=), =1e-9=,
+      =2.5E+10=. The exponent is =e= or =E=, an optional sign and
+      digits; with no digits after it, the =e= starts a name, so =2 e=
+      (two and the constant =e=) is unaffected.
 
     Mixed arithmetic takes the wider kind: Int with Rational gives a
     Rational, anything with a Float gives a Float. =/= between two Ints

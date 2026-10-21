@@ -169,7 +169,13 @@ ATTR_IDENT  : [a-z] [a-z0-9]* ('-' [a-z0-9]+)* (':' [a-z] [a-z0-9]* ('-' [a-z0-9
 
 // ── Numeric Literals ─────────────────────────────────────────────────
 HEX_LIT     : '0' [xX] [0-9a-fA-F] ([0-9a-fA-F_]* [0-9a-fA-F])? ;
-FLOAT_LIT   : [0-9] [0-9_]* '.' [0-9] [0-9_]* ;
+// A Float has a fraction, an exponent, or both: 3.14, 1.5e3, 1e-9.
+// Longest match keeps `2else`/`2e` apart: without exponent digits the
+// `e` starts a name, as before.
+FLOAT_LIT   : [0-9] [0-9_]* '.' [0-9] [0-9_]* EXPONENT?
+            | [0-9] [0-9_]* EXPONENT
+            ;
+fragment EXPONENT : [eE] [+-]? [0-9]+ ;
 RATIONAL    : [0-9]+ '/' [0-9]+ ;
 INT_LIT     : [0-9] ([0-9_]* [0-9])? ;
 

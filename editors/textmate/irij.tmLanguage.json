@@ -124,7 +124,7 @@
       "patterns": [
         { "name": "constant.numeric.hex.irij", "match": "(?<![\\w.])0[xX][0-9a-fA-F](?:[0-9a-fA-F_]*[0-9a-fA-F])?" },
         { "name": "constant.numeric.rational.irij", "match": "(?<![\\w.])[0-9]+/[0-9]+(?![\\w])" },
-        { "name": "constant.numeric.float.irij", "match": "(?<![\\w.])[0-9][0-9_]*\\.[0-9][0-9_]*" },
+        { "name": "constant.numeric.float.irij", "match": "(?<![\\w.])[0-9][0-9_]*(?:\\.[0-9][0-9_]*(?:[eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)" },
         { "name": "constant.numeric.integer.irij", "match": "(?<![\\w.])[0-9](?:[0-9_]*[0-9])?(?![\\w])" }
       ]
     },

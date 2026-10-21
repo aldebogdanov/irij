@@ -308,6 +308,20 @@ segment, the emitter:
    `r := with X body`) also into `kOuter.fields[bindIdx]` for
    subsequent segments.
 
+The inline form arrives in other shapes and the A-normalizer brings it
+to these two. `with h do (…)` parses to `Expr.Block([Stmt.With])`
+(`SmClassifier.singleWith`): as a statement it is
+`ExprStmt(Block([With]))`, which becomes the `Stmt.With` itself when
+its body performs (a pure one stays a plain statement); inside a larger
+expression — `1 + (with h do (op ()))`, an op's argument, the body of
+another inline `with` — it is lifted to `$anf$N := with h …` in source
+order with the ops around it, the `r := with X body` segment. So
+`with a do (with b do (op ()))` lowers like the block form.
+
+A nested `with` whose handler is a value (`with h` for a parameter
+`h`) is still refused in a performing body, in either form:
+`smCanHandle` only knows declared handlers.
+
 When inner body performs an effect the inner doesn't handle, the
 signal escapes inner `runWithSM` and is caught by the outer
 trampoline. The outer dispatches via `SM_STACK`; the synthesised
