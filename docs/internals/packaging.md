@@ -71,6 +71,16 @@ Two tables split package-level from version-level data:
 - `versions` — one row per published version: `version`,
   `description`, `readme`, `author`, `checksum`, `published`.
 
+`readme` is not in the publish metadata: the registry reads it out of
+the uploaded tarball (`seed-readme.irj` in irij.online) — the
+archive's root `README.md`, else `README`, at most 256 KiB, walking
+tar headers and skipping file bodies so no tarball is unpacked into
+memory. That works for every CLI release, and at boot the registry
+fills versions stored with `''` from their kept tarballs
+(`<workdir>/seeds/<name>/<version>.tar.gz`). The seed page renders it
+as Markdown in the browser, through DOMPurify — a README is written
+by whoever published the seed.
+
 Schema migrations are PRAGMA-probe + `ALTER TABLE` on boot
 (SQLite has no `ADD COLUMN IF NOT EXISTS`), so old prod DBs pick up
 new columns without manual steps.
