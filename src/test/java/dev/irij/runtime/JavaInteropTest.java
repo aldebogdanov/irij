@@ -104,7 +104,7 @@ class JavaInteropTest {
                 "println (starts \"hello\")",
                 "p := java.awt.Point/new 3 4",
                 "println (#[p] |> @ #y)");
-        assertEquals("#[ANN BO]\nx\n#[2026-01-31]\ntrue\n#[4]", run(src).replace("\r", ""));
+        assertEquals("#[\"ANN\" \"BO\"]\nx\n#[2026-01-31]\ntrue\n#[4]", run(src).replace("\r", ""));
     }
 
     @Test void referenceArgumentsAreEvaluatedOnce() throws Exception {

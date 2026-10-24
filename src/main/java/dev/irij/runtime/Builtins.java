@@ -39,6 +39,7 @@ public final class Builtins {
         env.define("read-line", new BuiltinFn("read-line", 0, List.of("Console"), args -> dev.irij.compiler.RuntimeSupport.readLine()));
 
         env.define("to-str", new BuiltinFn("to-str", 1, args -> dev.irij.compiler.RuntimeSupport.toStr(args.get(0))));
+        env.define("inspect", new BuiltinFn("inspect", 1, args -> dev.irij.compiler.RuntimeSupport.inspect(args.get(0))));
 
         // ── Concurrency primitives ─────────────────────────────────────
         env.define("sleep", new BuiltinFn("sleep", 1, List.of("Time"), args -> dev.irij.compiler.RtConcurrency.sleep(args.get(0))));

@@ -48,7 +48,7 @@ class ConsoleHandlerTest {
     }
 
     @Test void capturedOutputNeverReachesStdout() throws Exception {
-        assertEquals("after: #[a b]\n", run("""
+        assertEquals("after: #[\"a\" \"b\"]\n", run("""
             handler grab :: Console
               got :! #[]
               println m =>

@@ -224,7 +224,7 @@ public final class RuntimeSupport {
         if (fn instanceof dev.irij.runtime.Values.BuiltinFn bf) {
             return bf.apply(java.util.Arrays.asList(args));
         }
-        throw new IllegalArgumentException("Not callable: " + display(fn));
+        throw new IllegalArgumentException("Not callable: " + shown(fn));
     }
 
     // print, println and read-line perform the Console effect's ops of
@@ -254,8 +254,16 @@ public final class RuntimeSupport {
 
     public static String toStr(Object v) { return display(v); }
 
+    /** {@code inspect v} — the value as Irij source writes it, a Str in
+     *  quotes ({@link dev.irij.runtime.Values#inspect}). */
+    public static Object inspect(Object v) {
+        return dev.irij.runtime.Values.inspect(v == null ? dev.irij.runtime.Values.UNIT : v);
+    }
+
+    private static String shown(Object v) { return (String) inspect(v); }
+
     public static IllegalStateException noMatch(Object v) {
-        return new IllegalStateException("No match arm for: " + display(v));
+        return new IllegalStateException("No match arm for: " + shown(v));
     }
 
     public static Object typeOf(Object v) {
@@ -422,7 +430,7 @@ public final class RuntimeSupport {
     // ── Misc ─────────────────────────────────────────────────────────
 
     public static void dbg(Object v) {
-        System.err.println("[dbg] " + display(v));
+        System.err.println("[dbg] " + shown(v));
     }
 
     // rawHttpRequest removed phase 3b — Http effect now routes through

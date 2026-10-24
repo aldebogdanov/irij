@@ -106,7 +106,7 @@ highlighted only where they start their form (see
   '(;; constants
     "pi" "e"
     ;; console / debug
-    "print" "println" "to-str" "dbg" "type-of" "error" "read-line"
+    "print" "println" "to-str" "inspect" "dbg" "type-of" "error" "read-line"
     ;; numbers
     "abs" "min" "max" "quo" "rem" "sqrt" "floor" "ceil" "round"
     "sin" "cos" "tan" "log" "exp" "pow"

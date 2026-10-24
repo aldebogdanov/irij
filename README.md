@@ -68,6 +68,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 - **Structured concurrency** &mdash; `scope`, `fork`, `par`, `race`, `timeout`
 - **Child processes** &mdash; `std.proc`'s `Proc` effect: run a command to completion (stdin, timeout, both streams) or start one and talk to it a line at a time; mockable like every effect
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
+- **Unambiguous output** &mdash; `println "a b"` prints `a b`, but a Str inside a collection, variant or record prints quoted and escaped, as source writes it: `#["a b" "c"]`, `{name= "Ada"}`, `#[(Ok 1) (Err "e")]`; `inspect` gives that form for any value, a Str included, and the REPL echoes it
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs; `cond` (first condition that holds) and `case` (equality dispatch) for multi-way choices without `else if` chains
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method` for statics, `obj#method` for instance members (auto-reflection, java.lang auto-imported); every Java site needs `::: JVM`, checked at compile time

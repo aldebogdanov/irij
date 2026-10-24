@@ -782,6 +782,9 @@ Full design and the recorded Quint behaviour it rests on:
 
 ## Near-term (high priority)
 
+- [x] **Strs print quoted inside collections; `inspect`** — DONE (2026-10). `println #["a b" "c"]` printed `#[a b c]` (three elements?), `#["" "x"]` printed `#[ x]`, and a map's Strs lost their quotes while a variant's (`Ok "x"`) kept them — so a course check reported `expected #[tea: 3 …], got #[tea: 3 …]` for a 3-element and a 6-element vector. Now a Str prints raw only on its own; inside a Vector, Set, Tuple, Map, variant or record it is quoted and escaped, a map key that is no field name is quoted, and a variant with fields nests in parentheses — the form the spec's §8.2 examples already showed (`;; => #["Jo" "Al"]`). New builtin `inspect` quotes a Str on its own too; `dbg`, the REPL / nREPL / sandbox `value`, `assert-eq` messages and "No match arm for:" use it. Python's `str`/`repr`, Rust's Display/Debug, Clojure's `print`/`pr` split the same way. InspectTest, tests/test-inspect.irj.
+  - [ ] Functions and Java objects still print via `toString` (`#[2026-01-31]` is a LocalDate): a non-literal marker like `#<fn name>` would keep "reads back as an equal value" honest
+
 - [x] **Java members are `obj#member`; method references `#member`** — DONE (2026-10, spec §9.1). `s#trim ()`, `d#plusDays 30`, `p#x`; `names |> @ #toUpperCase`, `@ (#plusDays 30)`. `.` is Irij's own (fields, module members, cap ops) and an error on a Java object, naming the `#` form — no transition release. Every `#` site needs `::: JVM`, checked at compile time; `JAVA_MEMBER` vs `JAVA_MEMBER_REF` is decided by the character before `#` (`IrijLexerBase.afterAtom`). See `docs/internals/jvm-capability.md`.
 
 - [x] **Primitives as sum-spec variants (proper union types)** — DONE (PR4, 2026-07; see docs/internals/specs.md; spec text update batched into the PR5 spec reconciliation). A

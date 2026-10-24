@@ -101,7 +101,7 @@ class PortedBuiltinsTest {
     @Test void mapKeysVals() throws Exception {
         // assoc order preserved (LinkedHashMap). Note: Irij's display
         // of strings inside a Vector is unquoted (matches interp).
-        assertEquals("#[x y]", run(
+        assertEquals("#[\"x\" \"y\"]", run(
                 "m := assoc (assoc {} \"x\" 1) \"y\" 2\n"
               + "println (keys m)"));
         assertEquals("#[1 2]", run(

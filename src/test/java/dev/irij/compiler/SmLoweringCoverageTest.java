@@ -58,7 +58,7 @@ class SmLoweringCoverageTest {
             """;
 
     @Test void opInPipeLeft() throws Exception {
-        assertEquals("2\n#[a]", run(FX + """
+        assertEquals("2\n#[\"a\"]", run(FX + """
                 r := with logger
                   x := (tick "a") |> (v -> v + 1)
                   x
@@ -68,7 +68,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void twoOpsInMapValuesKeepOrder() throws Exception {
-        assertEquals("1\n#[a b]", run(FX + """
+        assertEquals("1\n#[\"a\" \"b\"]", run(FX + """
                 r := with logger
                   m := {x= (tick "a") y= (tick "b")}
                   m.x
@@ -78,7 +78,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void opInDynamicMapKey() throws Exception {
-        assertEquals("2\n#[k]", run(FX + """
+        assertEquals("2\n#[\"k\"]", run(FX + """
                 r := with logger
                   m := {("v" ++ (to-str (tick "k")))= 2}
                   m.v1
@@ -88,7 +88,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void opInRecordUpdateValue() throws Exception {
-        assertEquals("1\n#[c]", run(FX + """
+        assertEquals("1\n#[\"c\"]", run(FX + """
                 base := {a= 0}
                 r := with logger
                   m := {...base v= (tick "c")}
@@ -99,7 +99,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void opsInStringInterpKeepOrder() throws Exception {
-        assertEquals("v=1-1\n#[a b]", run(FX + """
+        assertEquals("v=1-1\n#[\"a\" \"b\"]", run(FX + """
                 r := with logger
                   s := "v=${tick "a"}-${tick "b"}"
                   s
@@ -109,7 +109,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void opInRangeBound() throws Exception {
-        assertEquals("1\n#[n]", run(FX + """
+        assertEquals("1\n#[\"n\"]", run(FX + """
                 r := with logger
                   rg := 1..(tick "n")
                   length rg
@@ -119,7 +119,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void opsInComposeOperandsKeepOrder() throws Exception {
-        assertEquals("2\n#[a b]", run(FX + """
+        assertEquals("2\n#[\"a\" \"b\"]", run(FX + """
                 inc := (n -> x -> x + n)
                 r := with logger
                   f := (inc (tick "a")) >> (inc (tick "b"))
@@ -130,7 +130,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void opsInDoExprKeepOrder() throws Exception {
-        assertEquals("2\n#[a b]", run(FX + """
+        assertEquals("2\n#[\"a\" \"b\"]", run(FX + """
                 r := with logger
                   v := do (tick "a") ((tick "b") + 1)
                   v
@@ -140,7 +140,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void mixedSequenceKeepsOrder() throws Exception {
-        assertEquals("3\n#[1 2 3]", run(FX + """
+        assertEquals("3\n#[\"1\" \"2\" \"3\"]", run(FX + """
                 r := with logger
                   a := tick "1"
                   m := {k= (tick "2")}
@@ -152,7 +152,7 @@ class SmLoweringCoverageTest {
     }
 
     @Test void opInPipeInsideBranch() throws Exception {
-        assertEquals("2\n#[pre t]", run(FX + """
+        assertEquals("2\n#[\"pre\" \"t\"]", run(FX + """
                 r := with logger
                   x := tick "pre"
                   if x == 1

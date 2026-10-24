@@ -43,7 +43,7 @@ final class IntrinsicsEmitter implements Opcodes {
             "abs", "assoc", "await", "ceil", "char-at", "char-code", "concat", "conj", "const",
             "constant-time-eq?", "contains?", "cos", "dbg", "dissoc", "drop", "empty?",
             "ends-with?", "env", "error", "exp", "flip", "floor", "fold", "from-char-code",
-            "get", "get-env", "head", "hmac-sha256-hex", "identity", "index-of", "join",
+            "get", "get-env", "head", "hmac-sha256-hex", "identity", "index-of", "inspect", "join",
             "json-encode", "json-encode-pretty", "json-parse", "keys", "last", "length", "log",
             "lower-case", "max", "merge", "min", "not", "now-ms", "nth", "par", "parse-float",
             "parse-int", "pbkdf2-sha256-hex", "percent-encode", "pow", "print", "println",
@@ -220,6 +220,7 @@ final class IntrinsicsEmitter implements Opcodes {
             case "to-tuple"     -> { return emitRT1(args, mv, locals, "toTuple"); }
             case "not"          -> { return emitRT1(args, mv, locals, "notOp"); }
             case "type-of"      -> { return emitRT1(args, mv, locals, "typeOf"); }
+            case "inspect"      -> { return emitRT1(args, mv, locals, "inspect"); }
             case "validate"     -> { return emitValidate(args, mv, locals, "validate"); }
             case "validate!"    -> { return emitValidate(args, mv, locals, "validateBang"); }
             // raw-db-* emit entries removed phase 3a; the Db effect ops
