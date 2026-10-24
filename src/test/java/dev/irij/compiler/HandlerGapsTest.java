@@ -231,7 +231,7 @@ class HandlerGapsTest {
     @Test
     void scopeInAPerformingWithBody() throws Exception {
         // `await f` waits for the fiber, so its log lands between the two.
-        assertEquals("42\n#[before fiber after]", run("""
+        assertEquals("42\n#[\"before\" \"fiber\" \"after\"]", run("""
                 effect Log
                   log :: Str -> ()
                 handler rec :: Log
@@ -254,7 +254,7 @@ class HandlerGapsTest {
 
     @Test
     void scopeBesideAPerformingBranch() throws Exception {
-        assertEquals("done\n#[on slept]", run("""
+        assertEquals("done\n#[\"on\" \"slept\"]", run("""
                 effect Log
                   log :: Str -> ()
                 handler rec :: Log

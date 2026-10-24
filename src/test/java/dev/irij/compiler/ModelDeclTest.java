@@ -113,7 +113,7 @@ class ModelDeclTest {
               decr  st     => st
             println (sort (keys bank.actions))
             """;
-        assertEquals("#[decr incr]", run(src));
+        assertEquals("#[\"decr\" \"incr\"]", run(src));
     }
 
     @Test

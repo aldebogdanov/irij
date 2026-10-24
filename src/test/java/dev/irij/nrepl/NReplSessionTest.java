@@ -47,7 +47,7 @@ class NReplSessionTest {
     @Test void evalReturnsStringConcatValue() {
         var session = new NReplSession();
         var resp = eval(session, "\"1\" ++ \"2\"");
-        assertEquals("12", resp.get("value"));
+        assertEquals("\"12\"", resp.get("value"));
     }
 
     @Test void evalReturnsUnitWhenNoTrailingExpression() {
@@ -164,7 +164,7 @@ class NReplSessionTest {
         var session = new NReplSession(project);
         var resp = eval(session, "use greeter :open\nmake-greeting \"World\"");
         assertNull(resp.get("err"), () -> "unexpected error: " + resp.get("err"));
-        assertEquals("Hi, World", resp.get("value"));
+        assertEquals("\"Hi, World\"", resp.get("value"));
     }
 
     /** Each eval imports what earlier evals imported, and reaches the names
@@ -172,12 +172,12 @@ class NReplSessionTest {
     @Test void importsAndNamesCarryAcrossEvals() {
         var session = new NReplSession();
         assertNull(eval(session, "use std.text :as str\nfn shout :: Str Str\n  (s -> s ++ \"!\")").get("err"));
-        assertEquals("#[a b]", eval(session, "str.words \"a b\"").get("value"));
-        assertEquals("hi!", eval(session, "shout \"hi\"").get("value"));
+        assertEquals("#[\"a\" \"b\"]", eval(session, "str.words \"a b\"").get("value"));
+        assertEquals("\"hi!\"", eval(session, "shout \"hi\"").get("value"));
         String err = String.valueOf(eval(session, "words \"a b\"").get("err"));
         assertTrue(err.contains("`words` is not imported here: it is std.text's"), err);
         assertNull(eval(session, "fn words :: Str Str\n  (s -> \"mine\")").get("err"));
-        assertEquals("mine", eval(session, "words \"a b\"").get("value"));
+        assertEquals("\"mine\"", eval(session, "words \"a b\"").get("value"));
     }
 
     /** A later eval reaches an earlier import's specs, variants and effects

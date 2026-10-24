@@ -276,7 +276,7 @@ public final class RuntimeSessions {
             Object last = bs.namespace().get(BytecodeSession.LAST_VALUE_KEY);
             Object surfaced = (last == sentinel) ? Values.UNIT : last;
             LinkedHashMap<String, Object> result = new LinkedHashMap<>();
-            result.put("value", Values.toIrijString(surfaced));
+            result.put("value", Values.inspect(surfaced));
             result.put("stdout", baos.toString());
             result.put("error", Values.UNIT);
             result.put("ok", Boolean.TRUE);

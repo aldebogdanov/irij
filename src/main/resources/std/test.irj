@@ -14,14 +14,14 @@ mod std.test
 pub fn assert-eq :: _ _ ()
   => expected actual
   if (expected /= actual)
-    error ~ "Expected " ++ (to-str expected) ++ " but got " ++ (to-str actual)
+    error ~ "Expected " ++ (inspect expected) ++ " but got " ++ (inspect actual)
   else
     ()
 
 pub fn assert-neq :: _ _ ()
   => a b
   if (a == b)
-    error ~ "Expected values to differ, but both are " ++ (to-str a)
+    error ~ "Expected values to differ, but both are " ++ (inspect a)
   else
     ()
 

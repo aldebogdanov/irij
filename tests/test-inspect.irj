@@ -1,0 +1,15 @@
+use std.test {assert-eq test}
+
+;; A Str prints raw on its own and quoted inside anything else;
+;; `inspect` quotes it on its own too. InspectTest checks the streams.
+
+test "to-str leaves a Str raw" (-> assert-eq "a b" (to-str "a b"))
+test "to-str quotes the Strs in a vector" (-> assert-eq "#[\"a b\" \"c\"]" (to-str #["a b" "c"]))
+test "an empty Str stays visible" (-> assert-eq "#[\"\" \"x\"]" (to-str #["" "x"]))
+test "map values are quoted, field names are not" (-> assert-eq "{name= \"Ada\"}" (to-str {name= "Ada"}))
+test "a key that is no field name is quoted" (-> assert-eq "{\"Content-Type\"= \"text/html\"}" (to-str {"Content-Type"= "text/html"}))
+test "nested variants go in parentheses" (-> assert-eq "#[(Ok 1) (Err \"e\")]" (to-str #[(Ok 1) (Err "e")]))
+test "inspect quotes a Str" (-> assert-eq "\"x\"" (inspect "x"))
+test "inspect escapes" (-> assert-eq "\"a\\\"b\\n\"" (inspect "a\"b\n"))
+test "inspect of a number is to-str" (-> assert-eq "42" (inspect 42))
+test "interpolation leaves a Str raw" (-> assert-eq "x=a b" ("x=${"a b"}"))

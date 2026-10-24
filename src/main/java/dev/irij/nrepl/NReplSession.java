@@ -124,7 +124,7 @@ public final class NReplSession {
             if (!stdout.isEmpty()) resp.put("out", stdout);
             Object last = session.namespace().get(dev.irij.compiler.BytecodeSession.LAST_VALUE_KEY);
             Object surfaced = (last == sentinel) ? dev.irij.runtime.Values.UNIT : last;
-            resp.put("value", dev.irij.runtime.Values.toIrijString(surfaced));
+            resp.put("value", dev.irij.runtime.Values.inspect(surfaced));
             resp.put("status", List.of("done"));
             return resp;
         } catch (IrijCompiler.CompileException e) {

@@ -97,6 +97,14 @@ println p          ;; Point {x= 3.0 y= 4.0}
 println p.x        ;; 3.0
 
 {x= px y= py} := p
+
+;; A Str prints raw on its own, quoted inside anything else — so the
+;; two elements of #["a b" "c"] can't look like three. `inspect` gives
+;; the quoted form for any value.
+println "a b"                  ;; a b
+println #["a b" "c"]           ;; #["a b" "c"]
+println {name= "Ada"}          ;; {name= "Ada"}
+println (inspect "a b")        ;; "a b"
 println ("x=" ++ (to-str px) ++ " y=" ++ (to-str py))
 
 ;; ── Apply-to-rest (~) ────────────────────────────────────────────────────

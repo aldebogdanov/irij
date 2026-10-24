@@ -76,7 +76,7 @@ class PatternGapsTest {
 
     @Test
     void lambdaPatternsWorkInsidePipelines() throws Exception {
-        assertEquals("#[one=1 two=2]", run("""
+        assertEquals("#[\"one=1\" \"two=2\"]", run("""
                 pairs := #[#(1 "one") #(2 "two")]
                 println (pairs |> @ (#(n w) -> w ++ "=" ++ to-str n))
                 """));
@@ -224,7 +224,7 @@ class PatternGapsTest {
 
     @Test
     void recordUpdateKeepsTheSpec() throws Exception {
-        assertEquals("User {name= Ada age= 37}\nUser\nhi Ada", run("""
+        assertEquals("User {name= \"Ada\" age= 37}\nUser\nhi Ada", run("""
                 spec User
                   name :: Str
                   age :: Int
@@ -251,7 +251,7 @@ class PatternGapsTest {
 
     @Test
     void recordUpdateAddingAFieldGivesAMap() throws Exception {
-        assertEquals("Map\n{name= Ada age= 36 nick= A}", run("""
+        assertEquals("Map\n{name= \"Ada\" age= 36 nick= \"A\"}", run("""
                 spec User
                   name :: Str
                   age :: Int

@@ -27,6 +27,20 @@ Registered as `BuiltinFn` objects in the global environment:
   std.console's Console ops: a handler with the clause answers instead
   (effects.md § Builtins that perform an effect); `dbg` always writes
   to stderr
+- Printing (`to-str`, `inspect`) — `Values.toIrijString` is what
+  `println`, `print`, `to-str`, `join` and `${…}` show: a Str on its
+  own stays raw (`println "a b"` prints `a b`), and anything inside a
+  Vector, Set, Tuple, Map, variant or record prints the way source
+  writes it (`Values.inspect`): a Str quoted and escaped (`\n \r \t
+  \e \" \\`, `\$` before `{`), a map key that is no field name quoted
+  (`{"Content-Type"= …}`), a variant with fields in parentheses
+  (`#[(Ok 1) (Err "e")]`). So `#["a b" "c"]` can't print like three
+  elements, and the printed form of plain data reads back as an equal
+  value (InspectTest). `inspect v` is that form for `v` itself, a Str
+  quoted too; `dbg`, the REPL / nREPL / sandbox `value`, `std.test`'s
+  `assert-eq` and "No match arm for: …" / "Not callable: …" use it.
+  Java objects and functions print as `toString` gives them, which no
+  literal reads back.
 - Conversion (`to-str`, `to-vec`, `to-set`, `to-tuple`) —
   `to-set`/`to-tuple` are the dynamic-arity counterparts of the
   `#{}` and `#(...)` literals: a Tuple whose size is only known at

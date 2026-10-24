@@ -105,7 +105,7 @@ class NestedInlineWithTest {
     }
 
     @Test void outerPerformsAroundTheInnerWithInOrder() throws Exception {
-        assertEquals("44\n#[a in b]", run(FX + """
+        assertEquals("44\n#[\"a\" \"in\" \"b\"]", run(FX + """
                 r := with logger
                   a := tick "a"
                   x := with answer do (tick "in" + ask ())
@@ -117,7 +117,7 @@ class NestedInlineWithTest {
     }
 
     @Test void aDiscardedStatementInTheMiddleOfABody() throws Exception {
-        assertEquals("1\n#[in after]", run(FX + """
+        assertEquals("1\n#[\"in\" \"after\"]", run(FX + """
                 r := with logger
                   with answer do (tick "in")
                   tick "after"
@@ -127,7 +127,7 @@ class NestedInlineWithTest {
     }
 
     @Test void theInnerWithAsTheBodysValue() throws Exception {
-        assertEquals("43\n#[before]", run(FX + """
+        assertEquals("43\n#[\"before\"]", run(FX + """
                 r := with logger
                   tick "before"
                   with answer do (ask () + 1)

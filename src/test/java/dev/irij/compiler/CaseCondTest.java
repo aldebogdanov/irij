@@ -180,7 +180,7 @@ class CaseCondTest {
 
     @Test
     void caseArmsMayPerformInAWithBody() throws Exception {
-        assertEquals("#[A]", run("""
+        assertEquals("#[\"A\"]", run("""
                 effect Log
                   log :: Str -> ()
                 handler rec :: Log

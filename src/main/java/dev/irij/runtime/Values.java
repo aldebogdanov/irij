@@ -90,7 +90,7 @@ public final class Values {
                 for (var e : namedFields.entrySet()) {
                     if (!first) sb.append(' ');
                     first = false;
-                    sb.append(e.getKey()).append("= ").append(Values.toIrijString(e.getValue()));
+                    sb.append(Values.fieldKey(e.getKey())).append("= ").append(Values.inspectNested(e.getValue()));
                 }
                 sb.append('}');
                 return sb.toString();
@@ -100,11 +100,7 @@ public final class Values {
             var sb = new StringBuilder(tag);
             for (var f : fields) {
                 sb.append(' ');
-                if (f instanceof String s) {
-                    sb.append('"').append(s).append('"');
-                } else {
-                    sb.append(Values.toIrijString(f));
-                }
+                sb.append(Values.inspectNested(f));
             }
             return sb.toString();
         }
@@ -124,7 +120,7 @@ public final class Values {
             var sb = new StringBuilder("#[");
             for (int i = 0; i < elements.size(); i++) {
                 if (i > 0) sb.append(' ');
-                sb.append(Values.toIrijString(elements.get(i)));
+                sb.append(Values.inspectNested(elements.get(i)));
             }
             sb.append(']');
             return sb.toString();
@@ -145,7 +141,7 @@ public final class Values {
             for (var e : elements) {
                 if (!first) sb.append(' ');
                 first = false;
-                sb.append(Values.toIrijString(e));
+                sb.append(Values.inspectNested(e));
             }
             sb.append('}');
             return sb.toString();
@@ -167,7 +163,7 @@ public final class Values {
             for (var e : entries.entrySet()) {
                 if (!first) sb.append(' ');
                 first = false;
-                sb.append(e.getKey()).append("= ").append(Values.toIrijString(e.getValue()));
+                sb.append(Values.fieldKey(e.getKey())).append("= ").append(Values.inspectNested(e.getValue()));
             }
             sb.append('}');
             return sb.toString();
@@ -264,7 +260,7 @@ public final class Values {
             var sb = new StringBuilder("#(");
             for (int i = 0; i < elements.length; i++) {
                 if (i > 0) sb.append(' ');
-                sb.append(Values.toIrijString(elements[i]));
+                sb.append(Values.inspectNested(elements[i]));
             }
             sb.append(')');
             return sb.toString();
@@ -341,6 +337,59 @@ public final class Values {
         if (value instanceof String s) return s;
         if (value instanceof Thread t) return "<thread " + t.threadId() + ">";
         return value.toString();
+    }
+
+    /** A value the way Irij source writes it: a Str quoted and escaped,
+     *  anything else as {@link #toIrijString}. Collections, variants and
+     *  records print their elements this way, so {@code #["a b" "c"]}
+     *  shows as {@code #["a b" "c"]}, not {@code #[a b c]}. The
+     *  {@code inspect} builtin; also what dbg, the REPL echo and runtime
+     *  messages ("No match arm for: …") show. */
+    public static String inspect(Object value) {
+        if (value instanceof String s) return quote(s);
+        return toIrijString(value);
+    }
+
+    /** {@link #inspect} for a value inside another one: a variant with
+     *  fields goes in parentheses, as source would write it, so
+     *  {@code #[(Ok 1) (Err "e")]} doesn't read as four elements. */
+    static String inspectNested(Object value) {
+        if (value instanceof Tagged t && t.namedFields() == null && !t.fields().isEmpty()) {
+            return "(" + inspect(value) + ")";
+        }
+        return inspect(value);
+    }
+
+    /** A Str as a string literal: in double quotes, with the escapes the
+     *  lexer reads back ({@code \n \r \t \e \" \\}, and {@code \$}
+     *  before a brace so the text doesn't turn into an interpolation). */
+    public static String quote(String s) {
+        var sb = new StringBuilder(s.length() + 2).append('"');
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"' -> sb.append("\\\"");
+                case '\\' -> sb.append("\\\\");
+                case '\n' -> sb.append("\\n");
+                case '\r' -> sb.append("\\r");
+                case '\t' -> sb.append("\\t");
+                case '\u001B' -> sb.append("\\e");
+                case '$' -> sb.append(i + 1 < s.length() && s.charAt(i + 1) == '{' ? "\\$" : "$");
+                default -> sb.append(c);
+            }
+        }
+        return sb.append('"').toString();
+    }
+
+    private static final java.util.regex.Pattern FIELD_NAME = java.util.regex.Pattern.compile(
+            "[a-z][a-z0-9]*([-_][a-z0-9]+)*[?!]?"
+            + "|[a-z][a-z0-9]*(-[a-z0-9]+)*(:[a-z][a-z0-9]*(-[a-z0-9]+)*)+");
+
+    /** A map key as a map literal writes it: bare when it is a field name
+     *  ({@code name=}, {@code data-on:click=}), else quoted
+     *  ({@code "Content-Type"=}). */
+    static String fieldKey(String key) {
+        return FIELD_NAME.matcher(key).matches() ? key : quote(key);
     }
 
     /** Check if a value is truthy. */
