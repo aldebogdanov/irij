@@ -7,6 +7,7 @@ import dev.irij.ast.Pattern;
 import dev.irij.ast.SpecExpr;
 import dev.irij.ast.Stmt;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -55,11 +56,19 @@ public final class EffectRowChecker {
      *  references in unrelated handler clauses fail with a precise
      *  error. */
     private final Map<String, String> capEffect = new HashMap<>();
+    /** Caps bound to a Java provider class (not a record of Irij fns):
+     *  a call through one reaches the world, so it performs its effect. */
+    private final Set<String> javaCaps = new HashSet<>();
 
     /** Effect name currently being inspected inside a handler clause —
      *  set by {@link #checkHandler} before walking each clause body and
      *  cleared after. {@code null} outside clause bodies. */
     private String currentClauseEffect = null;
+    /** The declared row of the handler whose clauses are being walked
+     *  (null outside one). A cap call performs the cap's effect, so the
+     *  handler must declare it: {@code handler default-db :: Db ::: Db}. */
+    private List<String> currentHandlerRow = null;
+    private String currentHandlerName = null;
 
     private final Map<String, List<String>> fnRows = new HashMap<>();
     /** fn-name → spec annotations (inputs..., output). Used at call
@@ -80,6 +89,9 @@ public final class EffectRowChecker {
                              java.util.LinkedHashMap<String, SpecExpr> fields) {}
     private final Map<String, String> effectOps = new HashMap<>();
     private final Map<String, String> handlerEffect = new HashMap<>();
+    /** handler-name → its declared row ({@code handler loud :: Log ::: Console}
+     *  → [Console]): what its clauses do, so what a {@code with} of it does. */
+    private final Map<String, List<String>> handlerRow = new HashMap<>();
     /** Set of declared effect names (from EffectDecl). Used to detect
      *  capability binds: `rnd :: Random := java.util.Random/new 42`
      *  binds `rnd` carrying the Random capability if Random is in this set. */
@@ -148,10 +160,20 @@ public final class EffectRowChecker {
      *  module, since inlining interleaves module decls at the use
      *  site. Empty map = fall back to the scan (LSP/tests). */
     public static void check(List<Decl> decls, Map<String, String> fnFile) {
+        check(decls, fnFile, null);
+    }
+
+    /** As above; {@code warn} (when non-null) receives deprecation
+     *  warnings — {@code with unsafe-jvm}. */
+    public static void check(List<Decl> decls, Map<String, String> fnFile,
+                             java.util.function.Consumer<String> warn) {
         var c = new EffectRowChecker();
         c.fnFileOrigin = fnFile != null ? fnFile : java.util.Map.of();
+        c.warn = warn;
         c.run(decls);
     }
+
+    private java.util.function.Consumer<String> warn;
 
     private Map<String, String> fnFileOrigin = java.util.Map.of();
 
@@ -213,6 +235,8 @@ public final class EffectRowChecker {
                 }
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 handlerEffect.put(hd.name(), hd.effectName());
+                handlerRow.put(hd.name(), hd.requiredEffects() != null
+                        ? hd.requiredEffects() : List.of());
             } else if (inner instanceof Decl.SpecDecl sd
                     && sd.body() instanceof Decl.SpecBody.ProductSpec ps) {
                 // Convert ProductSpec to a flat field map so call sites
@@ -227,6 +251,7 @@ public final class EffectRowChecker {
                 namedSpecs.put(sd.name(),
                         new NamedSpec(sd.rowParams(), fields));
             } else if (inner instanceof Decl.CapDecl cap) {
+                if (cap.providerClass() != null) javaCaps.add(cap.name());
                 String prev = capEffect.put(cap.name(), cap.effectName());
                 if (prev != null && !prev.equals(cap.effectName())) {
                     throw new IrijCompiler.CompileException(
@@ -287,6 +312,10 @@ public final class EffectRowChecker {
                 checkFn(fn);
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 checkHandler(hd);
+            } else if (inner instanceof Decl.WithDecl wd) {
+                // Top-level code has every effect: nothing to check, but
+                // a deprecated handler still gets its warning.
+                warnDeprecatedHandlers(wd.with(), "top-level code");
             }
         }
     }
@@ -437,6 +466,8 @@ public final class EffectRowChecker {
         // inside clause bodies are checked against it.
         String savedClauseEffect = currentClauseEffect;
         currentClauseEffect = hd.effectName();
+        currentHandlerRow = declared;
+        currentHandlerName = hd.name();
         try {
             for (var c : hd.clauses()) {
                 locals.clear();
@@ -446,6 +477,8 @@ public final class EffectRowChecker {
             locals.clear();
         } finally {
             currentClauseEffect = savedClauseEffect;
+            currentHandlerRow = null;
+            currentHandlerName = null;
         }
     }
 
@@ -519,6 +552,7 @@ public final class EffectRowChecker {
             }
             case Stmt.With w -> {
                 walkExpr(w.handler(), avail, ctx);
+                warnDeprecatedHandlers(w, ctx);
                 // Collect every effect the handler expression provides
                 // (single handler Var, or `>>`-composition of multiple).
                 Set<String> added = new HashSet<>();
@@ -538,6 +572,7 @@ public final class EffectRowChecker {
                     inner = new HashSet<>(avail);
                     inner.addAll(added);
                 }
+                if (avail != AMBIENT && !opaque) requireHandlerRows(w, avail, ctx);
                 walkScoped(w.body(), inner, ctx);
                 if (w.onFailure() != null) walkScoped(w.onFailure(), inner, ctx);
             }
@@ -624,6 +659,23 @@ public final class EffectRowChecker {
                                                   + currentClauseEffect + "' clause"
                                                 : "")
                                         + at(da.loc()));
+                    }
+                    // A cap call performs the cap's effect — it reaches the
+                    // world through the bound Java class — so the handler
+                    // declares it, and a `with` of the handler charges it to
+                    // the installer (pattern 4) instead of JVM.
+                    if (javaCaps.contains(v.name())
+                            && currentHandlerRow != null && !currentHandlerRow.contains(capEff)
+                            && !currentHandlerRow.contains("Any")) {
+                        throw new IrijCompiler.CompileException(
+                                "Capability '" + shown(v.name()) + "' performs " + capEff
+                                        + ": handler " + shown(currentHandlerName)
+                                        + " calls it, so it declares the effect — `handler "
+                                        + shown(currentHandlerName) + " :: " + capEff + " ::: "
+                                        + String.join(" ", java.util.stream.Stream.concat(
+                                                currentHandlerRow.stream().map(EffectRowChecker::shown),
+                                                java.util.stream.Stream.of(capEff)).toList())
+                                        + "`" + at(da.loc()));
                     }
                     // Legal cap use — short-circuit. Don't descend into the
                     // target (would re-trigger the bare-Var cap check) and
@@ -1175,6 +1227,18 @@ public final class EffectRowChecker {
                 collectHandlerEffects(w.handler(), handled);
                 inner.removeAll(handled);
                 out.addAll(inner);
+                // The handler's clauses run with its own row: a `with`
+                // does what its handler's clauses do.
+                List<String> names = new ArrayList<>();
+                if (collectHandlerNames(w.handler(), names)) {
+                    Set<String> byOuter = new HashSet<>();
+                    for (String n : names) {
+                        for (String e : handlerRow.getOrDefault(n, List.of())) {
+                            if (!isRowVar(e) && !"Any".equals(e) && !byOuter.contains(e)) out.add(e);
+                        }
+                        byOuter.add(handlerEffect.get(n));
+                    }
+                }
             }
             default -> {}
         }
@@ -1196,6 +1260,69 @@ public final class EffectRowChecker {
         Set<String> out = new HashSet<>(base);
         out.add(extra);
         return out;
+    }
+
+    /** A `with` does what its handler's clauses do: every effect in the
+     *  handler's declared row ({@code handler loud :: Log ::: Console})
+     *  must be in the enclosing fn's row, as a call to a fn with that row
+     *  would. Without this a fn declaring no effects could print, read the
+     *  clock or reach Java by installing a handler that does. A handler
+     *  with no row ({@code unsafe-jvm}) needs nothing: installing it is the
+     *  one explicit escape hatch. */
+    private void requireHandlerRows(Stmt.With w, Set<String> avail, String ctx) {
+        List<String> names = new ArrayList<>();
+        if (!collectHandlerNames(w.handler(), names)) return;
+        // `h1 >> h2` is `with h1 (with h2 …)`: h2's clauses run inside h1,
+        // so h1's effect meets h2's row.
+        Set<String> outer = new HashSet<>(avail);
+        for (String n : names) {
+            for (String e : handlerRow.getOrDefault(n, List.of())) {
+                if (isRowVar(e) || "Any".equals(e) || outer.contains(e)) continue;
+                throw new IrijCompiler.CompileException(
+                        "Effect '" + e + "' not declared in " + ctx + ": `with "
+                                + shown(n) + "` installs a handler whose clauses perform "
+                                + e + " (`handler " + shown(n) + " :: "
+                                + shown(handlerEffect.get(n)) + " ::: "
+                                + String.join(" ", handlerRow.get(n).stream().map(EffectRowChecker::shown).toList())
+                                + "`) — add ::: " + e + " to the enclosing function's effect row,"
+                                + " or install the handler where " + e + " is available"
+                                + " (top-level code has every effect)" + at(w.loc()));
+            }
+            outer.add(handlerEffect.get(n));
+        }
+    }
+
+    /** {@code unsafe-jvm} (std.jvm) is deprecated: it declares
+     *  {@code ::: JVM}, so installing it needs {@code JVM} already and
+     *  grants nothing — a fn that calls Java declares {@code ::: JVM}. */
+    private void warnDeprecatedHandlers(Stmt.With w, String ctx) {
+        if (warn == null) return;
+        List<String> names = new ArrayList<>();
+        collectHandlerNames(w.handler(), names);
+        for (String n : names) {
+            if ("unsafe-jvm".equals(shown(n)) && "JVM".equals(handlerEffect.get(n))) {
+                warn.accept("warning: `unsafe-jvm` is deprecated and will be removed (in " + ctx
+                        + at(w.loc()) + "): it grants nothing — declare ::: JVM on the fn that"
+                        + " calls Java and drop the `with`");
+            }
+        }
+    }
+
+    /** The handler declarations a `with` expression names: a Var, or a
+     *  {@code >>} composition of them. False when any part is opaque. */
+    private boolean collectHandlerNames(Expr handler, List<String> out) {
+        if (handler instanceof Expr.Var v) {
+            if (!handlerEffect.containsKey(v.name())) return false;
+            out.add(v.name());
+            return true;
+        }
+        if (handler instanceof Expr.Compose c) {
+            return collectHandlerNames(c.left(), out) & collectHandlerNames(c.right(), out);
+        }
+        if (handler instanceof Expr.BinaryOp bo && ">>".equals(bo.op())) {
+            return collectHandlerNames(bo.left(), out) & collectHandlerNames(bo.right(), out);
+        }
+        return false;
     }
 
     /** Collect every effect-name provided by a `with` handler

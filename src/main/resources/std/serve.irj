@@ -19,7 +19,7 @@ pub effect Serve
 
 cap server :: Serve = "dev.irij.runtime.ServeCapability"
 
-pub handler default-serve :: Serve ::: JVM
+pub handler default-serve :: Serve ::: Serve
   serve port h =>
     server.serve port h
     resume ()

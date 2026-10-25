@@ -34,7 +34,7 @@ pub effect FileIO
 ;; clauses (lint-enforced by EffectRowChecker).
 cap fs-files :: FileIO = "dev.irij.runtime.FsCapability"
 
-pub handler default-fs :: FileIO ::: JVM
+pub handler default-fs :: FileIO ::: FileIO
   fs-read path => resume (fs-files.read path)
   fs-write path content =>
     fs-files.write path content

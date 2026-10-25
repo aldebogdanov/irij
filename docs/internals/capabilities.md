@@ -347,6 +347,33 @@ none of the planned migrations (`Jdbc`, `Fs`, `HttpClient`,
 `HttpServer`, `Jvm`) need them — each is naturally a utility class
 of static dispatchers around the underlying JDK API.
 
+## A Java cap call performs its effect
+
+`cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"` says "this Java
+class implements `Db`". A call through it (`db-jdbc.query …`) reaches the
+world, so it performs `Db`: the handler whose clause calls it declares
+`Db` in its row (`handler default-db :: Db ::: Db`), and
+`EffectRowChecker` refuses a handler that doesn't. With effects.md's
+pattern 4 (a `with` needs its handler's row) a fn that installs
+`default-db` then declares `::: Db` — the resource it touches — instead
+of `JVM`, which means "anything". Every std handler has this shape
+(`default-fs :: FileIO ::: FileIO`, `default-serve :: Serve ::: Serve`,
+…), the shape `default-time :: Time ::: Time` and
+`default-random :: Random ::: Random` always had.
+
+The cap call isn't charged `JVM` (it never was, statically or at
+runtime: the lowered JavaRef doesn't consult the row). A provider can be
+a JDK class: `cap instant :: Clock = "java.time.Instant"` reaches its
+static methods. A record cap (`cap mock :: Greet = {greet= …}`) has no
+Java behind it and performs nothing, so an in-process mock still
+discharges its effect.
+
+Not covered yet: a Java member on a value a cap returns
+(`(instant.now ())#toString ()`) is still `#member` interop and needs
+`JVM` — and `RtInterop.javaMember` re-checks `JVM` against the clause's
+runtime row, so charging it to the cap's effect needs that runtime row
+to grant it too (TODO).
+
 ## Future work
 
 - **Phase 2**: cap dispatch in `ClassEmitter` (see above).

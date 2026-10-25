@@ -16,7 +16,9 @@ use std.fs {FileIO}
 ;; 1. Java-backed cap is the default shape for stdlib modules.
 ;;    std.fs already declares  cap fs-files :: FileIO = "..."
 ;;    and exposes  fs-read / fs-write / fs-exists?  effect ops.
-;;    User code just runs `with default-fs do (op …)`.
+;;    User code just runs `with default-fs do (op …)`. The cap call
+;;    performs FileIO, so `default-fs :: FileIO ::: FileIO`, and a fn
+;;    that installs it declares ::: FileIO — never JVM.
 ;; ═══════════════════════════════════════════════════════════════════
 
 irij-toml-exists := with fs.default-fs do (fs-exists? "irij.toml")

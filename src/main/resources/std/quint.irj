@@ -100,7 +100,7 @@ pub effect Quint
 ;; clauses (lint-enforced by EffectRowChecker).
 cap quint-cli :: Quint = "dev.irij.runtime.QuintCapability"
 
-pub handler default-quint :: Quint ::: JVM
+pub handler default-quint :: Quint ::: Quint
   quint-version _ => resume (quint-cli.version ())
   quint-run opts => resume (quint-cli.run opts)
   quint-test opts => resume (quint-cli.test opts)

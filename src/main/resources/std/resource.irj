@@ -29,6 +29,6 @@ pub effect Resource
 ;; clauses (lint-enforced by EffectRowChecker).
 cap resources :: Resource = "dev.irij.runtime.ResourceCapability"
 
-pub handler default-resource :: Resource ::: JVM
+pub handler default-resource :: Resource ::: Resource
   resource-read path => resume (resources.read path)
   resource-exists? path => resume (resources.existsQ path)

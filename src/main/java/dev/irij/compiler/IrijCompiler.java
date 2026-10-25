@@ -111,7 +111,8 @@ public final class IrijCompiler {
                 opts.specLint() ? System.err::println : null, sessionNames);
         try {
             List<Decl> inlined = inliner.inline(decls, rootFile);
-            EffectRowChecker.check(inlined, inliner.fnFile());
+            EffectRowChecker.check(inlined, inliner.fnFile(),
+                    opts.specLint() ? System.err::println : null);
             return new ClassEmitter(className, opts, rootFile, inliner.fnFile())
                     .emitProgram(inlined);
         } catch (StackOverflowError e) {

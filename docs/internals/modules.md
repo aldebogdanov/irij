@@ -260,4 +260,4 @@ yet emit the envelope (specs aren't runtime-checked in bytecode) — gap.
 | `std.json` | JSON parser/serialiser |
 | `std.convert` | Type coercions |
 | `std.test` | Test runner |
-| `std.jvm` | JVM capability + `unsafe-jvm` handler |
+| `std.jvm` | JVM capability (+ `unsafe-jvm`, deprecated) |

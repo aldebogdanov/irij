@@ -46,7 +46,7 @@ pub effect Proc
 ;; Capability binding. `proc-os` resolves only inside Proc-handler clauses.
 cap proc-os :: Proc = "dev.irij.runtime.ProcCapability"
 
-pub handler default-proc :: Proc ::: JVM
+pub handler default-proc :: Proc ::: Proc
   proc-run opts =>
     resume (proc-os.run opts)
   proc-start opts =>

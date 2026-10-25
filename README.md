@@ -60,7 +60,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 ## Language Features
 
 - **Specs** &mdash; `spec` declares structure with certification tags; runtime validation at boundaries
-- **Mandatory effect tracking** &mdash; `fn name ::: Console` declares effects; unannotated = pure
+- **Mandatory effect tracking** &mdash; `fn name ::: Console` declares effects; unannotated = pure — a `with` counts too: installing `handler loud :: Log ::: Console` needs `Console` in the fn's row, so a pure fn can't print, read the clock or reach Java through a handler
 - **Algebraic effects & handlers** &mdash; `effect`, `handler`, `with`, `resume`, `on-failure`; the `Console`, `Random` and `Time` builtins (`println`, `read-line`, `random-int`, `now-ms`, `sleep`, …) perform their effect, so a test handler captures output and fixes the dice and the clock
 - **Contracts** &mdash; `pre`, `post` (function-level), `in`, `out` (module-boundary with blame)
 - **Model-based testing** &mdash; `model bank :: "spec/bank.qnt" :pure` binds a [Quint](https://quint-lang.org/) specification to the code implementing it, one clause per action with the spec's `nondet` picks bound by name. Quint generates traces, Irij replays them and fails at the first diverging step; Apalache proves invariants; a committed trace replays in CI with no Quint installed. (Replaces the `law` property testing removed in v0.6.12 — sampling is not proof, and the tool that samples also proves.)

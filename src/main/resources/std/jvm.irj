@@ -8,8 +8,7 @@ mod std.jvm
 ;; "JVM" to be in the surrounding fn's effect row.
 ;;
 ;; Top-level scripts inherit ambient permissions, so they're exempt.
-;; Annotated `fn`s that touch Java must declare `::: JVM` (or wrap
-;; their callers in `with unsafe-jvm`).
+;; Annotated `fn`s that touch Java must declare `::: JVM`.
 ;;
 ;; Why this exists: Irij's effect rows would otherwise be a lie —
 ;; arbitrary `java.io.*` / `java.util.Random` / `System/exit` calls
@@ -21,19 +20,23 @@ mod std.jvm
 ;;
 ;; Usage:
 ;;
-;;   use std.jvm :open
-;;
-;;   fn parse-int :: Int ::: JVM
+;;   fn parse-int :: Str Int ::: JVM
 ;;     (s -> java.lang.Long/parseLong s)
 ;;
-;;   with unsafe-jvm
-;;     parse-int "42"
+;;   parse-int "42"          ;; top level has every effect
+;;
+;; A library keeps Java behind a cap instead: a `pub effect` for the
+;; resource, `cap instant :: Clock = "java.time.Instant"`, and a real
+;; handler `system-clock :: Clock ::: Clock` whose clauses call the cap.
+;; A cap call performs the cap's effect, so whoever installs the handler
+;; declares `::: Clock`, never JVM. JVM needs no import to be named in a
+;; row.
 
 pub effect JVM
 
-;; Default handler: provides the `JVM` capability with no clauses
-;; (the effect has no operations). Use as `with unsafe-jvm body`
-;; to enable Java interop in a scope. The name signals the trade-off:
-;; you've opted out of Irij's effect-tracking guarantees within this
-;; block.
-pub handler unsafe-jvm :: JVM
+;; DEPRECATED — will be removed. It used to grant JVM to a block inside
+;; a fn that didn't declare it, which let a fn declared pure call Java.
+;; A `with` now needs its handler's row, and this one's is JVM, so
+;; installing it grants nothing; using it prints a warning. Declare
+;; `::: JVM` on the fn that calls Java instead.
+pub handler unsafe-jvm :: JVM ::: JVM

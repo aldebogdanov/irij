@@ -706,6 +706,21 @@
    with the builtin =print=, is captured by =mock-console= below, and a
    handler that leaves a clause out passes that operation on.
 
+   *A =with= does what its handler's clauses do:* a handler's row
+   (=handler loud :: Log ::: Console=) names the effects its clauses
+   perform, so =with loud …= needs them in the enclosing function's row,
+   exactly as a call to a =::: Console= function would. The =with=
+   discharges the handler's own effect (=Log=) for its body; the
+   handler's row passes out to the caller. In =with h1 >> h2=, which is
+   =with h1 (with h2 …)=, =h1='s effect meets =h2='s row. Top-level code
+   has every effect, so a program installs its real handlers there (or
+   in =main=, which declares them). Without the rule a function declared
+   pure could print, read the clock or reach Java by installing a
+   handler that does. =unsafe-jvm= (=std.jvm=), which used to grant
+   =JVM= to a block for nothing, now declares =::: JVM= like any
+   handler, so it grants nothing; it is deprecated, warns, and will be
+   removed. A function that calls Java declares =::: JVM=.
+
    *Resuming:* a clause ends in one of two ways. =resume v= hands =v=
    back to the perform site as the operation's result, and the body
    carries on from there. =resume= does not return to the clause, so it
@@ -808,6 +823,15 @@
        migrate ()
      ;; DbWrite capability does not exist here — cannot be leaked
    #+end_example
+
+   *Java-backed capabilities (implemented):* =cap db-jdbc :: Db =
+   "…JdbcCapability"= binds a Java class to an effect. A call through it,
+   inside a clause of a handler for =Db=, performs =Db=: the handler
+   declares it (=handler default-db :: Db ::: Db=), and by §3.2 a function
+   that installs the handler declares =::: Db= — the resource it touches —
+   rather than =JVM=. =JVM= is left for hand-written =Class/member= and
+   =#member= interop. A cap whose right side is a record of Irij
+   functions performs nothing.
 
 * Part IV: Structured Concurrency
 

@@ -352,7 +352,7 @@ class EffectRowLintTest {
             effect Db
               db-open :: Str -> Int
             cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
-            handler default-db :: Db ::: JVM
+            handler default-db :: Db ::: Db
               db-open path => resume (db-jdbc.open path)
             """;
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
@@ -364,7 +364,7 @@ class EffectRowLintTest {
             effect Fs
               fs-read :: Str -> Str
             pub cap fs-files :: Fs = "dev.irij.runtime.FsCapability"
-            handler default-fs :: Fs ::: JVM
+            handler default-fs :: Fs ::: Fs
               fs-read path => resume (fs-files.read path)
             """;
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
@@ -590,5 +590,213 @@ class EffectRowLintTest {
         IrijCompiler.CompileException e = expectFail(src);
         assertTrue(e.getMessage().contains("Time"),
                 () -> "expected Time-effect error, got: " + e.getMessage());
+    }
+
+    // ── A `with` does what its handler's clauses do ─────────────────────
+
+    private static final String LOUD = """
+            effect Log
+              log :: Str -> ()
+            handler loud :: Log ::: Console
+              log msg =>
+                println msg
+                resume ()
+            """;
+
+    @Test
+    void withOfAHandlerNeedsTheHandlersRow() {
+        var e = expectFail(LOUD + """
+                fn price :: Int Int
+                  => cents
+                  with loud do (log "printed from a pure fn")
+                  cents + cents / 4
+                price 100
+                """);
+        assertTrue(e.getMessage().contains("Effect 'Console' not declared in fn price"), e.getMessage());
+        assertTrue(e.getMessage().contains("`with loud`"), e.getMessage());
+    }
+
+    @Test
+    void withOfAHandlerAcceptedWhenTheRowHasIt() {
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(LOUD + """
+                fn price :: Int Int ::: Console
+                  => cents
+                  with loud do (log "declared")
+                  cents
+                price 100
+                """, "irij.Program"));
+    }
+
+    @Test
+    void topLevelWithNeedsNothing() {
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(LOUD + """
+                with loud do (log "top level has every effect")
+                """, "irij.Program"));
+    }
+
+    @Test
+    void inlineAndBlockWithBothCharged() {
+        expectFail(LOUD + """
+                fn f
+                  =>
+                  with loud
+                    log "block form"
+                f ()
+                """);
+    }
+
+    @Test
+    void aHandlerWithAJvmRowNeedsJvm() {
+        var e = expectFail("""
+                effect Clock
+                  utc-now :: () -> Str
+                handler system-clock :: Clock ::: JVM
+                  utc-now () => resume ((java.time.Instant/now ())#toString ())
+                fn stamp :: Str
+                  =>
+                  with system-clock do (utc-now ())
+                stamp ()
+                """);
+        assertTrue(e.getMessage().contains("Effect 'JVM' not declared in fn stamp"), e.getMessage());
+    }
+
+    @Test
+    void anOuterHandlerInTheCompositionMeetsAnInnerOnesRow() {
+        // `logs >> cnt` is `with logs (with cnt …)`: cnt's clauses perform
+        // L, which logs handles; only logs's Console reaches the fn.
+        String src = """
+                effect L
+                  lg :: Str -> ()
+                effect C
+                  c :: () -> ()
+                handler logs :: L ::: Console
+                  lg m =>
+                    println m
+                    resume ()
+                handler cnt :: C ::: L
+                  c () =>
+                    lg "from cnt"
+                    resume ()
+                """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src + """
+                fn run ::: Console
+                  =>
+                  with logs >> cnt do (c ())
+                run ()
+                """, "irij.Program"));
+        var e = expectFail(src + """
+                fn run ::: Console
+                  =>
+                  with cnt >> logs do (c ())
+                run ()
+                """);
+        assertTrue(e.getMessage().contains("Effect 'L' not declared"), e.getMessage());
+    }
+
+    @Test
+    void theEffectsAWithNeedsReachTheCallerOfALambda() {
+        // A lambda's inferred effects include what its `with` installs.
+        var e = expectFail(LOUD + """
+                fn apply :: (Fn):eff _ _ ::: eff
+                  (f x -> f x)
+                fn quiet :: Int Int
+                  => n
+                  apply (k -> with loud do (log "x")) n
+                quiet 1
+                """);
+        assertTrue(e.getMessage().contains("Console"), e.getMessage());
+    }
+
+    @Test
+    void unsafeJvmNeedsJvmLikeAnyHandler() {
+        // Deprecated: unsafe-jvm declares ::: JVM, so it grants nothing.
+        var e = expectFail("""
+                use std.jvm {unsafe-jvm}
+                fn parse :: Str Int
+                  => s
+                  with unsafe-jvm
+                    Long/parseLong s
+                parse "42"
+                """);
+        assertTrue(e.getMessage().contains("Effect 'JVM' not declared in fn parse"), e.getMessage());
+    }
+
+    @Test
+    void unsafeJvmWarnsThatItIsDeprecated() {
+        var err = new java.io.ByteArrayOutputStream();
+        var saved = System.err;
+        System.setErr(new java.io.PrintStream(err));
+        try {
+            assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+                    use std.jvm {unsafe-jvm}
+                    fn parse :: Str Int ::: JVM
+                      => s
+                      with unsafe-jvm
+                        Long/parseLong s
+                    with unsafe-jvm
+                      parse "42"
+                    """, "irij.Program"));
+        } finally {
+            System.setErr(saved);
+        }
+        String out = err.toString();
+        assertTrue(out.contains("`unsafe-jvm` is deprecated") && out.contains("in fn parse"), out);
+        assertTrue(out.contains("in top-level code"), out);
+    }
+
+    // ── A Java cap call performs the cap's effect, not JVM ─────────────
+
+    private static final String CLOCK = """
+            effect Clock
+              utc-now :: () -> Str
+            cap instant :: Clock = "java.time.Instant"
+            cap text :: Clock = "java.lang.String"
+            """;
+
+    @Test
+    void aHandlerCallingAJavaCapDeclaresItsEffect() {
+        var e = expectFail(CLOCK + """
+                handler system-clock :: Clock
+                  utc-now () => resume (text.valueOf (instant.now ()))
+                """);
+        assertTrue(e.getMessage().contains("performs Clock: handler system-clock calls it")
+                && e.getMessage().contains("`handler system-clock :: Clock ::: Clock`"), e.getMessage());
+    }
+
+    @Test
+    void installingACapHandlerChargesItsEffectNotJvm() {
+        String h = CLOCK + """
+                handler system-clock :: Clock ::: Clock
+                  utc-now () => resume (text.valueOf (instant.now ()))
+                """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(h + """
+                fn stamp :: Str ::: Clock
+                  =>
+                  with system-clock do (utc-now ())
+                stamp ()
+                """, "irij.Program"));
+        var e = expectFail(h + """
+                fn stamp :: Str
+                  =>
+                  with system-clock do (utc-now ())
+                stamp ()
+                """);
+        assertTrue(e.getMessage().contains("Effect 'Clock' not declared in fn stamp"), e.getMessage());
+    }
+
+    @Test
+    void aRecordCapPerformsNothing() {
+        // An in-process mock: no Java behind it, so a pure fn may install it.
+        assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+                effect Greet
+                  greet :: Str -> Str
+                cap mock-greet :: Greet = {greet= (n -> "Hi, " ++ n)}
+                handler mocked :: Greet
+                  greet n => resume (mock-greet.greet n)
+                fn hello :: Str
+                  =>
+                  with mocked do (greet "Ada")
+                hello ()
+                """, "irij.Program"));
     }
 }
