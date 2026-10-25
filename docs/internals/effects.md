@@ -375,7 +375,7 @@ site if not — *not* at the handler dispatch.
 Bytecode enforces effect rows at **compile time** via
 `EffectRowChecker.check(decls)` after module inlining and before
 emit (see `docs/internals/specs.md` § Compile-time effect-row lint).
-The checker rejects three patterns:
+The checker rejects four patterns:
 
 1. **Call-site subsumption** — fn `f ::: A` calling fn `g ::: B` where
    `B ⊄ A ∪ available-handlers`.
@@ -387,6 +387,17 @@ The checker rejects three patterns:
    contain it. This is what makes `fn pure (x -> println x)` fail to
    compile rather than throwing at runtime — the static check
    subsumes interp's `BuiltinFn.requiredEffects` runtime gate.
+4. **A `with` of a handler whose row the fn lacks** — `with loud …`
+   where `handler loud :: Log ::: Console` and the fn's row has no
+   `Console` (`requireHandlerRows`). The handler's clauses run with its
+   row, so installing it does what they do; without this, a fn declared
+   pure could print, read the clock or call Java through a handler. In
+   `h1 >> h2` (`with h1 (with h2 …)`) h1's effect meets h2's row. A
+   handler with no row (`unsafe-jvm`) needs nothing. Effect inference
+   (`collectStmtInto`, for lambdas and row variables) adds the same rows,
+   so they reach a callback's caller. A handler the checker can't name
+   statically (a local, a fn's result) is not charged; its body is
+   checked as AMBIENT as before.
 
 A pipe is checked as the call it is (`x |> f a` as `f a x`, `f <| x`
 as `f x`) and a seq-op's function as called (`@ say` calls `say`), so

@@ -82,7 +82,7 @@ r5 := test "list dir adds entries" (-> assert-eq 2 (run-list ()))
 
 ;; ── Real FS (write + read + cleanup) ─────────────────────────────
 
-fn run-real-fs
+fn run-real-fs ::: JVM
   =>
   with fs.default-fs
     fs-write "/tmp/irij-test-fs.txt" "real data"
@@ -92,7 +92,7 @@ fn run-real-fs
 
 r6 := test "real fs write/read/delete" (-> assert-eq "real data" (run-real-fs ()))
 
-fn run-real-mkdir
+fn run-real-mkdir ::: JVM
   =>
   with fs.default-fs
     fs-mkdir "/tmp/irij-test-dir"

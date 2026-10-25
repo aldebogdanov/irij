@@ -469,7 +469,7 @@ handler silent-logger :: MyLog
 fn do-logging ::: MyLog
   (msg -> log-msg msg)
 
-fn run-logging
+fn run-logging ::: Console
   =>
   with console-logger
     do-logging "annotated handler"

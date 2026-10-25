@@ -591,4 +591,132 @@ class EffectRowLintTest {
         assertTrue(e.getMessage().contains("Time"),
                 () -> "expected Time-effect error, got: " + e.getMessage());
     }
+
+    // ── A `with` does what its handler's clauses do ─────────────────────
+
+    private static final String LOUD = """
+            effect Log
+              log :: Str -> ()
+            handler loud :: Log ::: Console
+              log msg =>
+                println msg
+                resume ()
+            """;
+
+    @Test
+    void withOfAHandlerNeedsTheHandlersRow() {
+        var e = expectFail(LOUD + """
+                fn price :: Int Int
+                  => cents
+                  with loud do (log "printed from a pure fn")
+                  cents + cents / 4
+                price 100
+                """);
+        assertTrue(e.getMessage().contains("Effect 'Console' not declared in fn price"), e.getMessage());
+        assertTrue(e.getMessage().contains("`with loud`"), e.getMessage());
+    }
+
+    @Test
+    void withOfAHandlerAcceptedWhenTheRowHasIt() {
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(LOUD + """
+                fn price :: Int Int ::: Console
+                  => cents
+                  with loud do (log "declared")
+                  cents
+                price 100
+                """, "irij.Program"));
+    }
+
+    @Test
+    void topLevelWithNeedsNothing() {
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(LOUD + """
+                with loud do (log "top level has every effect")
+                """, "irij.Program"));
+    }
+
+    @Test
+    void inlineAndBlockWithBothCharged() {
+        expectFail(LOUD + """
+                fn f
+                  =>
+                  with loud
+                    log "block form"
+                f ()
+                """);
+    }
+
+    @Test
+    void aHandlerWithAJvmRowNeedsJvm() {
+        var e = expectFail("""
+                effect Clock
+                  utc-now :: () -> Str
+                handler system-clock :: Clock ::: JVM
+                  utc-now () => resume ((java.time.Instant/now ())#toString ())
+                fn stamp :: Str
+                  =>
+                  with system-clock do (utc-now ())
+                stamp ()
+                """);
+        assertTrue(e.getMessage().contains("Effect 'JVM' not declared in fn stamp"), e.getMessage());
+    }
+
+    @Test
+    void anOuterHandlerInTheCompositionMeetsAnInnerOnesRow() {
+        // `logs >> cnt` is `with logs (with cnt …)`: cnt's clauses perform
+        // L, which logs handles; only logs's Console reaches the fn.
+        String src = """
+                effect L
+                  lg :: Str -> ()
+                effect C
+                  c :: () -> ()
+                handler logs :: L ::: Console
+                  lg m =>
+                    println m
+                    resume ()
+                handler cnt :: C ::: L
+                  c () =>
+                    lg "from cnt"
+                    resume ()
+                """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(src + """
+                fn run ::: Console
+                  =>
+                  with logs >> cnt do (c ())
+                run ()
+                """, "irij.Program"));
+        var e = expectFail(src + """
+                fn run ::: Console
+                  =>
+                  with cnt >> logs do (c ())
+                run ()
+                """);
+        assertTrue(e.getMessage().contains("Effect 'L' not declared"), e.getMessage());
+    }
+
+    @Test
+    void theEffectsAWithNeedsReachTheCallerOfALambda() {
+        // A lambda's inferred effects include what its `with` installs.
+        var e = expectFail(LOUD + """
+                fn apply :: (Fn):eff _ _ ::: eff
+                  (f x -> f x)
+                fn quiet :: Int Int
+                  => n
+                  apply (k -> with loud do (log "x")) n
+                quiet 1
+                """);
+        assertTrue(e.getMessage().contains("Console"), e.getMessage());
+    }
+
+    @Test
+    void unsafeJvmStaysTheExplicitEscapeHatch() {
+        // unsafe-jvm declares no row: installing it needs nothing.
+        assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+                use std.jvm {unsafe-jvm}
+                fn parse :: Str Int
+                  => s
+                  with unsafe-jvm
+                    Long/parseLong s
+                parse "42"
+                """, "irij.Program"));
+    }
 }

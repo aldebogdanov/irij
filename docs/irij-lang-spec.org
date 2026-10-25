@@ -706,6 +706,20 @@
    with the builtin =print=, is captured by =mock-console= below, and a
    handler that leaves a clause out passes that operation on.
 
+   *A =with= does what its handler's clauses do:* a handler's row
+   (=handler loud :: Log ::: Console=) names the effects its clauses
+   perform, so =with loud …= needs them in the enclosing function's row,
+   exactly as a call to a =::: Console= function would. The =with=
+   discharges the handler's own effect (=Log=) for its body; the
+   handler's row passes out to the caller. In =with h1 >> h2=, which is
+   =with h1 (with h2 …)=, =h1='s effect meets =h2='s row. Top-level code
+   has every effect, so a program installs its real handlers there (or
+   in =main=, which declares them). Without the rule a function declared
+   pure could print, read the clock or reach Java by installing a
+   handler that does. =unsafe-jvm= (=std.jvm=) declares no row: it is
+   the one handler whose =with= grants =JVM= to its body for nothing,
+   and its name says so.
+
    *Resuming:* a clause ends in one of two ways. =resume v= hands =v=
    back to the perform site as the operation's result, and the body
    carries on from there. =resume= does not return to the clause, so it

@@ -7,6 +7,7 @@ import dev.irij.ast.Pattern;
 import dev.irij.ast.SpecExpr;
 import dev.irij.ast.Stmt;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -80,6 +81,9 @@ public final class EffectRowChecker {
                              java.util.LinkedHashMap<String, SpecExpr> fields) {}
     private final Map<String, String> effectOps = new HashMap<>();
     private final Map<String, String> handlerEffect = new HashMap<>();
+    /** handler-name → its declared row ({@code handler loud :: Log ::: Console}
+     *  → [Console]): what its clauses do, so what a {@code with} of it does. */
+    private final Map<String, List<String>> handlerRow = new HashMap<>();
     /** Set of declared effect names (from EffectDecl). Used to detect
      *  capability binds: `rnd :: Random := java.util.Random/new 42`
      *  binds `rnd` carrying the Random capability if Random is in this set. */
@@ -213,6 +217,8 @@ public final class EffectRowChecker {
                 }
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 handlerEffect.put(hd.name(), hd.effectName());
+                handlerRow.put(hd.name(), hd.requiredEffects() != null
+                        ? hd.requiredEffects() : List.of());
             } else if (inner instanceof Decl.SpecDecl sd
                     && sd.body() instanceof Decl.SpecBody.ProductSpec ps) {
                 // Convert ProductSpec to a flat field map so call sites
@@ -538,6 +544,7 @@ public final class EffectRowChecker {
                     inner = new HashSet<>(avail);
                     inner.addAll(added);
                 }
+                if (avail != AMBIENT && !opaque) requireHandlerRows(w, avail, ctx);
                 walkScoped(w.body(), inner, ctx);
                 if (w.onFailure() != null) walkScoped(w.onFailure(), inner, ctx);
             }
@@ -1175,6 +1182,18 @@ public final class EffectRowChecker {
                 collectHandlerEffects(w.handler(), handled);
                 inner.removeAll(handled);
                 out.addAll(inner);
+                // The handler's clauses run with its own row: a `with`
+                // does what its handler's clauses do.
+                List<String> names = new ArrayList<>();
+                if (collectHandlerNames(w.handler(), names)) {
+                    Set<String> byOuter = new HashSet<>();
+                    for (String n : names) {
+                        for (String e : handlerRow.getOrDefault(n, List.of())) {
+                            if (!isRowVar(e) && !"Any".equals(e) && !byOuter.contains(e)) out.add(e);
+                        }
+                        byOuter.add(handlerEffect.get(n));
+                    }
+                }
             }
             default -> {}
         }
@@ -1196,6 +1215,53 @@ public final class EffectRowChecker {
         Set<String> out = new HashSet<>(base);
         out.add(extra);
         return out;
+    }
+
+    /** A `with` does what its handler's clauses do: every effect in the
+     *  handler's declared row ({@code handler loud :: Log ::: Console})
+     *  must be in the enclosing fn's row, as a call to a fn with that row
+     *  would. Without this a fn declaring no effects could print, read the
+     *  clock or reach Java by installing a handler that does. A handler
+     *  with no row ({@code unsafe-jvm}) needs nothing: installing it is the
+     *  one explicit escape hatch. */
+    private void requireHandlerRows(Stmt.With w, Set<String> avail, String ctx) {
+        List<String> names = new ArrayList<>();
+        if (!collectHandlerNames(w.handler(), names)) return;
+        // `h1 >> h2` is `with h1 (with h2 …)`: h2's clauses run inside h1,
+        // so h1's effect meets h2's row.
+        Set<String> outer = new HashSet<>(avail);
+        for (String n : names) {
+            for (String e : handlerRow.getOrDefault(n, List.of())) {
+                if (isRowVar(e) || "Any".equals(e) || outer.contains(e)) continue;
+                throw new IrijCompiler.CompileException(
+                        "Effect '" + e + "' not declared in " + ctx + ": `with "
+                                + shown(n) + "` installs a handler whose clauses perform "
+                                + e + " (`handler " + shown(n) + " :: "
+                                + shown(handlerEffect.get(n)) + " ::: "
+                                + String.join(" ", handlerRow.get(n).stream().map(EffectRowChecker::shown).toList())
+                                + "`) — add ::: " + e + " to the enclosing function's effect row,"
+                                + " or install the handler where " + e + " is available"
+                                + " (top-level code has every effect)" + at(w.loc()));
+            }
+            outer.add(handlerEffect.get(n));
+        }
+    }
+
+    /** The handler declarations a `with` expression names: a Var, or a
+     *  {@code >>} composition of them. False when any part is opaque. */
+    private boolean collectHandlerNames(Expr handler, List<String> out) {
+        if (handler instanceof Expr.Var v) {
+            if (!handlerEffect.containsKey(v.name())) return false;
+            out.add(v.name());
+            return true;
+        }
+        if (handler instanceof Expr.Compose c) {
+            return collectHandlerNames(c.left(), out) & collectHandlerNames(c.right(), out);
+        }
+        if (handler instanceof Expr.BinaryOp bo && ">>".equals(bo.op())) {
+            return collectHandlerNames(bo.left(), out) & collectHandlerNames(bo.right(), out);
+        }
+        return false;
     }
 
     /** Collect every effect-name provided by a `with` handler

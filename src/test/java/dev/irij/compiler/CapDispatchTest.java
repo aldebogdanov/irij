@@ -69,7 +69,7 @@ class CapDispatchTest {
             cap test-counter :: Counter = "dev.irij.compiler.TestCounterCapability"
             handler default-counter :: Counter ::: JVM
               bump () => resume (test-counter.bump ())
-            fn run ::: Counter
+            fn run ::: Counter JVM
               _ =>
                 with default-counter
                   a := bump ()
@@ -94,7 +94,7 @@ class CapDispatchTest {
             cap test-counter :: Counter = "dev.irij.compiler.TestCounterCapability"
             handler default-counter :: Counter ::: JVM
               bump () => resume (test-counter.add 10 32)
-            fn run ::: Counter
+            fn run ::: Counter JVM
               _ =>
                 with default-counter
                   bump ()
@@ -119,11 +119,11 @@ class CapDispatchTest {
               bump () => resume (real-counter.bump ())
             handler mock-h :: Counter ::: JVM
               bump () => resume (mock-counter.bump ())
-            fn run-real ::: Counter
+            fn run-real ::: Counter JVM
               _ =>
                 with real-h
                   bump ()
-            fn run-mock ::: Counter
+            fn run-mock ::: Counter JVM
               _ =>
                 with mock-h
                   bump ()

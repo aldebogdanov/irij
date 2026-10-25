@@ -68,6 +68,8 @@ opted out of Irij's effect-tracking guarantees within this block.
 | `fn f ::: Console JVM (...)` | ✅ row-combined |
 | `with unsafe-jvm body` (inline) | ✅ for the body's anonymous code |
 | `with unsafe-jvm; f (...)` where f is `fn f (s -> Long/parseLong s)` | ❌ — fn boundary enforces its own row |
+| `fn f` (no row) doing `with default-fs …` (`handler default-fs :: FileIO ::: JVM`) | ❌ — a `with` needs its handler's row (effects.md, pattern 4) |
+| top-level `with default-fs …` | ✅ ambient |
 
 The last row is intentional: fn-level annotations are a static
 contract, *independent* of dynamic scope. To call Java from a helper
@@ -84,10 +86,16 @@ fn roll-die ::: Random
   _ -> rand-int 6
 ```
 
-The `Random` effect operation `rand-int` is implemented inside the
-`default-random` handler which DOES touch `java.util.Random`. The
-handler clause has `::: JVM` itself. The capability is contained:
-callers see `::: Random`, the implementation deals with `::: JVM`.
+A library does the same: a `pub effect` for the resource (`Clock`,
+`Mailer`), `pub fn`s whose rows name only that effect, and a
+`pub handler system-clock :: Clock ::: JVM` whose clauses are the only
+Java in the module (plus private `::: JVM` helpers they call), next to
+a fake handler for tests. Callers see `::: Clock`; `JVM` appears where
+the real handler is installed — top-level code, which has every
+effect, or a `main` that declares `::: JVM`. Installing it inside a
+function needs `::: JVM` there: a `with` does what its handler's
+clauses do (effects.md, pattern 4), so a function can't look pure and
+still reach Java through a handler.
 
 ## What this doesn't catch
 
