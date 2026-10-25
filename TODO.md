@@ -784,6 +784,8 @@ Full design and the recorded Quint behaviour it rests on:
 
 - [x] **A `with` needs its handler's row** — DONE (2026-10, spec §3.2, approved). `handler loud :: Log ::: Console` installed by `with loud` inside `fn price :: Int Int` printed from a fn declared pure; the same went for reading the clock and calling Java through `default-fs` & co. — the `with` discharged `Log` and charged nothing. Now the handler's row must be in the enclosing fn's row (EffectRowChecker.requireHandlerRows); in `h1 >> h2` h1's effect meets h2's row; effect inference carries the rows to a lambda's caller. `unsafe-jvm` is deprecated: it now declares `::: JVM`, so it grants nothing, and every `with` of it warns. std.db's private `db-tx-wrapper`, three test files and two examples declared the effects they had been getting for free.
   - [ ] A handler the checker can't name statically (`h := pick-handler ()`, then `with h`) is still not charged, and its body is checked as AMBIENT: needs handler values to carry their row in the spec (`:: Handler Log ::: Console`)
+  - [x] A call through a Java cap performs the cap's effect, not JVM: std handlers are `default-db :: Db ::: Db` & co., so installing one charges `Db`, not `JVM` (capabilities.md)
+  - [ ] A Java member on a value a cap returns (`(instant.now ())#toString ()`) still needs JVM; charging it to the cap's effect needs `RtInterop.javaMember`'s runtime check to accept the clause's row
   - [ ] Remove `unsafe-jvm` from std.jvm after a release with the warning
   - [ ] `irij test` stops at the first file that fails to compile (prints the CompileException and exits) instead of reporting that file and running the rest
 

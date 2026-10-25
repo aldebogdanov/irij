@@ -392,7 +392,10 @@ The checker rejects four patterns:
    `Console` (`requireHandlerRows`). The handler's clauses run with its
    row, so installing it does what they do; without this, a fn declared
    pure could print, read the clock or call Java through a handler. In
-   `h1 >> h2` (`with h1 (with h2 …)`) h1's effect meets h2's row.
+   `h1 >> h2` (`with h1 (with h2 …)`) h1's effect meets h2's row. A
+   handler that calls a Java cap declares the cap's effect
+   (`default-db :: Db ::: Db`, capabilities.md), so installing a std
+   handler charges `Db` / `FileIO` / `Serve`, never `JVM`.
    `unsafe-jvm` declares `::: JVM` like any handler, so it is charged
    too (deprecated: `warnDeprecatedHandlers` warns at every `with` of it,
    top level included, through the spec-lint channel). Effect inference

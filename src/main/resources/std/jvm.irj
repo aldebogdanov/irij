@@ -25,10 +25,12 @@ mod std.jvm
 ;;
 ;;   parse-int "42"          ;; top level has every effect
 ;;
-;; A library keeps JVM in its handlers: a `pub effect` for the resource,
-;; `pub fn`s that name only that effect, and a real handler
-;; `:: Clock ::: JVM` installed at the program's edge (top level, or a
-;; `main ::: JVM`). JVM needs no import to be named in a row.
+;; A library keeps Java behind a cap instead: a `pub effect` for the
+;; resource, `cap instant :: Clock = "java.time.Instant"`, and a real
+;; handler `system-clock :: Clock ::: Clock` whose clauses call the cap.
+;; A cap call performs the cap's effect, so whoever installs the handler
+;; declares `::: Clock`, never JVM. JVM needs no import to be named in a
+;; row.
 
 pub effect JVM
 

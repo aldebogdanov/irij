@@ -56,11 +56,19 @@ public final class EffectRowChecker {
      *  references in unrelated handler clauses fail with a precise
      *  error. */
     private final Map<String, String> capEffect = new HashMap<>();
+    /** Caps bound to a Java provider class (not a record of Irij fns):
+     *  a call through one reaches the world, so it performs its effect. */
+    private final Set<String> javaCaps = new HashSet<>();
 
     /** Effect name currently being inspected inside a handler clause —
      *  set by {@link #checkHandler} before walking each clause body and
      *  cleared after. {@code null} outside clause bodies. */
     private String currentClauseEffect = null;
+    /** The declared row of the handler whose clauses are being walked
+     *  (null outside one). A cap call performs the cap's effect, so the
+     *  handler must declare it: {@code handler default-db :: Db ::: Db}. */
+    private List<String> currentHandlerRow = null;
+    private String currentHandlerName = null;
 
     private final Map<String, List<String>> fnRows = new HashMap<>();
     /** fn-name → spec annotations (inputs..., output). Used at call
@@ -243,6 +251,7 @@ public final class EffectRowChecker {
                 namedSpecs.put(sd.name(),
                         new NamedSpec(sd.rowParams(), fields));
             } else if (inner instanceof Decl.CapDecl cap) {
+                if (cap.providerClass() != null) javaCaps.add(cap.name());
                 String prev = capEffect.put(cap.name(), cap.effectName());
                 if (prev != null && !prev.equals(cap.effectName())) {
                     throw new IrijCompiler.CompileException(
@@ -457,6 +466,8 @@ public final class EffectRowChecker {
         // inside clause bodies are checked against it.
         String savedClauseEffect = currentClauseEffect;
         currentClauseEffect = hd.effectName();
+        currentHandlerRow = declared;
+        currentHandlerName = hd.name();
         try {
             for (var c : hd.clauses()) {
                 locals.clear();
@@ -466,6 +477,8 @@ public final class EffectRowChecker {
             locals.clear();
         } finally {
             currentClauseEffect = savedClauseEffect;
+            currentHandlerRow = null;
+            currentHandlerName = null;
         }
     }
 
@@ -646,6 +659,23 @@ public final class EffectRowChecker {
                                                   + currentClauseEffect + "' clause"
                                                 : "")
                                         + at(da.loc()));
+                    }
+                    // A cap call performs the cap's effect — it reaches the
+                    // world through the bound Java class — so the handler
+                    // declares it, and a `with` of the handler charges it to
+                    // the installer (pattern 4) instead of JVM.
+                    if (javaCaps.contains(v.name())
+                            && currentHandlerRow != null && !currentHandlerRow.contains(capEff)
+                            && !currentHandlerRow.contains("Any")) {
+                        throw new IrijCompiler.CompileException(
+                                "Capability '" + shown(v.name()) + "' performs " + capEff
+                                        + ": handler " + shown(currentHandlerName)
+                                        + " calls it, so it declares the effect — `handler "
+                                        + shown(currentHandlerName) + " :: " + capEff + " ::: "
+                                        + String.join(" ", java.util.stream.Stream.concat(
+                                                currentHandlerRow.stream().map(EffectRowChecker::shown),
+                                                java.util.stream.Stream.of(capEff)).toList())
+                                        + "`" + at(da.loc()));
                     }
                     // Legal cap use — short-circuit. Don't descend into the
                     // target (would re-trigger the bare-Var cap check) and

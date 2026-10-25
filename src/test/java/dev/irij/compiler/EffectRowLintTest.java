@@ -352,7 +352,7 @@ class EffectRowLintTest {
             effect Db
               db-open :: Str -> Int
             cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
-            handler default-db :: Db ::: JVM
+            handler default-db :: Db ::: Db
               db-open path => resume (db-jdbc.open path)
             """;
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
@@ -364,7 +364,7 @@ class EffectRowLintTest {
             effect Fs
               fs-read :: Str -> Str
             pub cap fs-files :: Fs = "dev.irij.runtime.FsCapability"
-            handler default-fs :: Fs ::: JVM
+            handler default-fs :: Fs ::: Fs
               fs-read path => resume (fs-files.read path)
             """;
         assertDoesNotThrow(() -> IrijCompiler.compileSource(src, "irij.Program"));
@@ -742,5 +742,61 @@ class EffectRowLintTest {
         String out = err.toString();
         assertTrue(out.contains("`unsafe-jvm` is deprecated") && out.contains("in fn parse"), out);
         assertTrue(out.contains("in top-level code"), out);
+    }
+
+    // ── A Java cap call performs the cap's effect, not JVM ─────────────
+
+    private static final String CLOCK = """
+            effect Clock
+              utc-now :: () -> Str
+            cap instant :: Clock = "java.time.Instant"
+            cap text :: Clock = "java.lang.String"
+            """;
+
+    @Test
+    void aHandlerCallingAJavaCapDeclaresItsEffect() {
+        var e = expectFail(CLOCK + """
+                handler system-clock :: Clock
+                  utc-now () => resume (text.valueOf (instant.now ()))
+                """);
+        assertTrue(e.getMessage().contains("performs Clock: handler system-clock calls it")
+                && e.getMessage().contains("`handler system-clock :: Clock ::: Clock`"), e.getMessage());
+    }
+
+    @Test
+    void installingACapHandlerChargesItsEffectNotJvm() {
+        String h = CLOCK + """
+                handler system-clock :: Clock ::: Clock
+                  utc-now () => resume (text.valueOf (instant.now ()))
+                """;
+        assertDoesNotThrow(() -> IrijCompiler.compileSource(h + """
+                fn stamp :: Str ::: Clock
+                  =>
+                  with system-clock do (utc-now ())
+                stamp ()
+                """, "irij.Program"));
+        var e = expectFail(h + """
+                fn stamp :: Str
+                  =>
+                  with system-clock do (utc-now ())
+                stamp ()
+                """);
+        assertTrue(e.getMessage().contains("Effect 'Clock' not declared in fn stamp"), e.getMessage());
+    }
+
+    @Test
+    void aRecordCapPerformsNothing() {
+        // An in-process mock: no Java behind it, so a pure fn may install it.
+        assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+                effect Greet
+                  greet :: Str -> Str
+                cap mock-greet :: Greet = {greet= (n -> "Hi, " ++ n)}
+                handler mocked :: Greet
+                  greet n => resume (mock-greet.greet n)
+                fn hello :: Str
+                  =>
+                  with mocked do (greet "Ada")
+                hello ()
+                """, "irij.Program"));
     }
 }

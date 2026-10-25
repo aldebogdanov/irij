@@ -31,14 +31,14 @@ r2 := test "absent through the handler" (-> assert-false (run-mock-absent ()))
 
 ;; ── Real handler: nothing outside resources/ is reachable ─────────
 
-fn run-real-absent ::: JVM
+fn run-real-absent ::: Resource
   =>
   with resource.default-resource
     resource-exists? "no-such-resource.txt"
 
 r3 := test "real handler: a missing resource is absent" (-> assert-false (run-real-absent ()))
 
-fn run-real-outside ::: JVM
+fn run-real-outside ::: Resource
   =>
   with resource.default-resource
     resource-exists? "irij.toml"

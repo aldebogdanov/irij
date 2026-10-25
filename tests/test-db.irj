@@ -21,7 +21,7 @@ fn open-close-body ::: Db
   db-close conn
   result
 
-fn test-open-close ::: Db JVM
+fn test-open-close ::: Db
   =>
   with db.default-db
     open-close-body ()
@@ -42,7 +42,7 @@ fn round-trip-body ::: Db
   assert-eq "Bob" (head (tail rows)).name
   db-close conn
 
-fn test-round-trip ::: Db JVM
+fn test-round-trip ::: Db
   =>
   with db.default-db
     round-trip-body ()
@@ -62,7 +62,7 @@ fn affected-body ::: Db
   db-close conn
   n
 
-fn test-affected ::: Db JVM
+fn test-affected ::: Db
   =>
   with db.default-db
     affected-body ()
@@ -84,7 +84,7 @@ fn types-body ::: Db
   assert-eq 42 row.i
   db-close conn
 
-fn test-types ::: Db JVM
+fn test-types ::: Db
   =>
   with db.default-db
     types-body ()
@@ -104,7 +104,7 @@ fn null-body ::: Db
   assert-eq "Unit" (type-of row.b)
   db-close conn
 
-fn test-null ::: Db JVM
+fn test-null ::: Db
   =>
   with db.default-db
     null-body ()
@@ -127,7 +127,7 @@ fn tx-commit-body ::: Db
   assert-eq "inside-tx" (head rows).v
   db-close conn
 
-fn test-tx-commit ::: Db JVM
+fn test-tx-commit ::: Db
   =>
   with db.default-db
     tx-commit-body ()
@@ -152,7 +152,7 @@ fn tx-rollback-body ::: Db
   assert-eq 0 (length rows)
   db-close conn
 
-fn test-tx-rollback ::: Db JVM
+fn test-tx-rollback ::: Db
   =>
   with db.default-db
     tx-rollback-body ()

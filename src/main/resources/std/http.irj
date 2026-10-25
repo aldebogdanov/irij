@@ -33,7 +33,7 @@ pub effect Http
 ;; Http-handler clauses.
 cap http-client :: Http = "dev.irij.runtime.HttpClientCapability"
 
-pub handler default-http :: Http ::: JVM
+pub handler default-http :: Http ::: Http
   http-get url =>
     resume (http-client.request {method= "GET" url= url})
   http-post url body headers =>

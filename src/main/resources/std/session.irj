@@ -28,7 +28,7 @@ pub effect Session
 
 cap session-mgr :: Session = "dev.irij.runtime.SessionCapability"
 
-pub handler default-session :: Session ::: JVM
+pub handler default-session :: Session ::: Session
   session-create =>
     resume (session-mgr.create ())
   session-eval id code timeout =>

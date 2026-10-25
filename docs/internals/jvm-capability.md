@@ -69,7 +69,7 @@ it (`warnDeprecatedHandlers`); it will be removed.
 | `fn f ::: JVM (...)` | ✅ explicit |
 | `fn f ::: Console JVM (...)` | ✅ row-combined |
 | `fn f` (no row) doing `with unsafe-jvm …` | ❌ — `unsafe-jvm :: JVM ::: JVM`; deprecated, warns |
-| `fn f` (no row) doing `with default-fs …` (`handler default-fs :: FileIO ::: JVM`) | ❌ — a `with` needs its handler's row (effects.md, pattern 4) |
+| `fn f` (no row) doing `with default-fs …` (`handler default-fs :: FileIO ::: FileIO`) | ❌ — needs `::: FileIO`, not `JVM`: a `with` needs its handler's row (effects.md, pattern 4) |
 | top-level `with default-fs …` | ✅ ambient |
 
 Fn-level annotations are a static contract, *independent* of dynamic
@@ -86,16 +86,29 @@ fn roll-die ::: Random
   _ -> rand-int 6
 ```
 
-A library does the same: a `pub effect` for the resource (`Clock`,
-`Mailer`), `pub fn`s whose rows name only that effect, and a
-`pub handler system-clock :: Clock ::: JVM` whose clauses are the only
-Java in the module (plus private `::: JVM` helpers they call), next to
-a fake handler for tests. Callers see `::: Clock`; `JVM` appears where
-the real handler is installed — top-level code, which has every
-effect, or a `main` that declares `::: JVM`. Installing it inside a
-function needs `::: JVM` there: a `with` does what its handler's
-clauses do (effects.md, pattern 4), so a function can't look pure and
-still reach Java through a handler.
+A library does the same through a **cap**: a `pub effect` for the
+resource (`Clock`, `Mailer`), `pub fn`s whose rows name only that
+effect, a `cap` binding a Java class to it, and a real handler whose
+clauses call the cap:
+
+```
+pub effect Clock
+  utc-now :: () -> Str
+
+cap instant :: Clock = "java.time.Instant"   ;; a JDK class works too
+cap text :: Clock = "java.lang.String"
+
+pub handler system-clock :: Clock ::: Clock
+  utc-now () => resume (text.valueOf (instant.now ()))
+```
+
+A call through a Java cap performs the cap's effect, not `JVM`
+(capabilities.md § A Java cap call performs its effect), so the real
+handler's row is its own effect — the shape `default-time :: Time :::
+Time` always had — and a fn that installs it declares `::: Clock`, the
+resource it touches. `JVM` appears only where someone writes
+`Class/member` or `#member` by hand. The `cap` line is the trust point:
+it says "this Java class implements `Clock`", once, greppably.
 
 ## What this doesn't catch
 

@@ -43,12 +43,12 @@ cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"
 ;; can still perform Db ops while the transaction is in flight (the
 ;; outer with-frame has been unwound by the time `transaction` invokes
 ;; the thunk via the cap).
-fn db-tx-wrapper ::: Db JVM
+fn db-tx-wrapper ::: Db
   => thunk
   with default-db
     thunk ()
 
-pub handler default-db :: Db ::: JVM
+pub handler default-db :: Db ::: Db
   db-open path =>
     resume (db-jdbc.open path)
   db-close conn =>

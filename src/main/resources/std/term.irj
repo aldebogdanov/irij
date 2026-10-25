@@ -68,7 +68,7 @@ pub effect Term
 ;; clauses (lint-enforced by EffectRowChecker).
 cap term-jline :: Term = "dev.irij.runtime.TermCapability"
 
-pub handler default-term :: Term ::: JVM
+pub handler default-term :: Term ::: Term
   term-enter opts =>
     term-jline.enter opts
     resume ()

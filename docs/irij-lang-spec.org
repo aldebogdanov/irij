@@ -824,6 +824,15 @@
      ;; DbWrite capability does not exist here — cannot be leaked
    #+end_example
 
+   *Java-backed capabilities (implemented):* =cap db-jdbc :: Db =
+   "…JdbcCapability"= binds a Java class to an effect. A call through it,
+   inside a clause of a handler for =Db=, performs =Db=: the handler
+   declares it (=handler default-db :: Db ::: Db=), and by §3.2 a function
+   that installs the handler declares =::: Db= — the resource it touches —
+   rather than =JVM=. =JVM= is left for hand-written =Class/member= and
+   =#member= interop. A cap whose right side is a record of Irij
+   functions performs nothing.
+
 * Part IV: Structured Concurrency
 
 ** 4.1 Design: Concurrency as Effects

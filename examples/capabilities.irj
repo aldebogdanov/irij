@@ -16,9 +16,9 @@ use std.fs {FileIO}
 ;; 1. Java-backed cap is the default shape for stdlib modules.
 ;;    std.fs already declares  cap fs-files :: FileIO = "..."
 ;;    and exposes  fs-read / fs-write / fs-exists?  effect ops.
-;;    User code just runs `with default-fs do (op …)` — at top level,
-;;    which has every effect. Inside a fn, the fn declares ::: JVM:
-;;    a `with` does what its handler's clauses do (default-fs ::: JVM).
+;;    User code just runs `with default-fs do (op …)`. The cap call
+;;    performs FileIO, so `default-fs :: FileIO ::: FileIO`, and a fn
+;;    that installs it declares ::: FileIO — never JVM.
 ;; ═══════════════════════════════════════════════════════════════════
 
 irij-toml-exists := with fs.default-fs do (fs-exists? "irij.toml")
@@ -77,7 +77,7 @@ console-run ()
 ;; 4. Inline `with do …` — saves the helper-fn dance.
 ;; ═══════════════════════════════════════════════════════════════════
 
-fn list-count ::: FileIO JVM
+fn list-count ::: FileIO
   => dir
   with fs.default-fs do (length (fs-list-dir dir))
 
