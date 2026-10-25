@@ -27,6 +27,10 @@ import java.util.List;
  * vrata = "0.1.1"                                          # registry shorthand
  * utils = { git = "https://github.com/user/utils.git", tag = "v1.0" }  # git inline
  * local-lib = { path = "../my-lib" }                        # path inline
+ *
+ * [trust]                         # optional — see {@link Trust}
+ * caps = ["acme.clock"]           # modules that may bind a Java class with `cap`
+ * jvm = ["seed-readme"]           # modules that may write Java interop by hand
  * </pre>
  *
  * <p>Seeds (dependencies) support three source types:
@@ -64,6 +68,41 @@ public final class ProjectFile {
         String repo,
         String docs
     ) {}
+
+    /**
+     * The {@code [trust]} section: which modules may reach Java. With it,
+     * the compiler refuses a Java {@code cap} declaration in a module not
+     * matched by {@code caps}, and hand-written Java interop
+     * ({@code Class/member}, {@code obj#member}, {@code #member}) in a
+     * module not matched by {@code jvm} — so "anything can happen through
+     * Java" is confined to the modules listed. Without the section nothing
+     * is enforced. Patterns are a module name ({@code "acme.clock"}) or a
+     * prefix ({@code "acme.*"}: {@code acme} and everything under it); the
+     * entry program (a file without {@code mod}) is {@code "main"}. The
+     * standard library ({@code std.*}) is always trusted. Seeds are
+     * covered too: the policy is the root project's.
+     */
+    public record Trust(List<String> caps, List<String> jvm) {
+        public boolean allowsCaps(String module) { return matches(caps, module); }
+        public boolean allowsJvm(String module) { return matches(jvm, module); }
+
+        public static boolean isStd(String module) {
+            return module != null && (module.equals("std") || module.startsWith("std."));
+        }
+
+        private static boolean matches(List<String> patterns, String module) {
+            if (isStd(module)) return true;
+            String m = module == null ? "main" : module;
+            for (String p : patterns) {
+                if (p.equals(m)) return true;
+                if (p.endsWith(".*")) {
+                    String prefix = p.substring(0, p.length() - 2);
+                    if (m.equals(prefix) || m.startsWith(prefix + ".")) return true;
+                }
+            }
+            return false;
+        }
+    }
 
     private ProjectFile() {}
 
@@ -123,7 +162,37 @@ public final class ProjectFile {
             }
         }
 
-        return new ParseResult(meta, List.copyOf(seeds));
+        return new ParseResult(meta, List.copyOf(seeds), parseTrust(toml));
+    }
+
+    private static Trust parseTrust(Toml toml) {
+        var t = toml.getTable("trust");
+        if (t == null) return null;
+        for (String key : t.toMap().keySet()) {
+            if (!key.equals("caps") && !key.equals("jvm")) {
+                throw new ParseError("[trust] has an unknown key '" + key
+                        + "' — it takes `caps` and `jvm`, lists of module names");
+            }
+        }
+        return new Trust(stringList(t, "caps"), stringList(t, "jvm"));
+    }
+
+    private static List<String> stringList(Toml t, String key) {
+        if (!t.contains(key)) return List.of();
+        List<Object> raw;
+        try {
+            raw = t.getList(key);
+        } catch (ClassCastException e) {
+            throw new ParseError("[trust] " + key + " must be a list of module names, like [\"acme.clock\"]");
+        }
+        var out = new ArrayList<String>();
+        for (Object o : raw) {
+            if (!(o instanceof String str) || str.isBlank()) {
+                throw new ParseError("[trust] " + key + " must be a list of module names, like [\"acme.clock\"]");
+            }
+            out.add(str);
+        }
+        return List.copyOf(out);
     }
 
     /** Extract just the seed list (convenience for loadDeps). */
@@ -155,8 +224,9 @@ public final class ProjectFile {
     }
 
     /** Result of parsing irij.toml. */
-    public record ParseResult(ProjectMeta meta, List<Dependency> deps) {
-        static final ParseResult EMPTY = new ParseResult(null, List.of());
+    /** {@code trust} is null when irij.toml has no {@code [trust]}. */
+    public record ParseResult(ProjectMeta meta, List<Dependency> deps, Trust trust) {
+        static final ParseResult EMPTY = new ParseResult(null, List.of(), null);
     }
 
     /** Error thrown when irij.toml has syntax errors. */

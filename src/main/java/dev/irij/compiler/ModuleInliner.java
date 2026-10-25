@@ -211,8 +211,17 @@ final class ModuleInliner {
             // `::: Any`. The emitter skips them. The PubDecl wrapper goes:
             // the emitter treats a pub fn as a fn.
             out.add(inner);
+            declOrigin.put(inner, new TrustChecker.Origin(module, currentFile));
         }
     }
+
+    /** Each inlined decl → the module it came from (null for the program)
+     *  and its file. By identity: records compare by value, and two
+     *  modules may hold equal decls. Read by {@link TrustChecker}. */
+    private final java.util.IdentityHashMap<Decl, TrustChecker.Origin> declOrigin =
+            new java.util.IdentityHashMap<>();
+
+    java.util.Map<Decl, TrustChecker.Origin> declOrigin() { return declOrigin; }
 
     private void loadAndInline(String qualifiedName, List<Decl> out) {
         if (!loaded.add(qualifiedName)) return;

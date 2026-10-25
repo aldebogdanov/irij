@@ -833,6 +833,14 @@
    =#member= interop. A cap whose right side is a record of Irij
    functions performs nothing.
 
+   *Trust (implemented):* a project confines Java to the modules it names
+   in =irij.toml='s =[trust]= — =caps= for those that may bind a Java
+   class with =cap=, =jvm= for those that may write Java interop by hand
+   (=std.*= always may; the entry program is ="main"=). The compiler
+   refuses Java anywhere else, its own modules and its seeds alike, and
+   =irij audit= lists every site. With it, a dependency that claims only
+   =Log= cannot reach the network through Java either.
+
 * Part IV: Structured Concurrency
 
 ** 4.1 Design: Concurrency as Effects
