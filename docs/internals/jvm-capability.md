@@ -40,23 +40,25 @@ current effect-row stack (`AVAILABLE_EFFECTS`). Top-level scripts get
 `AMBIENT_EFFECTS` (everything available), so scripts work. Annotated
 fns must declare `::: JVM` to touch Java.
 
-## Default handler
+## `std.jvm` and the deprecated `unsafe-jvm`
 
 `std.jvm` ships:
 
 ```
 mod std.jvm
 pub effect JVM
-pub handler unsafe-jvm :: JVM
+pub handler unsafe-jvm :: JVM ::: JVM     ;; deprecated
 ```
 
-`effect JVM` has no operations — it's a capability marker. The handler
-likewise has no clauses. `with unsafe-jvm body` simply adds `JVM` to
-the available effect set for the body's dynamic extent. Suitable for
-inline scripts.
-
-The name `unsafe-jvm` is deliberate — it signals the trade-off: you've
-opted out of Irij's effect-tracking guarantees within this block.
+`effect JVM` has no operations — it's a capability marker, and it
+needs no import to be named in a row. `unsafe-jvm` has no clauses.
+It used to declare no row, so `with unsafe-jvm body` added `JVM` to a
+block inside a fn that didn't declare it — the escape hatch that let a
+fn declared pure call Java. Its one use in the wild (irij.online's
+`stored-readme`) was exactly that. Since a `with` needs its handler's
+row (effects.md, pattern 4), it declares `::: JVM`: installing it needs
+`JVM` already and grants nothing. The checker warns at every `with` of
+it (`warnDeprecatedHandlers`); it will be removed.
 
 ## Behavioural matrix
 
@@ -66,15 +68,13 @@ opted out of Irij's effect-tracking guarantees within this block.
 | `fn f (...)` | ❌ rejected at the Java site |
 | `fn f ::: JVM (...)` | ✅ explicit |
 | `fn f ::: Console JVM (...)` | ✅ row-combined |
-| `with unsafe-jvm body` (inline) | ✅ for the body's anonymous code |
-| `with unsafe-jvm; f (...)` where f is `fn f (s -> Long/parseLong s)` | ❌ — fn boundary enforces its own row |
+| `fn f` (no row) doing `with unsafe-jvm …` | ❌ — `unsafe-jvm :: JVM ::: JVM`; deprecated, warns |
 | `fn f` (no row) doing `with default-fs …` (`handler default-fs :: FileIO ::: JVM`) | ❌ — a `with` needs its handler's row (effects.md, pattern 4) |
 | top-level `with default-fs …` | ✅ ambient |
 
-The last row is intentional: fn-level annotations are a static
-contract, *independent* of dynamic scope. To call Java from a helper
-fn, that fn declares `::: JVM`. `with unsafe-jvm` doesn't override
-the fn's declaration.
+Fn-level annotations are a static contract, *independent* of dynamic
+scope: to call Java from a helper fn, that fn declares `::: JVM`, and
+no `with` inside a fn can grant an effect its row lacks.
 
 ## Stdlib pattern
 
@@ -102,8 +102,8 @@ still reach Java through a handler.
 - **Java methods that call back into Irij.** A `Runnable` impl passed
   to Java that internally performs effects — capability info is
   erased crossing the FFI boundary. Same problem every FFI has.
-- **Reference aliasing across handler boundaries.** A `with unsafe-jvm`
-  block can return a `java.util.Random` ref without spec annotation;
+- **Reference aliasing across handler boundaries.** A `::: JVM` fn
+  can return a `java.util.Random` ref without spec annotation;
   calls on that ref still flow through the plain `JVM` check. The
   per-ref propagation below catches the *annotated* case.
 

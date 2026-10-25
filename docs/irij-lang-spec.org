@@ -716,9 +716,10 @@
    has every effect, so a program installs its real handlers there (or
    in =main=, which declares them). Without the rule a function declared
    pure could print, read the clock or reach Java by installing a
-   handler that does. =unsafe-jvm= (=std.jvm=) declares no row: it is
-   the one handler whose =with= grants =JVM= to its body for nothing,
-   and its name says so.
+   handler that does. =unsafe-jvm= (=std.jvm=), which used to grant
+   =JVM= to a block for nothing, now declares =::: JVM= like any
+   handler, so it grants nothing; it is deprecated, warns, and will be
+   removed. A function that calls Java declares =::: JVM=.
 
    *Resuming:* a clause ends in one of two ways. =resume v= hands =v=
    back to the perform site as the operation's result, and the body

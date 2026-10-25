@@ -708,15 +708,39 @@ class EffectRowLintTest {
     }
 
     @Test
-    void unsafeJvmStaysTheExplicitEscapeHatch() {
-        // unsafe-jvm declares no row: installing it needs nothing.
-        assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+    void unsafeJvmNeedsJvmLikeAnyHandler() {
+        // Deprecated: unsafe-jvm declares ::: JVM, so it grants nothing.
+        var e = expectFail("""
                 use std.jvm {unsafe-jvm}
                 fn parse :: Str Int
                   => s
                   with unsafe-jvm
                     Long/parseLong s
                 parse "42"
-                """, "irij.Program"));
+                """);
+        assertTrue(e.getMessage().contains("Effect 'JVM' not declared in fn parse"), e.getMessage());
+    }
+
+    @Test
+    void unsafeJvmWarnsThatItIsDeprecated() {
+        var err = new java.io.ByteArrayOutputStream();
+        var saved = System.err;
+        System.setErr(new java.io.PrintStream(err));
+        try {
+            assertDoesNotThrow(() -> IrijCompiler.compileSource("""
+                    use std.jvm {unsafe-jvm}
+                    fn parse :: Str Int ::: JVM
+                      => s
+                      with unsafe-jvm
+                        Long/parseLong s
+                    with unsafe-jvm
+                      parse "42"
+                    """, "irij.Program"));
+        } finally {
+            System.setErr(saved);
+        }
+        String out = err.toString();
+        assertTrue(out.contains("`unsafe-jvm` is deprecated") && out.contains("in fn parse"), out);
+        assertTrue(out.contains("in top-level code"), out);
     }
 }

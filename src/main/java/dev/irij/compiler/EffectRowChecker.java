@@ -152,10 +152,20 @@ public final class EffectRowChecker {
      *  module, since inlining interleaves module decls at the use
      *  site. Empty map = fall back to the scan (LSP/tests). */
     public static void check(List<Decl> decls, Map<String, String> fnFile) {
+        check(decls, fnFile, null);
+    }
+
+    /** As above; {@code warn} (when non-null) receives deprecation
+     *  warnings — {@code with unsafe-jvm}. */
+    public static void check(List<Decl> decls, Map<String, String> fnFile,
+                             java.util.function.Consumer<String> warn) {
         var c = new EffectRowChecker();
         c.fnFileOrigin = fnFile != null ? fnFile : java.util.Map.of();
+        c.warn = warn;
         c.run(decls);
     }
+
+    private java.util.function.Consumer<String> warn;
 
     private Map<String, String> fnFileOrigin = java.util.Map.of();
 
@@ -293,6 +303,10 @@ public final class EffectRowChecker {
                 checkFn(fn);
             } else if (inner instanceof Decl.HandlerDecl hd) {
                 checkHandler(hd);
+            } else if (inner instanceof Decl.WithDecl wd) {
+                // Top-level code has every effect: nothing to check, but
+                // a deprecated handler still gets its warning.
+                warnDeprecatedHandlers(wd.with(), "top-level code");
             }
         }
     }
@@ -525,6 +539,7 @@ public final class EffectRowChecker {
             }
             case Stmt.With w -> {
                 walkExpr(w.handler(), avail, ctx);
+                warnDeprecatedHandlers(w, ctx);
                 // Collect every effect the handler expression provides
                 // (single handler Var, or `>>`-composition of multiple).
                 Set<String> added = new HashSet<>();
@@ -1244,6 +1259,22 @@ public final class EffectRowChecker {
                                 + " (top-level code has every effect)" + at(w.loc()));
             }
             outer.add(handlerEffect.get(n));
+        }
+    }
+
+    /** {@code unsafe-jvm} (std.jvm) is deprecated: it declares
+     *  {@code ::: JVM}, so installing it needs {@code JVM} already and
+     *  grants nothing — a fn that calls Java declares {@code ::: JVM}. */
+    private void warnDeprecatedHandlers(Stmt.With w, String ctx) {
+        if (warn == null) return;
+        List<String> names = new ArrayList<>();
+        collectHandlerNames(w.handler(), names);
+        for (String n : names) {
+            if ("unsafe-jvm".equals(shown(n)) && "JVM".equals(handlerEffect.get(n))) {
+                warn.accept("warning: `unsafe-jvm` is deprecated and will be removed (in " + ctx
+                        + at(w.loc()) + "): it grants nothing — declare ::: JVM on the fn that"
+                        + " calls Java and drop the `with`");
+            }
         }
     }
 
