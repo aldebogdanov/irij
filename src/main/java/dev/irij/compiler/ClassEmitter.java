@@ -4,6 +4,7 @@ import dev.irij.ast.Decl;
 import dev.irij.ast.Expr;
 import dev.irij.ast.Node;
 import dev.irij.ast.Pattern;
+import dev.irij.ast.SpecExpr;
 import dev.irij.ast.Stmt;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Handle;
@@ -66,6 +67,10 @@ final class ClassEmitter implements Opcodes {
     /** Sum-spec variants, kept in declaration order for deterministic
      *  emission. Each entry maps {@code variantName → arity}. */
     final Map<String, LinkedHashMap<String, Integer>> sumVariants = new LinkedHashMap<>();
+    /** Sum spec → each variant's encoded field specs, joined by
+     *  {@link SpecValidator#FIELD_SEP}; and every spec's type parameters. */
+    final Map<String, LinkedHashMap<String, String>> sumVariantSpecs = new LinkedHashMap<>();
+    final Map<String, List<String>> specParams = new HashMap<>();
     /** Reverse lookup: variant/product tag → enclosing spec name. Used
      *  by {@link #emitConstructorApp} to certify Tagged values with
      *  their specName so {@link SpecValidator}'s O(1) fast-path
@@ -376,19 +381,32 @@ final class ClassEmitter implements Opcodes {
                         List<String> fieldSpecs = new ArrayList<>();
                         for (Decl.SpecField f : ps.fields()) {
                             names.add(f.name());
-                            // "" where the field is unconstrained: no
-                            // annotation, a wildcard, or a type var.
-                            fieldSpecs.add(f.spec() == null || FnEmitter.skipSpec(f.spec())
+                            // "" where the field is unconstrained (no
+                            // annotation, a wildcard); a type var is kept
+                            // (`?a`) so an applied spec can bind it.
+                            fieldSpecs.add(f.spec() instanceof SpecExpr.Var
+                                    ? SpecValidator.encode(f.spec())
+                                    : f.spec() == null || FnEmitter.skipSpec(f.spec())
                                     ? "" : SpecValidator.encode(f.spec()));
                         }
                         productFields.put(sd.name(), names);
+                        specParams.put(sd.name(), sd.specParams());
                         productFieldSpecs.put(sd.name(), fieldSpecs);
                         tagToSpec.put(sd.name(), sd.name());
                     }
                     case Decl.SpecBody.SumSpec ss -> {
                         LinkedHashMap<String, Integer> vmap = new LinkedHashMap<>();
+                        LinkedHashMap<String, String> vspecs = new LinkedHashMap<>();
                         for (Decl.Variant v : ss.variants()) {
                             vmap.put(v.name(), v.arity());
+                            List<String> enc = new ArrayList<>();
+                            for (SpecExpr fs : v.fieldSpecs()) {
+                                enc.add(fs == null || fs instanceof SpecExpr.Wildcard ? "_" : SpecValidator.encode(fs));
+                            }
+                            // Unknown field specs (an AST built without them)
+                            // stay open: one "_" per field.
+                            while (enc.size() < v.arity()) enc.add("_");
+                            vspecs.put(v.name(), String.join(SpecValidator.FIELD_SEP, enc));
                             // Primitive variants (Str/Int/…) match by type,
                             // not tag — keep them out of the constructor
                             // registry so `Str` stays a spec name, never a
@@ -398,6 +416,8 @@ final class ClassEmitter implements Opcodes {
                             }
                         }
                         sumVariants.put(sd.name(), vmap);
+                        sumVariantSpecs.put(sd.name(), vspecs);
+                        specParams.put(sd.name(), sd.specParams());
                     }
                 }
             }
@@ -554,33 +574,24 @@ final class ClassEmitter implements Opcodes {
         for (var e : productFields.entrySet()) {
             cl.visitLdcInsn(org.objectweb.asm.Type.getObjectType(internalName));
             cl.visitLdcInsn(e.getKey());
+            pushStringArray(cl, specParams.getOrDefault(e.getKey(), List.of()));
             pushStringArray(cl, e.getValue());
             pushStringArray(cl, productFieldSpecs.getOrDefault(e.getKey(), List.of()));
             cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerProduct",
-                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
+                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
         }
         for (var e : sumVariants.entrySet()) {
+            var vspecs = sumVariantSpecs.getOrDefault(e.getKey(), new LinkedHashMap<>());
+            List<String> names = new ArrayList<>(e.getValue().keySet());
+            List<String> specs = new ArrayList<>();
+            for (String v : names) specs.add(vspecs.getOrDefault(v, ""));
             cl.visitLdcInsn(org.objectweb.asm.Type.getObjectType(internalName));
             cl.visitLdcInsn(e.getKey());
-            // Object[] {name, arity, name, arity, ...}
-            exprEm.pushIconst(cl, e.getValue().size() * 2);
-            cl.visitTypeInsn(ANEWARRAY, OBJ);
-            int i = 0;
-            for (var v : e.getValue().entrySet()) {
-                cl.visitInsn(DUP);
-                exprEm.pushIconst(cl, i++);
-                cl.visitLdcInsn(v.getKey());
-                cl.visitInsn(AASTORE);
-                cl.visitInsn(DUP);
-                exprEm.pushIconst(cl, i++);
-                // Box arity as java.lang.Integer
-                cl.visitLdcInsn(v.getValue());
-                cl.visitMethodInsn(INVOKESTATIC, "java/lang/Integer", "valueOf",
-                        "(I)Ljava/lang/Integer;", false);
-                cl.visitInsn(AASTORE);
-            }
-            cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerSum",
-                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/Object;)V", false);
+            pushStringArray(cl, specParams.getOrDefault(e.getKey(), List.of()));
+            pushStringArray(cl, names);
+            pushStringArray(cl, specs);
+            cl.visitMethodInsn(INVOKESTATIC, SPEC_VALIDATOR, "registerSumSpec",
+                    "(Ljava/lang/Class;Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;[Ljava/lang/String;)V", false);
         }
         // Phase 3 — materialise every Irij-record cap once at class-load
         // time. Each cap's recordExpr (a map-literal Expr) is evaluated

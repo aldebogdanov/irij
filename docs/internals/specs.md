@@ -384,36 +384,62 @@ validation reads the registry from a `ScopedValue` bound by the entry
 point, so the recursive validators don't each take it as a parameter.
 
 Populated by a generated `<clinit>` on every emitted class. For
-each `Decl.SpecDecl` the emitter records the variant arities (sum)
-or the field names *and their encoded specs* (product) and emits
-`clinit` calls:
+each `Decl.SpecDecl` the emitter records the type parameters, and the
+field names *and their encoded specs* (product) or each variant's
+encoded field specs (sum), and emits `clinit` calls:
 
 ```
 SpecValidator.registerProduct(Program.class, "Point",
+        new String[]{},                       // type parameters
         new String[]{"x","y"},
         new String[]{"Int","Int"});
-SpecValidator.registerSum(Program.class, "Shape",
-        new Object[]{"Circle", 1, "Rect", 2});
+SpecValidator.registerSumSpec(Program.class, "Shape",
+        new String[]{},                       // type parameters
+        new String[]{"Circle", "Rect"},
+        new String[]{"Float", "Float\u0001Float"});   // FIELD_SEP-joined
 ```
+
+A variant keeps its field specs in the AST (`Decl.Variant.fieldSpecs`,
+one per spec atom), and `newtype Email := Str` is the one-variant sum
+`Email Str`. Until v0.10 the AST kept only the arity, so a variant's
+payload was never checked: `Circle "x"` built a certified `Shape`.
+The registry also maps each non-primitive variant to its sum spec
+(`variantOf`).
 
 The per-field specs are `SpecValidator.encode` strings — the same
 encoding fn annotations use — so a field spec may be anything a fn
 annotation may be (`#[Int]`, `Map[Str,Int]`, a nested product, an
 arrow). An empty string marks a field the declaration left open (a
-wildcard or a type variable). Until this was wired, the field specs
+wildcard); a type variable is kept as `?a` so an applied spec can bind
+it. Until this was wired, the field specs
 were parsed into `Decl.SpecField` and then dropped, so a product
 validated field *presence* only.
 
-`SpecValidator.validateNamed` falls through unknown names into
-`validateUserDeclared`, which:
+**A spec names something.** `ModuleScope.specName` resolves every name
+in a spec position — fn annotations, product fields, variant fields,
+newtypes, bind annotations — and refuses one nothing declares, with the
+nearest known name as a suggestion (`Strr` → "did you mean `Str`?").
+Known: the builtins (`BUILTIN_TYPES`, `Ok` and `Err` included), the
+file's own specs, variants, effects and protos, its imports, and a
+session's earlier declarations. Before v0.10 an unknown name reached
+`validateUserDeclared`, found no descriptor and *accepted every value*,
+so a typo silently turned a check off. An effect name is known: it is a
+capability tag on a bind (`rnd := … :: Random`), not a shape, and the
+runtime still passes it.
 
-1. Fast-paths Tagged values whose `specName` already matches (set
-   by `emitConstructorApp` — the bytecode emitter passes the
-   parent spec name through to `Values.Tagged`). That fast-path is
-   sound only because `emitConstructorApp` also emits a
-   `SpecValidator.certifyProduct` call: the constructor is the one
-   place a product value is built, so validating there means a
-   certified value is genuinely valid. Skip it and `Point "str" 2`
+`SpecValidator.validateNamed` hands names that aren't builtin shapes to
+`validateDeclared(value, name, args)` — also the target of an applied
+spec (`(Maybe Int)`, `(Just Int)`, `(Ok Int)`), with its arguments:
+
+1. Fast-paths Tagged values whose `specName` already matches, when the
+   spec isn't applied (set by `emitConstructorApp` — the bytecode
+   emitter passes the parent spec name through to `Values.Tagged`).
+   That fast-path is sound only because `emitConstructorApp` also emits
+   `SpecValidator.certifyProduct` (a record) or `certifySum` (a variant
+   with fields): the constructor is the one place such a value is
+   built, so validating there means a certified value is genuinely
+   valid. An applied spec skips it: `Just "s"` is a certified `Maybe`
+   but not a `(Maybe Int)`. Skip it and `Point "str" 2`
    satisfies `x :: Int` at every boundary forever after. A record
    update `{...p x= 3}` builds one too, so `RT.recordUpdateEnd`
    certifies the result the same way — it keeps the spec only while
@@ -431,7 +457,21 @@ validated field *presence* only.
    - **Sum**: requires `Tagged` whose tag is a known variant of the
      spec, and whose positional-field count matches the declared
      arity — one field per spec atom of the variant (`Rect Float
-     Float` has two; see `ast.md`). Re-certifies the result.
+     Float` has two; see `ast.md`) — and checks each field against
+     its declared spec. Re-certifies the result.
+   - Applied (`(Result Int Str)`, `(Pair Int Str)`): the spec's type
+     parameters are bound to the arguments and substituted into the
+     field specs (`SpecValidator.subst`); unapplied, a parameter
+     accepts anything. A product applied only to bind its effect row
+     (`(Route):eff` — a zero-argument App) is an **open** record: its
+     declared fields are checked, others pass (std.serve's routes carry
+     `method`/`path`).
+3. A **variant name** as a spec (`Nickel`, `(Just Int)`) requires that
+   variant, its fields checked against the arguments when applied,
+   else against the variant's declared field specs. The builtin `Ok`
+   and `Err` work the same way (`(Ok Int)`); a program's own
+   `spec Result a e / Ok a / Err e` takes them over, and a builtin `Ok`
+   from `try` is a `Result` by its tag.
 
 This mirrors `Interpreter.validateProduct` /
 `Interpreter.validateSum` (including the O(1) tag-match

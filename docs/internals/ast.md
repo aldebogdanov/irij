@@ -135,6 +135,11 @@ and `#[Red ...rest]` hands `...rest` to `Red`. Three places put it right:
   `specExpr`s: `Rect Float Float` reads as one application `Float Float`,
   so counting expressions gave every multi-field variant arity 1. A
   field that applies a spec is parenthesized: `Node (Tree a) a (Tree a)`.
+  The variant keeps one `SpecExpr` per field too
+  (`Decl.Variant.fieldSpecs`: `[Float, Float]`), and a newtype
+  (`newtype Email := Str`) is the variant `Email` with `[Str]` — the
+  runtime checks a payload against them (specs.md). Until v0.10 only the
+  arity was kept.
 
 ## Forms with no node of their own
 
