@@ -110,6 +110,41 @@ resource it touches. `JVM` appears only where someone writes
 `Class/member` or `#member` by hand. The `cap` line is the trust point:
 it says "this Java class implements `Clock`", once, greppably.
 
+## Trust: which modules may reach Java
+
+`JVM` in a row says "this fn may do anything". With caps, almost no
+code needs it — but nothing stops a module from writing
+`java.lang.Runtime/getRuntime ()` and declaring `::: JVM`, or binding a
+cap to any class. irij.toml's optional `[trust]` section confines that:
+
+```toml
+[trust]
+caps = ["acme.clock"]      # may declare a Java cap (`cap x :: E = "java.Class"`)
+jvm = ["seed-readme"]      # may write Class/member, obj#member, #member
+```
+
+With it, the compiler refuses a Java cap or a hand-written Java site in a
+module the matching list doesn't name, and lists every one with the line
+to add. A pattern is a module name or a prefix (`"acme.*"`: `acme` and
+below); the entry program, a file without `mod`, is `"main"`. `std.*` is
+always trusted. The policy covers everything the program compiles —
+its own modules and its seeds — and is the root project's (the
+`irij.toml` beside the entry file, the one seeds are resolved from).
+Without the section nothing is enforced. A record cap has no Java behind
+it and is not a site.
+
+`irij audit [file.irj]` prints every site by module, marks each module
+trusted or not against `[trust]`, summarises std in one line, and exits 1
+when a module isn't trusted.
+
+Implementation: `ProjectFile.Trust` parses and matches; `ModuleInliner`
+tags each inlined decl with its module and file (`declOrigin`, by
+identity — records compare by value); `TrustChecker.sites` walks the
+inlined program's AST records reflectively, so a new node type can't
+hide a `JavaRef` from it; `IrijCompiler` enforces it before
+`EffectRowChecker` when `[trust]` is present. Sandbox and nREPL sessions
+compile with no project root, so a playground is unaffected.
+
 ## What this doesn't catch
 
 - **Java methods that call back into Irij.** A `Runnable` impl passed

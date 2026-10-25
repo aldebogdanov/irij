@@ -60,6 +60,16 @@ public final class IrijCli {
             case "compile"          -> { CompileCommand.run(rest); return; }
             case "lsp"              -> { dev.irij.lsp.IrijLspServer.run(); return; }
             case "quint"            -> { QuintCommand.run(rest); return; }
+            case "audit"            -> {
+                try {
+                    AuditCommand.run(rest);
+                } catch (IrijCompiler.CompileException | dev.irij.module.ProjectFile.ParseError e) {
+                    System.err.println(e instanceof dev.irij.module.ProjectFile.ParseError
+                            ? "irij.toml: " + e.getMessage() : e.getMessage());
+                    System.exit(1);
+                }
+                return;
+            }
             case "repl"             -> { launchRepl(); return; }
             case "help"             -> { printHelp(); return; }
             case "run"              -> {
@@ -192,6 +202,9 @@ public final class IrijCli {
         } catch (IrijRuntimeError e) {
             System.err.println(path + ":" + e.getMessage());
             System.exit(1);
+        } catch (dev.irij.module.ProjectFile.ParseError e) {
+            System.err.println("irij.toml: " + e.getMessage());
+            System.exit(1);
         }
     }
 
@@ -229,6 +242,7 @@ public final class IrijCli {
               irij test <dir/>           run all test-*.irj in directory
               irij test f1.irj f2.irj    run multiple test files
               irij quint doctor          check the quint binary model-based testing needs
+              irij audit [file.irj]      list where the program reaches Java, by module, against irij.toml [trust]
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
               irij --no-spec-lint <file> disable spec lint warnings (on by default)
