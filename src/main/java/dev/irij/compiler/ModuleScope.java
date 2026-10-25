@@ -301,7 +301,7 @@ final class ModuleScope {
      *  a module when the program declares a spec of the same name. */
     static final Set<String> BUILTIN_TYPES = Set.of(
             "Any", "Bool", "Float", "Fn", "Handler", "Int", "Keyword", "Map", "Rational",
-            "Set", "Str", "Tuple", "Unit", "Vec", "Vector", "Ok", "Err");
+            "Set", "Str", "Tuple", "Unit", "Vec", "Vector", "Ok", "Err", "Result");
 
     /** How many arguments a builtin function takes, or null for a name
      *  that isn't one (or an intrinsic with no fixed arity, like {@code par}). */
@@ -523,6 +523,15 @@ final class ModuleScope {
                                 .toList(), im.loc());
                 case Decl.CapDecl cd -> new Decl.CapDecl(cd.isPub(), cd.name(), typeName(cd.effectName(), cd.loc()),
                         cd.providerClass(), expr(cd.recordExpr(), Scope.top()), cd.loc());
+                case Decl.SpecDecl sd when sd.body() instanceof Decl.SpecBody.SumSpec ss -> {
+                    Set<String> vars = Set.copyOf(sd.specParams());
+                    List<Decl.Variant> variants = new ArrayList<>();
+                    for (var v : ss.variants()) {
+                        variants.add(new Decl.Variant(v.name(), v.arity(), specs(v.fieldSpecs(), vars, sd.loc())));
+                    }
+                    yield new Decl.SpecDecl(sd.name(), sd.specParams(), sd.rowParams(),
+                            new Decl.SpecBody.SumSpec(variants), sd.loc());
+                }
                 case Decl.SpecDecl sd -> {
                     if (!(sd.body() instanceof Decl.SpecBody.ProductSpec ps)) yield sd;
                     Set<String> vars = Set.copyOf(sd.specParams());
@@ -588,10 +597,10 @@ final class ModuleScope {
         private SpecExpr spec(SpecExpr s, Set<String> vars, SourceLoc loc) {
             if (s == null) return null;
             return switch (s) {
-                case SpecExpr.Name n -> vars.contains(n.name()) ? n : new SpecExpr.Name(typeName(n.name(), loc));
+                case SpecExpr.Name n -> vars.contains(n.name()) ? n : new SpecExpr.Name(specName(n.name(), loc));
                 case SpecExpr.App a -> {
                     row(a.rowVar() == null ? null : List.of(a.rowVar()), loc);
-                    yield new SpecExpr.App(vars.contains(a.head()) ? a.head() : typeName(a.head(), loc),
+                    yield new SpecExpr.App(vars.contains(a.head()) ? a.head() : specName(a.head(), loc),
                             specs(a.args(), vars, loc), a.rowVar());
                 }
                 case SpecExpr.Arrow ar -> {
@@ -611,6 +620,52 @@ final class ModuleScope {
                 case SpecExpr.Wildcard w -> w;
                 case SpecExpr.Unit u -> u;
             };
+        }
+
+        /** A name in a spec position: resolved like any type-level name,
+         *  and refused when nothing declares it. A spec naming a missing
+         *  spec used to accept every value, so a typo turned a check off. */
+        private String specName(String name, SourceLoc loc) {
+            String resolved = typeName(name, loc);
+            if (name.indexOf('.') >= 0 || knownType(resolved)) return resolved;
+            String near = nearestType(name);
+            throw error("`" + name + "` is not a spec: nothing declares it"
+                    + (near != null ? " — did you mean `" + near + "`?" : ".")
+                    + " Declare it with `spec " + name + "`, or use a builtin one"
+                    + " (Int, Float, Str, Bool, Keyword, Rational, Vec, Map, Set, Tuple, Fn, Unit, Any, Ok, Err, Result)", loc);
+        }
+
+        private boolean knownType(String name) {
+            return cx.own().contains(name) || cx.imports().types.contains(name)
+                    || builtinEffects().contains(name) || BUILTIN_TYPES.contains(name)
+                    || typeIndex.containsKey(name) || cx.programNames().contains(name);
+        }
+
+        private String nearestType(String name) {
+            Set<String> pool = new HashSet<>(BUILTIN_TYPES);
+            for (String n : cx.own()) if (!n.isEmpty() && Character.isUpperCase(n.charAt(0))) pool.add(n);
+            pool.addAll(cx.imports().types);
+            String best = null;
+            int bestD = Math.max(2, name.length() / 3) + 1;
+            for (String c : pool) {
+                int d = editDistance(name.toLowerCase(), c.toLowerCase());
+                if (d < bestD) { bestD = d; best = c; }
+            }
+            return best;
+        }
+
+        private static int editDistance(String a, String b) {
+            int[] prev = new int[b.length() + 1], cur = new int[b.length() + 1];
+            for (int j = 0; j <= b.length(); j++) prev[j] = j;
+            for (int i = 1; i <= a.length(); i++) {
+                cur[0] = i;
+                for (int j = 1; j <= b.length(); j++) {
+                    int sub = prev[j - 1] + (a.charAt(i - 1) == b.charAt(j - 1) ? 0 : 1);
+                    cur[j] = Math.min(sub, Math.min(prev[j] + 1, cur[j - 1] + 1));
+                }
+                int[] t = prev; prev = cur; cur = t;
+            }
+            return prev[b.length()];
         }
 
         private List<SpecExpr> specs(List<SpecExpr> ss, Set<String> vars, SourceLoc loc) {

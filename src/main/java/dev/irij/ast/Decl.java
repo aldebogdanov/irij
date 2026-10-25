@@ -171,7 +171,14 @@ public sealed interface Decl extends Node {
         record ProductSpec(List<SpecField> fields) implements SpecBody {}
     }
 
-    record Variant(String name, int arity) {}
+    /** A sum-spec variant: its name and one spec per field
+     *  ({@code Rect Float Float} → [Float, Float]). {@code arity} is
+     *  {@code fieldSpecs.size()} when the specs are known. */
+    record Variant(String name, int arity, List<SpecExpr> fieldSpecs) {
+        public Variant(String name, int arity) {
+            this(name, arity, List.of());
+        }
+    }
     /** Spec field: `name :: SpecExpr` inside a product/record spec body.
      *  Pre-0.7.x stored only the field name; the per-field spec was
      *  discarded. Now keeps the spec so phase-2c row-var propagation

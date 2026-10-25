@@ -57,13 +57,26 @@ public final class SpecValidator {
          *                    to {@code fields}. An empty string means
          *                    the field's spec was a wildcard or a type
          *                    variable — present but unconstrained. */
-        record Product(List<String> fields, List<String> fieldSpecs) implements Descriptor {}
-        record Sum(java.util.LinkedHashMap<String, Integer> variants) implements Descriptor {}
+        record Product(List<String> fields, List<String> fieldSpecs, List<String> params) implements Descriptor {
+            public Product(List<String> fields, List<String> fieldSpecs) { this(fields, fieldSpecs, List.of()); }
+        }
+        /** {@code variantSpecs}: each variant's {@link #encode}d field
+         *  specs ({@code "_"} where open); {@code params}: the spec's type
+         *  parameters, which an applied spec ({@code (Maybe Int)})
+         *  substitutes into them. */
+        record Sum(java.util.LinkedHashMap<String, Integer> variants,
+                   java.util.Map<String, List<String>> variantSpecs, List<String> params) implements Descriptor {
+            public Sum(java.util.LinkedHashMap<String, Integer> variants) {
+                this(variants, java.util.Map.of(), List.of());
+            }
+        }
     }
 
-    /** Declared product/sum specs of one program: name → descriptor. */
+    /** Declared product/sum specs of one program: name → descriptor,
+     *  and each (non-primitive) variant → the sum spec declaring it. */
     public static final class Registry {
         final ConcurrentHashMap<String, Descriptor> specs = new ConcurrentHashMap<>();
+        final ConcurrentHashMap<String, String> variantOf = new ConcurrentHashMap<>();
     }
 
     /** One registry per classloader. Every program run, and every
@@ -105,11 +118,38 @@ public final class SpecValidator {
      *  parallel specs array carries each field's {@link #encode}d
      *  spec, or {@code ""} where the declaration left it open. */
     public static void registerProduct(Class<?> owner, String name, String[] fields, String[] fieldSpecs) {
+        registerProduct(owner, name, new String[0], fields, fieldSpecs);
+    }
+
+    /** As above, with the spec's type parameters ({@code spec Pair a b}). */
+    public static void registerProduct(Class<?> owner, String name, String[] params,
+                                       String[] fields, String[] fieldSpecs) {
         var specs = new java.util.ArrayList<String>(fields.length);
         for (int i = 0; i < fields.length; i++) {
             specs.add(i < fieldSpecs.length && fieldSpecs[i] != null ? fieldSpecs[i] : "");
         }
-        registryOf(owner).specs.put(name, new Descriptor.Product(List.of(fields), List.copyOf(specs)));
+        registryOf(owner).specs.put(name,
+                new Descriptor.Product(List.of(fields), List.copyOf(specs), List.of(params)));
+    }
+
+    /** Separates a variant's encoded field specs in {@link #registerSumSpec}. */
+    public static final String FIELD_SEP = "\u0001";
+
+    /** Emitter-side: register a sum spec with its type parameters and each
+     *  variant's field specs ({@code fieldSpecs[i]} is variant i's encoded
+     *  specs joined by {@link #FIELD_SEP}, {@code ""} for none). */
+    public static void registerSumSpec(Class<?> owner, String name, String[] params,
+                                       String[] variants, String[] fieldSpecs) {
+        var arities = new java.util.LinkedHashMap<String, Integer>();
+        var specs = new java.util.LinkedHashMap<String, List<String>>();
+        Registry reg = registryOf(owner);
+        for (int i = 0; i < variants.length; i++) {
+            List<String> fs = fieldSpecs[i].isEmpty() ? List.of() : List.of(fieldSpecs[i].split(FIELD_SEP, -1));
+            arities.put(variants[i], fs.size());
+            specs.put(variants[i], fs);
+            if (!PRIMITIVE_VARIANTS.contains(variants[i])) reg.variantOf.put(variants[i], name);
+        }
+        reg.specs.put(name, new Descriptor.Sum(arities, specs, List.of(params)));
     }
 
     public static void registerProduct(String name, String[] fields, String[] fieldSpecs) {
@@ -135,6 +175,7 @@ public final class SpecValidator {
             String vname = (String) flatVariants[i];
             int arity = ((Number) flatVariants[i + 1]).intValue();
             map.put(vname, arity);
+            if (!PRIMITIVE_VARIANTS.contains(vname)) registryOf(owner).variantOf.put(vname, name);
         }
         registryOf(owner).specs.put(name, new Descriptor.Sum(map));
     }
@@ -497,19 +538,156 @@ public final class SpecValidator {
      *  is registered — same behaviour as before product/sum specs
      *  were wired into bytecode mode. */
     private static Object validateUserDeclared(Object value, String name) {
-        // O(1) certification fast-path — Constructor sets specName at
-        // construction time, so a Tagged carrying the matching spec
-        // name is already known-good. Matches Interpreter's
-        // validateAgainstSpec short-circuit.
-        if (value instanceof Values.Tagged t && name.equals(t.specName())) {
+        return validateDeclared(value, name, List.of());
+    }
+
+    /**
+     * {@code value} against a declared spec, a variant, or the builtin
+     * {@code Ok} / {@code Err}, applied to {@code args} ({@code (Maybe Int)},
+     * {@code (Just Int)}, {@code (Ok Int)}) or not. A spec's type parameters
+     * are substituted from {@code args}; unapplied, they accept anything.
+     * A name nothing declares passes: the compiler refuses one in a
+     * program's specs (ModuleScope.specName), so only a capability tag
+     * ({@code rnd := … :: Random}, an effect) reaches here.
+     */
+    private static Object validateDeclared(Object value, String name, List<SpecExpr> args) {
+        // O(1) certification fast-path — a constructor certifies its
+        // payload against the declared field specs when it builds the
+        // value (certifyProduct / certifySum), so a Tagged carrying the
+        // matching spec name is known-good. Not when the spec is applied:
+        // `Just "s"` is a certified Maybe but not a (Maybe Int).
+        if (args.isEmpty() && value instanceof Values.Tagged t && name.equals(t.specName())) {
             return value;
         }
-        Descriptor d = current().specs.get(name);
-        if (d == null) return value;
-        return switch (d) {
-            case Descriptor.Product p -> validateProductShape(value, name, p);
-            case Descriptor.Sum s -> validateSumShape(value, name, s.variants());
+        Registry reg = current();
+        Descriptor d = reg.specs.get(name);
+        if (d != null) {
+            return switch (d) {
+                case Descriptor.Product p -> validateProductShape(value, name, p, bind(p.params(), args, name));
+                case Descriptor.Sum s -> validateSumShape(value, name, s, bind(s.params(), args, name));
+            };
+        }
+        String owner = reg.variantOf.get(name);
+        if (owner != null && reg.specs.get(owner) instanceof Descriptor.Sum s) {
+            return validateVariant(value, name, s.variantSpecs().getOrDefault(name, List.of()), args);
+        }
+        if (name.equals("Ok") || name.equals("Err")) {
+            return validateVariant(value, name, List.of("_"), args);
+        }
+        if (name.equals("Result")) return validateResult(value, args);
+        return value;
+    }
+
+    /**
+     * The builtin {@code Result a e} — {@code Ok a | Err e}, the values
+     * {@code try} returns. Unapplied it requires an {@code Ok} or an
+     * {@code Err}; {@code (Result Int Str)} checks the payload too. A
+     * program's own {@code spec Result} takes precedence (it has a
+     * descriptor, so {@link #validateDeclared} never gets here).
+     */
+    private static Object validateResult(Object value, List<SpecExpr> args) {
+        if (!args.isEmpty() && args.size() != 2) {
+            throw fail("Result takes 2 spec parameters (Result ok err), given " + args.size());
+        }
+        if (value instanceof Values.Tagged t && (t.tag().equals("Ok") || t.tag().equals("Err"))
+                && t.fields().size() == 1) {
+            if (args.isEmpty()) return value;
+            SpecExpr payload = t.tag().equals("Ok") ? args.get(0) : args.get(1);
+            try {
+                validate(t.fields().get(0), payload);
+            } catch (IrijRuntimeError e) {
+                throw fail("Result " + t.tag() + " field 1: " + e.getMessage());
+            }
+            return value;
+        }
+        throw fail("expected Result (Ok or Err), got " + describe(value));
+    }
+
+    /** {@code value} is the variant {@code tag}: its fields against
+     *  {@code args} when the variant is applied ({@code (Ok Int)}), else
+     *  against its declared {@code fieldSpecs}. */
+    private static Object validateVariant(Object value, String tag, List<String> fieldSpecs, List<SpecExpr> args) {
+        if (!(value instanceof Values.Tagged t) || !t.tag().equals(tag)) {
+            throw fail("expected " + tag + ", got " + describe(value));
+        }
+        if (!args.isEmpty() && args.size() != t.fields().size()) {
+            throw fail(tag + " has " + t.fields().size() + " field" + (t.fields().size() == 1 ? "" : "s")
+                    + ", the spec gives " + args.size());
+        }
+        for (int i = 0; i < t.fields().size(); i++) {
+            SpecExpr fs = !args.isEmpty() ? args.get(i)
+                    : (i < fieldSpecs.size() ? decodeField(fieldSpecs.get(i)) : null);
+            if (fs == null) continue;
+            try {
+                validate(t.fields().get(i), fs);
+            } catch (IrijRuntimeError e) {
+                throw fail(tag + " field " + (i + 1) + ": " + e.getMessage());
+            }
+        }
+        return value;
+    }
+
+    /** A spec's type parameters → the specs an application gives them. */
+    private static java.util.Map<String, SpecExpr> bind(List<String> params, List<SpecExpr> args, String name) {
+        if (args.isEmpty()) return java.util.Map.of();
+        if (args.size() != params.size()) {
+            throw fail(name + " takes " + params.size() + " spec parameter" + (params.size() == 1 ? "" : "s")
+                    + ", given " + args.size());
+        }
+        var m = new java.util.HashMap<String, SpecExpr>();
+        for (int i = 0; i < params.size(); i++) m.put(params.get(i), args.get(i));
+        return m;
+    }
+
+    private static final ConcurrentHashMap<String, SpecExpr> DECODED = new ConcurrentHashMap<>();
+
+    /** A field's encoded spec, decoded once; null when it is open. */
+    private static SpecExpr decodeField(String encoded) {
+        if (encoded.isEmpty() || encoded.equals("_")) return null;
+        return DECODED.computeIfAbsent(encoded, SpecValidator::decode);
+    }
+
+    /** {@code spec} with each type variable bound in {@code env} replaced. */
+    static SpecExpr subst(SpecExpr spec, java.util.Map<String, SpecExpr> env) {
+        if (env.isEmpty() || spec == null) return spec;
+        return switch (spec) {
+            case SpecExpr.Var v -> env.getOrDefault(v.name(), v);
+            case SpecExpr.Name n -> env.getOrDefault(n.name(), n);
+            case SpecExpr.App a -> new SpecExpr.App(a.head(), a.args().stream().map(x -> subst(x, env)).toList(), a.rowVar());
+            case SpecExpr.Arrow a -> new SpecExpr.Arrow(a.inputs().stream().map(x -> subst(x, env)).toList(),
+                    subst(a.output(), env), a.rowVar());
+            case SpecExpr.VecSpec v -> new SpecExpr.VecSpec(subst(v.elemSpec(), env));
+            case SpecExpr.SetSpec v -> new SpecExpr.SetSpec(subst(v.elemSpec(), env));
+            case SpecExpr.TupleSpec t -> new SpecExpr.TupleSpec(t.elemSpecs().stream().map(x -> subst(x, env)).toList());
+            case SpecExpr.RecordSpec r -> {
+                var f = new java.util.LinkedHashMap<String, SpecExpr>();
+                r.fields().forEach((k, x) -> f.put(k, subst(x, env)));
+                yield new SpecExpr.RecordSpec(f);
+            }
+            default -> spec;
         };
+    }
+
+    private static String describe(Object value) {
+        if (value instanceof Values.Tagged t) return t.tag();
+        return typeName(value);
+    }
+
+    /**
+     * Constructor-side certification of a sum variant: its fields against
+     * the variant's declared specs (type parameters accept anything here).
+     * Without it `Circle "x"` built a certified Shape, and the fast-path
+     * above let it through every later `:: Shape`.
+     */
+    public static Object certifySum(Object value, String specName, Class<?> owner) {
+        Registry reg = registryOf(owner);
+        if (reg.specs.get(specName) instanceof Descriptor.Sum s && value instanceof Values.Tagged t) {
+            List<String> fs = s.variantSpecs().get(t.tag());
+            if (fs != null && !fs.isEmpty()) {
+                ScopedValue.where(CURRENT, reg).run(() -> validateVariant(value, t.tag(), fs, List.of()));
+            }
+        }
+        return value;
     }
 
     /**
@@ -524,7 +702,7 @@ public final class SpecValidator {
         if (d instanceof Descriptor.Product p
                 && value instanceof Values.Tagged t
                 && t.namedFields() != null) {
-            ScopedValue.where(CURRENT, reg).run(() -> checkProductFields(t.namedFields(), specName, p));
+            ScopedValue.where(CURRENT, reg).run(() -> checkProductFields(t.namedFields(), specName, p, java.util.Map.of()));
         }
         return value;
     }
@@ -541,13 +719,13 @@ public final class SpecValidator {
      * name a shape it doesn't actually pin down.
      */
     private static Object validateProductShape(Object value, String specName,
-                                                Descriptor.Product p) {
+                                                Descriptor.Product p, java.util.Map<String, SpecExpr> env) {
         if (value instanceof Values.Tagged t && t.namedFields() != null) {
-            checkProductFields(t.namedFields(), specName, p);
+            checkProductFields(t.namedFields(), specName, p, env);
             return new Values.Tagged(t.tag(), t.fields(), t.namedFields(), specName);
         }
         if (value instanceof Values.IrijMap m) {
-            checkProductFields(m.entries(), specName, p);
+            checkProductFields(m.entries(), specName, p, env);
             var named = new java.util.LinkedHashMap<>(m.entries());
             List<Object> fields = new java.util.ArrayList<>(p.fields().size());
             for (var field : p.fields()) fields.add(named.get(field));
@@ -557,16 +735,17 @@ public final class SpecValidator {
     }
 
     private static void checkProductFields(java.util.Map<String, Object> actual,
-                                            String specName, Descriptor.Product p) {
+                                            String specName, Descriptor.Product p,
+                                            java.util.Map<String, SpecExpr> env) {
         for (int i = 0; i < p.fields().size(); i++) {
             String field = p.fields().get(i);
             if (!actual.containsKey(field)) {
                 throw fail(specName + " requires field '" + field + "'");
             }
-            String encoded = p.fieldSpecs().get(i);
-            if (encoded.isEmpty()) continue;
+            SpecExpr fs = decodeField(p.fieldSpecs().get(i));
+            if (fs == null) continue;
             try {
-                validate(actual.get(field), decode(encoded));
+                validate(actual.get(field), subst(fs, env));
             } catch (IrijRuntimeError e) {
                 throw fail(specName + " field '" + field + "': " + e.getMessage());
             }
@@ -605,7 +784,8 @@ public final class SpecValidator {
     }
 
     private static Object validateSumShape(Object value, String specName,
-                                            java.util.Map<String, Integer> variants) {
+                                            Descriptor.Sum sum, java.util.Map<String, SpecExpr> env) {
+        java.util.Map<String, Integer> variants = sum.variants();
         if (!(value instanceof Values.Tagged t)) {
             // Primitive variants: `spec Node / Raw / El / Str` accepts a
             // bare string by type. Primitives carry no certification tag;
@@ -624,6 +804,16 @@ public final class SpecValidator {
         }
         if (t.fields().size() != arity) {
             throw fail(t.tag() + " expects " + arity + " fields, got " + t.fields().size());
+        }
+        List<String> fs = sum.variantSpecs().getOrDefault(t.tag(), List.of());
+        for (int i = 0; i < fs.size() && i < t.fields().size(); i++) {
+            SpecExpr spec = decodeField(fs.get(i));
+            if (spec == null) continue;
+            try {
+                validate(t.fields().get(i), subst(spec, env));
+            } catch (IrijRuntimeError e) {
+                throw fail(specName + " " + t.tag() + " field " + (i + 1) + ": " + e.getMessage());
+            }
         }
         return new Values.Tagged(t.tag(), t.fields(), t.namedFields(), specName);
     }
@@ -689,8 +879,38 @@ public final class SpecValidator {
                         + (required != null ? " " + required : "")
                         + ", got " + typeName(value));
             }
-            default -> value;
+            default -> {
+                // `(Route):eff` — a product spec applied only to bind its
+                // effect row — is an open record: its declared fields are
+                // checked, others pass (std.serve routes carry method/path).
+                // A zero-argument App only comes from a row-var attachment
+                // (the runtime encoding drops the row var itself).
+                if (app.args().isEmpty()
+                        && current().specs.get(app.head()) instanceof Descriptor.Product p) {
+                    yield validateOpenProduct(value, app.head(), p);
+                }
+                yield validateDeclared(value, app.head(), app.args());
+            }
         };
+    }
+
+    private static Object validateOpenProduct(Object value, String specName, Descriptor.Product p) {
+        java.util.Map<String, Object> actual;
+        if (value instanceof Values.Tagged t && t.namedFields() != null) actual = t.namedFields();
+        else if (value instanceof Values.IrijMap m) actual = m.entries();
+        else throw fail("expected " + specName + " (a record), got " + typeName(value));
+        for (int i = 0; i < p.fields().size(); i++) {
+            String field = p.fields().get(i);
+            if (!actual.containsKey(field)) throw fail(specName + " requires field '" + field + "'");
+            SpecExpr fs = decodeField(p.fieldSpecs().get(i));
+            if (fs == null) continue;
+            try {
+                validate(actual.get(field), fs);
+            } catch (IrijRuntimeError e) {
+                throw fail(specName + " field '" + field + "': " + e.getMessage());
+            }
+        }
+        return value;
     }
 
     private static Object validateArrow(Object value, SpecExpr.Arrow arrow) {

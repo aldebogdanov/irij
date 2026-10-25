@@ -1032,6 +1032,14 @@ final class ExprEmitter implements Opcodes {
             mv.visitLdcInsn(specName);
             mv.visitMethodInsn(INVOKESPECIAL, ClassEmitter.VALUES + "$Tagged", "<init>",
                     "(Ljava/lang/String;Ljava/util/List;Ljava/util/Map;Ljava/lang/String;)V", false);
+            // Certify the payload against the variant's field specs, as
+            // certifyProduct does for records: `Circle "x"` is refused here.
+            if (!args.isEmpty()) {
+                mv.visitLdcInsn(specName);
+                mv.visitLdcInsn(org.objectweb.asm.Type.getObjectType(ce.internalName));
+                mv.visitMethodInsn(INVOKESTATIC, ClassEmitter.SPEC_VALIDATOR, "certifySum",
+                        "(Ljava/lang/Object;Ljava/lang/String;Ljava/lang/Class;)Ljava/lang/Object;", false);
+            }
         } else {
             mv.visitMethodInsn(INVOKESPECIAL, ClassEmitter.VALUES + "$Tagged", "<init>",
                     "(Ljava/lang/String;Ljava/util/List;)V", false);

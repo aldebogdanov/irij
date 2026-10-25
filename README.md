@@ -60,7 +60,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 
 ## Language Features
 
-- **Specs** &mdash; `spec` declares structure with certification tags; runtime validation at boundaries
+- **Specs** &mdash; `spec` declares structure with certification tags; runtime validation at boundaries — variant payloads and applied parametric specs (`(Maybe Int)`) included; a name nothing declares is a compile error; builtin `Result a e` (`Ok a | Err e`) for what `try` returns
 - **Mandatory effect tracking** &mdash; `fn name ::: Console` declares effects; unannotated = pure — a `with` counts too: installing `handler loud :: Log ::: Console` needs `Console` in the fn's row, so a pure fn can't print, read the clock or reach Java through a handler
 - **Algebraic effects & handlers** &mdash; `effect`, `handler`, `with`, `resume`, `on-failure`; the `Console`, `Random` and `Time` builtins (`println`, `read-line`, `random-int`, `now-ms`, `sleep`, …) perform their effect, so a test handler captures output and fixes the dice and the clock
 - **Contracts** &mdash; `pre`, `post` (function-level), `in`, `out` (module-boundary with blame)

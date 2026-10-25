@@ -502,11 +502,15 @@ public class AstBuilder {
                 // specApp reads atoms greedily (`Float Float` as one
                 // application), so counting specExprs gave 1; a field
                 // that applies a spec is parenthesized, `Node (Tree a) a`.
-                int arity = 0;
+                var fieldSpecs = new ArrayList<SpecExpr>();
                 for (var se : v.specExpr()) {
-                    arity += se.ARROW() != null ? 1 : se.specApp().specAtom().size();
+                    if (se.ARROW() != null) {
+                        fieldSpecs.add(buildSpecExpr(se));
+                    } else {
+                        for (var atom : se.specApp().specAtom()) fieldSpecs.add(buildSpecAtom(atom));
+                    }
                 }
-                variants.add(new Decl.Variant(name, arity));
+                variants.add(new Decl.Variant(name, fieldSpecs.size(), List.copyOf(fieldSpecs)));
             }
             return new Decl.SpecBody.SumSpec(variants);
         }
@@ -527,7 +531,8 @@ public class AstBuilder {
     private Decl visitNewtypeDecl(NewtypeDeclContext ctx) {
         String name = ctx.upperName().UPPER_NAME().getText();
         return new Decl.SpecDecl(name, List.of(),
-                new Decl.SpecBody.SumSpec(List.of(new Decl.Variant(name, 1))), loc(ctx));
+                new Decl.SpecBody.SumSpec(List.of(new Decl.Variant(name, 1,
+                        List.of(buildSpecExpr(ctx.specExpr()))))), loc(ctx));
     }
 
     // ── cap ─────────────────────────────────────────────────────────────
