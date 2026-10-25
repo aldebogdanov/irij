@@ -469,9 +469,13 @@ spec (`(Maybe Int)`, `(Just Int)`, `(Ok Int)`), with its arguments:
 3. A **variant name** as a spec (`Nickel`, `(Just Int)`) requires that
    variant, its fields checked against the arguments when applied,
    else against the variant's declared field specs. The builtin `Ok`
-   and `Err` work the same way (`(Ok Int)`); a program's own
-   `spec Result a e / Ok a / Err e` takes them over, and a builtin `Ok`
-   from `try` is a `Result` by its tag.
+   and `Err` work the same way (`(Ok Int)`).
+4. **`Result`** is builtin (`validateResult`): `Ok a | Err e`, what
+   `try` returns. `:: Result` admits either variant (one field);
+   `(Result Int Str)` checks `Ok`'s payload against `Int` and `Err`'s
+   against `Str`. A program's own `spec Result` has a descriptor, so it
+   takes precedence (step 2), and a builtin `Ok` from `try` matches it
+   by tag.
 
 This mirrors `Interpreter.validateProduct` /
 `Interpreter.validateSum` (including the O(1) tag-match

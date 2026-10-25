@@ -409,7 +409,8 @@
    u.name   ;; → "Jo"
    u.age    ;; → 30
 
-   ;; sum spec (tagged union)
+   ;; sum spec (tagged union) — this one is builtin, as `try` returns
+   ;; its variants; a program may still declare its own Result
    spec Result a e
      Ok  a
      Err e
@@ -438,7 +439,26 @@
    Email= with the one variant =Email Str=: =Email "jo@x.io"= wraps a
    string, =(Email s)= unwraps it, and =:: Email= admits only a wrapped
    value, never a bare =Str=. As with any variant's fields, the wrapped
-   spec (=Str=) is not checked when a value is wrapped.
+   spec is checked when a value is wrapped: =Email 42= is an error.
+
+   *Variant fields are checked.* A variant's fields are specs:
+   =Circle "x"= for =Circle Float= is refused where it is built, and a
+   value of a sum spec satisfies it only when its fields satisfy the
+   variant's. A parametric spec applied to arguments substitutes them:
+   =(Tree Int)= requires =Int= leaves, while a bare =Tree= leaves its
+   parameter open. A variant name is a spec too — =:: Nickel= admits only
+   =Nickel=, =(Just Int)= a =Just= holding an =Int=.
+
+   *Result.* =Result a e= — =Ok a= or =Err e= — is builtin, because =try=
+   returns its variants: =fn parse :: Str (Result Int Str)= describes a
+   function that answers =Ok n= or =Err "why"=. =:: Result= admits either
+   variant with any payload; =:: Ok= or =:: (Ok Int)= only the one. A
+   program may declare its own =spec Result=, which takes precedence.
+
+   *Every spec name is declared.* A name in a spec that nothing declares
+   — not a builtin, not the file's own, not imported — is a compile
+   error ("=Strr= is not a spec … did you mean =Str=?"), never a spec
+   that accepts everything.
 
    *Product specs are closed.* A value satisfies a product spec when it
    carries exactly the declared fields — no more, no fewer — and each
@@ -604,8 +624,8 @@
    =m.tick ()= for an op. A handler's clauses name its effect's ops bare.
    A file that only names an effect in a row imports it all the same. The
    effects builtins perform (=Console=, =Time=, =Env=, =Random=, =JVM=)
-   and the builtin specs (=Int=, =Str=, …, with =Ok= and =Err=) need no
-   import.
+   and the builtin specs (=Int=, =Str=, …, with =Ok=, =Err= and
+   =Result=) need no import.
 
    *Style: qualify.* Import a module with =:as= and name what it gives
    through the alias: =str.words=, =with db.default-db=, =:: m.Mode=,

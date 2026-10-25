@@ -145,4 +145,24 @@ class SpecStrictnessTest {
             RuntimeSessions.rawSessionDestroy(s);
         }
     }
+
+    // ── The builtin Result ──────────────────────────────────────────
+
+    @Test void resultIsBuiltin() throws Exception {
+        assertEquals("ok", verdict("fn f :: Int Result\n  (n -> Err n)", "f 1"));
+        assertEquals("Spec failure on output of f: expected Result (Ok or Err), got Int",
+                verdict("fn f :: Int Result\n  (n -> n)", "f 1"));
+        assertEquals("ok", verdict("fn f :: Str (Result Int Str)\n  (s -> try (-> parse-int s))", "f \"x\""));
+        assertEquals("Spec failure on output of f: Result Ok field 1: expected Str, got Int",
+                verdict("fn f :: Int (Result Str Str)\n  (n -> Ok n)", "f 1"));
+        assertEquals("Spec failure on output of f: Result takes 2 spec parameters (Result ok err), given 1",
+                verdict("fn f :: Int (Result Int)\n  (n -> Ok n)", "f 1"));
+    }
+
+    @Test void aProgramsOwnResultTakesPrecedence() throws Exception {
+        String own = "spec Result a\n  Good a\n  Bad\n";
+        assertEquals("ok", verdict(own + "fn f :: Int (Result Int)\n  (n -> Good n)", "f 1"));
+        assertEquals("Spec failure on output of f: 'Ok' is not a variant of Result (expected one of: [Good, Bad])",
+                verdict(own + "fn f :: Int Result\n  (n -> Ok n)", "f 1"));
+    }
 }

@@ -301,7 +301,7 @@ final class ModuleScope {
      *  a module when the program declares a spec of the same name. */
     static final Set<String> BUILTIN_TYPES = Set.of(
             "Any", "Bool", "Float", "Fn", "Handler", "Int", "Keyword", "Map", "Rational",
-            "Set", "Str", "Tuple", "Unit", "Vec", "Vector", "Ok", "Err");
+            "Set", "Str", "Tuple", "Unit", "Vec", "Vector", "Ok", "Err", "Result");
 
     /** How many arguments a builtin function takes, or null for a name
      *  that isn't one (or an intrinsic with no fixed arity, like {@code par}). */
@@ -632,7 +632,7 @@ final class ModuleScope {
             throw error("`" + name + "` is not a spec: nothing declares it"
                     + (near != null ? " — did you mean `" + near + "`?" : ".")
                     + " Declare it with `spec " + name + "`, or use a builtin one"
-                    + " (Int, Float, Str, Bool, Keyword, Rational, Vec, Map, Set, Tuple, Fn, Unit, Any, Ok, Err)", loc);
+                    + " (Int, Float, Str, Bool, Keyword, Rational, Vec, Map, Set, Tuple, Fn, Unit, Any, Ok, Err, Result)", loc);
         }
 
         private boolean knownType(String name) {

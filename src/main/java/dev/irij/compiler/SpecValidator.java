@@ -574,7 +574,33 @@ public final class SpecValidator {
         if (name.equals("Ok") || name.equals("Err")) {
             return validateVariant(value, name, List.of("_"), args);
         }
+        if (name.equals("Result")) return validateResult(value, args);
         return value;
+    }
+
+    /**
+     * The builtin {@code Result a e} — {@code Ok a | Err e}, the values
+     * {@code try} returns. Unapplied it requires an {@code Ok} or an
+     * {@code Err}; {@code (Result Int Str)} checks the payload too. A
+     * program's own {@code spec Result} takes precedence (it has a
+     * descriptor, so {@link #validateDeclared} never gets here).
+     */
+    private static Object validateResult(Object value, List<SpecExpr> args) {
+        if (!args.isEmpty() && args.size() != 2) {
+            throw fail("Result takes 2 spec parameters (Result ok err), given " + args.size());
+        }
+        if (value instanceof Values.Tagged t && (t.tag().equals("Ok") || t.tag().equals("Err"))
+                && t.fields().size() == 1) {
+            if (args.isEmpty()) return value;
+            SpecExpr payload = t.tag().equals("Ok") ? args.get(0) : args.get(1);
+            try {
+                validate(t.fields().get(0), payload);
+            } catch (IrijRuntimeError e) {
+                throw fail("Result " + t.tag() + " field 1: " + e.getMessage());
+            }
+            return value;
+        }
+        throw fail("expected Result (Ok or Err), got " + describe(value));
     }
 
     /** {@code value} is the variant {@code tag}: its fields against
