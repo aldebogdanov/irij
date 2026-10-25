@@ -112,6 +112,8 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.10 &mdash; effect rows you can trust: a `with` needs its handler's row, so a pure function can't print, read the clock or reach Java through a handler; a call through a Java `cap` performs the cap's effect (std's real handlers are `default-db :: Db ::: Db` & co.), so code names the resource it touches instead of `JVM`; irij.toml `[trust]` confines Java to the modules it lists, and `irij audit` shows every site; `unsafe-jvm` is deprecated. Strings print quoted inside collections, and `inspect` gives that form for any value.
+
 0.9 &mdash; model-based testing against a Quint specification (the `model` declaration, `std.quint`).
 
 **SSE dispatcher fix.** A handler that promotes its exchange to
