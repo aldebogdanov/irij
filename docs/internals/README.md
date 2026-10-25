@@ -24,7 +24,7 @@ links back here for depth.
 10. [Versioning](versioning.md) — commit-count releases, publish guards, dep resolution
 11. [Packaging](packaging.md) — seeds, `irij.toml` manifest, `irij publish`, registry storage
 12. [Concurrency](concurrency.md) — virtual threads, structured concurrency, SM_STACK
-13. [JVM capability](jvm-capability.md) — `::: JVM`, why Java is impure
+13. [JVM capability](jvm-capability.md) — `::: JVM`, why Java is impure, irij.toml `[trust]`, `irij audit`
 14. [Capabilities](capabilities.md) — `cap` decls, bridging effects to host code
 15. [Stdlib](stdlib.md) — what lives in Irij vs Java, the boundary
 16. [Quint](quint.md) — model-based testing against a formal spec

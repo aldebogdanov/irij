@@ -25,6 +25,7 @@ irij                          # launch REPL
 irij file.irj                 # run a file
 irij file.irj --port 9090     # args after the file reach the program (env-args)
 irij test                     # run tests/ directory
+irij audit                    # where the program reaches Java, against irij.toml [trust]
 irij --nrepl-server            # start nREPL (port 7888)
 irij --nrepl-server=9000       # nREPL on custom port
 irij --parse-only file.irj    # check syntax only
@@ -69,6 +70,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 - **Child processes** &mdash; `std.proc`'s `Proc` effect: run a command to completion (stdin, timeout, both streams) or start one and talk to it a line at a time; mockable like every effect
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
 - **Unambiguous output** &mdash; `println "a b"` prints `a b`, but a Str inside a collection, variant or record prints quoted and escaped, as source writes it: `#["a b" "c"]`, `{name= "Ada"}`, `#[(Ok 1) (Err "e")]`; `inspect` gives that form for any value, a Str included, and the REPL echoes it
+- **Java behind caps, confined by trust** &mdash; a `cap` binds a Java class to an effect, and a call through it performs that effect, so code that installs `default-db` declares `::: Db`, not `JVM`; irij.toml's `[trust]` names the modules that may declare caps or write Java at all, the compiler refuses the rest, and `irij audit` lists every site
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs; `cond` (first condition that holds) and `case` (equality dispatch) for multi-way choices without `else if` chains
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method` for statics, `obj#method` for instance members (auto-reflection, java.lang auto-imported); every Java site needs `::: JVM`, checked at compile time

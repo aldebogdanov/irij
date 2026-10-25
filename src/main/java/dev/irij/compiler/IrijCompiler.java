@@ -111,6 +111,10 @@ public final class IrijCompiler {
                 opts.specLint() ? System.err::println : null, sessionNames);
         try {
             List<Decl> inlined = inliner.inline(decls, rootFile);
+            var trust = projectTrust(sourceRoot);
+            if (trust != null) {
+                TrustChecker.enforce(TrustChecker.sites(inlined, inliner.declOrigin()), trust);
+            }
             EffectRowChecker.check(inlined, inliner.fnFile(),
                     opts.specLint() ? System.err::println : null);
             return new ClassEmitter(className, opts, rootFile, inliner.fnFile())
@@ -120,6 +124,34 @@ public final class IrijCompiler {
             // of nesting that exhausts the stack.
             throw new CompileException("program is nested too deeply to compile");
         }
+    }
+
+    /** The {@code [trust]} of the project at {@code sourceRoot}'s
+     *  irij.toml, or null (no root, no file, no section). */
+    static dev.irij.module.ProjectFile.Trust projectTrust(Path sourceRoot) {
+        if (sourceRoot == null) return null;
+        try {
+            return dev.irij.module.ProjectFile.parseFile(sourceRoot.resolve("irij.toml")).trust();
+        } catch (IOException e) {
+            throw new CompileException("can't read " + sourceRoot.resolve("irij.toml") + ": " + e.getMessage());
+        } catch (dev.irij.module.ProjectFile.ParseError e) {
+            throw new CompileException("irij.toml: " + e.getMessage());
+        }
+    }
+
+    /** What {@code irij audit} prints: every Java site in the program at
+     *  {@code path} and its modules, and the project's {@code [trust]}. */
+    public record Audit(List<TrustChecker.Site> sites, dev.irij.module.ProjectFile.Trust trust) {}
+
+    public static Audit audit(Path path, List<Path> seedRoots) throws IOException {
+        var parsed = IrijParseDriver.parse(Files.readString(path));
+        if (parsed.hasErrors()) {
+            throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
+        }
+        Path root = path.toAbsolutePath().getParent();
+        var inliner = new ModuleInliner(root, seedRoots, null, java.util.Set.of());
+        List<Decl> inlined = inliner.inline(buildAst(parsed), path.getFileName().toString());
+        return new Audit(TrustChecker.sites(inlined, inliner.declOrigin()), projectTrust(root));
     }
 
     /** Multi-class compile from source text. */

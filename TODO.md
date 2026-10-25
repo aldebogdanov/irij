@@ -782,6 +782,10 @@ Full design and the recorded Quint behaviour it rests on:
 
 ## Near-term (high priority)
 
+- [x] **irij.toml `[trust]` and `irij audit`** — DONE (2026-10, spec §3.3, approved). `[trust] caps = […]` / `jvm = […]` name the modules that may declare a Java cap or write Java interop by hand; with the section, the compiler refuses Java anywhere else, the program's modules and its seeds alike (`TrustChecker`, a reflective walk over the inlined AST). `std.*` is always trusted; the entry program is `"main"`. `irij audit` lists every site by module and exits 1 on an untrusted one. Without the section nothing is enforced.
+  - [ ] `irij test` reads irij.toml beside each test file (as seeds do), so a project's `[trust]` doesn't cover `tests/`
+  - [ ] Make `[trust]` the default for new projects (`irij new`?) once the ecosystem's seeds have been audited
+
 - [x] **A `with` needs its handler's row** — DONE (2026-10, spec §3.2, approved). `handler loud :: Log ::: Console` installed by `with loud` inside `fn price :: Int Int` printed from a fn declared pure; the same went for reading the clock and calling Java through `default-fs` & co. — the `with` discharged `Log` and charged nothing. Now the handler's row must be in the enclosing fn's row (EffectRowChecker.requireHandlerRows); in `h1 >> h2` h1's effect meets h2's row; effect inference carries the rows to a lambda's caller. `unsafe-jvm` is deprecated: it now declares `::: JVM`, so it grants nothing, and every `with` of it warns. std.db's private `db-tx-wrapper`, three test files and two examples declared the effects they had been getting for free.
   - [ ] A handler the checker can't name statically (`h := pick-handler ()`, then `with h`) is still not charged, and its body is checked as AMBIENT: needs handler values to carry their row in the spec (`:: Handler Log ::: Console`)
   - [x] A call through a Java cap performs the cap's effect, not JVM: std handlers are `default-db :: Db ::: Db` & co., so installing one charges `Db`, not `JVM` (capabilities.md)

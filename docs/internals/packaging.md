@@ -26,6 +26,10 @@ docs = "https://…/docs"    # optional — likewise
 vrata = "0.2"                                        # registry, minor line
 utils = { git = "https://…/utils.git", tag = "v1" }  # git
 local = { path = "../lib" }                          # path (dev only)
+
+[trust]                    # optional — who may reach Java (jvm-capability.md § Trust)
+caps = ["acme.clock"]      # modules that may declare a Java `cap`
+jvm = ["seed-readme"]      # modules that may write Java interop by hand
 ```
 
 ### Link fields (`website` / `repo` / `docs`)
