@@ -211,7 +211,11 @@ Two forms of cap provider:
 
 - **Java classpath (string):** the original v0.7.0 form. Provider
   methods are public-static `Object → Object` methods on the named
-  class; use-sites lower to `INVOKESTATIC providerClass/method`.
+  class; use-sites lower to `INVOKESTATIC providerClass/method`. The
+  class can come from the JDK, the runtime, or a library the project
+  or a seed lists in irij.toml `[jvm]` — the program's classes load
+  under the deps class loader, so the `INVOKESTATIC` links against the
+  library (packaging.md § Java libraries).
 - **Irij record (map literal):** v0.7.x phase 3. The cap value is a
   map whose keys are op names and values are IrijFn closures. The
   emitter materialises the record once at class-load time

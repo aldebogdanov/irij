@@ -780,6 +780,44 @@ Full design and the recorded Quint behaviour it rests on:
 
 ---
 
+## Phase 16 — Java libraries in projects and seeds
+
+A project or seed lists Maven libraries in irij.toml `[jvm]`; caps and
+interop reach them. Design: `docs/internals/packaging.md` § Java
+libraries.
+
+- [x] **`[jvm]` manifest section** — quoted `"group:artifact"` = exact
+      version (ranges, LATEST, RELEASE, snapshots refused); root-only
+      `repos`. `ProjectFile.parseJvm`, `ProjectFileTest.JvmSection`.
+- [x] **Resolution + `irij.lock`** — Maven Resolver (supplier-mvn3),
+      transitive, checksum policy `fail`, cache `~/.irij/jars`; the lock
+      pins every jar's sha256 and an inputs hash, and a locked jar with a
+      different sha256 is refused. Root version wins; highest seed version
+      within a major; two majors from seeds is an error. `JvmDeps`,
+      `ProjectDeps`, `JvmDepsTest` (offline `file:` repo).
+- [x] **Deps class loader** — child-first over the jars (JDK, `java.*`,
+      `dev.irij.*` from the parent); parent of every program loader;
+      `JavaInterop.resolveClass` and the run thread's context loader use
+      it. Wired into run, test, REPL, nREPL.
+- [x] **`irij build`** — libraries ship whole under `__irij_lib/`, the
+      program under `__irij_program/`, `JarLauncher` as main class; apps
+      without `[jvm]` keep the old layout.
+- [x] **`[trust] jars`** — names the seeds whose libraries may be
+      fetched; an untrusted seed is refused before any download.
+- [x] **`irij deps`**, Java-libraries section in **`irij audit`**,
+      `irij install` fetches libraries.
+- [x] **Publish** sends `jvm` (coordinates) in the metadata; a seed with
+      `[jvm] repos` is refused.
+- [ ] Registry: store and show a seed's `jvm` list (irij.online)
+- [ ] Phase 3: a seed ships `java/` sources that irij compiles (a real
+      static provider instead of an interop adapter)
+- [ ] Phase 4: instance/handle caps; adding a library to a running REPL
+- [ ] Std's JDBC cap only opens `jdbc:sqlite:`; a `[jvm]` JDBC driver
+      needs its own cap (DriverManager won't see drivers in the deps
+      loader)
+
+---
+
 ## Near-term (high priority)
 
 - [x] **Specs check what they say** — DONE (2026-10). A name nothing declares (`fn f :: NonExistant Int`) accepted every value, on input and output; so did `Ok` / `Err` and variant names as specs (`fn f :: Int Nickel` returned `Dime`), an applied parametric spec (`(Maybe Int)` returned `5`), and a variant's payload was never checked (`Circle "x"` for `Circle Float`, `Email 42` for `newtype Email := Str`). Now an unknown name is a compile error with a suggestion (ModuleScope.specName); variants keep their field specs in the AST, constructors certify them (certifySum), descriptors carry type parameters, and an applied spec substitutes them; a variant name or `Ok` / `Err` as a spec checks the variant (and `(Ok Int)` its payload). SpecStrictnessTest.

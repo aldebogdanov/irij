@@ -3,6 +3,8 @@ package dev.irij.cli;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.compiler.TrustChecker;
 import dev.irij.module.DependencyResolver;
+import dev.irij.module.ProjectFile;
+import dev.irij.module.jvm.JvmDeps;
 import dev.irij.module.ProjectFile.Trust;
 
 import java.nio.file.Files;
@@ -17,7 +19,9 @@ import java.util.Map;
  * in the entry file, its modules and its seeds. With a {@code [trust]}
  * section in irij.toml, each module is marked trusted or not, and the
  * command exits 1 when one isn't (the compiler refuses that program). The
- * standard library is trusted and summarised in one line.
+ * standard library is trusted and summarised in one line. Then the Java
+ * libraries ({@code [jvm]}) the project and each seed bring, each seed
+ * marked against {@code [trust] jars}. Nothing is downloaded.
  */
 public final class AuditCommand {
 
@@ -26,8 +30,10 @@ public final class AuditCommand {
     public static void run(String[] args) throws Exception {
         Path entry = entryPoint(args);
         Path root = entry.toAbsolutePath().getParent();
-        List<Path> seedRoots = DependencyResolver.resolveSeedRoots(root, System.err);
-        IrijCompiler.Audit audit = IrijCompiler.audit(entry, seedRoots);
+        var manifest = ProjectFile.parseFile(root.resolve("irij.toml"));
+        Map<String, Path> seeds = manifest.deps().isEmpty() ? Map.of()
+                : new DependencyResolver(root, System.err).resolveAll(manifest.deps());
+        IrijCompiler.Audit audit = IrijCompiler.audit(entry, new java.util.ArrayList<>(seeds.values()));
         Trust trust = audit.trust();
 
         Map<String, List<TrustChecker.Site>> byModule = new LinkedHashMap<>();
@@ -42,7 +48,7 @@ public final class AuditCommand {
 
         System.out.println("Java in " + entry + (trust == null
                 ? "  (irij.toml has no [trust]: nothing is enforced)"
-                : "  (irij.toml [trust]: caps " + trust.caps() + ", jvm " + trust.jvm() + ")"));
+                : "  (irij.toml [trust]: caps " + trust.caps() + ", jvm " + trust.jvm() + ", jars " + trust.jars() + ")"));
         System.out.println();
         boolean untrusted = false;
         if (byModule.isEmpty()) {
@@ -69,11 +75,43 @@ public final class AuditCommand {
         System.out.println();
         System.out.println("  std  (" + plural(stdCaps, "cap") + ", " + plural(stdJvm, "Java interop site")
                 + ")  always trusted");
+
+        var plan = JvmDeps.plan(manifest, seeds);
+        boolean untrustedJars = printJars(root, plan);
         if (untrusted) {
             System.out.println();
             System.out.println("Some modules reach Java without [trust] listing them; the compiler refuses this program.");
-            System.exit(1);
         }
+        if (untrustedJars) {
+            System.out.println();
+            System.out.println("Some seeds bring Java libraries without [trust] jars listing them; no Java library is downloaded until it does.");
+        }
+        if (untrusted || untrustedJars) System.exit(1);
+    }
+
+    /** The Java libraries section. True when a seed's libraries aren't trusted. */
+    static boolean printJars(Path root, JvmDeps.Plan plan) throws java.io.IOException {
+        System.out.println();
+        if (plan.isEmpty()) {
+            System.out.println("Java libraries: none ([jvm] is empty here and in every seed)");
+            return false;
+        }
+        var locked = JvmDeps.lockedJars(root, plan);
+        System.out.println("Java libraries" + (locked == null
+                ? "  (irij.lock missing or out of date; the next run resolves [jvm])"
+                : "  (irij.lock: " + plural(locked.size(), "jar") + " with dependencies)"));
+        System.out.println();
+        for (var e : JvmDeps.byDeclarer(plan).entrySet()) {
+            String who = e.getKey();
+            String mark = "";
+            if (!who.equals("irij.toml") && plan.trustEnforced()) {
+                mark = plan.untrusted().contains(who) ? "  NOT TRUSTED" : "  trusted";
+            }
+            System.out.println("  " + who + mark);
+            for (var d : e.getValue()) System.out.println("    " + d.coord());
+        }
+        for (String n : plan.notes()) System.out.println("  note: " + n);
+        return !plan.untrusted().isEmpty();
     }
 
     private static String plural(long n, String what) {

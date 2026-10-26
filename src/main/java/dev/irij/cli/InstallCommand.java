@@ -13,7 +13,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-/** {@code irij install} (alias {@code seed}) — fetch seeds from irij.toml. */
+/** {@code irij install} (alias {@code seed}) — fetch seeds and Java
+ *  libraries ({@code [jvm]}, pinned in irij.lock) from irij.toml. */
 final class InstallCommand {
 
     static void run() {
@@ -26,20 +27,25 @@ final class InstallCommand {
         }
 
         try {
-            var deps = dev.irij.module.ProjectFile.parseDeps(tomlFile);
-            if (deps.isEmpty()) {
-                System.out.println("irij.toml has no seeds to install.");
+            var manifest = dev.irij.module.ProjectFile.parseFile(tomlFile);
+            var deps = manifest.deps();
+            if (deps.isEmpty() && manifest.jvm().deps().isEmpty()) {
+                System.out.println("irij.toml has no seeds or [jvm] libraries to install.");
                 return;
             }
 
-            System.out.println("Installing " + deps.size() + " seed"
-                + (deps.size() == 1 ? "" : "s") + " ...");
-            var resolver = new dev.irij.module.DependencyResolver(projectRoot, System.out);
-            var resolved = resolver.resolveAll(deps);
+            if (!deps.isEmpty()) {
+                System.out.println("Installing " + deps.size() + " seed"
+                    + (deps.size() == 1 ? "" : "s") + " ...");
+            }
+            var resolved = dev.irij.module.jvm.ProjectDeps.resolve(projectRoot, System.out);
 
             System.out.println();
-            for (var entry : resolved.entrySet()) {
+            for (var entry : resolved.seeds().entrySet()) {
                 System.out.println("  " + entry.getKey() + " → " + entry.getValue());
+            }
+            for (var jar : resolved.jars()) {
+                System.out.println("  " + jar.getFileName() + " → " + jar);
             }
             System.out.println("\nDone.");
         } catch (dev.irij.module.ProjectFile.ParseError e) {

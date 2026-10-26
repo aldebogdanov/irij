@@ -111,6 +111,16 @@ final class PublishCommand {
                 }
             }
 
+            // A seed's [jvm] libraries come from the consumer's
+            // repositories; consumers refuse a seed that sets its own.
+            if (!result.jvm().repos().isEmpty()) {
+                System.err.println("Error: a seed can't set [jvm] repos — projects that use it fetch "
+                    + "its Java libraries from their own repositories (Maven Central by default). "
+                    + "Remove `repos` before publishing.");
+                System.exit(1);
+                return;
+            }
+
             // Collect .irj files + README + irij.toml
             var filesToBundle = new ArrayList<Path>();
             filesToBundle.add(tomlFile);
@@ -164,7 +174,9 @@ final class PublishCommand {
                     + ",\"license\":" + jsonStr(meta.license())
                     + ",\"website\":" + jsonStr(meta.website())
                     + ",\"repo\":" + jsonStr(meta.repo())
-                    + ",\"docs\":" + jsonStr(meta.docs()) + "}";
+                    + ",\"docs\":" + jsonStr(meta.docs())
+                    + ",\"jvm\":" + jsonList(result.jvm().deps().stream()
+                            .map(dev.irij.module.ProjectFile.JavaDep::coord).toList()) + "}";
 
                 var bodyBaos = new ByteArrayOutputStream();
                 bodyBaos.write(("--" + boundary + "\r\n").getBytes());
@@ -218,6 +230,10 @@ final class PublishCommand {
             System.err.println("Error publishing: " + e.getMessage());
             System.exit(1);
         }
+    }
+
+    static String jsonList(java.util.List<String> items) {
+        return "[" + String.join(",", items.stream().map(PublishCommand::jsonStr).toList()) + "]";
     }
 
     private static String jsonStr(String s) {

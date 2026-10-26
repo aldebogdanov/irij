@@ -159,6 +159,10 @@ public final class BytecodeSession {
         try {
             Method main = cls.getMethod("main", String[].class);
             RuntimeSupport.callBoundSession(namespace, captureOut, () -> {
+                // [jvm] libraries find their plugins through the context loader.
+                Thread self = Thread.currentThread();
+                ClassLoader previous = self.getContextClassLoader();
+                self.setContextClassLoader(dev.irij.runtime.DepsClassLoader.current());
                 try {
                     main.invoke(null, (Object) new String[0]);
                     return null;
@@ -169,6 +173,8 @@ public final class BytecodeSession {
                     throw new RuntimeException(cause);
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException(e);
+                } finally {
+                    self.setContextClassLoader(previous);
                 }
             });
         } catch (NoSuchMethodException e) {
@@ -205,7 +211,7 @@ public final class BytecodeSession {
     }
 
     private static final class Loader extends ClassLoader {
-        Loader() { super(BytecodeSession.class.getClassLoader()); }
+        Loader() { super(dev.irij.runtime.DepsClassLoader.current()); }
         Class<?> define(String name, byte[] bytes) {
             return defineClass(name, bytes, 0, bytes.length);
         }

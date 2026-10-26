@@ -1,0 +1,12 @@
+# irij.lock: the Java libraries irij.toml [jvm] resolved to, with their
+# sha256. Written by irij; commit it. A changed [jvm] rewrites it.
+version = 1
+inputs = "2dda820859947c17a5b1f00895e9320b6dd705d795cf14a319bf69b467c25688"
+
+[[jar]]
+coord = "org.apache.commons:commons-text:jar:1.12.0"
+sha256 = "de023257ff166044a56bd1aa9124e843cd05dac5806cc705a9311f3556d5a15f"
+
+[[jar]]
+coord = "org.apache.commons:commons-lang3:jar:3.14.0"
+sha256 = "7b96bf3ee68949abb5bc465559ac270e0551596fa34523fddf890ec418dde13c"

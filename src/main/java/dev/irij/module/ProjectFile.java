@@ -28,9 +28,13 @@ import java.util.List;
  * utils = { git = "https://github.com/user/utils.git", tag = "v1.0" }  # git inline
  * local-lib = { path = "../my-lib" }                        # path inline
  *
+ * [jvm]                           # optional — Java libraries, see {@link Jvm}
+ * "org.neo4j.driver:neo4j-java-driver" = "5.28.5"
+ *
  * [trust]                         # optional — see {@link Trust}
  * caps = ["acme.clock"]           # modules that may bind a Java class with `cap`
  * jvm = ["seed-readme"]           # modules that may write Java interop by hand
+ * jars = ["neo4irij"]             # seeds that may bring Java libraries
  * </pre>
  *
  * <p>Seeds (dependencies) support three source types:
@@ -69,6 +73,29 @@ public final class ProjectFile {
         String docs
     ) {}
 
+    /** A Java library from {@code [jvm]}: a Maven coordinate at an exact version. */
+    public record JavaDep(String group, String artifact, String version) {
+        /** {@code group:artifact} — the key two requests for one library share. */
+        public String key() { return group + ":" + artifact; }
+        public String coord() { return key() + ":" + version; }
+        @Override public String toString() { return coord(); }
+    }
+
+    /**
+     * The {@code [jvm]} section: Java libraries the project or seed needs
+     * on the classpath. Keys are quoted {@code "group:artifact"}
+     * coordinates, values exact versions (no ranges, no {@code LATEST},
+     * no snapshots — what a manifest names must mean one jar forever).
+     * {@code repos} lists Maven repository URLs to fetch from instead of
+     * Maven Central; only the root project's are used, and a seed that
+     * sets them is refused (it would choose where your build downloads
+     * code from).
+     */
+    public record Jvm(List<JavaDep> deps, List<String> repos) {
+        static final Jvm EMPTY = new Jvm(List.of(), List.of());
+        public boolean isEmpty() { return deps.isEmpty() && repos.isEmpty(); }
+    }
+
     /**
      * The {@code [trust]} section: which modules may reach Java. With it,
      * the compiler refuses a Java {@code cap} declaration in a module not
@@ -80,11 +107,17 @@ public final class ProjectFile {
      * prefix ({@code "acme.*"}: {@code acme} and everything under it); the
      * entry program (a file without {@code mod}) is {@code "main"}. The
      * standard library ({@code std.*}) is always trusted. Seeds are
-     * covered too: the policy is the root project's.
+     * covered too: the policy is the root project's. {@code jars} names
+     * the seeds (by their name in {@code [seeds]}, same pattern rules)
+     * whose {@code [jvm]} libraries may be fetched and loaded; the root
+     * project's own {@code [jvm]} needs no entry.
      */
-    public record Trust(List<String> caps, List<String> jvm) {
+    public record Trust(List<String> caps, List<String> jvm, List<String> jars) {
+        public Trust(List<String> caps, List<String> jvm) { this(caps, jvm, List.of()); }
+
         public boolean allowsCaps(String module) { return matches(caps, module); }
         public boolean allowsJvm(String module) { return matches(jvm, module); }
+        public boolean allowsJars(String seed) { return matches(jars, seed); }
 
         public static boolean isStd(String module) {
             return module != null && (module.equals("std") || module.startsWith("std."));
@@ -162,19 +195,83 @@ public final class ProjectFile {
             }
         }
 
-        return new ParseResult(meta, List.copyOf(seeds), parseTrust(toml));
+        return new ParseResult(meta, List.copyOf(seeds), parseTrust(toml), parseJvm(toml));
+    }
+
+    /** A Maven group or artifact id: dots, dashes and underscores between
+     *  letters and digits — never a path, never empty. */
+    private static final java.util.regex.Pattern MAVEN_ID =
+        java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
+    /** An exact version. Ranges ({@code [1,2)}), {@code ${props}} and
+     *  spaces fail this; {@code LATEST}/{@code RELEASE}/snapshots are
+     *  refused by name below. */
+    private static final java.util.regex.Pattern MAVEN_VERSION =
+        java.util.regex.Pattern.compile("[A-Za-z0-9][A-Za-z0-9._+-]*");
+
+    private static Jvm parseJvm(Toml toml) {
+        var t = toml.getTable("jvm");
+        if (t == null) return Jvm.EMPTY;
+        var deps = new ArrayList<JavaDep>();
+        var repos = List.<String>of();
+        for (var e : t.toMap().entrySet()) {
+            String key = unquote(e.getKey());
+            Object value = e.getValue();
+            if (key.equals("repos")) {
+                repos = repoList(value);
+                continue;
+            }
+            String[] ga = key.split(":", -1);
+            if (ga.length != 2 || !MAVEN_ID.matcher(ga[0]).matches()
+                    || !MAVEN_ID.matcher(ga[1]).matches() || key.contains("..")) {
+                throw new ParseError("[jvm] key '" + key + "' must be a quoted Maven coordinate "
+                        + "\"group:artifact\", like \"org.neo4j.driver:neo4j-java-driver\" = \"5.28.5\"");
+            }
+            if (!(value instanceof String v)) {
+                throw new ParseError("[jvm] \"" + key + "\" must be a version string, like \"1.2.3\"");
+            }
+            if (!MAVEN_VERSION.matcher(v).matches() || v.contains("..") || v.equals("LATEST")
+                    || v.equals("RELEASE") || v.endsWith("-SNAPSHOT")) {
+                throw new ParseError("[jvm] \"" + key + "\" = \"" + v + "\": the version must be exact "
+                        + "(no ranges, LATEST, RELEASE or -SNAPSHOT), so it names one jar forever");
+            }
+            deps.add(new JavaDep(ga[0], ga[1], v));
+        }
+        deps.sort(java.util.Comparator.comparing(JavaDep::coord));
+        return new Jvm(List.copyOf(deps), repos);
+    }
+
+    private static List<String> repoList(Object value) {
+        String usage = "[jvm] repos must be a list of http(s):// or file: URLs";
+        if (!(value instanceof List<?> raw)) throw new ParseError(usage);
+        var out = new ArrayList<String>();
+        for (Object o : raw) {
+            if (!(o instanceof String url)
+                    || !(url.startsWith("https://") || url.startsWith("http://") || url.startsWith("file:"))) {
+                throw new ParseError(usage);
+            }
+            out.add(url);
+        }
+        return List.copyOf(out);
+    }
+
+    /** toml4j hands a quoted key back with its quotes. */
+    private static String unquote(String key) {
+        if (key.length() >= 2 && key.startsWith("\"") && key.endsWith("\"")) {
+            return key.substring(1, key.length() - 1);
+        }
+        return key;
     }
 
     private static Trust parseTrust(Toml toml) {
         var t = toml.getTable("trust");
         if (t == null) return null;
         for (String key : t.toMap().keySet()) {
-            if (!key.equals("caps") && !key.equals("jvm")) {
+            if (!key.equals("caps") && !key.equals("jvm") && !key.equals("jars")) {
                 throw new ParseError("[trust] has an unknown key '" + key
-                        + "' — it takes `caps` and `jvm`, lists of module names");
+                        + "' — it takes `caps` and `jvm` (lists of module names) and `jars` (seed names)");
             }
         }
-        return new Trust(stringList(t, "caps"), stringList(t, "jvm"));
+        return new Trust(stringList(t, "caps"), stringList(t, "jvm"), stringList(t, "jars"));
     }
 
     private static List<String> stringList(Toml t, String key) {
@@ -223,10 +320,10 @@ public final class ProjectFile {
         }
     }
 
-    /** Result of parsing irij.toml. */
-    /** {@code trust} is null when irij.toml has no {@code [trust]}. */
-    public record ParseResult(ProjectMeta meta, List<Dependency> deps, Trust trust) {
-        static final ParseResult EMPTY = new ParseResult(null, List.of(), null);
+    /** Result of parsing irij.toml. {@code trust} is null when irij.toml
+     *  has no {@code [trust]}; {@code jvm} is empty without {@code [jvm]}. */
+    public record ParseResult(ProjectMeta meta, List<Dependency> deps, Trust trust, Jvm jvm) {
+        static final ParseResult EMPTY = new ParseResult(null, List.of(), null, Jvm.EMPTY);
     }
 
     /** Error thrown when irij.toml has syntax errors. */

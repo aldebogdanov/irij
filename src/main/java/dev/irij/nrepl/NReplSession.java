@@ -41,14 +41,14 @@ public final class NReplSession {
         this.closed = false;
     }
 
-    /** Resolve the project's seeds to local roots. Best-effort: no
-     *  manifest, no deps, or a resolution failure (e.g. offline)
-     *  degrades to an empty list rather than killing the session — the
-     *  eval will then surface its own "module not found" if it actually
-     *  needed a seed. */
+    /** Resolve the project's seeds to local roots and load its Java
+     *  libraries ([jvm]). Best-effort: no manifest, no deps, or a
+     *  resolution failure (e.g. offline) degrades to an empty list
+     *  rather than killing the session — the eval will then surface its
+     *  own "module not found" if it actually needed a seed. */
     private static List<java.nio.file.Path> resolveSeedRoots(java.nio.file.Path projectRoot) {
         try {
-            return dev.irij.module.DependencyResolver.resolveSeedRoots(projectRoot, System.out);
+            return dev.irij.module.jvm.ProjectDeps.load(projectRoot, System.out).seedRoots();
         } catch (Exception e) {
             System.err.println("nREPL: seed resolution failed for "
                     + projectRoot + ": " + e.getMessage());

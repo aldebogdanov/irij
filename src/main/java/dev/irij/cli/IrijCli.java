@@ -21,7 +21,7 @@ import java.nio.file.Path;
  *   irij <file.irj>            — parse and run a source file
  *   irij run <file.irj>        — same, explicit
  *   irij test [files|dirs...]  — run test files (auto-discovers test-*.irj)
- *   irij build | compile | install | publish | version | lsp | help
+ *   irij build | compile | install | deps | publish | version | lsp | help
  *   irij --parse-only <file>   — parse and report errors, no evaluation
  *   irij --ast <file>          — dump parsed AST (debug)
  *   irij --nrepl-server[=PORT] — start nREPL server (default port 7888)
@@ -63,13 +63,15 @@ public final class IrijCli {
             case "audit"            -> {
                 try {
                     AuditCommand.run(rest);
-                } catch (IrijCompiler.CompileException | dev.irij.module.ProjectFile.ParseError e) {
+                } catch (IrijCompiler.CompileException | dev.irij.module.ProjectFile.ParseError
+                         | dev.irij.module.jvm.JvmDeps.DepsError e) {
                     System.err.println(e instanceof dev.irij.module.ProjectFile.ParseError
                             ? "irij.toml: " + e.getMessage() : e.getMessage());
                     System.exit(1);
                 }
                 return;
             }
+            case "deps"             -> { DepsCommand.run(); return; }
             case "repl"             -> { launchRepl(); return; }
             case "help"             -> { printHelp(); return; }
             case "run"              -> {
@@ -205,6 +207,9 @@ public final class IrijCli {
         } catch (dev.irij.module.ProjectFile.ParseError e) {
             System.err.println("irij.toml: " + e.getMessage());
             System.exit(1);
+        } catch (dev.irij.module.jvm.JvmDeps.DepsError e) {
+            System.err.println(e.getMessage());
+            System.exit(1);
         }
     }
 
@@ -233,7 +238,8 @@ public final class IrijCli {
               irij build -o out.jar      build with custom output path
               irij compile <file.irj>    (experimental) compile to .class
               irij compile <file> -o j.jar  (experimental) compile to runnable jar
-              irij install               fetch seeds from irij.toml (alias: seed)
+              irij install               fetch seeds and [jvm] Java libraries from irij.toml (alias: seed)
+              irij deps                  list the [jvm] Java libraries and the jars irij.lock pins
               irij publish               publish seed to registry (alias: sow)
               irij version               print this project's MAJOR.MINOR.<commit-count> version
               irij version --base|--count   print just the base / commit count

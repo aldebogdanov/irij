@@ -121,6 +121,7 @@ cap to any class. irij.toml's optional `[trust]` section confines that:
 [trust]
 caps = ["acme.clock"]      # may declare a Java cap (`cap x :: E = "java.Class"`)
 jvm = ["seed-readme"]      # may write Class/member, obj#member, #member
+jars = ["neo4irij"]        # seeds that may bring Java libraries ([jvm])
 ```
 
 With it, the compiler refuses a Java cap or a hand-written Java site in a
@@ -133,9 +134,19 @@ its own modules and its seeds — and is the root project's (the
 Without the section nothing is enforced. A record cap has no Java behind
 it and is not a site.
 
+`jars` is about code, not call sites: a seed's `[jvm]` libraries
+(packaging.md § Java libraries) run as soon as their classes load —
+static initialisers, service providers — whatever the Irij side calls.
+So it names **seeds** (their `[seeds]` names, same pattern rules), and
+an untrusted seed's libraries are refused before anything is
+downloaded; the root project's own `[jvm]` needs no entry. It is
+orthogonal to `caps` / `jvm`: a trusted seed still needs `caps` to bind
+a library class with `cap`.
+
 `irij audit [file.irj]` prints every site by module, marks each module
-trusted or not against `[trust]`, summarises std in one line, and exits 1
-when a module isn't trusted.
+trusted or not against `[trust]`, summarises std in one line, then lists
+the Java libraries each seed brings, marked against `jars`, and exits 1
+when a module or seed isn't trusted.
 
 Implementation: `ProjectFile.Trust` parses and matches; `ModuleInliner`
 tags each inlined decl with its module and file (`declOrigin`, by

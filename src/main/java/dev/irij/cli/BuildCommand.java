@@ -3,7 +3,9 @@ package dev.irij.cli;
 import dev.irij.compiler.CompileOptions;
 import dev.irij.compiler.IrijCompiler;
 import dev.irij.module.ProjectFile;
-import dev.irij.module.DependencyResolver;
+import dev.irij.module.jvm.JvmDeps;
+import dev.irij.module.jvm.ProjectDeps;
+import dev.irij.runtime.JarLauncher;
 
 import java.io.*;
 import java.nio.file.*;
@@ -21,6 +23,9 @@ import java.util.stream.Stream;
  *       and seed it uses inlined (see {@code ModuleInliner})</li>
  *   <li>The Irij runtime classes and the libraries they need</li>
  *   <li>Static resources from {@code resources/} (under {@code __irij_resources/})</li>
+ *   <li>The Java libraries {@code irij.toml} {@code [jvm]} resolves to, as whole
+ *       jars under {@code __irij_lib/}; the program then moves to
+ *       {@code __irij_program/} and {@link dev.irij.runtime.JarLauncher} starts it</li>
  * </ul>
  *
  * <p>The bundled JAR runs with: {@code java -jar app.jar}
@@ -48,7 +53,7 @@ public final class BuildCommand {
         System.out.println("  entry:  " + entryPoint);
         System.out.println("  output: " + outputJar);
 
-        Map<String, Path> bcDeps = resolveDeps(projectRoot);
+        ProjectDeps bcDeps = resolveDeps(projectRoot);
         buildBytecodeJar(projectRoot, entryPoint, outputJar, directLinking, bcDeps);
         long sizeKbBc = Files.size(outputJar) / 1024;
         System.out.println();
@@ -112,21 +117,20 @@ public final class BuildCommand {
         return null;
     }
 
-    private static Map<String, Path> resolveDeps(Path projectRoot) throws IOException {
-        Path tomlFile = projectRoot.resolve("irij.toml");
-        if (!Files.exists(tomlFile)) return Map.of();
-
+    private static ProjectDeps resolveDeps(Path projectRoot) throws IOException {
         try {
-            var deps = ProjectFile.parseDeps(tomlFile);
-            if (deps.isEmpty()) return Map.of();
-
-            System.out.println("  seeds:  " + deps.size());
-            var resolver = new DependencyResolver(projectRoot, System.out);
-            return resolver.resolveAll(deps);
+            var deps = ProjectDeps.resolve(projectRoot, System.out);
+            if (!deps.seeds().isEmpty()) System.out.println("  seeds:  " + deps.seeds().size());
+            if (!deps.jars().isEmpty()) System.out.println("  jars:   " + deps.jars().size());
+            return deps;
         } catch (ProjectFile.ParseError e) {
             System.err.println("Error in irij.toml: " + e.getMessage());
             System.exit(1);
-            return Map.of();
+            return ProjectDeps.NONE;
+        } catch (JvmDeps.DepsError e) {
+            System.err.println(e.getMessage());
+            System.exit(1);
+            return ProjectDeps.NONE;
         }
     }
 
@@ -189,7 +193,7 @@ public final class BuildCommand {
     private static void buildBytecodeJar(Path projectRoot, String entryPoint,
                                           Path outputJar,
                                           boolean directLinking,
-                                          Map<String, Path> deps) throws IOException {
+                                          ProjectDeps deps) throws IOException {
         CompileOptions opts = CompileOptions.defaults()
                 .withDirectLinking(directLinking);
 
@@ -197,7 +201,7 @@ public final class BuildCommand {
         // Hand resolved seed dirs to the compiler so `use mod.X` in the
         // entry source can be inlined from `~/.irij/seeds/<name>/<ver>/`
         // or any other resolved location DependencyResolver returned.
-        List<Path> seedRoots = new java.util.ArrayList<>(deps.values());
+        List<Path> seedRoots = deps.seedRoots();
         java.util.Map<String, byte[]> programClasses;
         try {
             programClasses = IrijCompiler.compileFileMulti(entryFile, BYTECODE_CLASS_NAME, opts, seedRoots);
@@ -211,9 +215,16 @@ public final class BuildCommand {
         List<Path> resourceFiles = Files.isDirectory(resourcesDir)
                 ? collectAllFiles(resourcesDir) : List.of();
 
+        // With Java libraries the program can't sit on the JAR's classpath:
+        // its classes must link against the libraries, which load in their
+        // own loader. JarLauncher sets that up (same as `irij run` does).
+        boolean withLibs = !deps.jars().isEmpty();
+        String programPrefix = withLibs ? JarLauncher.PROGRAM : "";
+
         Manifest mf = new Manifest();
         mf.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
-        mf.getMainAttributes().put(Attributes.Name.MAIN_CLASS, BYTECODE_CLASS_NAME);
+        mf.getMainAttributes().put(Attributes.Name.MAIN_CLASS,
+                withLibs ? JarLauncher.class.getName() : BYTECODE_CLASS_NAME);
 
         try (JarOutputStream jos = new JarOutputStream(
                 new BufferedOutputStream(Files.newOutputStream(outputJar)), mf)) {
@@ -223,7 +234,7 @@ public final class BuildCommand {
             // 1. User program classes — main class plus any per-module
             //    classes from multi-class emission.
             for (var e : programClasses.entrySet()) {
-                String classEntry = e.getKey().replace('.', '/') + ".class";
+                String classEntry = programPrefix + e.getKey().replace('.', '/') + ".class";
                 jos.putNextEntry(new JarEntry(classEntry));
                 jos.write(e.getValue());
                 jos.closeEntry();
@@ -234,7 +245,26 @@ public final class BuildCommand {
             //    and the packaged stdlib (std/*.irj).
             bundleRuntimeClasses(jos, written);
 
-            // 3. Resources under __irij_resources/ (mirrors interp mode layout).
+            // 3. Java libraries, whole, named by sha256, plus the index
+            //    JarLauncher reads.
+            if (withLibs) {
+                var index = new StringBuilder("main " + BYTECODE_CLASS_NAME + "\n");
+                for (Path jar : deps.jars()) {
+                    String sha = JvmDeps.sha256(jar);
+                    String name = JarLauncher.LIB + sha + ".jar";
+                    index.append("jar ").append(sha).append(' ').append(jar.getFileName()).append('\n');
+                    if (!written.add(name)) continue;
+                    jos.putNextEntry(new JarEntry(name));
+                    Files.copy(jar, jos);
+                    jos.closeEntry();
+                }
+                jos.putNextEntry(new JarEntry(JarLauncher.INDEX));
+                jos.write(index.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                jos.closeEntry();
+                written.add(JarLauncher.INDEX);
+            }
+
+            // 4. Resources under __irij_resources/ (mirrors interp mode layout).
             for (Path resFile : resourceFiles) {
                 String relative = resourcesDir.relativize(resFile).toString();
                 String name = RESOURCES_PREFIX + relative;
@@ -266,6 +296,8 @@ public final class BuildCommand {
                         (name.endsWith(".class") && name.startsWith("dev/irij/")
                                 && !name.startsWith("dev/irij/cli/")
                                 && !name.startsWith("dev/irij/repl/")
+                                // [jvm] resolution — CLI-only, needs Maven Resolver.
+                                && !name.startsWith("dev/irij/module/jvm/")
                                 && !name.startsWith("dev/irij/nrepl/")
                                 && !name.startsWith("dev/irij/mcp/"))
                         || name.startsWith("std/")
@@ -278,8 +310,13 @@ public final class BuildCommand {
                         // so the JDBC driver can self-load on start.
                         || name.startsWith("org/sqlite/native/")
                         // Service loader files — java.sql.Driver discovers
-                        // org.sqlite.JDBC via META-INF/services.
-                        || name.startsWith("META-INF/services/");
+                        // org.sqlite.JDBC via META-INF/services; jline finds
+                        // its terminal providers there. Only those: the
+                        // CLI's other libraries (Maven Resolver, LSP) aren't
+                        // bundled, so their service files would name
+                        // classes the app doesn't have.
+                        || name.equals("META-INF/services/java.sql.Driver")
+                        || name.startsWith("META-INF/services/org/jline/");
                 if (!keep) continue;
                 if (!written.add(name)) continue;
                 jos.putNextEntry(new JarEntry(name));

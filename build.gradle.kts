@@ -55,6 +55,10 @@ dependencies {
     // framework).
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1")
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc:0.23.1")
+    // Maven Resolver — fetches the Java libraries a project or seed
+    // declares in irij.toml [jvm] (transitively) into irij.lock. Used by
+    // the CLI only; `irij build` doesn't bundle it into apps.
+    implementation("org.apache.maven.resolver:maven-resolver-supplier-mvn3:2.0.24")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

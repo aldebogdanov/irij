@@ -26,6 +26,8 @@ irij file.irj                 # run a file
 irij file.irj --port 9090     # args after the file reach the program (env-args)
 irij test                     # run tests/ directory
 irij audit                    # where the program reaches Java, against irij.toml [trust]
+irij install                  # fetch seeds and [jvm] Java libraries (pinned in irij.lock)
+irij deps                     # the Java libraries asked for and the jars they resolve to
 irij --nrepl-server            # start nREPL (port 7888)
 irij --nrepl-server=9000       # nREPL on custom port
 irij --parse-only file.irj    # check syntax only
@@ -43,6 +45,7 @@ irij examples/walkthrough.irj # full language tour (all phases)
 irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
 irij examples/terminal.irj    # raw-mode terminal (Term effect) — needs a tty
 irij examples/quint.irj       # model-based testing against a Quint spec — needs `quint`
+(cd examples/java-libs && irij run main.irj)  # a Maven library through a cap ([jvm], irij.lock)
 ```
 
 ## Tests
@@ -71,6 +74,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
 - **Unambiguous output** &mdash; `println "a b"` prints `a b`, but a Str inside a collection, variant or record prints quoted and escaped, as source writes it: `#["a b" "c"]`, `{name= "Ada"}`, `#[(Ok 1) (Err "e")]`; `inspect` gives that form for any value, a Str included, and the REPL echoes it
 - **Java behind caps, confined by trust** &mdash; a `cap` binds a Java class to an effect, and a call through it performs that effect, so code that installs `default-db` declares `::: Db`, not `JVM`; irij.toml's `[trust]` names the modules that may declare caps or write Java at all, the compiler refuses the rest, and `irij audit` lists every site
+- **Java libraries** &mdash; irij.toml's `[jvm]` names Maven coordinates (`"org.apache.commons:commons-text" = "1.12.0"`); they're fetched with their dependencies from Maven Central, pinned with sha256 in `irij.lock`, loaded child-first so a library keeps its own versions, and shipped whole inside `irij build`'s JAR. Seeds can bring libraries too, if `[trust] jars` names them. See `examples/java-libs/`
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs; `cond` (first condition that holds) and `case` (equality dispatch) for multi-way choices without `else if` chains
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method` for statics, `obj#method` for instance members (auto-reflection, java.lang auto-imported); every Java site needs `::: JVM`, checked at compile time

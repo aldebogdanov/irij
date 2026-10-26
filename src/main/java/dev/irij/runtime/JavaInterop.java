@@ -45,11 +45,19 @@ public final class JavaInterop {
 
     // ── Class resolution ────────────────────────────────────────────────
 
+    /** Forget resolved classes — the program's Java libraries changed
+     *  ({@link DepsClassLoader#install}). */
+    static void clearClassCache() {
+        CLASS_CACHE.clear();
+    }
+
+    /** Resolve {@code name} through {@link DepsClassLoader#current()}: the
+     *  JDK, the program's {@code [jvm]} libraries, then the runtime. */
     public static Class<?> resolveClass(String name) {
         var cached = CLASS_CACHE.get(name);
         if (cached != null) return cached;
         try {
-            var cls = Class.forName(name);
+            var cls = Class.forName(name, true, DepsClassLoader.current());
             CLASS_CACHE.put(name, cls);
             return cls;
         } catch (ClassNotFoundException e) {
