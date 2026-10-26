@@ -472,7 +472,7 @@ public final class RuntimeSupport {
     // The Db effect surface (`db-open`, `db-close`, `db-query`,
     // `db-exec`, `db-transaction`) is now routed through
     // `cap db-jdbc :: Db = "dev.irij.runtime.JdbcCapability"` in
-    // std/db.irj. The provider class owns every JDBC body + the
+    // std/jdbc.irj. The provider class owns every JDBC body + the
     // param/connection extraction helpers. The old `rawDb*` statics
     // here, the `raw-db-*` Builtins.install entries, and the
     // matching emit-table entries in ClassEmitter were all deleted —

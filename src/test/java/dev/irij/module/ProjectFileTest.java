@@ -7,6 +7,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -221,6 +222,66 @@ class ProjectFileTest {
             var result = ProjectFile.parseFile(tomlFile);
             assertEquals(1, result.deps().size());
             assertEquals("mylib", result.deps().get(0).name());
+        }
+    }
+
+    @Nested
+    class JvmSection {
+
+        @Test void parsesQuotedCoordinates() {
+            var jvm = ProjectFile.parse("""
+                [jvm]
+                "org.neo4j.driver:neo4j-java-driver" = "5.28.5"
+                "com.example:util" = "1.0"
+                """).jvm();
+            assertEquals(List.of("com.example:util:1.0", "org.neo4j.driver:neo4j-java-driver:5.28.5"),
+                    jvm.deps().stream().map(ProjectFile.JavaDep::coord).toList());
+            assertTrue(jvm.repos().isEmpty());
+        }
+
+        @Test void absentSectionIsEmpty() {
+            assertTrue(ProjectFile.parse("[project]\nname = \"x\"\n").jvm().isEmpty());
+        }
+
+        @Test void reposAreRead() {
+            var jvm = ProjectFile.parse("""
+                [jvm]
+                repos = ["https://repo.example/m2", "file:///tmp/m2"]
+                """).jvm();
+            assertEquals(List.of("https://repo.example/m2", "file:///tmp/m2"), jvm.repos());
+        }
+
+        @Test void versionMustBeExact() {
+            for (String v : List.of("[1.0,2.0)", "LATEST", "RELEASE", "1.0-SNAPSHOT", "${v}", "1 .0")) {
+                var e = assertThrows(ProjectFile.ParseError.class,
+                        () -> ProjectFile.parse("[jvm]\n\"a:b\" = \"" + v + "\"\n"), v);
+                assertTrue(e.getMessage().contains("must be exact"), e.getMessage());
+            }
+        }
+
+        @Test void keyMustBeGroupColonArtifact() {
+            for (String k : List.of("a", "a:b:c", "a:../b", ":b")) {
+                var e = assertThrows(ProjectFile.ParseError.class,
+                        () -> ProjectFile.parse("[jvm]\n\"" + k + "\" = \"1.0\"\n"), k);
+                assertTrue(e.getMessage().contains("Maven coordinate"), e.getMessage());
+            }
+        }
+
+        @Test void reposMustBeUrls() {
+            assertThrows(ProjectFile.ParseError.class,
+                    () -> ProjectFile.parse("[jvm]\nrepos = [\"ftp://x\"]\n"));
+            assertThrows(ProjectFile.ParseError.class,
+                    () -> ProjectFile.parse("[jvm]\nrepos = \"https://x\"\n"));
+        }
+
+        @Test void trustJarsNamesSeeds() {
+            var trust = ProjectFile.parse("""
+                [trust]
+                jars = ["neo4irij", "acme.*"]
+                """).trust();
+            assertTrue(trust.allowsJars("neo4irij"));
+            assertTrue(trust.allowsJars("acme.db"));
+            assertFalse(trust.allowsJars("other"));
         }
     }
 }

@@ -558,12 +558,13 @@ Effect-based I/O operations, mockable via handlers in tests.
 
 - [x] SQLite via sqlite-jdbc (embedded, zero-config)
 - [x] Raw builtins: `raw-db-open`, `raw-db-query`, `raw-db-exec`, `raw-db-close`, `raw-db-transaction`
-- [x] `std.db` module with `Db` effect, `default-db` handler, `db-open`/`db-close` convenience fns
+- [x] `std.db` module with `Db` effect, `default-db` handler, `db-open`/`db-close` convenience fns (now `std.jdbc`, Phase 16)
 - [x] Parameter binding (Int, Float, Str, Unit/null)
 - [x] Transaction support: auto-commit on success, rollback on error
 - [x] Mockable via custom handlers (test without real DB)
 - [x] Java tests (12) + integration tests (11)
-- [ ] JDBC / HikariCP / PostgreSQL — deferred until after JVM interop phase
+- [x] Any JDBC database — `std.jdbc` with the driver from `[jvm]` (Phase 16)
+- [ ] Connection pooling (HikariCP) — a `[jvm]` library behind a cap
 
 ---
 
@@ -777,6 +778,50 @@ Full design and the recorded Quint behaviour it rests on:
       so running one is `irij run` or `irij test`, and a `check` that
       discovered models by itself would need a registry the desugaring
       deliberately does not build.
+
+---
+
+## Phase 16 — Java libraries in projects and seeds
+
+A project or seed lists Maven libraries in irij.toml `[jvm]`; caps and
+interop reach them. Design: `docs/internals/packaging.md` § Java
+libraries.
+
+- [x] **`[jvm]` manifest section** — quoted `"group:artifact"` = exact
+      version (ranges, LATEST, RELEASE, snapshots refused); root-only
+      `repos`. `ProjectFile.parseJvm`, `ProjectFileTest.JvmSection`.
+- [x] **Resolution + `irij.lock`** — Maven Resolver (supplier-mvn3),
+      transitive, checksum policy `fail`, cache `~/.irij/jars`; the lock
+      pins every jar's sha256 and an inputs hash, and a locked jar with a
+      different sha256 is refused. Root version wins; highest seed version
+      within a major; two majors from seeds is an error. `JvmDeps`,
+      `ProjectDeps`, `JvmDepsTest` (offline `file:` repo).
+- [x] **Deps class loader** — child-first over the jars (JDK, `java.*`,
+      `dev.irij.*` from the parent); parent of every program loader;
+      `JavaInterop.resolveClass` and the run thread's context loader use
+      it. Wired into run, test, REPL, nREPL.
+- [x] **`irij build`** — libraries ship whole under `__irij_lib/`, the
+      program under `__irij_program/`, `JarLauncher` as main class; apps
+      without `[jvm]` keep the old layout.
+- [x] **`[trust] jars`** — names the seeds whose libraries may be
+      fetched; an untrusted seed is refused before any download.
+- [x] **`irij deps`**, Java-libraries section in **`irij audit`**,
+      `irij install` fetches libraries.
+- [x] **Publish** sends `jvm` (coordinates) in the metadata; a seed with
+      `[jvm] repos` is refused.
+- [ ] Registry: store and show a seed's `jvm` list (irij.online)
+- [ ] Phase 3: a seed ships `java/` sources that irij compiles (a real
+      static provider instead of an interop adapter)
+- [ ] Phase 4: instance/handle caps; adding a library to a running REPL
+- [x] **`std.db` → `std.jdbc`; SQLite out of `irij.jar`** — `db-open`
+      takes a JDBC URL; the driver is a `[jvm]` library found with
+      `ServiceLoader` in the deps loader (any JDBC database). `irij.jar`
+      18 MB → 8 MB, a hello-world app 17 MB → ~3 MB. `use std.db` fails
+      with the migration; `tests/irij.toml` lists sqlite-jdbc.
+- [x] Deps loader falls back only to what apps bundle
+      (`RUNTIME_PACKAGES`), so `irij run` and the built app agree.
+- [ ] Migrate users of `std.db` after the release: irij.online
+      (server.irj, `/learn` modules-java.md), the `chereda` seed
 
 ---
 

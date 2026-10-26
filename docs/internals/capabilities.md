@@ -26,11 +26,25 @@ matching `std.*` module to use the cap, deletes the old `raw-*`
 surface from `Builtins` / `EffectRowChecker.BUILTIN_EFFECTS` /
 `ClassEmitter` emit table, and updates the test fixture.
 
-- **3a — Db (shipped)**: `JdbcCapability` provider; `std.db`
-  exposes `db-open`, `db-close`, `db-query`, `db-exec`,
-  `db-transaction` as effect ops (was: open/close were plain fns
-  calling `raw-db-*`). `raw-db-*` names gone from the runtime
-  surface entirely; tests rewritten to use only effect ops.
+- **3a — Db (shipped)**: `JdbcCapability` provider; `std.jdbc`
+  (named `std.db` until the SQLite driver left the runtime) exposes
+  `db-open`, `db-close`, `db-query`, `db-exec`, `db-transaction` as
+  effect ops (was: open/close were plain fns calling `raw-db-*`).
+  `raw-db-*` names gone from the runtime surface entirely; tests
+  rewritten to use only effect ops.
+  - **Drivers come from `[jvm]`.** Irij bundles no JDBC driver (SQLite's
+    native libraries were 14 MB of the 18 MB `irij.jar`, and every app
+    JAR carried them). `db-open` takes a JDBC URL; `JdbcCapability`
+    looks the driver up with `ServiceLoader` in the program's deps
+    loader, then falls back to `DriverManager` for drivers the JDK
+    registered. `DriverManager` alone can't see `[jvm]` drivers: it
+    only hands a driver to a caller whose class loader can load the
+    driver's class, and `JdbcCapability` is the runtime's, below the
+    deps loader. No driver → an error naming the coordinate to add for
+    sqlite / postgresql / mysql / mariadb / h2. A bare path (std.db's
+    argument) is refused with the `"jdbc:sqlite:" ++ path` to write;
+    `use std.db` fails with the whole migration (`ModuleInliner.MOVED`).
+    SQLite URLs still get `PRAGMA journal_mode=WAL` on open.
 - **3b — Http client (shipped)**: `HttpClientCapability`,
   `std.http` rewritten to route through `http-client.request`,
   `raw-http-request` delisted from all three registries. One shared
@@ -211,7 +225,11 @@ Two forms of cap provider:
 
 - **Java classpath (string):** the original v0.7.0 form. Provider
   methods are public-static `Object → Object` methods on the named
-  class; use-sites lower to `INVOKESTATIC providerClass/method`.
+  class; use-sites lower to `INVOKESTATIC providerClass/method`. The
+  class can come from the JDK, the runtime, or a library the project
+  or a seed lists in irij.toml `[jvm]` — the program's classes load
+  under the deps class loader, so the `INVOKESTATIC` links against the
+  library (packaging.md § Java libraries).
 - **Irij record (map literal):** v0.7.x phase 3. The cap value is a
   map whose keys are op names and values are IrijFn closures. The
   emitter materialises the record once at class-load time
@@ -242,7 +260,7 @@ made a program's own parameter called `server` a compile error
 Example:
 
 ```
-mod std.db
+mod std.jdbc
 
 effect Db
   db-open  :: Str  Int
@@ -257,7 +275,7 @@ pub handler default-db :: Db ::: JVM
   db-close conn     => db-jdbc.close conn ; resume ()
 ```
 
-User code that imports `std.db` never sees `db-jdbc`. The lint pass
+User code that imports `std.jdbc` never sees `db-jdbc`. The lint pass
 makes the cap unreferenceable outside `Db`-handler clauses.
 
 ## Lint rules (`EffectRowChecker`)
@@ -377,7 +395,7 @@ to grant it too (TODO).
 ## Future work
 
 - **Phase 2**: cap dispatch in `ClassEmitter` (see above).
-- **Phase 3**: convert existing stdlib (`std.db`, `std.http`,
+- **Phase 3**: convert existing stdlib (`std.jdbc`, `std.http`,
   `std.fs`, `std.serve`) to use the pattern. Delist `raw-*` builtins
   from `Builtins`, `EffectRowChecker.BUILTIN_EFFECTS`, and
   `ClassEmitter`'s emit table once the migration is complete.

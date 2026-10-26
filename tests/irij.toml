@@ -1,0 +1,6 @@
+# The integration tests' own project file (`irij test` reads the irij.toml
+# beside each test file). test-jdbc.irj needs a JDBC driver, and Irij
+# bundles none: like any program, the tests list SQLite's as a Java
+# library. irij.lock pins it.
+[jvm]
+"org.xerial:sqlite-jdbc" = "3.53.4.0"

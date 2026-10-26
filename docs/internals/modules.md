@@ -253,7 +253,7 @@ yet emit the envelope (specs aren't runtime-checked in bytecode) — gap.
 | `std.env` | Environment-variable effect |
 | `std.fs` | File-system effect (read-file, write-file, ...) |
 | `std.http` | HTTP client + server |
-| `std.db` | Database effect (SQLite via std.db) |
+| `std.jdbc` | `Db` effect — any JDBC database; the driver comes from irij.toml `[jvm]` (was `std.db`) |
 | `std.serve` | Web server framework |
 | `std.session` | nREPL session effects |
 | `std.datastar` | Datastar SSE protocol |

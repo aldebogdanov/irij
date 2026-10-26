@@ -15,7 +15,7 @@ group = "dev.irij"
 // base by hand for a MAJOR/MINOR release; the patch is the commit count,
 // so every commit advances it and nobody hand-picks a patch. CI checks
 // out with fetch-depth: 0 (a shallow clone would count as 1).
-val baseVersion = "0.10"
+val baseVersion = "0.11"
 fun gitCommitCount(): String =
     try {
         val p = ProcessBuilder("git", "rev-list", "--count", "HEAD")
@@ -44,7 +44,6 @@ dependencies {
     implementation("org.antlr:antlr4-runtime:4.13.2")
     implementation("org.jline:jline:3.26.3")
     implementation("com.google.code.gson:gson:2.11.0")
-    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
     implementation("com.moandjiezana.toml:toml4j:0.7.2")
     implementation("org.ow2.asm:asm:9.7")
     implementation("org.ow2.asm:asm-util:9.7")
@@ -55,6 +54,10 @@ dependencies {
     // framework).
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j:0.23.1")
     implementation("org.eclipse.lsp4j:org.eclipse.lsp4j.jsonrpc:0.23.1")
+    // Maven Resolver — fetches the Java libraries a project or seed
+    // declares in irij.toml [jvm] (transitively) into irij.lock. Used by
+    // the CLI only; `irij build` doesn't bundle it into apps.
+    implementation("org.apache.maven.resolver:maven-resolver-supplier-mvn3:2.0.24")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")

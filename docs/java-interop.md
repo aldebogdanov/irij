@@ -126,6 +126,27 @@ fn read-sys-time :: _ Int ::: JVM
 
 The `std.test.test` row already includes `JVM`, so tests can use Java directly.
 
+## Libraries beyond the JDK
+
+Name a Maven library in irij.toml's `[jvm]`, and its classes are reachable like the JDK's — through a `cap` (preferred: the call performs your effect, not `JVM`) or by hand:
+
+```toml
+[jvm]
+"org.apache.commons:commons-text" = "1.12.0"
+```
+
+```irij
+effect Markup
+  escape :: Str -> Str
+
+cap escapes :: Markup = "org.apache.commons.text.StringEscapeUtils"
+
+handler commons-text :: Markup ::: Markup
+  escape s => resume (escapes.escapeHtml4 s)
+```
+
+The first `irij run` (or `irij install`) fetches the library and its dependencies from Maven Central and writes `irij.lock` with each jar's sha256 — commit it. Versions must be exact. A seed can list libraries too; with a `[trust]` section, its name must be in `jars = [...]` or nothing is downloaded. `irij build` ships the jars inside the app JAR. Full example: `examples/java-libs/`; how it works: `docs/internals/packaging.md` § Java libraries.
+
 ## Gotchas
 
 - **`()` means zero args.** `"hi"#toUpperCase ()` → `toUpperCase()`, not `toUpperCase(Locale)`. Irij strips a lone `()` before dispatch.

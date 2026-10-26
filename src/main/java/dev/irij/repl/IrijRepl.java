@@ -49,14 +49,15 @@ public class IrijRepl {
         this.out = terminal.writer();
     }
 
-    /** Resolve seeds from the working directory the REPL was launched
-     *  in, so `use <seed>` at the prompt resolves like a file run does.
-     *  Best-effort — a resolution failure (offline, missing seed)
-     *  degrades to no seeds rather than aborting REPL startup. */
+    /** Resolve seeds and load Java libraries ([jvm]) from the working
+     *  directory the REPL was launched in, so `use <seed>` at the prompt
+     *  resolves like a file run does. Best-effort — a resolution failure
+     *  (offline, missing seed) degrades to no seeds rather than aborting
+     *  REPL startup. */
     private static List<Path> replSeedRoots() {
         Path cwd = Path.of(System.getProperty("user.dir"));
         try {
-            return dev.irij.module.DependencyResolver.resolveSeedRoots(cwd, System.out);
+            return dev.irij.module.jvm.ProjectDeps.load(cwd, System.out).seedRoots();
         } catch (Exception e) {
             System.err.println("REPL: seed resolution failed for "
                     + cwd + ": " + e.getMessage());

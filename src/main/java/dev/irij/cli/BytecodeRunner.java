@@ -3,7 +3,8 @@ package dev.irij.cli;
 import dev.irij.compiler.CompileOptions;
 import dev.irij.compiler.RuntimeSupport;
 import dev.irij.compiler.IrijCompiler;
-import dev.irij.module.DependencyResolver;
+import dev.irij.module.jvm.ProjectDeps;
+import dev.irij.runtime.DepsClassLoader;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -72,7 +73,7 @@ public final class BytecodeRunner {
     public static void runFile(Path sourceFile, PrintStream captureOut, String[] programArgs,
                                boolean specLint) throws IOException {
         Path projectRoot = sourceFile.toAbsolutePath().getParent();
-        List<Path> seedRoots = DependencyResolver.resolveSeedRoots(projectRoot, System.out);
+        List<Path> seedRoots = ProjectDeps.load(projectRoot, System.out).seedRoots();
 
         String className = "irij.CliRun$" + COUNTER.incrementAndGet();
         Map<String, byte[]> classes = IrijCompiler.compileFileMulti(sourceFile, className,
@@ -106,6 +107,11 @@ public final class BytecodeRunner {
     private static void invokeMain(Class<?> cls, String[] args, PrintStream captureOut) {
         if (captureOut != null) RuntimeSupport.routeSystemOutThroughSessions();
         RuntimeSupport.callBoundSession(null, captureOut, () -> {
+            // Libraries that find their plugins through the context
+            // loader (ServiceLoader, JDBC, logging) look in [jvm]'s jars.
+            Thread self = Thread.currentThread();
+            ClassLoader previous = self.getContextClassLoader();
+            self.setContextClassLoader(DepsClassLoader.current());
             try {
                 Method main = cls.getMethod("main", String[].class);
                 main.invoke(null, (Object) args);
@@ -117,12 +123,14 @@ public final class BytecodeRunner {
                 throw new RuntimeException(cause);
             } catch (NoSuchMethodException | IllegalAccessException e) {
                 throw new RuntimeException(e);
+            } finally {
+                self.setContextClassLoader(previous);
             }
         });
     }
 
     private static final class BytesLoader extends ClassLoader {
-        BytesLoader() { super(BytecodeRunner.class.getClassLoader()); }
+        BytesLoader() { super(dev.irij.runtime.DepsClassLoader.current()); }
         Class<?> define(String name, byte[] bytes) {
             return defineClass(name, bytes, 0, bytes.length);
         }

@@ -190,7 +190,7 @@ Real Irij code, parsed + compiled like user code:
 | `std.fs` | `FileIO` effect + handlers |
 | `std.resource` | `Resource` effect — `resource-read`, `resource-exists?`: read-only access to the program's own `resources/` (bundled into the jar by `irij build`, else `resources/` under the working directory), nothing else; `default-resource` handler |
 | `std.http` | HTTP client (`http-get`, `http-post`, `http-request` — the latter takes an optional `timeout-ms`) |
-| `std.db` | `Db` effect + SQLite handler |
+| `std.jdbc` | `Db` effect + `default-db` handler over JDBC. `db-open` takes a JDBC URL (`"jdbc:sqlite:app.db"`); Irij bundles no driver — list one in irij.toml `[jvm]` (`"org.xerial:sqlite-jdbc" = "3.53.4.0"`). Was `std.db`, which was SQLite-only and built in; see capabilities.md, *3a — Db* |
 | `std.serve` | Web server framework (routes, middleware, request/response); serves the app's `resources/` directory as static files, nothing else. `route-prefix "/admin"` matches whole segments (`/admin`, `/admin/x`, not `/adminpanel`). A request's `path` is decoded, `query` raw, `params` decoded — see capabilities.md, *3c — Serve / SSE* |
 | `std.session` | nREPL session effects |
 | `std.proc` | `Proc` effect — child processes: `proc-run` (to completion, with stdin and a timeout) and `proc-start`/`proc-line`/`proc-send`/`proc-close`/`proc-wait`/`proc-kill` (streaming); `default-proc` handler |

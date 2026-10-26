@@ -1,23 +1,29 @@
-mod std.db
+mod std.jdbc
 
-;; Database effect module (SQLite).
+;; Relational databases through JDBC. `db-open` takes a JDBC URL; the
+;; driver is a Java library the project lists in irij.toml [jvm] —
+;; Irij bundles none:
+;;
+;;   [jvm]
+;;   "org.xerial:sqlite-jdbc" = "3.53.4.0"          # jdbc:sqlite:app.db
+;;   "org.postgresql:postgresql" = "<version>"      # jdbc:postgresql://host/db?user=…
 ;;
 ;; Usage:
-;;   use std.db :open
+;;   use std.jdbc :as db
 ;;
-;;   with default-db
-;;     conn := db-open ":memory:"
-;;     db-exec conn "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INT)" #[]
-;;     db-exec conn "INSERT INTO users (name, age) VALUES (?, ?)" #["Alice" 30]
-;;     users := db-query conn "SELECT * FROM users WHERE age > ?" #[21]
+;;   with db.default-db
+;;     conn := db.db-open "jdbc:sqlite::memory:"
+;;     db.db-exec conn "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INT)" #[]
+;;     db.db-exec conn "INSERT INTO users (name, age) VALUES (?, ?)" #["Alice" 30]
+;;     users := db.db-query conn "SELECT * FROM users WHERE age > ?" #[21]
 ;;     ;; users = #[{id= 1 name= "Alice" age= 30}]
 ;;
 ;;     ;; Transactions: auto-commit on success, rollback on error.
-;;     db-transaction conn (->
-;;       db-exec conn "UPDATE accounts SET balance = balance - 100 WHERE id = ?" #[1]
-;;       db-exec conn "UPDATE accounts SET balance = balance + 100 WHERE id = ?" #[2])
+;;     db.db-transaction conn (->
+;;       db.db-exec conn "UPDATE accounts SET balance = balance - 100 WHERE id = ?" #[1]
+;;       db.db-exec conn "UPDATE accounts SET balance = balance + 100 WHERE id = ?" #[2])
 ;;
-;;     db-close conn
+;;     db.db-close conn
 ;;
 ;;   ;; Mock in tests — same surface, different handler:
 ;;   handler mock-db :: Db

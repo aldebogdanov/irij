@@ -1,0 +1,8 @@
+# irij.lock: the Java libraries irij.toml [jvm] resolved to, with their
+# sha256. Written by irij; commit it. A changed [jvm] rewrites it.
+version = 1
+inputs = "aa11acc1f252bddd0f2874ff72c5c8bdbd704a1e75002cbce4ed924bc8d53bbc"
+
+[[jar]]
+coord = "org.xerial:sqlite-jdbc:jar:3.53.4.0"
+sha256 = "bcb1f51e36f940867e83342f9efbf5968ac44a6bef4d397bb4af7b17b45cd2fb"

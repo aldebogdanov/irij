@@ -861,6 +861,16 @@
    =irij audit= lists every site. With it, a dependency that claims only
    =Log= cannot reach the network through Java either.
 
+   *Java libraries (implemented):* a project or seed lists the Java
+   libraries it needs in =irij.toml='s =[jvm]=, as Maven coordinates at
+   exact versions (="org.neo4j.driver:neo4j-java-driver" = "5.28.5"=).
+   They are fetched with their dependencies and pinned, with each jar's
+   hash, in =irij.lock=; a cap or Java interop site reaches their classes
+   like the JDK's. A library runs code as soon as it loads, whatever the
+   Irij side calls, so =[trust]='s =jars= names the seeds whose libraries
+   may be fetched at all; the project's own =[jvm]= needs no entry. A
+   seed it doesn't name is refused before anything is downloaded.
+
 * Part IV: Structured Concurrency
 
 ** 4.1 Design: Concurrency as Effects
@@ -1610,7 +1620,7 @@
   std.resource    ;; Resource effect — read-only, the program's own resources/
   std.http        ;; Http client effect
   std.serve       ;; Serve effect — HTTP server, SSE, multipart
-  std.db          ;; Db effect (SQLite via JDBC)
+  std.jdbc        ;; Db effect — any JDBC database; driver from irij.toml [jvm]
   std.session     ;; Session effect (server-side sessions)
   std.auth        ;; password hashing / token helpers
   std.env         ;; Env effect (environment variables, program arguments)

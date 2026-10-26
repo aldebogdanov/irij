@@ -26,6 +26,8 @@ irij file.irj                 # run a file
 irij file.irj --port 9090     # args after the file reach the program (env-args)
 irij test                     # run tests/ directory
 irij audit                    # where the program reaches Java, against irij.toml [trust]
+irij install                  # fetch seeds and [jvm] Java libraries (pinned in irij.lock)
+irij deps                     # the Java libraries asked for and the jars they resolve to
 irij --nrepl-server            # start nREPL (port 7888)
 irij --nrepl-server=9000       # nREPL on custom port
 irij --parse-only file.irj    # check syntax only
@@ -43,6 +45,7 @@ irij examples/walkthrough.irj # full language tour (all phases)
 irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
 irij examples/terminal.irj    # raw-mode terminal (Term effect) — needs a tty
 irij examples/quint.irj       # model-based testing against a Quint spec — needs `quint`
+(cd examples/java-libs && irij run main.irj)  # a Maven library through a cap ([jvm], irij.lock)
 ```
 
 ## Tests
@@ -71,6 +74,8 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 - **Terminal apps** &mdash; `std.term`'s `Term` effect: raw mode, decoded key/mouse events, resize, `wcwidth`; mockable, so a TUI is testable with no screen
 - **Unambiguous output** &mdash; `println "a b"` prints `a b`, but a Str inside a collection, variant or record prints quoted and escaped, as source writes it: `#["a b" "c"]`, `{name= "Ada"}`, `#[(Ok 1) (Err "e")]`; `inspect` gives that form for any value, a Str included, and the REPL echoes it
 - **Java behind caps, confined by trust** &mdash; a `cap` binds a Java class to an effect, and a call through it performs that effect, so code that installs `default-db` declares `::: Db`, not `JVM`; irij.toml's `[trust]` names the modules that may declare caps or write Java at all, the compiler refuses the rest, and `irij audit` lists every site
+- **Java libraries** &mdash; irij.toml's `[jvm]` names Maven coordinates (`"org.apache.commons:commons-text" = "1.12.0"`); they're fetched with their dependencies from Maven Central, pinned with sha256 in `irij.lock`, loaded child-first so a library keeps its own versions, and shipped whole inside `irij build`'s JAR. Seeds can bring libraries too, if `[trust] jars` names them. See `examples/java-libs/`
+- **Databases** &mdash; `std.jdbc`'s `Db` effect talks to any database with a JDBC driver: `db-open "jdbc:sqlite:app.db"` with `"org.xerial:sqlite-jdbc"` in `[jvm]`, or PostgreSQL, MySQL, H2… Irij bundles no driver (`std.db`, SQLite-only and built in, was renamed)
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs; `cond` (first condition that holds) and `case` (equality dispatch) for multi-way choices without `else if` chains
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names
 - **Java interop** &mdash; Clojure-style `Class/method` for statics, `obj#method` for instance members (auto-reflection, java.lang auto-imported); every Java site needs `::: JVM`, checked at compile time
@@ -111,6 +116,8 @@ docs/                    # Specification and phase docs
 ```
 
 ## Version
+
+0.11 &mdash; Java libraries: irij.toml `[jvm]` lists Maven coordinates at exact versions, fetched with their dependencies and pinned with sha256 in `irij.lock`, loaded child-first, shipped whole in `irij build`'s JAR; seeds bring libraries only where `[trust] jars` names them; `irij deps`, and `irij audit` lists libraries. **Breaking:** `std.db` is now `std.jdbc` — `db-open` takes a JDBC URL (`"jdbc:sqlite:" ++ path`) and the driver is a `[jvm]` library (`"org.xerial:sqlite-jdbc"`); any JDBC database works, and `irij.jar` drops from 18 MB to 8 MB.
 
 0.10 &mdash; effect rows you can trust: a `with` needs its handler's row, so a pure function can't print, read the clock or reach Java through a handler; a call through a Java `cap` performs the cap's effect (std's real handlers are `default-db :: Db ::: Db` & co.), so code names the resource it touches instead of `JVM`; irij.toml `[trust]` confines Java to the modules it lists, and `irij audit` shows every site; `unsafe-jvm` is deprecated. Strings print quoted inside collections, and `inspect` gives that form for any value.
 

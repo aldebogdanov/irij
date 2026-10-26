@@ -1,0 +1,27 @@
+;; Java libraries from irij.toml [jvm].
+;;
+;; irij.toml names a Maven coordinate; `irij run` fetches it (and what it
+;; depends on) into ~/.irij/jars and pins every jar in irij.lock. The
+;; program reaches the library the same way it reaches the JDK: a `cap`
+;; binds a Java class to an effect, and a handler's clauses call it.
+;;
+;;   cd examples/java-libs
+;;   irij run main.irj        ;; Tom &amp; Jerry &lt;3
+;;   irij build && java --enable-native-access=ALL-UNNAMED -jar build/main.jar
+
+effect Markup
+  escape :: Str -> Str
+  title :: Str -> Str
+
+cap escapes :: Markup = "org.apache.commons.text.StringEscapeUtils"
+cap words :: Markup = "org.apache.commons.text.WordUtils"
+
+handler commons-text :: Markup ::: Markup
+  escape s => resume (escapes.escapeHtml4 s)
+  title s => resume (words.capitalizeFully s)
+
+fn heading ::: Markup
+  name => escape (title name)
+
+with commons-text
+  println (heading "tom & jerry <3")

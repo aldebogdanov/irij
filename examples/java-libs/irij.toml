@@ -1,0 +1,9 @@
+[project]
+name = "java-libs"
+version = "0.1"
+description = "Calling a Java library from Maven Central through a cap"
+
+# Java libraries, fetched with their dependencies from Maven Central and
+# pinned (with sha256) in irij.lock beside this file.
+[jvm]
+"org.apache.commons:commons-text" = "1.12.0"

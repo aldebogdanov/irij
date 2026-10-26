@@ -128,7 +128,7 @@ class TrustCheckerTest {
     void trustParsesAndRejectsMalformedEntries() {
         var t = ProjectFile.parse("[trust]\ncaps = [\"acme.*\"]\njvm = [\"seed-readme\"]\n").trust();
         assertTrue(t.allowsCaps("acme") && t.allowsCaps("acme.clock.x") && !t.allowsCaps("acmex"));
-        assertTrue(t.allowsJvm("seed-readme") && !t.allowsJvm("main") && t.allowsJvm("std.db"));
+        assertTrue(t.allowsJvm("seed-readme") && !t.allowsJvm("main") && t.allowsJvm("std.jdbc"));
         assertNull(ProjectFile.parse("[project]\nname = \"p\"\n").trust());
         assertThrows(ProjectFile.ParseError.class, () -> ProjectFile.parse("[trust]\ncaps = \"acme\"\n"));
         assertThrows(ProjectFile.ParseError.class, () -> ProjectFile.parse("[trust]\nunsafe = [\"x\"]\n"));
