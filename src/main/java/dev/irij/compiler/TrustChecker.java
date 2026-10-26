@@ -77,6 +77,26 @@ public final class TrustChecker {
         throw new IrijCompiler.CompileException(sb.toString());
     }
 
+    /** With no {@code [trust]}: one warning naming the seed modules that
+     *  reach Java, since `irij build` will refuse the project until
+     *  {@code [trust]} says whether they may. Nothing when none do. */
+    public static void warnUntrusted(List<Site> sites, java.util.Set<String> seedModules,
+                                     java.util.function.Consumer<String> warn) {
+        var bySeedModule = new java.util.TreeMap<String, Integer>();
+        for (Site s : sites) {
+            if (seedModules.contains(s.module())) bySeedModule.merge(s.module(), 1, Integer::sum);
+        }
+        if (bySeedModule.isEmpty()) return;
+        var sb = new StringBuilder("warning: irij.toml has no [trust], and seeds reach Java:");
+        for (var e : bySeedModule.entrySet()) {
+            sb.append("\n  ").append(e.getKey()).append(" (").append(e.getValue())
+              .append(e.getValue() == 1 ? " site)" : " sites)");
+        }
+        sb.append("\n`irij build` refuses a project without [trust]; `irij audit --fix` writes one"
+                + " (review it), `irij audit` lists every site.");
+        warn.accept(sb.toString());
+    }
+
     // ── The walk ────────────────────────────────────────────────────
 
     private static final Map<Class<?>, Method[]> ACCESSORS = new ConcurrentHashMap<>();

@@ -52,7 +52,11 @@ on the server default (`''`).
 
 `IrijCli.runPublish`, in order:
 
-1. Parse `irij.toml`; require name/version/author/description.
+1. Parse `irij.toml`; require name/version/author/description, and a
+   `[trust]` section (empty is fine; `irij audit --fix` writes it — see
+   jvm-capability.md § Trust). Consumers enforce their own `[trust]`,
+   not the seed's; requiring it makes the author state where the seed
+   reaches Java.
 2. Validate link fields are web URLs (above).
 3. Version guards (see `versioning.md`): 2-part base only, `main`
    branch only, clean tree only. Publish version =

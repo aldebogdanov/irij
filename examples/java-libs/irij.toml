@@ -7,3 +7,11 @@ description = "Calling a Java library from Maven Central through a cap"
 # pinned (with sha256) in irij.lock beside this file.
 [jvm]
 "org.apache.commons:commons-text" = "1.12.0"
+
+# Who may reach Java: modules that bind a Java class with `cap` (caps),
+# write Java by hand (jvm), seeds that bring Java libraries (jars).
+# Written by `irij audit --fix` — review it.
+[trust]
+caps = ["main"]
+jvm = []
+jars = []

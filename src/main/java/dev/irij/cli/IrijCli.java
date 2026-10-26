@@ -197,7 +197,7 @@ public final class IrijCli {
         // v0.6.13: single execution model — bytecode. The interpreter
         // was removed in R5d.
         try {
-            BytecodeRunner.runFile(path, null, programArgs, !noSpecLint);
+            BytecodeRunner.runFile(path, null, programArgs, !noSpecLint, true);
         } catch (IrijCompiler.CompileException e) {
             System.err.println(path + ":" + e.getMessage());
             System.exit(1);
@@ -249,6 +249,7 @@ public final class IrijCli {
               irij test f1.irj f2.irj    run multiple test files
               irij quint doctor          check the quint binary model-based testing needs
               irij audit [file.irj]      list where the program reaches Java, by module, against irij.toml [trust]
+              irij audit --fix           add to irij.toml [trust] what this program needs to build (review it)
               irij --parse-only <file>   parse only, report errors
               irij --ast <file>          dump AST (debug)
               irij --no-spec-lint <file> disable spec lint warnings (on by default)

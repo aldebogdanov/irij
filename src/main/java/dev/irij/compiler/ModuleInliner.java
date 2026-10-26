@@ -47,6 +47,8 @@ final class ModuleInliner {
     private final java.util.Map<Path, String> seedNames = new HashMap<>();
     private final Set<String> loaded = new HashSet<>();
     private final Set<String> loading = new HashSet<>();
+    /** Modules read from a seed root (not std, not the project). */
+    private final Set<String> seedModules = new HashSet<>();
 
     /** Receives spec-lint warnings; null = lint off. */
     private final java.util.function.Consumer<String> specLint;
@@ -232,6 +234,10 @@ final class ModuleInliner {
 
     java.util.Map<Decl, TrustChecker.Origin> declOrigin() { return declOrigin; }
 
+    /** The inlined modules that came from a seed — dependencies, as
+     *  opposed to std and the project's own files. */
+    Set<String> seedModules() { return seedModules; }
+
     private void loadAndInline(String qualifiedName, List<Decl> out) {
         if (!loaded.add(qualifiedName)) return;
         if (!loading.add(qualifiedName)) {
@@ -300,6 +306,7 @@ final class ModuleInliner {
             Path p = root.resolve(relative);
             if (Files.exists(p)) {
                 try {
+                    seedModules.add(qualifiedName);
                     return Files.readString(p, StandardCharsets.UTF_8);
                 } catch (IOException e) {
                     throw new IrijCompiler.CompileException(
@@ -317,6 +324,7 @@ final class ModuleInliner {
                 Path q = root.resolve(stripped);
                 if (Files.exists(q)) {
                     try {
+                        seedModules.add(qualifiedName);
                         return Files.readString(q, StandardCharsets.UTF_8);
                     } catch (IOException e) {
                         throw new IrijCompiler.CompileException(

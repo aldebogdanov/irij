@@ -859,7 +859,9 @@
    (=std.*= always may; the entry program is ="main"=). The compiler
    refuses Java anywhere else, its own modules and its seeds alike, and
    =irij audit= lists every site. With it, a dependency that claims only
-   =Log= cannot reach the network through Java either.
+   =Log= cannot reach the network through Java either. Building or
+   publishing a project needs the section — an empty one says "no Java
+   outside =std=" — while running, testing and the REPL don't.
 
    *Java libraries (implemented):* a project or seed lists the Java
    libraries it needs in =irij.toml='s =[jvm]=, as Maven coordinates at

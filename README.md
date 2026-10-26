@@ -26,6 +26,7 @@ irij file.irj                 # run a file
 irij file.irj --port 9090     # args after the file reach the program (env-args)
 irij test                     # run tests/ directory
 irij audit                    # where the program reaches Java, against irij.toml [trust]
+irij audit --fix              # add to [trust] what the program needs (build/publish require [trust])
 irij install                  # fetch seeds and [jvm] Java libraries (pinned in irij.lock)
 irij deps                     # the Java libraries asked for and the jars they resolve to
 irij --nrepl-server            # start nREPL (port 7888)
@@ -117,7 +118,7 @@ docs/                    # Specification and phase docs
 
 ## Version
 
-0.11 &mdash; Java libraries: irij.toml `[jvm]` lists Maven coordinates at exact versions, fetched with their dependencies and pinned with sha256 in `irij.lock`, loaded child-first, shipped whole in `irij build`'s JAR; seeds bring libraries only where `[trust] jars` names them; `irij deps`, and `irij audit` lists libraries. **Breaking:** `std.db` is now `std.jdbc` — `db-open` takes a JDBC URL (`"jdbc:sqlite:" ++ path`) and the driver is a `[jvm]` library (`"org.xerial:sqlite-jdbc"`); any JDBC database works, and `irij.jar` drops from 18 MB to 8 MB.
+0.11 &mdash; Java libraries: irij.toml `[jvm]` lists Maven coordinates at exact versions, fetched with their dependencies and pinned with sha256 in `irij.lock`, loaded child-first, shipped whole in `irij build`'s JAR; seeds bring libraries only where `[trust] jars` names them; `irij deps`, and `irij audit` lists libraries. **Breaking:** `std.db` is now `std.jdbc` — `db-open` takes a JDBC URL (`"jdbc:sqlite:" ++ path`) and the driver is a `[jvm]` library (`"org.xerial:sqlite-jdbc"`); any JDBC database works, and `irij.jar` drops from 18 MB to 8 MB. `irij build` and `irij publish` refuse a project without an irij.toml `[trust]` section (an empty one means "no Java outside std"); `irij run` warns when a seed reaches Java without it, and `irij audit --fix` writes the smallest `[trust]` the program needs.
 
 0.10 &mdash; effect rows you can trust: a `with` needs its handler's row, so a pure function can't print, read the clock or reach Java through a handler; a call through a Java `cap` performs the cap's effect (std's real handlers are `default-db :: Db ::: Db` & co.), so code names the resource it touches instead of `JVM`; irij.toml `[trust]` confines Java to the modules it lists, and `irij audit` shows every site; `unsafe-jvm` is deprecated. Strings print quoted inside collections, and `inspect` gives that form for any value.
 

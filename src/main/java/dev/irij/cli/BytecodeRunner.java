@@ -72,12 +72,23 @@ public final class BytecodeRunner {
     /** As above; {@code specLint} reports pub fns without a spec on stderr. */
     public static void runFile(Path sourceFile, PrintStream captureOut, String[] programArgs,
                                boolean specLint) throws IOException {
+        runFile(sourceFile, captureOut, programArgs, specLint, false);
+    }
+
+    /** As above; {@code trustWarning} (`irij run`) warns on stderr when
+     *  irij.toml has no {@code [trust]} and a seed reaches Java — through
+     *  its code or its {@code [jvm]} libraries — since `irij build` will
+     *  refuse the project. */
+    public static void runFile(Path sourceFile, PrintStream captureOut, String[] programArgs,
+                               boolean specLint, boolean trustWarning) throws IOException {
         Path projectRoot = sourceFile.toAbsolutePath().getParent();
-        List<Path> seedRoots = ProjectDeps.load(projectRoot, System.out).seedRoots();
+        ProjectDeps deps = ProjectDeps.load(projectRoot, System.out);
+        List<Path> seedRoots = deps.seedRoots();
+        if (trustWarning) warnUntrustedJars(projectRoot, deps);
 
         String className = "irij.CliRun$" + COUNTER.incrementAndGet();
         Map<String, byte[]> classes = IrijCompiler.compileFileMulti(sourceFile, className,
-                CompileOptions.defaults().withSpecLint(specLint), seedRoots);
+                CompileOptions.defaults().withSpecLint(specLint).withTrustWarning(trustWarning), seedRoots);
 
         // Run in a fresh classloader so subsequent runs don't see
         // each other's static state (e.g. SpecValidator registry).
@@ -85,6 +96,18 @@ public final class BytecodeRunner {
         Class<?> cls = loader.defineAll(classes, className);
 
         invokeMain(cls, programArgs, captureOut);
+    }
+
+    private static void warnUntrustedJars(Path projectRoot, ProjectDeps deps) throws IOException {
+        if (deps.plan() == null) return;
+        var manifest = dev.irij.module.ProjectFile.parseFile(projectRoot.resolve("irij.toml"));
+        if (manifest.trust() != null) return;
+        var seeds = new java.util.TreeSet<String>();
+        for (var r : deps.plan().requests()) if (r.seed() != null) seeds.add(r.seed());
+        if (seeds.isEmpty()) return;
+        System.err.println("warning: irij.toml has no [trust], and seeds bring Java libraries: "
+                + String.join(", ", seeds) + "\n`irij build` refuses a project without [trust]; "
+                + "`irij audit --fix` writes one (review it).");
     }
 
     /** Compile + run a source string (no file). Used by {@code
