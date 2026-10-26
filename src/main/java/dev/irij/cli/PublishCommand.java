@@ -111,6 +111,16 @@ final class PublishCommand {
                 }
             }
 
+            // A seed states who in it reaches Java. Consumers enforce
+            // their own [trust], not the seed's, but publishing makes the
+            // author look (`irij audit --fix` writes it), and an empty
+            // [trust] says "no Java" outright.
+            if (result.trust() == null) {
+                System.err.println("Error: " + BuildCommand.missingTrust("irij publish", tomlFile));
+                System.exit(1);
+                return;
+            }
+
             // A seed's [jvm] libraries come from the consumer's
             // repositories; consumers refuse a seed that sets its own.
             if (!result.jvm().repos().isEmpty()) {

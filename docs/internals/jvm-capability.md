@@ -131,8 +131,29 @@ below); the entry program, a file without `mod`, is `"main"`. `std.*` is
 always trusted. The policy covers everything the program compiles —
 its own modules and its seeds — and is the root project's (the
 `irij.toml` beside the entry file, the one seeds are resolved from).
-Without the section nothing is enforced. A record cap has no Java behind
-it and is not a site.
+Without the section nothing is enforced while you work — `irij run`,
+`irij test`, the REPL, nREPL and the playground — but **`irij build`
+and `irij publish` refuse a project with no `[trust]`**: a build ships
+every seed the program uses, and a publish hands code to other people,
+so either needs the project to have said who may reach Java. An empty
+`[trust]` is a complete policy (no Java outside `std` and the project's
+own `[jvm]`). `irij run` warns once when there's no `[trust]` and a
+seed reaches Java (its modules' caps or interop —
+`TrustChecker.warnUntrusted`, on `CompileOptions.trustWarning`, using
+the modules `ModuleInliner` read from a seed root — or its `[jvm]`
+libraries), so the refusal doesn't first show up at deploy time. A
+record cap has no Java behind it and is not a site.
+
+`irij audit --fix` writes the smallest policy the program needs:
+each non-std module with a cap or Java of its own goes into `caps` /
+`jvm`, each seed with `[jvm]` libraries into `jars`, skipping what the
+existing `[trust]` already allows. `TrustFix` edits the text — comments
+and order stay — appending a commented section with all three keys
+when there is none, extending a key's line or adding one under the
+header otherwise (a list spanning several lines is refused: add to it
+by hand). In a seed (no `server.irj` / `main.irj` / `app.irj` that is a
+program), `irij audit` covers every module the seed's root files
+declare, so `--fix` works there too.
 
 `jars` is about code, not call sites: a seed's `[jvm]` libraries
 (packaging.md § Java libraries) run as soon as their classes load —
@@ -143,7 +164,7 @@ downloaded; the root project's own `[jvm]` needs no entry. It is
 orthogonal to `caps` / `jvm`: a trusted seed still needs `caps` to bind
 a library class with `cap`.
 
-`irij audit [file.irj]` prints every site by module, marks each module
+`irij audit [file.irj] [--fix]` prints every site by module, marks each module
 trusted or not against `[trust]`, summarises std in one line, then lists
 the Java libraries each seed brings, marked against `jars`, and exits 1
 when a module or seed isn't trusted.

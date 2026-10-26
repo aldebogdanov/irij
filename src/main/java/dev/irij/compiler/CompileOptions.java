@@ -22,27 +22,36 @@ package dev.irij.compiler;
  *       successive evals share state. Off in normal build.</li>
  * </ul>
  */
-public record CompileOptions(boolean directLinking, boolean namespaceMode, boolean specLint) {
+public record CompileOptions(boolean directLinking, boolean namespaceMode, boolean specLint,
+                             boolean trustWarning) {
 
     public static CompileOptions defaults() {
-        return new CompileOptions(false, false, true);
+        return new CompileOptions(false, false, true, false);
     }
 
     public CompileOptions withDirectLinking(boolean enabled) {
-        return new CompileOptions(enabled, namespaceMode, specLint);
+        return new CompileOptions(enabled, namespaceMode, specLint, trustWarning);
     }
 
     /** Namespace mode is for interactive evals (REPL, nREPL, MCP,
      *  Playground), where a spec-lint warning on every eval is noise —
      *  so it also turns the lint off. */
     public CompileOptions withNamespaceMode(boolean enabled) {
-        return new CompileOptions(directLinking, enabled, specLint && !enabled);
+        return new CompileOptions(directLinking, enabled, specLint && !enabled, trustWarning);
     }
 
     /** {@code specLint}: warn (on stderr) about every {@code pub fn}
      *  without a spec annotation. On by default; {@code --no-spec-lint}
      *  turns it off. */
     public CompileOptions withSpecLint(boolean enabled) {
-        return new CompileOptions(directLinking, namespaceMode, enabled);
+        return new CompileOptions(directLinking, namespaceMode, enabled, trustWarning);
+    }
+
+    /** {@code trustWarning}: with no irij.toml {@code [trust]}, warn (on
+     *  stderr) when a seed's modules reach Java — `irij build` refuses a
+     *  project without {@code [trust]}, and this says so before deploy
+     *  time. Set by `irij run` only. */
+    public CompileOptions withTrustWarning(boolean enabled) {
+        return new CompileOptions(directLinking, namespaceMode, specLint, enabled);
     }
 }

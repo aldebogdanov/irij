@@ -114,6 +114,9 @@ public final class IrijCompiler {
             var trust = projectTrust(sourceRoot);
             if (trust != null) {
                 TrustChecker.enforce(TrustChecker.sites(inlined, inliner.declOrigin()), trust);
+            } else if (opts.trustWarning() && !inliner.seedModules().isEmpty()) {
+                TrustChecker.warnUntrusted(TrustChecker.sites(inlined, inliner.declOrigin()),
+                        inliner.seedModules(), System.err::println);
             }
             EffectRowChecker.check(inlined, inliner.fnFile(),
                     opts.specLint() ? System.err::println : null);
@@ -144,13 +147,19 @@ public final class IrijCompiler {
     public record Audit(List<TrustChecker.Site> sites, dev.irij.module.ProjectFile.Trust trust) {}
 
     public static Audit audit(Path path, List<Path> seedRoots) throws IOException {
-        var parsed = IrijParseDriver.parse(Files.readString(path));
+        return auditSource(Files.readString(path), path.getFileName().toString(),
+                path.toAbsolutePath().getParent(), seedRoots);
+    }
+
+    /** {@link #audit} of program text at {@code root} — for a seed, a
+     *  program that only `use`s each of its modules. */
+    public static Audit auditSource(String source, String fileLabel, Path root, List<Path> seedRoots) {
+        var parsed = IrijParseDriver.parse(source);
         if (parsed.hasErrors()) {
             throw new CompileException("Parse errors:\n" + String.join("\n", parsed.errors()));
         }
-        Path root = path.toAbsolutePath().getParent();
         var inliner = new ModuleInliner(root, seedRoots, null, java.util.Set.of());
-        List<Decl> inlined = inliner.inline(buildAst(parsed), path.getFileName().toString());
+        List<Decl> inlined = inliner.inline(buildAst(parsed), fileLabel);
         return new Audit(TrustChecker.sites(inlined, inliner.declOrigin()), projectTrust(root));
     }
 

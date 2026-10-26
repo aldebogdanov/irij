@@ -46,6 +46,7 @@ public final class BuildCommand {
         boolean directLinking = parseDirectLinking(args);
         rejectNReplPortFlag(args);
         String entryPoint = findEntryPoint(projectRoot, args);
+        requireTrust(projectRoot.resolve(entryPoint).toAbsolutePath().getParent());
         Path outputJar = resolveOutputPath(args, entryPoint);
 
         System.out.println("Building Irij application...");
@@ -60,6 +61,39 @@ public final class BuildCommand {
         System.out.println("Built: " + outputJar + " (" + sizeKbBc + " KB)");
         System.out.println("Run:   java --enable-native-access=ALL-UNNAMED -jar "
                 + outputJar.getFileName());
+    }
+
+    /** A build ships the program and every seed it uses, so it needs the
+     *  project to have said who may reach Java: irij.toml must have a
+     *  {@code [trust]} section (empty is fine — then nothing outside std
+     *  and the project's own [jvm] may). `irij run` and the REPL don't
+     *  ask; `irij run` warns when a seed reaches Java without it. */
+    static void requireTrust(Path root) {
+        String problem = trustProblem(root);
+        if (problem == null) return;
+        System.err.println(problem);
+        System.exit(1);
+    }
+
+    /** Why `irij build` can't build the project at {@code root}, or null. */
+    static String trustProblem(Path root) {
+        Path toml = root.resolve("irij.toml");
+        try {
+            if (ProjectFile.parseFile(toml).trust() != null) return null;
+        } catch (IOException | ProjectFile.ParseError e) {
+            return "Error in irij.toml: " + e.getMessage();
+        }
+        return missingTrust("irij build", toml);
+    }
+
+    /** What `irij build` / `irij publish` print without [trust]. */
+    static String missingTrust(String command, Path toml) {
+        return command + " needs a [trust] section in " + toml.getFileName() + ".\n"
+                + "It says which modules may bind Java with `cap` (caps), write Java by hand (jvm),\n"
+                + "and which seeds may bring Java libraries (jars). What it doesn't list can't.\n"
+                + "  irij audit --fix   writes the smallest [trust] this program needs — review it\n"
+                + "  irij audit         lists every place the program reaches Java\n"
+                + "An empty [trust] is valid: no Java outside std and the project's own [jvm].";
     }
 
     private static String findEntryPoint(Path projectRoot, String[] args) {
