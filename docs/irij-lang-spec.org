@@ -1620,7 +1620,7 @@
   std.resource    ;; Resource effect — read-only, the program's own resources/
   std.http        ;; Http client effect
   std.serve       ;; Serve effect — HTTP server, SSE, multipart
-  std.db          ;; Db effect (SQLite via JDBC)
+  std.jdbc        ;; Db effect — any JDBC database; driver from irij.toml [jvm]
   std.session     ;; Session effect (server-side sessions)
   std.auth        ;; password hashing / token helpers
   std.env         ;; Env effect (environment variables, program arguments)

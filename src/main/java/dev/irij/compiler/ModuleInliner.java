@@ -27,6 +27,15 @@ import java.util.Set;
  */
 final class ModuleInliner {
 
+    /** Std modules that were renamed or removed: `use` of one fails with
+     *  what to write instead, not a bare "Module not found". */
+    private static final java.util.Map<String, String> MOVED = java.util.Map.of(
+            "std.db", "std.db is now std.jdbc, and SQLite is no longer built in:\n"
+                    + "  use std.jdbc :as db                       (the Db effect and default-db are unchanged)\n"
+                    + "  db.db-open (\"jdbc:sqlite:\" ++ path)       (db-open takes a JDBC URL)\n"
+                    + "  irij.toml: [jvm]\n"
+                    + "             \"org.xerial:sqlite-jdbc\" = \"3.53.4.0\"");
+
     private final Path sourceRoot;
     /** Extra roots to search for `use mod.X` after the classpath and
      *  the primary {@link #sourceRoot}. Used to point at resolved
@@ -316,6 +325,8 @@ final class ModuleInliner {
                 }
             }
         }
+        String moved = MOVED.get(qualifiedName);
+        if (moved != null) throw new IrijCompiler.CompileException(moved);
         throw new IrijCompiler.CompileException(
                 "Module not found: " + qualifiedName
                         + " (searched classpath + " + sourceRoot

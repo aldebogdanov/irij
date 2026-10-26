@@ -158,8 +158,12 @@ coord = "org.apache.commons:commons-text:jar:1.12.0"
 sha256 = "de02…"
 ```
 
-While `inputs` matches the current plan, later runs skip resolution
-and fetch exactly the locked coordinates, then check each jar's sha256
+While `inputs` matches the current plan, later runs skip resolution.
+When every locked jar is already in the cache with its locked sha256
+(hashes are remembered per file size + mtime), Maven Resolver isn't
+even started — the normal case, and what keeps `irij test` (one
+resolution per test file) fast and offline. Otherwise they fetch
+exactly the locked coordinates, then check each jar's sha256
 — a repository (or cache) serving a different file for the same
 version is refused, which the remote `.sha1` alone can't catch (it
 comes from the same server). Any change to `[jvm]`, here or in a seed,
@@ -184,7 +188,13 @@ then the runtime. A library therefore gets the gson / ASM / antlr it
 shipped with, not the runtime's copy — Irij's own dependencies aren't
 relocated, so parent-first would hand a library whatever version
 `irij.jar` happens to bundle. `dev.irij.*` and `java.*` always come
-from the parent: a jar can't replace the runtime. `getResources` lists
+from the parent: a jar can't replace the runtime. The fallback to the
+runtime is limited to `DepsClassLoader.RUNTIME_PACKAGES` — Irij and the
+libraries `irij build` bundles with it (the same list drives the
+bundling). The CLI's own libraries (Maven Resolver, SLF4J, LSP) stay
+invisible, so a library sees the same runtime under `irij run` as in
+the built app: SQLite's driver, finding the CLI's SLF4J, printed a
+no-provider warning under `irij run` only. `getResources` lists
 the jars' resources before the runtime's, so a library's
 `ServiceLoader` finds its own providers first. The run thread's
 context class loader is the deps loader for the same reason (JDBC,
@@ -219,9 +229,10 @@ and defines the program from `__irij_program/` in a loader under it —
 the arrangement `irij run` has. An app without `[jvm]` keeps the old
 layout (`Main-Class: irij.Program`). The runtime bundle never includes
 `dev.irij.module.jvm` or Maven Resolver, and copies only the service
-files it needs (`java.sql.Driver`, jline's providers): the CLI's other
-libraries aren't bundled, so their service files would name missing
-classes.
+files it needs (jline's providers): the CLI's other libraries aren't
+bundled, so their service files would name missing classes. No JDBC
+driver is bundled either — a program's driver is a `[jvm]` library
+(capabilities.md, *3a — Db*).
 
 ### Commands
 

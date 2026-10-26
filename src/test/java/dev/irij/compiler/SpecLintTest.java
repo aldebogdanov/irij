@@ -55,7 +55,7 @@ class SpecLintTest {
     @Test void stdlibIsClean() {
         var src = new StringBuilder();
         for (var m : List.of("time", "auth", "jvm", "datastar", "http", "quint", "serve", "fs",
-                "list", "session", "env", "term", "proc", "test", "random", "math", "db",
+                "list", "session", "env", "term", "proc", "test", "random", "math", "jdbc",
                 "convert", "text", "log", "collection", "func", "quint.itf")) {
             src.append("use std.").append(m).append(" :open\n");
         }

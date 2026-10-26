@@ -6,6 +6,7 @@ import dev.irij.runtime.Values.IrijVector;
 import dev.irij.runtime.Values.Tagged;
 
 import java.sql.Connection;
+import java.sql.Driver;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -15,9 +16,13 @@ import java.sql.Types;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+import java.util.ServiceLoader;
 
 /**
- * Capability provider for the {@code Db} effect (SQLite via JDBC).
+ * Capability provider for the {@code Db} effect of {@code std.jdbc}:
+ * any database with a JDBC driver.
  *
  * <p>Bound from Irij with:
  * <pre>
@@ -33,24 +38,80 @@ import java.util.List;
  * surface — those names are no longer registered in
  * {@code Builtins} / {@code EffectRowChecker.BUILTIN_EFFECTS} /
  * {@code ClassEmitter}. The only access path to JDBC is through
- * the {@code std.db} effect ops, which route through this provider.
+ * the {@code std.jdbc} effect ops, which route through this provider.
+ *
+ * <p>Irij bundles no driver. A program lists one in irij.toml
+ * {@code [jvm]} ({@code "org.xerial:sqlite-jdbc"}), and {@link #open}
+ * finds it with {@link ServiceLoader} in the program's Java libraries
+ * ({@link DepsClassLoader#current()}). {@link DriverManager} can't be
+ * used for those: it only hands a driver to a caller whose class loader
+ * can see the driver's class, and this class is the runtime's, below
+ * the deps loader.
  */
 public final class JdbcCapability {
 
     private JdbcCapability() {}
 
-    /** Open a SQLite connection; returns a Tagged("DbConn", [conn]) value. */
-    public static Object open(Object pathArg) {
-        String path = asStr(pathArg, "db-jdbc.open");
+    /** Drivers people reach for, by JDBC subprotocol: what to add to
+     *  [jvm] when none is found. */
+    private static final Map<String, String> KNOWN_DRIVERS = Map.of(
+            "sqlite", "\"org.xerial:sqlite-jdbc\" = \"3.53.4.0\"",
+            "postgresql", "\"org.postgresql:postgresql\" = \"<version>\"",
+            "mysql", "\"com.mysql:mysql-connector-j\" = \"<version>\"",
+            "mariadb", "\"org.mariadb.jdbc:mariadb-java-client\" = \"<version>\"",
+            "h2", "\"com.h2database:h2\" = \"<version>\"");
+
+    /** Open a connection to the JDBC URL {@code url}; returns a
+     *  Tagged("DbConn", [conn]) value. SQLite files are switched to WAL. */
+    public static Object open(Object urlArg) {
+        String url = asStr(urlArg, "db-open");
+        if (!url.startsWith("jdbc:")) {
+            throw new IrijRuntimeError("db-open: expected a JDBC URL, got \"" + url + "\". "
+                    + "For a SQLite file write \"jdbc:sqlite:" + url + "\" (std.db took a bare path; "
+                    + "std.jdbc takes the URL any driver understands)");
+        }
         try {
-            Connection conn = DriverManager.getConnection("jdbc:sqlite:" + path);
-            try (var stmt = conn.createStatement()) {
-                stmt.execute("PRAGMA journal_mode=WAL");
+            Connection conn = connect(url);
+            if (url.startsWith("jdbc:sqlite:")) {
+                try (var stmt = conn.createStatement()) {
+                    stmt.execute("PRAGMA journal_mode=WAL");
+                }
             }
             return new Tagged("DbConn", List.of(conn), null, null);
         } catch (SQLException e) {
-            throw new IrijRuntimeError("db-jdbc.open: " + e.getMessage());
+            throw new IrijRuntimeError("db-open: " + e.getMessage());
         }
+    }
+
+    /** The first driver that accepts {@code url}: the program's [jvm]
+     *  libraries first, then whatever the JDK registered. */
+    private static Connection connect(String url) throws SQLException {
+        var drivers = ServiceLoader.load(Driver.class, DepsClassLoader.current()).iterator();
+        while (true) {
+            Driver d;
+            try {
+                if (!drivers.hasNext()) break;
+                d = drivers.next();
+            } catch (java.util.ServiceConfigurationError broken) {
+                continue;                                    // a provider that can't load
+            }
+            if (d.acceptsURL(url)) {
+                Connection c = d.connect(url, new Properties());
+                if (c != null) return c;
+            }
+        }
+        try {
+            return DriverManager.getConnection(url);
+        } catch (SQLException e) {
+            if (!"08001".equals(e.getSQLState())) throw e;   // "No suitable driver"
+        }
+        String sub = url.substring("jdbc:".length());
+        int colon = sub.indexOf(':');
+        sub = colon < 0 ? sub : sub.substring(0, colon);
+        String hint = KNOWN_DRIVERS.get(sub);
+        throw new SQLException("no JDBC driver for " + url.substring(0, Math.min(url.length(), 5 + sub.length() + 1))
+                + "… — Irij bundles none; list one in irij.toml [jvm]"
+                + (hint == null ? " (its Maven coordinate)" : ":\n  [jvm]\n  " + hint));
     }
 
     public static Object close(Object connArg) {

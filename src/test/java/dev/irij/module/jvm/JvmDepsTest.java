@@ -214,6 +214,70 @@ class JvmDepsTest {
 
         Class<?> interop = Class.forName("dev.irij.runtime.JavaInterop", true, DepsClassLoader.current());
         assertSame(JavaInterop.class, interop, "the runtime can't be replaced");
+
+        // Libraries the runtime bundles into apps are visible; the CLI's
+        // own (Maven Resolver, SLF4J) are not — as in a built app.
+        assertNotNull(Class.forName("org.objectweb.asm.ClassWriter", false, DepsClassLoader.current()));
+        assertThrows(ClassNotFoundException.class,
+                () -> Class.forName("org.slf4j.LoggerFactory", false, DepsClassLoader.current()));
+        assertThrows(ClassNotFoundException.class,
+                () -> Class.forName("org.eclipse.aether.RepositorySystem", false, DepsClassLoader.current()));
+        assertNull(DepsClassLoader.current().getResource("org/slf4j/LoggerFactory.class"));
+        assertNotNull(DepsClassLoader.current().getResource("java/lang/String.class"));
+    }
+
+    // ── JDBC drivers (std.jdbc) ──────────────────────────────────────────
+
+    @Test
+    void jdbcDriverIsFoundInTheProgramsLibraries() throws Exception {
+        Path driver = repo.compile("fake-driver", Map.of("testlib.jdbc.FakeDriver", """
+                package testlib.jdbc;
+                import java.sql.*;
+                import java.util.Properties;
+                import java.util.logging.Logger;
+                public class FakeDriver implements Driver {
+                    public Connection connect(String url, Properties p) {
+                        if (!acceptsURL(url)) return null;
+                        return (Connection) java.lang.reflect.Proxy.newProxyInstance(
+                            FakeDriver.class.getClassLoader(), new Class<?>[] { Connection.class },
+                            (proxy, m, a) -> m.getName().equals("toString") ? "fake " + url : null);
+                    }
+                    public boolean acceptsURL(String url) { return url.startsWith("jdbc:fake:"); }
+                    public DriverPropertyInfo[] getPropertyInfo(String u, Properties p) { return new DriverPropertyInfo[0]; }
+                    public int getMajorVersion() { return 1; }
+                    public int getMinorVersion() { return 0; }
+                    public boolean jdbcCompliant() { return false; }
+                    public Logger getParentLogger() { return Logger.getGlobal(); }
+                }
+                """), List.of(), Map.of("META-INF/services/java.sql.Driver", "testlib.jdbc.FakeDriver\n"));
+
+        var none = assertThrows(dev.irij.IrijRuntimeError.class,
+                () -> dev.irij.runtime.JdbcCapability.open("jdbc:fake:db"));
+        assertTrue(none.getMessage().contains("no JDBC driver"), none.getMessage());
+
+        DepsClassLoader.install(List.of(driver));
+        var conn = (dev.irij.runtime.Values.Tagged) dev.irij.runtime.JdbcCapability.open("jdbc:fake:db");
+        assertEquals("DbConn", conn.tag());
+        assertEquals("fake jdbc:fake:db", conn.fields().get(0).toString());
+    }
+
+    @Test
+    void jdbcErrorsSayWhatToWrite() {
+        var bare = assertThrows(dev.irij.IrijRuntimeError.class,
+                () -> dev.irij.runtime.JdbcCapability.open("app.db"));
+        assertTrue(bare.getMessage().contains("\"jdbc:sqlite:app.db\""), bare.getMessage());
+
+        var sqlite = assertThrows(dev.irij.IrijRuntimeError.class,
+                () -> dev.irij.runtime.JdbcCapability.open("jdbc:sqlite::memory:"));
+        assertTrue(sqlite.getMessage().contains("\"org.xerial:sqlite-jdbc\""), sqlite.getMessage());
+    }
+
+    @Test
+    void useOfTheOldModuleSaysWhereItWent() {
+        var e = assertThrows(IrijCompiler.CompileException.class, () -> IrijCompiler.compileSourceMulti(
+                "use std.db :as db\n", "irij.OldDb", null, CompileOptions.defaults(), List.of(), "old.irj"));
+        assertTrue(e.getMessage().contains("std.jdbc"), e.getMessage());
+        assertTrue(e.getMessage().contains("org.xerial:sqlite-jdbc"), e.getMessage());
     }
 
     // ── Programs ─────────────────────────────────────────────────────────

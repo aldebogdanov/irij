@@ -23,8 +23,13 @@ import java.util.List;
  * runtime ({@code dev.irij.*}): a library gets the gson, ASM or antlr it
  * shipped with, not the version the runtime happens to bundle. Without
  * that, a library needing a newer gson would fail with a
- * {@code NoSuchMethodError} deep inside its own code. Anything the jars
- * don't have falls through to the runtime.
+ * {@code NoSuchMethodError} deep inside its own code. What the jars
+ * don't have falls through to the runtime — but only to
+ * {@link #RUNTIME_PACKAGES}, the libraries an {@code irij build} app
+ * carries. The CLI's own (Maven Resolver, SLF4J, LSP) stay invisible,
+ * so a library behaves under {@code irij run} as it will in the built
+ * app: SQLite's driver, finding the CLI's SLF4J, logged a warning in one
+ * and not the other.
  *
  * <p>One loader per process is current ({@link #current()}); with no
  * {@code [jvm]} it is the runtime's own loader, so nothing changes for a
@@ -33,6 +38,17 @@ import java.util.List;
 public final class DepsClassLoader extends URLClassLoader {
 
     static { ClassLoader.registerAsParallelCapable(); }
+
+    /** Packages a program's libraries may get from the runtime: Irij and
+     *  the libraries {@code irij build} bundles with it. Anything else on
+     *  the CLI's classpath belongs to the CLI. */
+    public static final List<String> RUNTIME_PACKAGES = List.of(
+            "dev.irij.",
+            "com.google.gson.",
+            "com.moandjiezana.toml.",
+            "org.antlr.v4.runtime.",
+            "org.objectweb.asm.",
+            "org.jline.");
 
     private static final ClassLoader RUNTIME = DepsClassLoader.class.getClassLoader();
     private static final ClassLoader PLATFORM = ClassLoader.getPlatformClassLoader();
@@ -104,6 +120,7 @@ public final class DepsClassLoader extends URLClassLoader {
                         try {
                             c = findClass(name);               // the program's jars
                         } catch (ClassNotFoundException notOurs) {
+                            if (!fromRuntime(name)) throw notOurs;
                             c = getParent().loadClass(name);   // the runtime's libraries
                         }
                     }
@@ -114,20 +131,32 @@ public final class DepsClassLoader extends URLClassLoader {
         }
     }
 
+    private static boolean fromRuntime(String className) {
+        for (String p : RUNTIME_PACKAGES) if (className.startsWith(p)) return true;
+        return false;
+    }
+
+    /** A resource path ({@code org/jline/…}) under {@link #RUNTIME_PACKAGES}. */
+    private static boolean runtimeResource(String path) {
+        return fromRuntime(path.replace('/', '.'));
+    }
+
     @Override
     public URL getResource(String name) {
         URL url = PLATFORM.getResource(name);
         if (url == null) url = findResource(name);
-        if (url == null) url = getParent().getResource(name);
+        if (url == null && runtimeResource(name)) url = getParent().getResource(name);
         return url;
     }
 
-    /** The jars' resources before the runtime's, so a library's
-     *  {@code ServiceLoader} sees its own providers first. */
+    /** The jars' resources (then the JDK's, and the runtime's under
+     *  {@link #RUNTIME_PACKAGES}) — a library's {@code ServiceLoader}
+     *  sees its own providers and never the CLI's. */
     @Override
     public Enumeration<URL> getResources(String name) throws IOException {
         List<URL> all = new ArrayList<>(Collections.list(findResources(name)));
-        all.addAll(Collections.list(getParent().getResources(name)));
+        all.addAll(Collections.list(PLATFORM.getResources(name)));
+        if (runtimeResource(name)) all.addAll(Collections.list(getParent().getResources(name)));
         return Collections.enumeration(all);
     }
 }

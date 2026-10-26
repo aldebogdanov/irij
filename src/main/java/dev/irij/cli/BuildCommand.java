@@ -305,17 +305,12 @@ public final class BuildCommand {
                         // are already in dev/irij/** space? No — they live under their own
                         // packages. Copy them too so emitted classes resolve at runtime.
                         || (name.endsWith(".class") && isRuntimeDep(name))
-                        // SQLite ships native libraries under org/sqlite/native/
-                        // (.so/.dylib/.dll for each platform); bundle them
-                        // so the JDBC driver can self-load on start.
-                        || name.startsWith("org/sqlite/native/")
-                        // Service loader files — java.sql.Driver discovers
-                        // org.sqlite.JDBC via META-INF/services; jline finds
-                        // its terminal providers there. Only those: the
-                        // CLI's other libraries (Maven Resolver, LSP) aren't
-                        // bundled, so their service files would name
-                        // classes the app doesn't have.
-                        || name.equals("META-INF/services/java.sql.Driver")
+                        // Service loader files — jline finds its terminal
+                        // providers there. Only those: the CLI's other
+                        // libraries (Maven Resolver, LSP) aren't bundled,
+                        // so their service files would name classes the
+                        // app doesn't have. (A JDBC driver is a [jvm]
+                        // library; its own jar carries its service file.)
                         || name.startsWith("META-INF/services/org/jline/");
                 if (!keep) continue;
                 if (!written.add(name)) continue;
@@ -326,18 +321,15 @@ public final class BuildCommand {
         }
     }
 
-    /** Packages the bytecode runtime transitively depends on. */
+    /** Packages the bytecode runtime transitively depends on — the same
+     *  list a program's [jvm] libraries may fall back to
+     *  ({@link dev.irij.runtime.DepsClassLoader#RUNTIME_PACKAGES}), so a
+     *  library sees the same runtime under `irij run` and in the app. */
     private static boolean isRuntimeDep(String name) {
-        return name.startsWith("com/google/gson/")
-                || name.startsWith("com/moandjiezana/toml/")
-                || name.startsWith("org/antlr/v4/runtime/")
-                || name.startsWith("org/objectweb/asm/")
-                // SQLite JDBC driver — needed by RuntimeSupport.rawDbOpen
-                // and any program using std.db.
-                || name.startsWith("org/sqlite/")
-                // JLine — needed by the REPL surface that builtins
-                // can transitively reach (e.g. when stdlib functions
-                // print prompts). Cheap to bundle.
-                || name.startsWith("org/jline/");
+        String dotted = name.replace('/', '.');
+        for (String p : dev.irij.runtime.DepsClassLoader.RUNTIME_PACKAGES) {
+            if (!p.equals("dev.irij.") && dotted.startsWith(p)) return true;
+        }
+        return false;
     }
 }

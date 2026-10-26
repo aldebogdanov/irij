@@ -234,7 +234,7 @@ public final class Builtins {
         // phase 3d. Reach via std.fs effect ops + FsCapability.
 
         // ── Database primitives — removed phase 3a ────────────────────────
-        // The Db effect surface is now reached through the std.db handler
+        // The Db effect surface is now reached through the std.jdbc handler
         // + JdbcCapability provider. Direct raw-db-* names are gone.
 
         // ── HTTP client primitives — removed phase 3b ───────────────────

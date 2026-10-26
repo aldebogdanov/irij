@@ -224,7 +224,7 @@ final class IntrinsicsEmitter implements Opcodes {
             case "validate"     -> { return emitValidate(args, mv, locals, "validate"); }
             case "validate!"    -> { return emitValidate(args, mv, locals, "validateBang"); }
             // raw-db-* emit entries removed phase 3a; the Db effect ops
-            // route through `db-jdbc.method` dispatch in std/db.irj.
+            // route through `db-jdbc.method` dispatch in std/jdbc.irj.
             // raw-sse-* emit entries removed phase 3c (ServeCapability)
             // raw-multipart-* emit entries removed phase 3d (ServeCapability)
             // raw-http-serve emit entry removed phase 3c (ServeCapability)

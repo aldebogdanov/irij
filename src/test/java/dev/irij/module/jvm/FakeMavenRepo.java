@@ -37,6 +37,13 @@ final class FakeMavenRepo {
     /** Compile {@code sources} (class name → Java source) against
      *  {@code classpath} into a jar. */
     Path compile(String jarName, Map<String, String> sources, List<Path> classpath) throws IOException {
+        return compile(jarName, sources, classpath, Map.of());
+    }
+
+    /** As above, adding {@code resources} (jar path → text), such as a
+     *  {@code META-INF/services} file. */
+    Path compile(String jarName, Map<String, String> sources, List<Path> classpath,
+                 Map<String, String> resources) throws IOException {
         Path src = Files.createDirectories(work.resolve(jarName + "-src"));
         Path out = Files.createDirectories(work.resolve(jarName + "-classes"));
         var files = new ArrayList<String>();
@@ -62,6 +69,11 @@ final class FakeMavenRepo {
             for (Path p : walk.filter(Files::isRegularFile).sorted().toList()) {
                 jos.putNextEntry(new JarEntry(out.relativize(p).toString().replace('\\', '/')));
                 Files.copy(p, jos);
+                jos.closeEntry();
+            }
+            for (var e : resources.entrySet()) {
+                jos.putNextEntry(new JarEntry(e.getKey()));
+                jos.write(e.getValue().getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 jos.closeEntry();
             }
         }

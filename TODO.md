@@ -558,12 +558,13 @@ Effect-based I/O operations, mockable via handlers in tests.
 
 - [x] SQLite via sqlite-jdbc (embedded, zero-config)
 - [x] Raw builtins: `raw-db-open`, `raw-db-query`, `raw-db-exec`, `raw-db-close`, `raw-db-transaction`
-- [x] `std.db` module with `Db` effect, `default-db` handler, `db-open`/`db-close` convenience fns
+- [x] `std.db` module with `Db` effect, `default-db` handler, `db-open`/`db-close` convenience fns (now `std.jdbc`, Phase 16)
 - [x] Parameter binding (Int, Float, Str, Unit/null)
 - [x] Transaction support: auto-commit on success, rollback on error
 - [x] Mockable via custom handlers (test without real DB)
 - [x] Java tests (12) + integration tests (11)
-- [ ] JDBC / HikariCP / PostgreSQL — deferred until after JVM interop phase
+- [x] Any JDBC database — `std.jdbc` with the driver from `[jvm]` (Phase 16)
+- [ ] Connection pooling (HikariCP) — a `[jvm]` library behind a cap
 
 ---
 
@@ -812,9 +813,15 @@ libraries.
 - [ ] Phase 3: a seed ships `java/` sources that irij compiles (a real
       static provider instead of an interop adapter)
 - [ ] Phase 4: instance/handle caps; adding a library to a running REPL
-- [ ] Std's JDBC cap only opens `jdbc:sqlite:`; a `[jvm]` JDBC driver
-      needs its own cap (DriverManager won't see drivers in the deps
-      loader)
+- [x] **`std.db` → `std.jdbc`; SQLite out of `irij.jar`** — `db-open`
+      takes a JDBC URL; the driver is a `[jvm]` library found with
+      `ServiceLoader` in the deps loader (any JDBC database). `irij.jar`
+      18 MB → 8 MB, a hello-world app 17 MB → ~3 MB. `use std.db` fails
+      with the migration; `tests/irij.toml` lists sqlite-jdbc.
+- [x] Deps loader falls back only to what apps bundle
+      (`RUNTIME_PACKAGES`), so `irij run` and the built app agree.
+- [ ] Migrate users of `std.db` after the release: irij.online
+      (server.irj, `/learn` modules-java.md), the `chereda` seed
 
 ---
 

@@ -1,11 +1,12 @@
 use std.test {assert-eq test}
-use std.db :as db
-use std.db {Db}
+use std.jdbc :as db
+use std.jdbc {Db}
 
-;; ── std.db effect surface ────────────────────────────────────────
+;; ── std.jdbc effect surface ──────────────────────────────────────
 ;;
 ;; All Db operations are effect ops; the JDBC bridge lives behind
-;; the `db-jdbc` cap inside std/db.irj. No more raw-db-* names.
+;; the `db-jdbc` cap inside std/jdbc.irj. The SQLite driver is a [jvm]
+;; library (tests/irij.toml), as it is for any program.
 ;;
 ;; Each test body keeps the with-block flat (open / helper-fn /
 ;; close) and pushes the actual logic into named helper fns. The
@@ -16,7 +17,7 @@ use std.db {Db}
 
 fn open-close-body ::: Db
   =>
-  conn := db-open ":memory:"
+  conn := db-open "jdbc:sqlite::memory:"
   result := type-of conn
   db-close conn
   result
@@ -32,7 +33,7 @@ test "db-open and db-close" (-> assert-eq "DbConn" (test-open-close ()))
 
 fn round-trip-body ::: Db
   =>
-  conn := db-open ":memory:"
+  conn := db-open "jdbc:sqlite::memory:"
   db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)" #[]
   db-exec conn "INSERT INTO t (name) VALUES (?)" #["Alice"]
   db-exec conn "INSERT INTO t (name) VALUES (?)" #["Bob"]
@@ -53,7 +54,7 @@ test "db-exec + db-query round-trip" (-> test-round-trip ())
 
 fn affected-body ::: Db
   =>
-  conn := db-open ":memory:"
+  conn := db-open "jdbc:sqlite::memory:"
   db-exec conn "CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)" #[]
   db-exec conn "INSERT INTO t (v) VALUES (?)" #["a"]
   db-exec conn "INSERT INTO t (v) VALUES (?)" #["b"]
@@ -73,7 +74,7 @@ test "db-exec returns affected count" (-> assert-eq 2 (test-affected ()))
 
 fn types-body ::: Db
   =>
-  conn := db-open ":memory:"
+  conn := db-open "jdbc:sqlite::memory:"
   db-exec conn "CREATE TABLE t (i INTEGER, r REAL, s TEXT)" #[]
   db-exec conn "INSERT INTO t VALUES (?, ?, ?)" #[42 3.14 "hello"]
   rows := db-query conn "SELECT * FROM t" #[]
@@ -95,7 +96,7 @@ test "query returns correct types" (-> test-types ())
 
 fn null-body ::: Db
   =>
-  conn := db-open ":memory:"
+  conn := db-open "jdbc:sqlite::memory:"
   db-exec conn "CREATE TABLE t (a TEXT, b TEXT)" #[]
   db-exec conn "INSERT INTO t VALUES (?, ?)" #["x" ()]
   rows := db-query conn "SELECT * FROM t" #[]
@@ -119,7 +120,7 @@ fn tx-commit-insert ::: Db
 
 fn tx-commit-body ::: Db
   =>
-  conn := db-open ":memory:"
+  conn := db-open "jdbc:sqlite::memory:"
   db-exec conn "CREATE TABLE t (v TEXT)" #[]
   db-transaction conn (-> tx-commit-insert conn)
   rows := db-query conn "SELECT * FROM t" #[]
@@ -145,7 +146,7 @@ fn tx-rollback-attempt ::: Db
 
 fn tx-rollback-body ::: Db
   =>
-  conn := db-open ":memory:"
+  conn := db-open "jdbc:sqlite::memory:"
   db-exec conn "CREATE TABLE t (v TEXT)" #[]
   try (-> tx-rollback-attempt conn)
   rows := db-query conn "SELECT * FROM t" #[]

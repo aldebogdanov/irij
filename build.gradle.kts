@@ -44,7 +44,6 @@ dependencies {
     implementation("org.antlr:antlr4-runtime:4.13.2")
     implementation("org.jline:jline:3.26.3")
     implementation("com.google.code.gson:gson:2.11.0")
-    implementation("org.xerial:sqlite-jdbc:3.47.1.0")
     implementation("com.moandjiezana.toml:toml4j:0.7.2")
     implementation("org.ow2.asm:asm:9.7")
     implementation("org.ow2.asm:asm-util:9.7")

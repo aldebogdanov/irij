@@ -203,6 +203,10 @@ public final class JvmDeps {
         String inputs = inputsHash(plan);
         Path lockPath = projectRoot.resolve(LOCK_FILE);
         Lock lock = Lock.read(lockPath);
+        if (lock != null && lock.inputs().equals(inputs)) {
+            List<Path> cached = cachedLocked(lock);
+            if (cached != null) return cached;
+        }
 
         silenceSlf4j();
         RepositorySystem system = new RepositorySystemSupplier().get();
@@ -262,6 +266,50 @@ public final class JvmDeps {
     }
 
     private record LockedRequest(Lock.Jar jar, ArtifactRequest request) {}
+
+    /** The locked jars straight from the cache when every one is there
+     *  with its locked sha256 — no resolver, no network; null otherwise
+     *  (the resolver then fetches what's missing, and a jar that is
+     *  present but different is refused there). The common case: every
+     *  run after the first, and every file of `irij test`. */
+    private static List<Path> cachedLocked(Lock lock) throws IOException {
+        var paths = new ArrayList<Path>();
+        for (Lock.Jar j : lock.jars()) {
+            Path p;
+            try {
+                p = localPath(new DefaultArtifact(j.coord()));
+            } catch (IllegalArgumentException bad) {
+                return null;
+            }
+            if (!Files.isRegularFile(p) || !j.sha256().equals(sha256Memo(p))) return null;
+            paths.add(p);
+        }
+        return paths;
+    }
+
+    /** Where Maven's layout puts {@code a} in the cache. */
+    static Path localPath(Artifact a) {
+        String file = a.getArtifactId() + "-" + a.getVersion()
+                + (a.getClassifier().isEmpty() ? "" : "-" + a.getClassifier()) + "." + a.getExtension();
+        return cacheDir().resolve(a.getGroupId().replace('.', '/')).resolve(a.getArtifactId())
+                .resolve(a.getVersion()).resolve(file);
+    }
+
+    private record Hashed(long size, long modified, String sha256) {}
+    private static final java.util.concurrent.ConcurrentHashMap<Path, Hashed> HASHED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** {@link #sha256(Path)}, remembered while the file's size and mtime
+     *  stay the same — a test run checks the same jars once per file. */
+    private static String sha256Memo(Path p) throws IOException {
+        long size = Files.size(p);
+        long modified = Files.getLastModifiedTime(p).toMillis();
+        Hashed h = HASHED.get(p);
+        if (h != null && h.size() == size && h.modified() == modified) return h.sha256();
+        String sha = sha256(p);
+        HASHED.put(p, new Hashed(size, modified, sha));
+        return sha;
+    }
 
     /** Resolve the plan transitively; coordinate → jar, classpath order. */
     private static List<Map.Entry<String, Path>> resolve(RepositorySystem system, RepositorySystemSession session,
