@@ -117,6 +117,8 @@ docs/                    # Specification and phase docs
 
 ## Version
 
+0.11 &mdash; Java libraries: irij.toml `[jvm]` lists Maven coordinates at exact versions, fetched with their dependencies and pinned with sha256 in `irij.lock`, loaded child-first, shipped whole in `irij build`'s JAR; seeds bring libraries only where `[trust] jars` names them; `irij deps`, and `irij audit` lists libraries. **Breaking:** `std.db` is now `std.jdbc` — `db-open` takes a JDBC URL (`"jdbc:sqlite:" ++ path`) and the driver is a `[jvm]` library (`"org.xerial:sqlite-jdbc"`); any JDBC database works, and `irij.jar` drops from 18 MB to 8 MB.
+
 0.10 &mdash; effect rows you can trust: a `with` needs its handler's row, so a pure function can't print, read the clock or reach Java through a handler; a call through a Java `cap` performs the cap's effect (std's real handlers are `default-db :: Db ::: Db` & co.), so code names the resource it touches instead of `JVM`; irij.toml `[trust]` confines Java to the modules it lists, and `irij audit` shows every site; `unsafe-jvm` is deprecated. Strings print quoted inside collections, and `inspect` gives that form for any value.
 
 0.9 &mdash; model-based testing against a Quint specification (the `model` declaration, `std.quint`).
