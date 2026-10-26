@@ -238,6 +238,54 @@ bundled, so their service files would name missing classes. No JDBC
 driver is bundled either — a program's driver is a `[jvm]` library
 (capabilities.md, *3a — Db*).
 
+## Java sources — `java/`
+
+A project or a seed may keep Java sources in `java/` beside its
+`irij.toml`, in the usual package layout (`java/neo4irij/bolt/Bolt.java`).
+They exist to be **cap providers**: a class of static methods over plain
+Java values that a `cap` binds (capabilities.md § Custom providers), so a
+library wrapping an object-oriented Java API needs no hand-written
+interop and its handler performs the cap's effect, not `JVM`.
+
+`JavaSources` (in `dev.irij.module.jvm`) does it inside
+`ProjectDeps.resolve`, after the libraries are fetched:
+
+1. **Plan.** One *unit* per `java/` that holds `.java` files — each
+   seed's (in name order), then the root's. With a root `[trust]`, a seed
+   its `java` key doesn't name is untrusted, and `requireTrusted` refuses
+   the program before anything is compiled (the `jars` rule, for code
+   that ships as source). The root's own `java/` needs no entry. Without
+   `[trust]` nothing is refused; `irij run` warns
+   (`BytecodeRunner.untrustedJavaWarning`), and `irij build` /
+   `irij publish` refuse the project anyway for lacking the section.
+2. **Compile.** `javax.tools` (the running JDK's compiler — a JRE
+   without one gets an error saying so) with `--release 25`, Irij's own
+   level, `-proc:none`, UTF-8, and an explicit `-classpath`: the
+   program's library jars, plus, for the root, the seeds' compiled jars.
+   Never Irij's classes — with no classpath javac would fall back to the
+   JVM's, so an empty one is spelled as the output directory. Sources
+   therefore can't reach `dev.irij.*`: a provider trades plain values.
+   Errors come back as `[seed: ]java/a/B.java:12: message`.
+3. **Package rule.** Every class a seed compiles must be under
+   `JavaSources.packageOf(seed)` — the name with `-` as `_` and a
+   leading-digit segment prefixed by `_` (`chereda-redis` →
+   `chereda_redis`). The program has one classpath; two seeds can't both
+   define `util.Strings`. The root's classes may live anywhere.
+4. **Cache.** Each unit becomes `~/.irij/java/<sha256>.jar`
+   (`irij.java.dir` overrides). The hash covers the release, the unit,
+   every source's path and bytes, and each classpath jar's path and size
+   (library jars live at versioned paths, compiled ones are named by
+   their own hash), so an unchanged project compiles nothing and an edit
+   compiles one new jar. Entries carry a fixed time; the jar is written
+   to a temp file and moved into place.
+
+`ProjectDeps.jars` is the libraries followed by these jars, so the deps
+class loader, run, test, the REPL, nREPL, `irij build` (they ship under
+`__irij_lib/` like any library) and the built app's `JarLauncher` all take
+them with no further change. `irij publish` puts `java/**/*.java` in the
+tarball (`PublishCommand.bundleFiles`; only `.java`, at any depth) and
+`"java": true|false` in the metadata. The registry doesn't show it yet.
+
 ### Commands
 
 - `irij install` — fetch seeds and libraries; writes `irij.lock`.
@@ -245,5 +293,7 @@ driver is bundled either — a program's driver is a `[jvm]` library
   classpath order.
 - `irij audit` — after the Java sites, a *Java libraries* section: each
   declarer's coordinates, seeds marked `trusted` / `NOT TRUSTED`
-  against `[trust] jars`, and whether `irij.lock` is current. Downloads
-  nothing; exits 1 on an untrusted seed.
+  against `[trust] jars`, and whether `irij.lock` is current; then a
+  *Java sources* section: each `java/` with its files, seeds marked
+  against `[trust] java`. Downloads and compiles nothing; exits 1 on an
+  untrusted seed. `--fix` writes `jars` and `java` too.

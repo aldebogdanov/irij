@@ -35,6 +35,7 @@ import java.util.List;
  * caps = ["acme.clock"]           # modules that may bind a Java class with `cap`
  * jvm = ["seed-readme"]           # modules that may write Java interop by hand
  * jars = ["neo4irij"]             # seeds that may bring Java libraries
+ * java = ["neo4irij"]             # seeds whose java/ sources may be compiled
  * </pre>
  *
  * <p>Seeds (dependencies) support three source types:
@@ -110,14 +111,19 @@ public final class ProjectFile {
      * covered too: the policy is the root project's. {@code jars} names
      * the seeds (by their name in {@code [seeds]}, same pattern rules)
      * whose {@code [jvm]} libraries may be fetched and loaded; the root
-     * project's own {@code [jvm]} needs no entry.
+     * project's own {@code [jvm]} needs no entry. {@code java} names the
+     * seeds whose {@code java/} sources may be compiled and loaded
+     * ({@code JavaSources}); the root project's own {@code java/} needs
+     * no entry either.
      */
-    public record Trust(List<String> caps, List<String> jvm, List<String> jars) {
-        public Trust(List<String> caps, List<String> jvm) { this(caps, jvm, List.of()); }
+    public record Trust(List<String> caps, List<String> jvm, List<String> jars, List<String> java) {
+        public Trust(List<String> caps, List<String> jvm) { this(caps, jvm, List.of(), List.of()); }
+        public Trust(List<String> caps, List<String> jvm, List<String> jars) { this(caps, jvm, jars, List.of()); }
 
         public boolean allowsCaps(String module) { return matches(caps, module); }
         public boolean allowsJvm(String module) { return matches(jvm, module); }
         public boolean allowsJars(String seed) { return matches(jars, seed); }
+        public boolean allowsJava(String seed) { return matches(java, seed); }
 
         public static boolean isStd(String module) {
             return module != null && (module.equals("std") || module.startsWith("std."));
@@ -266,12 +272,12 @@ public final class ProjectFile {
         var t = toml.getTable("trust");
         if (t == null) return null;
         for (String key : t.toMap().keySet()) {
-            if (!key.equals("caps") && !key.equals("jvm") && !key.equals("jars")) {
+            if (!key.equals("caps") && !key.equals("jvm") && !key.equals("jars") && !key.equals("java")) {
                 throw new ParseError("[trust] has an unknown key '" + key
-                        + "' — it takes `caps` and `jvm` (lists of module names) and `jars` (seed names)");
+                        + "' — it takes `caps` and `jvm` (lists of module names), `jars` and `java` (seed names)");
             }
         }
-        return new Trust(stringList(t, "caps"), stringList(t, "jvm"), stringList(t, "jars"));
+        return new Trust(stringList(t, "caps"), stringList(t, "jvm"), stringList(t, "jars"), stringList(t, "java"));
     }
 
     private static List<String> stringList(Toml t, String key) {

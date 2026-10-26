@@ -1,0 +1,34 @@
+;; A project's own Java, in java/.
+;;
+;; `irij run` compiles java/ (against the JDK and the project's [jvm]
+;; libraries, here none) into a jar cached in ~/.irij/java, and it joins
+;; the program's Java libraries. A `cap` binds its class like any other,
+;; so the handler performs Regex, not JVM, and so does `hashtags`.
+;;
+;;   cd examples/java-sources
+;;   irij run main.irj
+;;   irij build && java --enable-native-access=ALL-UNNAMED -jar build/main.jar
+
+effect Regex
+  compile :: Str _
+  find-all :: _ Str Vec
+  replace-all :: _ Str Str Str
+
+cap patterns :: Regex = "words.Patterns"
+
+handler java-regex :: Regex ::: Regex
+  compile regex => resume (patterns.compile regex)
+  find-all p text => resume (patterns.findAll p text)
+  replace-all p text by => resume (patterns.replaceAll p text by)
+
+fn hashtags :: Str Vec ::: Regex
+  => text
+  tag := compile "#[a-z0-9]+"
+  find-all tag text
+
+fn redact :: Str Str ::: Regex
+  (text -> replace-all (compile "[0-9]{4}") text "####")
+
+with java-regex
+  println (hashtags "effects are #fun and #composable, see #irij")
+  println (redact "card 1234 5678")

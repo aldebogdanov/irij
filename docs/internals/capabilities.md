@@ -386,11 +386,52 @@ static methods. A record cap (`cap mock :: Greet = {greet= …}`) has no
 Java behind it and performs nothing, so an in-process mock still
 discharges its effect.
 
-Not covered yet: a Java member on a value a cap returns
+A Java member on a value a cap returns
 (`(instant.now ())#toString ()`) is still `#member` interop and needs
 `JVM` — and `RtInterop.javaMember` re-checks `JVM` against the clause's
-runtime row, so charging it to the cap's effect needs that runtime row
-to grant it too (TODO).
+runtime row. For an object API, write the provider instead
+(§ Custom providers below): the members are then called in Java, behind
+the cap.
+
+## Custom providers: a project's or seed's own Java
+
+The provider contract — public static methods, called with `INVOKESTATIC`
+— suits a utility class, but most Java libraries are object APIs: a
+driver hands out sessions, a session runs queries. Calling those by hand
+(`d#session`, `s#run`) is interop, needs `JVM`, and puts `JVM` in the
+handler's row. Instead the library ships its own provider in `java/`
+(packaging.md § Java sources):
+
+```java
+package neo4irij.bolt;
+
+public final class Bolt {
+    public static Object driver(String uri, Map<String, Object> auth) { … }
+    public static Map<String, Object> run(Object driver, String cypher,
+                                          Map<String, Object> params) { … }
+}
+```
+
+```
+cap bolt :: Neo4j = "neo4irij.bolt.Bolt"
+
+pub handler neo4j :: Neo4j ::: Neo4j
+  neo-run conn stmt params => resume (decode (bolt.run (driver-of conn) stmt params))
+```
+
+The class is compiled against the program's `[jvm]` libraries and the
+JDK only, so its methods trade plain Java values with Irij — the
+interop conversions apply as for any Java call: a `Str` arrives as a
+`String`, an `Int` as a `long`, a `Vec` or `Map` as a `java.util.List` /
+`Map` when the parameter says so; a `List` or `Map` it returns arrives as
+a `Vec` or `Map`, and any other object (a driver, a session) comes back
+to Irij untouched, to be passed to the next call. Declare parameters as
+`List` / `Map` rather than `Object` when they take collections: an Irij
+`Vec` or `Map` passed where Java takes `Object` arrives as Irij's own
+type. An exception thrown by a provider is raised in Irij with its
+message. No `#member` call is left on the Irij side, so the cap's effect
+is the whole story: the module needs `caps` in `[trust]`, not `jvm`, and
+the seed needs `java`.
 
 ## Future work
 

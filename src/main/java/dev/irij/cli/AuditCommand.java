@@ -50,7 +50,8 @@ public final class AuditCommand {
         Trust trust = audit.trust();
 
         if (java.util.Arrays.asList(args).contains("--fix")) {
-            fix(root.resolve("irij.toml"), audit, JvmDeps.plan(manifest, seeds), trust);
+            fix(root.resolve("irij.toml"), audit, JvmDeps.plan(manifest, seeds),
+                    dev.irij.module.jvm.JavaSources.plan(manifest, root, seeds), trust);
             String[] rest = java.util.Arrays.stream(args).filter(a -> !a.equals("--fix")).toArray(String[]::new);
             run(rest);
             return;
@@ -68,7 +69,8 @@ public final class AuditCommand {
 
         System.out.println("Java in " + entry + (trust == null
                 ? "  (irij.toml has no [trust]: nothing is enforced)"
-                : "  (irij.toml [trust]: caps " + trust.caps() + ", jvm " + trust.jvm() + ", jars " + trust.jars() + ")"));
+                : "  (irij.toml [trust]: caps " + trust.caps() + ", jvm " + trust.jvm() + ", jars " + trust.jars()
+                        + ", java " + trust.java() + ")"));
         System.out.println();
         boolean untrusted = false;
         if (byModule.isEmpty()) {
@@ -98,6 +100,8 @@ public final class AuditCommand {
 
         var plan = JvmDeps.plan(manifest, seeds);
         boolean untrustedJars = printJars(root, plan);
+        var javaPlan = dev.irij.module.jvm.JavaSources.plan(manifest, root, seeds);
+        boolean untrustedJava = printJava(javaPlan);
         if (untrusted) {
             System.out.println();
             System.out.println("Some modules reach Java without [trust] listing them; the compiler refuses this program.");
@@ -106,11 +110,16 @@ public final class AuditCommand {
             System.out.println();
             System.out.println("Some seeds bring Java libraries without [trust] jars listing them; no Java library is downloaded until it does.");
         }
-        if (untrusted || untrustedJars) System.exit(1);
+        if (untrustedJava) {
+            System.out.println();
+            System.out.println("Some seeds ship Java sources without [trust] java listing them; nothing is compiled until it does.");
+        }
+        if (untrusted || untrustedJars || untrustedJava) System.exit(1);
     }
 
     /** Write what [trust] lacks for this program; print what changed. */
-    private static void fix(Path toml, IrijCompiler.Audit audit, JvmDeps.Plan plan, Trust trust)
+    private static void fix(Path toml, IrijCompiler.Audit audit, JvmDeps.Plan plan,
+                            dev.irij.module.jvm.JavaSources.Plan javaPlan, Trust trust)
             throws java.io.IOException {
         var caps = new java.util.ArrayList<String>();
         var jvm = new java.util.ArrayList<String>();
@@ -126,7 +135,11 @@ public final class AuditCommand {
         for (JvmDeps.Request r : plan.requests()) {
             if (r.seed() != null && (trust == null || !trust.allowsJars(r.seed()))) jars.add(r.seed());
         }
-        var add = dev.irij.module.TrustFix.entries(caps, jvm, jars);
+        var javaSeeds = new java.util.ArrayList<String>();
+        for (String seed : javaPlan.seeds()) {
+            if (trust == null || !trust.allowsJava(seed)) javaSeeds.add(seed);
+        }
+        var add = dev.irij.module.TrustFix.entries(caps, jvm, jars, javaSeeds);
         if (trust != null && add.isEmpty()) {
             System.out.println("irij.toml [trust] already lets this program build; nothing to add.");
             System.out.println();
@@ -171,6 +184,29 @@ public final class AuditCommand {
             for (var d : e.getValue()) System.out.println("    " + d.coord());
         }
         for (String n : plan.notes()) System.out.println("  note: " + n);
+        return !plan.untrusted().isEmpty();
+    }
+
+    /** The Java sources section. True when a seed's sources aren't trusted. */
+    static boolean printJava(dev.irij.module.jvm.JavaSources.Plan plan) {
+        System.out.println();
+        if (plan.isEmpty()) {
+            System.out.println("Java sources: none (no java/ here or in any seed)");
+            return false;
+        }
+        System.out.println("Java sources  (java/, compiled into the program's Java libraries)");
+        System.out.println();
+        for (var u : plan.units()) {
+            String mark = "";
+            if (u.seed() != null && plan.trustEnforced()) {
+                mark = plan.untrusted().contains(u.seed()) ? "  NOT TRUSTED" : "  trusted";
+            }
+            System.out.println("  " + u.who() + "  (" + plural(u.files().size(), "file") + ")" + mark);
+            Path dir = u.root().resolve(dev.irij.module.jvm.JavaSources.DIR);
+            for (Path f : u.files()) {
+                System.out.println("    java/" + dir.relativize(f).toString().replace('\\', '/'));
+            }
+        }
         return !plan.untrusted().isEmpty();
     }
 

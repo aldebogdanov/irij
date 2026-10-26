@@ -14,21 +14,27 @@ import java.util.Map;
 
 /**
  * Everything a project's {@code irij.toml} pulls in: its seeds (name →
- * source dir, transitively) and its Java libraries ({@link JvmDeps}).
+ * source dir, transitively), its Java libraries ({@link JvmDeps}) and the
+ * {@code java/} sources of the project and its seeds, compiled
+ * ({@link JavaSources}). {@code jars} is all of it — libraries first, then
+ * the compiled sources — the list the program's class loader and
+ * {@code irij build} take.
  * The one entry point for "run in a project context" — {@code irij run},
  * {@code irij test}, the REPL, nREPL, {@code irij build}, {@code irij
  * install} — so they all see the same seeds and the same jars.
  */
-public record ProjectDeps(Map<String, Path> seeds, JvmDeps.Plan plan, List<Path> jars) {
+public record ProjectDeps(Map<String, Path> seeds, JvmDeps.Plan plan, JavaSources.Plan java,
+                          List<Path> jars) {
 
-    public static final ProjectDeps NONE = new ProjectDeps(Map.of(), null, List.of());
+    public static final ProjectDeps NONE = new ProjectDeps(Map.of(), null, JavaSources.Plan.EMPTY, List.of());
 
     public List<Path> seedRoots() {
         return new ArrayList<>(seeds.values());
     }
 
-    /** Resolve seeds and fetch Java libraries for {@code projectRoot}
-     *  (null, or no irij.toml: nothing). */
+    /** Resolve seeds, fetch Java libraries and compile Java sources for
+     *  {@code projectRoot} (null, or no irij.toml: nothing). Untrusted
+     *  seeds are refused before anything is downloaded or compiled. */
     public static ProjectDeps resolve(Path projectRoot, PrintStream out) throws IOException {
         if (projectRoot == null) return NONE;
         Path toml = projectRoot.resolve("irij.toml");
@@ -37,7 +43,12 @@ public record ProjectDeps(Map<String, Path> seeds, JvmDeps.Plan plan, List<Path>
         Map<String, Path> seeds = manifest.deps().isEmpty() ? Map.of()
                 : new DependencyResolver(projectRoot, out).resolveAll(manifest.deps());
         var plan = JvmDeps.plan(manifest, seeds);
-        return new ProjectDeps(seeds, plan, JvmDeps.fetch(projectRoot, plan, out));
+        var java = JavaSources.plan(manifest, projectRoot, seeds);
+        java.requireTrusted();
+        var libraries = JvmDeps.fetch(projectRoot, plan, out);
+        var jars = new ArrayList<>(libraries);
+        jars.addAll(JavaSources.compile(java, libraries, out));
+        return new ProjectDeps(seeds, plan, java, List.copyOf(jars));
     }
 
     /** {@link #resolve}, then make the jars the program's Java libraries

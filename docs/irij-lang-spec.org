@@ -873,6 +873,23 @@
    may be fetched at all; the project's own =[jvm]= needs no entry. A
    seed it doesn't name is refused before anything is downloaded.
 
+   *Java sources (implemented):* a project or seed may keep Java sources
+   in a =java/= directory beside =irij.toml=. Irij compiles them against
+   the program's =[jvm]= libraries and the JDK, nothing of Irij's, and
+   their classes join the program's Java libraries, so a =cap= binds one
+   like any class. This is how a library wraps an object-oriented Java
+   API: a provider class of static methods takes and returns plain Java
+   values (=String=, =long=, =double=, =boolean=, =null=, =List=, =Map=,
+   and objects Irij hands back untouched), so the Irij side binds it with
+   =cap= and its handler performs the cap's effect instead of =JVM=. A
+   seed's classes live in its own package (=neo4irij= or below).
+   Compiled Java runs as soon as it loads, so =[trust]='s =java= names
+   the seeds whose sources may be compiled at all; the project's own
+   =java/= needs no entry, and a seed it doesn't name is refused before
+   anything is compiled. As with =jars=, =irij run= and =irij test= only
+   warn when there is no =[trust]=; =irij build= and =irij publish= need
+   the section.
+
 * Part IV: Structured Concurrency
 
 ** 4.1 Design: Concurrency as Effects
