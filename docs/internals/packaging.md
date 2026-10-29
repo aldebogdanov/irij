@@ -284,7 +284,13 @@ class loader, run, test, the REPL, nREPL, `irij build` (they ship under
 `__irij_lib/` like any library) and the built app's `JarLauncher` all take
 them with no further change. `irij publish` puts `java/**/*.java` in the
 tarball (`PublishCommand.bundleFiles`; only `.java`, at any depth) and
-`"java": true|false` in the metadata. The registry doesn't show it yet.
+`"java": true|false` in the metadata; the registry lists the sources on
+the seed page, read from the tarball. `irij publish` runs `tar` with
+`COPYFILE_DISABLE=1`: macOS tar otherwise adds an AppleDouble `._X`
+entry beside each file with extended attributes, which GNU tar unpacks
+as a real file — a `java/._X.java` the consumer's compile choked on.
+`JavaSources.sources` skips `._*` files too, for seeds published that
+way before the fix.
 
 ### Commands
 

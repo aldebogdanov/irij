@@ -149,6 +149,11 @@ final class PublishCommand {
                 }
                 var pb = new ProcessBuilder(tarArgs)
                     .redirectErrorStream(true);
+                // macOS tar adds an AppleDouble `._X` entry beside each file
+                // that has extended attributes; GNU tar on the consumer's
+                // machine unpacks them as files (`java/._X.java` broke the
+                // seed's Java compile). Ignored by other tars.
+                pb.environment().put("COPYFILE_DISABLE", "1");
                 var proc = pb.start();
                 try (var is = proc.getInputStream()) { is.readAllBytes(); }
                 if (proc.waitFor() != 0) {

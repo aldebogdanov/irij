@@ -103,12 +103,16 @@ public final class JavaSources {
         return new Plan(List.copyOf(units), List.copyOf(untrusted), trust != null);
     }
 
-    /** Every {@code .java} file under {@code root/java}, in path order. */
+    /** Every {@code .java} file under {@code root/java}, in path order.
+     *  {@code ._X.java} is not Java: it's the AppleDouble metadata macOS
+     *  tar puts beside {@code X.java}, and GNU tar unpacks it as a file —
+     *  a seed published from a Mac before 0.11.379 can carry them. */
     public static List<Path> sources(Path root) throws IOException {
         Path dir = root.resolve(DIR);
         if (!Files.isDirectory(dir)) return List.of();
         try (Stream<Path> s = Files.walk(dir)) {
-            return s.filter(p -> Files.isRegularFile(p) && p.toString().endsWith(".java"))
+            return s.filter(p -> Files.isRegularFile(p) && p.toString().endsWith(".java")
+                            && !p.getFileName().toString().startsWith("._"))
                     .sorted(Comparator.comparing(p -> dir.relativize(p).toString().replace('\\', '/')))
                     .toList();
         }
