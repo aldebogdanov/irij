@@ -47,6 +47,7 @@ irij examples/compiled.irj    # bytecode compiler MVP demo (see: irij compile)
 irij examples/terminal.irj    # raw-mode terminal (Term effect) — needs a tty
 irij examples/quint.irj       # model-based testing against a Quint spec — needs `quint`
 (cd examples/java-libs && irij run main.irj)  # a Maven library through a cap ([jvm], irij.lock)
+(cd examples/java-sources && irij run main.irj)  # the project's own Java (java/) as a cap provider
 ```
 
 ## Tests
@@ -76,6 +77,7 @@ Both are coloured on a terminal and plain when piped; for `irij`,
 - **Unambiguous output** &mdash; `println "a b"` prints `a b`, but a Str inside a collection, variant or record prints quoted and escaped, as source writes it: `#["a b" "c"]`, `{name= "Ada"}`, `#[(Ok 1) (Err "e")]`; `inspect` gives that form for any value, a Str included, and the REPL echoes it
 - **Java behind caps, confined by trust** &mdash; a `cap` binds a Java class to an effect, and a call through it performs that effect, so code that installs `default-db` declares `::: Db`, not `JVM`; irij.toml's `[trust]` names the modules that may declare caps or write Java at all, the compiler refuses the rest, and `irij audit` lists every site
 - **Java libraries** &mdash; irij.toml's `[jvm]` names Maven coordinates (`"org.apache.commons:commons-text" = "1.12.0"`); they're fetched with their dependencies from Maven Central, pinned with sha256 in `irij.lock`, loaded child-first so a library keeps its own versions, and shipped whole inside `irij build`'s JAR. Seeds can bring libraries too, if `[trust] jars` names them. See `examples/java-libs/`
+- **Java sources** &mdash; a project or seed keeps its own Java in `java/`; Irij compiles it (against the `[jvm]` libraries and the JDK, cached in `~/.irij/java`) and a `cap` binds it. That's how a library wraps an object API — a driver, a client — behind static methods over plain values, so its handler performs its own effect instead of `JVM`. A seed's sources compile only where `[trust] java` names it. See `examples/java-sources/`
 - **Databases** &mdash; `std.jdbc`'s `Db` effect talks to any database with a JDBC driver: `db-open "jdbc:sqlite:app.db"` with `"org.xerial:sqlite-jdbc"` in `[jvm]`, or PostgreSQL, MySQL, H2… Irij bundles no driver (`std.db`, SQLite-only and built in, was renamed)
 - **Pattern matching** &mdash; destructuring, guards, spread, ADTs; `cond` (first condition that holds) and `case` (equality dispatch) for multi-way choices without `else if` chains
 - **Module system** &mdash; `mod`, `use`, `pub`, qualified names

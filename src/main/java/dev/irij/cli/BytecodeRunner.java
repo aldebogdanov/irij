@@ -104,10 +104,25 @@ public final class BytecodeRunner {
         if (manifest.trust() != null) return;
         var seeds = new java.util.TreeSet<String>();
         for (var r : deps.plan().requests()) if (r.seed() != null) seeds.add(r.seed());
-        if (seeds.isEmpty()) return;
-        System.err.println("warning: irij.toml has no [trust], and seeds bring Java libraries: "
-                + String.join(", ", seeds) + "\n`irij build` refuses a project without [trust]; "
-                + "`irij audit --fix` writes one (review it).");
+        if (!seeds.isEmpty()) {
+            System.err.println("warning: irij.toml has no [trust], and seeds bring Java libraries: "
+                    + String.join(", ", seeds) + "\n`irij build` refuses a project without [trust]; "
+                    + "`irij audit --fix` writes one (review it).");
+        }
+        String java = untrustedJavaWarning(projectRoot, deps);
+        if (java != null) System.err.println(java);
+    }
+
+    /** The warning `irij run` prints when irij.toml has no [trust] and
+     *  seeds ship {@code java/} sources (compiled all the same); null when
+     *  there's nothing to say. */
+    public static String untrustedJavaWarning(Path projectRoot, ProjectDeps deps) throws IOException {
+        if (deps.java() == null || deps.java().seeds().isEmpty()) return null;
+        var manifest = dev.irij.module.ProjectFile.parseFile(projectRoot.resolve("irij.toml"));
+        if (manifest.trust() != null) return null;
+        return "warning: irij.toml has no [trust], and seeds ship Java sources: "
+                + String.join(", ", deps.java().seeds()) + "\n`irij build` refuses a project without [trust]; "
+                + "`irij audit --fix` writes one (review it).";
     }
 
     /** Compile + run a source string (no file). Used by {@code

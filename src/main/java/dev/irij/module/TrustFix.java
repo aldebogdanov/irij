@@ -19,7 +19,7 @@ public final class TrustFix {
 
     private TrustFix() {}
 
-    public static final List<String> KEYS = List.of("caps", "jvm", "jars");
+    public static final List<String> KEYS = List.of("caps", "jvm", "jars", "java");
 
     private static final Pattern STRING = Pattern.compile("\"([^\"]*)\"");
 
@@ -36,7 +36,8 @@ public final class TrustFix {
             if (!text.isEmpty() && !text.endsWith("\n")) sb.append('\n');
             if (!text.isBlank()) sb.append('\n');
             sb.append("# Who may reach Java: modules that bind a Java class with `cap` (caps),\n");
-            sb.append("# write Java by hand (jvm), seeds that bring Java libraries (jars).\n");
+            sb.append("# write Java by hand (jvm), seeds that bring Java libraries (jars)\n");
+            sb.append("# or ship Java sources (java).\n");
             sb.append("# Written by `irij audit --fix` — review it.\n");
             sb.append("[trust]\n");
             for (String k : KEYS) sb.append(k).append(" = ").append(list(add.getOrDefault(k, List.of()))).append('\n');
@@ -91,10 +92,16 @@ public final class TrustFix {
 
     /** Ordered, de-duplicated key → entries, skipping empty lists. */
     public static Map<String, List<String>> entries(List<String> caps, List<String> jvm, List<String> jars) {
+        return entries(caps, jvm, jars, List.of());
+    }
+
+    public static Map<String, List<String>> entries(List<String> caps, List<String> jvm, List<String> jars,
+                                                    List<String> java) {
         var m = new LinkedHashMap<String, List<String>>();
         if (!caps.isEmpty()) m.put("caps", caps.stream().distinct().toList());
         if (!jvm.isEmpty()) m.put("jvm", jvm.stream().distinct().toList());
         if (!jars.isEmpty()) m.put("jars", jars.stream().distinct().toList());
+        if (!java.isEmpty()) m.put("java", java.stream().distinct().toList());
         return m;
     }
 }

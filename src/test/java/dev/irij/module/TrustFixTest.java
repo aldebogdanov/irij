@@ -44,6 +44,16 @@ class TrustFixTest {
         assertEquals(1, parsed.deps().size(), "[seeds] untouched");
     }
 
+    @Test void writesTheJavaKey() {
+        var whole = ProjectFile.parse(TrustFix.apply("", Map.of("java", List.of("neo4irij")))).trust();
+        assertEquals(List.of("neo4irij"), whole.java());
+        String extended = TrustFix.apply("[trust]\njars = [\"neo4irij\"]\n",
+                TrustFix.entries(List.of(), List.of(), List.of(), List.of("neo4irij")));
+        var trust = ProjectFile.parse(extended).trust();
+        assertEquals(List.of("neo4irij"), trust.jars());
+        assertTrue(trust.allowsJava("neo4irij"), extended);
+    }
+
     @Test void refusesAListSpanningLines() {
         String before = "[trust]\ncaps = [\n  \"a\",\n]\n";
         var e = assertThrows(IllegalStateException.class,

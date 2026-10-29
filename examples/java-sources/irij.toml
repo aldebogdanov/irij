@@ -1,0 +1,12 @@
+[project]
+name = "java-sources"
+version = "0.1"
+description = "A project's own Java, compiled from java/, as a cap provider"
+
+# The project's own java/ needs no [trust] entry; `main` binds its class
+# with `cap`. A seed shipping java/ would need `java = ["<seed>"]`.
+[trust]
+caps = ["main"]
+jvm = []
+jars = []
+java = []

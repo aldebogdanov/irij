@@ -122,6 +122,7 @@ cap to any class. irij.toml's optional `[trust]` section confines that:
 caps = ["acme.clock"]      # may declare a Java cap (`cap x :: E = "java.Class"`)
 jvm = ["seed-readme"]      # may write Class/member, obj#member, #member
 jars = ["neo4irij"]        # seeds that may bring Java libraries ([jvm])
+java = ["neo4irij"]        # seeds whose java/ sources may be compiled
 ```
 
 With it, the compiler refuses a Java cap or a hand-written Java site in a
@@ -146,7 +147,8 @@ record cap has no Java behind it and is not a site.
 
 `irij audit --fix` writes the smallest policy the program needs:
 each non-std module with a cap or Java of its own goes into `caps` /
-`jvm`, each seed with `[jvm]` libraries into `jars`, skipping what the
+`jvm`, each seed with `[jvm]` libraries into `jars`, each seed with
+`java/` sources into `java`, skipping what the
 existing `[trust]` already allows. `TrustFix` edits the text — comments
 and order stay — appending a commented section with all three keys
 when there is none, extending a key's line or adding one under the
@@ -154,6 +156,14 @@ header otherwise (a list spanning several lines is refused: add to it
 by hand). In a seed (no `server.irj` / `main.irj` / `app.irj` that is a
 program), `irij audit` covers every module the seed's root files
 declare, so `--fix` works there too.
+
+`java` is the same rule for code a seed ships as source in `java/`
+(packaging.md § Java sources): compiled Java runs as soon as it loads,
+so a seed `java` doesn't name is refused before its sources are
+compiled, and the project's own `java/` needs no entry. A trusted seed
+still needs `caps` for the module that binds its provider. As for
+`jars`, `irij run` warns when there's no `[trust]` and a seed ships
+sources; `irij build` / `irij publish` need the section.
 
 `jars` is about code, not call sites: a seed's `[jvm]` libraries
 (packaging.md § Java libraries) run as soon as their classes load —

@@ -131,19 +131,7 @@ final class PublishCommand {
                 return;
             }
 
-            // Collect .irj files + README + irij.toml
-            var filesToBundle = new ArrayList<Path>();
-            filesToBundle.add(tomlFile);
-            try (var stream = Files.walk(projectRoot, 5)) {
-                stream.filter(p -> Files.isRegularFile(p)
-                        && !p.startsWith(projectRoot.resolve(".git"))
-                        && !p.startsWith(projectRoot.resolve("build"))
-                        && !p.startsWith(projectRoot.resolve(".irij"))
-                        && (p.toString().endsWith(".irj")
-                            || p.getFileName().toString().equalsIgnoreCase("README.md")
-                            || p.getFileName().toString().equalsIgnoreCase("README")))
-                    .forEach(filesToBundle::add);
-            }
+            var filesToBundle = bundleFiles(projectRoot);
 
             // Build tarball
             var tarball = Files.createTempFile("irij-publish-", ".tar.gz");
@@ -185,6 +173,7 @@ final class PublishCommand {
                     + ",\"website\":" + jsonStr(meta.website())
                     + ",\"repo\":" + jsonStr(meta.repo())
                     + ",\"docs\":" + jsonStr(meta.docs())
+                    + ",\"java\":" + !dev.irij.module.jvm.JavaSources.sources(projectRoot).isEmpty()
                     + ",\"jvm\":" + jsonList(result.jvm().deps().stream()
                             .map(dev.irij.module.ProjectFile.JavaDep::coord).toList()) + "}";
 
@@ -244,6 +233,27 @@ final class PublishCommand {
 
     static String jsonList(java.util.List<String> items) {
         return "[" + String.join(",", items.stream().map(PublishCommand::jsonStr).toList()) + "]";
+    }
+
+    /** What a published seed carries: {@code irij.toml}, its {@code .irj}
+     *  files and README, and the {@code .java} sources under {@code java/}
+     *  (packages nest deep, so that tree is walked whole). */
+    public static List<Path> bundleFiles(Path projectRoot) throws IOException {
+        var files = new ArrayList<Path>();
+        files.add(projectRoot.resolve("irij.toml"));
+        try (var stream = Files.walk(projectRoot, 5)) {
+            stream.filter(p -> Files.isRegularFile(p)
+                    && !p.startsWith(projectRoot.resolve(".git"))
+                    && !p.startsWith(projectRoot.resolve("build"))
+                    && !p.startsWith(projectRoot.resolve(".irij"))
+                    && !p.startsWith(projectRoot.resolve(dev.irij.module.jvm.JavaSources.DIR))
+                    && (p.toString().endsWith(".irj")
+                        || p.getFileName().toString().equalsIgnoreCase("README.md")
+                        || p.getFileName().toString().equalsIgnoreCase("README")))
+                .forEach(files::add);
+        }
+        files.addAll(dev.irij.module.jvm.JavaSources.sources(projectRoot));
+        return files;
     }
 
     private static String jsonStr(String s) {

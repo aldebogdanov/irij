@@ -810,8 +810,22 @@ libraries.
 - [x] **Publish** sends `jvm` (coordinates) in the metadata; a seed with
       `[jvm] repos` is refused.
 - [ ] Registry: store and show a seed's `jvm` list (irij.online)
-- [ ] Phase 3: a seed ships `java/` sources that irij compiles (a real
-      static provider instead of an interop adapter)
+- [x] **Phase 3: `java/` sources** — a project or seed keeps Java in
+      `java/`; `JavaSources` compiles it (javax.tools, `--release 25`,
+      against the program's `[jvm]` jars and the JDK only, never
+      `dev.irij.*`) into `~/.irij/java/<sha256>.jar`, cached by sources +
+      classpath, appended to `ProjectDeps.jars` — so the deps loader, run,
+      test, REPL, nREPL, `irij build` and the built app take it unchanged.
+      A seed's classes must sit in its package (`packageOf`). `[trust]
+      java` names the seeds whose sources may compile (refused before
+      compiling; the root's own needs no entry; `irij run` warns without
+      `[trust]`). Publish bundles `java/**/*.java` and sends `java` in the
+      metadata; `irij audit` lists sources, `--fix` writes `java`. A cap
+      binds the provider, so a wrapper over an object API (a driver, a
+      client) performs its effect instead of `JVM`. `JavaSourcesTest`
+      (11), `PublishBundleTest`, `TrustFixTest`; `examples/java-sources`.
+- [ ] Registry: show that a seed ships Java sources (`java` in the publish
+      metadata) — irij.online
 - [ ] Phase 4: instance/handle caps; adding a library to a running REPL
 - [x] **`std.db` → `std.jdbc`; SQLite out of `irij.jar`** — `db-open`
       takes a JDBC URL; the driver is a `[jvm]` library found with
