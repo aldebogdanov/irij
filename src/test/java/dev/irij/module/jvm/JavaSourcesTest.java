@@ -121,6 +121,15 @@ class JavaSourcesTest {
     }
 
     @Test
+    void appleDoubleFilesAreNotSources() throws Exception {
+        Path app = app("[project]\nname = \"app\"\n");
+        write(app.resolve("java/acme/Clock.java"), CLOCK);
+        Files.write(app.resolve("java/acme/._Clock.java"), new byte[] {0, 5, 22, 7, 0, 2, 0, 0});
+        assertEquals(List.of(app.resolve("java/acme/Clock.java")), JavaSources.sources(app));
+        assertEquals("hello java\n{n= 42 xs= #[1 2]}\n3\n", runMain(app));
+    }
+
+    @Test
     void underTrustTheProjectsOwnJavaNeedsNoEntry() throws Exception {
         Path app = app("[project]\nname = \"app\"\n\n[trust]\ncaps = [\"main\"]\n");
         write(app.resolve("java/acme/Clock.java"), CLOCK);
